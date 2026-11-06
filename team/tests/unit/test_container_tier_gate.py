@@ -29,6 +29,15 @@ run-cold-build-tests.sh hands its pytest launch to a python3 stand-in that
 records the launch (and the image selection it was given) and exits 0, and
 run-three-host-matrix.sh is pointed at an engine name that does not exist,
 which it reports as not-attempted.
+
+The shipped-image test module (tests/unit/test_entrypoint_shipped_image.py,
+run by the operator through run-gated-tests.sh) honours the same rule
+through tests.fixtures.binary_guard.require_container_tier: it is run here
+as a nested pytest against the same recording engine stubs, never a real
+engine. So do the team/tests/cold modules, through the
+operator_container_tier fixture in tests/cold/conftest.py: unauthorized,
+the whole directory is collected; authorized, each module whose image
+fixture probes the daemon is run on its own.
 """
 
 from __future__ import annotations
@@ -37,9 +46,11 @@ import pathlib
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 
+from tests.fixtures.binary_guard import container_tier_authorized
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
@@ -104,9 +115,7 @@ class _Sandbox:
     def __init__(self, tmp_path: pathlib.Path) -> None:
         self.root = tmp_path / "kanban_root"
         (self.root / "projects" / _PROJECT).mkdir(parents=True)
-        (self.root / "projects.cfg").write_text(
-            f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8")
         self.temp = tmp_path / "pgai_tmp"
         self.temp.mkdir()
         self.home = tmp_path / "home"
@@ -146,9 +155,7 @@ class _Sandbox:
         return lane
 
     def set_cfg_images(self, value: str) -> None:
-        (self.root / "kanban.cfg").write_text(
-            f"[release]\ncontainer_images = {value}\n", encoding="utf-8"
-        )
+        (self.root / "kanban.cfg").write_text(f"[release]\ncontainer_images = {value}\n", encoding="utf-8")
 
     def env(self, **extra: str) -> dict:
         return build_scrubbed_env(
@@ -198,9 +205,9 @@ def _assert_skipped(result: subprocess.CompletedProcess, sandbox: _Sandbox, scri
     assert _SKIP_KEY in line, detail
     assert "container tier is operator-only" in line, detail
     assert f'operator_command="PGAI_CONTAINER_TIER=1 bash {script}' in line, detail
-    assert sandbox.engine_calls() == "", (
-        f"a skipped harness must start no container; engine stub saw:\n{sandbox.engine_calls()}"
-    )
+    assert (
+        sandbox.engine_calls() == ""
+    ), f"a skipped harness must start no container; engine stub saw:\n{sandbox.engine_calls()}"
     assert "container_tier.operator_only" not in result.stderr, detail
 
 
@@ -261,9 +268,7 @@ def test_skipped_deep_verify_leaves_the_ledger_exactly_as_it_was(tmp_path: pathl
 def test_skipped_deep_verify_with_no_prior_ledger_writes_none(tmp_path: pathlib.Path) -> None:
     sandbox = _Sandbox(tmp_path)
     lane = sandbox.green_lane()
-    result = sandbox.run(
-        _DEEP_VERIFY, ["--project", _PROJECT], PGAI_DEEP_VERIFY_COLD_LANE_CMD=str(lane)
-    )
+    result = sandbox.run(_DEEP_VERIFY, ["--project", _PROJECT], PGAI_DEEP_VERIFY_COLD_LANE_CMD=str(lane))
     _assert_skipped(result, sandbox, _DEEP_VERIFY)
     assert not sandbox.ledger.exists()
 
@@ -326,9 +331,7 @@ def test_image_all_selects_every_manifest_image(tmp_path: pathlib.Path) -> None:
 def test_repeated_image_flags_select_each_named_image_in_manifest_order(tmp_path: pathlib.Path) -> None:
     sandbox = _Sandbox(tmp_path)
     sandbox.use_python3_stand_in()
-    result = sandbox.run(
-        _COLD_RUNNER, ["--image", "rocky9", "--image=debian"], PGAI_CONTAINER_TIER="1"
-    )
+    result = sandbox.run(_COLD_RUNNER, ["--image", "rocky9", "--image=debian"], PGAI_CONTAINER_TIER="1")
     assert result.returncode == 0, _detail(result)
     assert sandbox.recorded().strip() == "pytest-launched tests/cold/ --capture=no images=debian rocky9"
 
@@ -384,9 +387,7 @@ def test_unknown_image_name_refuses_naming_the_manifest_list(
     sandbox.use_python3_stand_in()
     lane = sandbox.green_lane()
     bad_args = [a if a != "all" else "nope" for a in args]
-    result = sandbox.run(
-        script, bad_args, PGAI_CONTAINER_TIER="1", PGAI_DEEP_VERIFY_COLD_LANE_CMD=str(lane)
-    )
+    result = sandbox.run(script, bad_args, PGAI_CONTAINER_TIER="1", PGAI_DEEP_VERIFY_COLD_LANE_CMD=str(lane))
     detail = _detail(result)
     assert result.returncode == _REFUSAL_EXIT, detail
     assert _UNKNOWN_IMAGE_KEY in result.stderr, detail
@@ -442,12 +443,9 @@ def test_operator_run_writes_start_then_finish_with_images_duration_and_exit(tmp
     assert result.returncode == 0, _detail(result)
     lines = sandbox.docker_use_lines()
     assert len(lines) == 2, lines
+    assert re.match(r"^\S+Z START actor=operator task=- script=deep-verify\.sh images=debian,rocky9$", lines[0]), lines
     assert re.match(
-        r"^\S+Z START actor=operator task=- script=deep-verify\.sh images=debian,rocky9$", lines[0]
-    ), lines
-    assert re.match(
-        r"^\S+Z FINISH actor=operator task=- script=deep-verify\.sh images=debian,rocky9 "
-        r"duration=\d+s exit=0$",
+        r"^\S+Z FINISH actor=operator task=- script=deep-verify\.sh images=debian,rocky9 " r"duration=\d+s exit=0$",
         lines[1],
     ), lines
 
@@ -470,9 +468,7 @@ def test_nested_harness_run_is_recorded_once_by_the_outer_session(tmp_path: path
 def test_failing_run_records_its_exit_code_on_finish(tmp_path: pathlib.Path) -> None:
     sandbox = _Sandbox(tmp_path)
     sandbox.use_python3_stand_in()
-    result = sandbox.run(
-        _COLD_RUNNER, ["--image", "rocky9"], PGAI_CONTAINER_TIER="1", STAND_IN_PYTEST_EXIT="1"
-    )
+    result = sandbox.run(_COLD_RUNNER, ["--image", "rocky9"], PGAI_CONTAINER_TIER="1", STAND_IN_PYTEST_EXIT="1")
     assert result.returncode == 1, _detail(result)
     lines = sandbox.docker_use_lines()
     assert [line.split()[1] for line in lines] == ["START", "FINISH"], lines
@@ -483,18 +479,14 @@ def test_failing_run_records_its_exit_code_on_finish(tmp_path: pathlib.Path) -> 
 def test_argument_error_ends_the_run_before_any_docker_use_record(tmp_path: pathlib.Path) -> None:
     sandbox = _Sandbox(tmp_path)
     sandbox.use_python3_stand_in()
-    result = sandbox.run(
-        _COLD_RUNNER, ["--image", "debian", "--no-such-flag"], PGAI_CONTAINER_TIER="1"
-    )
+    result = sandbox.run(_COLD_RUNNER, ["--image", "debian", "--no-such-flag"], PGAI_CONTAINER_TIER="1")
     assert result.returncode == 1, _detail(result)
     assert sandbox.docker_use_lines() == []
     assert sandbox.recorded() == ""
 
 
 @pytest.mark.parametrize("authorized", [False, True], ids=["skips", "runs"])
-def test_unwritable_docker_use_log_never_changes_the_harness_outcome(
-    tmp_path: pathlib.Path, authorized: bool
-) -> None:
+def test_unwritable_docker_use_log_never_changes_the_harness_outcome(tmp_path: pathlib.Path, authorized: bool) -> None:
     sandbox = _Sandbox(tmp_path)
     # A plain file where the logs/ directory should be: nothing can be
     # created or appended beneath it.
@@ -529,19 +521,20 @@ def test_harness_help_needs_no_authorization(tmp_path: pathlib.Path) -> None:
     assert sandbox.engine_calls() == ""
 
 
-@pytest.mark.parametrize(
-    "value,wake,approved,expected",
-    [
-        ("1", "", False, 0),
-        ("1", "0", False, 0),
-        ("", "", True, 0),
-        ("", "", False, 1),
-        ("yes", "", False, 1),
-        ("true", "", False, 1),
-        ("1", "1", False, 1),
-        ("", "1", True, 1),
-    ],
-)
+# (PGAI_CONTAINER_TIER, PGAI_AGENT_WAKE_ACTIVE, --operator-approved, exit status)
+_AUTHORIZATION_CASES = [
+    ("1", "", False, 0),
+    ("1", "0", False, 0),
+    ("", "", True, 0),
+    ("", "", False, 1),
+    ("yes", "", False, 1),
+    ("true", "", False, 1),
+    ("1", "1", False, 1),
+    ("", "1", True, 1),
+]
+
+
+@pytest.mark.parametrize("value,wake,approved,expected", _AUTHORIZATION_CASES)
 def test_authorized_requires_operator_approval_and_no_agent_wake(
     tmp_path: pathlib.Path, value: str, wake: str, approved: bool, expected: int
 ) -> None:
@@ -592,8 +585,7 @@ def test_scrub_removes_the_authorization_from_the_shell_and_its_children(
         [
             "bash",
             "-c",
-            f'source "{_LIB}"; container_tier_scrub_env; '
-            'bash -c \'printf "%s" "${PGAI_CONTAINER_TIER-unset}"\'',
+            f'source "{_LIB}"; container_tier_scrub_env; ' 'bash -c \'printf "%s" "${PGAI_CONTAINER_TIER-unset}"\'',
         ],
         capture_output=True,
         text=True,
@@ -602,3 +594,234 @@ def test_scrub_removes_the_authorization_from_the_shell_and_its_children(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "unset"
+
+
+@pytest.mark.parametrize(
+    "value,wake,expected",
+    [(value, wake, expected) for value, wake, approved, expected in _AUTHORIZATION_CASES if not approved],
+)
+def test_python_twin_of_authorized_agrees_with_the_library(value: str, wake: str, expected: int) -> None:
+    """tests.fixtures.binary_guard.container_tier_authorized applies the
+    library's rule to an environment (pytest has no --operator-approved)."""
+    env = {"PGAI_CONTAINER_TIER": value}
+    if wake:
+        env["PGAI_AGENT_WAKE_ACTIVE"] = wake
+    assert container_tier_authorized(env) is (expected == 0)
+
+
+# ---------------------------------------------------------------------------
+# The shipped-image test module honours the gate
+# ---------------------------------------------------------------------------
+
+_SHIPPED_IMAGE_MODULE = "tests/unit/test_entrypoint_shipped_image.py"
+_SHIPPED_IMAGE_TESTS = (
+    "test_missing_root_env_var_exits_one_naming_it",
+    "test_unmounted_root_path_exits_one_naming_the_path",
+    "test_mounted_root_lands_shell_in_that_directory",
+)
+_DOCKERFILE_TESTS = (
+    "test_dockerfile_has_baked_entrypoint_declaration",
+    "test_dockerfile_copies_entrypoint_with_exec_permission",
+)
+_SHIPPED_IMAGE_FLAVORS = ("debian", "rocky9")
+
+
+def _run_test_modules(
+    sandbox: _Sandbox, targets: tuple[str, ...], **extra: str
+) -> tuple[subprocess.CompletedProcess, dict[str, tuple[str, str]]]:
+    """Run *targets* (test files, as --files names them) as a nested pytest
+    with the sandbox's recording docker/podman stubs first on PATH.
+
+    Returns the completed process and, per test id (`<module>::name[param]`,
+    module without its package path or .py), its outcome from the junit
+    report: ("passed", ""), ("skipped", message) or ("failed", message).
+    """
+    junit = sandbox.bin.parent / "nested-junit.xml"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            *targets,
+            "-p",
+            "no:randomly",
+            "-p",
+            "no:cacheprovider",
+            f"--basetemp={sandbox.bin.parent / 'nested-basetemp'}",
+            f"--junitxml={junit}",
+            "-q",
+            "-rs",
+        ],
+        capture_output=True,
+        text=True,
+        env=sandbox.env(PYTHONDONTWRITEBYTECODE="1", **extra),
+        cwd=str(_TEAM_DIR),
+        timeout=300,
+    )
+    outcomes: dict[str, tuple[str, str]] = {}
+    if junit.exists():
+        for case in ET.parse(junit).getroot().iter("testcase"):
+            test_id = f"{case.get('classname', '').rsplit('.', 1)[-1]}::{case.get('name', '')}"
+            skipped = case.find("skipped")
+            failed = case.find("failure") if case.find("failure") is not None else case.find("error")
+            if skipped is not None:
+                outcomes[test_id] = ("skipped", skipped.get("message", ""))
+            elif failed is not None:
+                outcomes[test_id] = ("failed", failed.get("message", ""))
+            else:
+                outcomes[test_id] = ("passed", "")
+    return result, outcomes
+
+
+def _ids(names: tuple[str, ...]) -> list[str]:
+    module = pathlib.Path(_SHIPPED_IMAGE_MODULE).stem
+    return [f"{module}::{name}[{flavor}]" for name in names for flavor in _SHIPPED_IMAGE_FLAVORS]
+
+
+@pytest.mark.parametrize(
+    "extra,why",
+    [
+        ({}, "PGAI_CONTAINER_TIER=1 is not set"),
+        ({"PGAI_CONTAINER_TIER": "yes"}, "PGAI_CONTAINER_TIER=1 is not set"),
+        (
+            {"PGAI_CONTAINER_TIER": "1", "PGAI_AGENT_WAKE_ACTIVE": "1"},
+            "inside an agent wake, and agents never run the container tier",
+        ),
+    ],
+    ids=["unset", "not-exactly-1", "inside-agent-wake"],
+)
+def test_shipped_image_module_without_authorization_builds_and_runs_nothing(
+    tmp_path: pathlib.Path, extra: dict[str, str], why: str
+) -> None:
+    """Named explicitly (as --files names it, which bypasses the unit
+    runner's --ignore), the module calls no engine command at all and every
+    image test skips naming the operator-only gate; the Dockerfile
+    structural tests still run and pass."""
+    sandbox = _Sandbox(tmp_path)
+    result, outcomes = _run_test_modules(sandbox, (_SHIPPED_IMAGE_MODULE,), **extra)
+    detail = f"{_detail(result)}\noutcomes: {outcomes}"
+    assert result.returncode == 0, detail
+    assert (
+        sandbox.engine_calls() == ""
+    ), f"an unauthorized run must call no engine command; engine stub saw:\n{sandbox.engine_calls()}"
+    for test_id in _ids(_SHIPPED_IMAGE_TESTS):
+        status, message = outcomes.get(test_id, ("absent", ""))
+        assert status == "skipped", f"{test_id}: {status}\n{detail}"
+        assert "container tier is operator-only" in message, f"{test_id}: {message}"
+        assert _SKIP_KEY in message, f"{test_id}: {message}"
+        assert why in message, f"{test_id}: {message}"
+        assert 'operator_command="PGAI_CONTAINER_TIER=1 bash ' in message, f"{test_id}: {message}"
+        assert "run-gated-tests.sh" in message, f"{test_id}: {message}"
+    for test_id in _ids(_DOCKERFILE_TESTS):
+        assert outcomes.get(test_id) == ("passed", ""), f"{test_id}\n{detail}"
+    summary = [line for line in result.stdout.splitlines() if line.startswith("SKIPPED ")]
+    assert summary and all(f"container tier is operator-only ({_SKIP_KEY})" in line for line in summary), detail
+
+
+def test_shipped_image_module_with_authorization_reaches_its_daemon_check_and_build(
+    tmp_path: pathlib.Path,
+) -> None:
+    """With the operator's authorization the fixture proceeds exactly as
+    before: the daemon probe, then one build per flavor, then the image
+    tests' runs and the teardown's removal -- all answered by the recording
+    stub, so the image tests' verdicts against it are not under test."""
+    sandbox = _Sandbox(tmp_path)
+    result, outcomes = _run_test_modules(sandbox, (_SHIPPED_IMAGE_MODULE,), PGAI_CONTAINER_TIER="1")
+    detail = f"{_detail(result)}\noutcomes: {outcomes}\nengine:\n{sandbox.engine_calls()}"
+    calls = sandbox.engine_calls().splitlines()
+    assert calls and calls[0] == "docker info", detail
+    for flavor in _SHIPPED_IMAGE_FLAVORS:
+        tag = f"pgai-kanban-entrypoint-shipped-{flavor}:test"
+        assert any(c.startswith(f"docker build --tag {tag} --file ") for c in calls), detail
+        assert any(c.startswith("docker run ") and c.endswith(tag) for c in calls), detail
+        assert f"docker image rm --force {tag}" in calls, detail
+    for test_id in _ids(_SHIPPED_IMAGE_TESTS):
+        status, message = outcomes.get(test_id, ("absent", ""))
+        assert status != "absent", f"{test_id}\n{detail}"
+        assert _SKIP_KEY not in message, f"{test_id}: {message}"
+    for test_id in _ids(_DOCKERFILE_TESTS):
+        assert outcomes.get(test_id) == ("passed", ""), f"{test_id}\n{detail}"
+
+
+# ---------------------------------------------------------------------------
+# The team/tests/cold modules honour the gate in-file
+# ---------------------------------------------------------------------------
+
+_COLD_DIR = "tests/cold"
+# Every test that can reach a container engine, one per gate site: the
+# tests behind each image-building fixture, and each test that calls the
+# engine itself. Parametrized ids (`name[...]`) all count.
+_COLD_GATED_TESTS = (
+    ("test_dashboard_smoke_container", "test_create_sh_no_tmux_produces_no_command_not_found"),
+    ("test_dashboard_operator_window", "test_window0_section_headers_match_fixture"),
+    ("test_dashboard_operator_window", "test_kill_sh_destroys_entire_session"),
+    ("test_docker_build_fixture", "test_image_builds_without_error"),
+    ("test_docker_build_fixture", "test_build_without_pinned_versions_fails_naming_the_missing_arg"),
+    ("test_docker_cold_build", "test_image_builds_without_error"),
+    ("test_docker_cold_build", "test_broken_run_step_fails_loud_on_reachable_base_image"),
+    ("test_docker_cold_build", "test_unreachable_base_image_skips_naming_the_probe"),
+    ("test_docker_cold_build", "test_bad_codex_version_fails_the_smoke_check_layer_naming_codex"),
+    ("test_docker_cold_build", "test_real_flavor_build_without_pins_fails_naming_the_unset_arg"),
+    ("test_docker_cold_build", "test_real_flavor_bad_codex_version_fails_the_smoke_check_layer_naming_codex"),
+    ("test_strangers_path_check_harness", "test_seeded_break_in_install_step_fails_and_cites_doc_and_line"),
+)
+# The cold modules whose image fixtures probe the daemon before building.
+_COLD_DAEMON_CHECK_MODULES = (
+    "tests/cold/test_dashboard_smoke_container.py",
+    "tests/cold/test_dashboard_operator_window.py",
+    "tests/cold/test_docker_build_fixture.py",
+    "tests/cold/test_docker_cold_build.py",
+)
+
+
+@pytest.mark.parametrize(
+    "extra,why",
+    [
+        ({}, "PGAI_CONTAINER_TIER=1 is not set"),
+        (
+            {"PGAI_CONTAINER_TIER": "1", "PGAI_AGENT_WAKE_ACTIVE": "1"},
+            "inside an agent wake, and agents never run the container tier",
+        ),
+    ],
+    ids=["unset", "inside-agent-wake"],
+)
+def test_cold_modules_without_authorization_call_no_engine_and_skip_naming_the_gate(
+    tmp_path: pathlib.Path, extra: dict[str, str], why: str
+) -> None:
+    """Collected outside run-cold-build-tests.sh, every team/tests/cold
+    module calls no engine command at all -- `docker info` included -- and
+    every test that could reach an engine skips naming the operator-only
+    gate; tests that only read files or drive a stub engine still pass."""
+    sandbox = _Sandbox(tmp_path)
+    result, outcomes = _run_test_modules(sandbox, (_COLD_DIR,), **extra)
+    detail = f"{_detail(result)}\noutcomes: {outcomes}"
+    assert result.returncode == 0, detail
+    assert (
+        sandbox.engine_calls() == ""
+    ), f"an unauthorized run must call no engine command; engine stub saw:\n{sandbox.engine_calls()}"
+    for module, name in _COLD_GATED_TESTS:
+        ids = [test_id for test_id in outcomes if test_id.split("[", 1)[0] == f"{module}::{name}"]
+        assert ids, f"{module}::{name} was not collected\n{detail}"
+        for test_id in ids:
+            status, message = outcomes[test_id]
+            assert status == "skipped", f"{test_id}: {status}\n{detail}"
+            assert _SKIP_KEY in message and why in message, f"{test_id}: {message}"
+            assert "run-cold-build-tests.sh --image all" in message, f"{test_id}: {message}"
+    for test_id, (status, message) in outcomes.items():
+        assert status == "passed" or _SKIP_KEY in message, f"{test_id}: {status} {message}\n{detail}"
+
+
+@pytest.mark.parametrize("module", _COLD_DAEMON_CHECK_MODULES, ids=lambda m: pathlib.Path(m).stem)
+def test_cold_module_with_authorization_reaches_its_daemon_check(tmp_path: pathlib.Path, module: str) -> None:
+    """With the operator's authorization the gate returns and the module
+    proceeds exactly as before: its first engine command is the existing
+    daemon probe. Every later engine command is answered by the recording
+    stub, so the verdicts against it are not under test."""
+    sandbox = _Sandbox(tmp_path)
+    result, outcomes = _run_test_modules(sandbox, (module,), PGAI_CONTAINER_TIER="1")
+    calls = sandbox.engine_calls().splitlines()
+    detail = f"{_detail(result)}\noutcomes: {outcomes}\nengine:\n{sandbox.engine_calls()}"
+    assert calls and calls[0] == "docker info", detail
+    assert any(c.startswith("docker build ") for c in calls), detail
+    assert outcomes, detail
+    assert all(_SKIP_KEY not in message for _status, message in outcomes.values()), detail

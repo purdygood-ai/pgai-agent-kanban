@@ -23,14 +23,19 @@ Public API
 Raises WorkflowError with a descriptive message on any validation failure.
 """
 
-import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
+# The pgai_agent_kanban package sits beside pm-agent/ in the same tree
+# (team/pm-agent/lib -> team/); each tree finds its own copy.
+_TEAM_ROOT = str(Path(__file__).resolve().parents[2])
+if _TEAM_ROOT not in sys.path:
+    sys.path.insert(0, _TEAM_ROOT)
+from pgai_agent_kanban.env import resolve_kanban_root_or_default as _kanban_root  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants: valid values for enum-like fields
@@ -51,34 +56,38 @@ VALID_WHEN_PREDICATES = {"foreach_was_used", "review_agent_configured"}
 # Dataclasses
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class InputsSpec:
     """Specification of workflow inputs."""
+
     required: list  # list[str]
     optional: list  # list[str]
-    context: list   # list[str]
+    context: list  # list[str]
 
 
 @dataclass
 class PipelineStep:
     """One step in the workflow pipeline."""
+
     role: str
     name: str
-    operation: Optional[str] = None
-    foreach: Optional[str] = None
-    deliverable: Optional[str] = None
+    operation: str | None = None
+    foreach: str | None = None
+    deliverable: str | None = None
     inputs: list = field(default_factory=list)  # list[str]
     optional: bool = False
-    branch: Optional[str] = None
-    branch_pattern: Optional[str] = None
-    target_branch: Optional[str] = None
-    autonomous_criterion: Optional[str] = None
-    when: Optional[str] = None
+    branch: str | None = None
+    branch_pattern: str | None = None
+    target_branch: str | None = None
+    autonomous_criterion: str | None = None
+    when: str | None = None
 
 
 @dataclass
 class OutputsSpec:
     """Specification of workflow outputs."""
+
     format: object  # str or list[str]
     location: str
 
@@ -86,6 +95,7 @@ class OutputsSpec:
 @dataclass
 class WorkflowDefinition:
     """A fully validated workflow definition loaded from YAML."""
+
     name: str
     description: str
     inputs: InputsSpec
@@ -99,6 +109,7 @@ class WorkflowDefinition:
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class WorkflowError(Exception):
     """Raised when a workflow YAML is missing, malformed, or invalid."""
 
@@ -106,19 +117,6 @@ class WorkflowError(Exception):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _kanban_root(kanban_root=None) -> Path:
-    """Resolve the kanban root path from argument or environment.
-
-    Precedence: explicit argument > PGAI_AGENT_KANBAN_ROOT_PATH (canonical) >
-    ~/pgai_agent_kanban.
-    """
-    if kanban_root is not None:
-        return Path(kanban_root)
-    return Path(
-        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-        or str(Path.home() / "pgai_agent_kanban")
-    )
 
 
 def _find_workflow_file(name: str, root: Path) -> tuple:
@@ -147,9 +145,7 @@ def _find_workflow_file(name: str, root: Path) -> tuple:
         if path.is_file():
             return path, expected_name
     searched = ", ".join(str(p) for p, _ in candidates)
-    raise WorkflowError(
-        f"Workflow '{name}' not found. Searched: {searched}"
-    )
+    raise WorkflowError(f"Workflow '{name}' not found. Searched: {searched}")
 
 
 def _load_yaml(path: Path) -> dict:
@@ -163,9 +159,7 @@ def _load_yaml(path: Path) -> dict:
     except yaml.YAMLError as exc:
         raise WorkflowError(f"YAML parse error in '{path}': {exc}") from exc
     if not isinstance(data, dict):
-        raise WorkflowError(
-            f"Workflow file '{path}' must be a YAML mapping at top level"
-        )
+        raise WorkflowError(f"Workflow file '{path}' must be a YAML mapping at top level")
     return data
 
 
@@ -175,9 +169,7 @@ def _require_str(data: dict, key: str, context: str) -> str:
         raise WorkflowError(f"Missing required field '{key}' in {context}")
     val = data[key]
     if not isinstance(val, str):
-        raise WorkflowError(
-            f"Field '{key}' in {context} must be a string, got {type(val).__name__}"
-        )
+        raise WorkflowError(f"Field '{key}' in {context} must be a string, got {type(val).__name__}")
     val = val.strip()
     if not val:
         raise WorkflowError(f"Field '{key}' in {context} must not be empty")
@@ -190,9 +182,7 @@ def _require_list(data: dict, key: str, context: str) -> list:
         raise WorkflowError(f"Missing required field '{key}' in {context}")
     val = data[key]
     if not isinstance(val, list):
-        raise WorkflowError(
-            f"Field '{key}' in {context} must be a list, got {type(val).__name__}"
-        )
+        raise WorkflowError(f"Field '{key}' in {context} must be a list, got {type(val).__name__}")
     return val
 
 
@@ -206,21 +196,16 @@ def _coerce_str_list(val, key: str, context: str) -> list:
         # Validate all elements are strings
         for i, item in enumerate(val):
             if not isinstance(item, str):
-                raise WorkflowError(
-                    f"Item {i} in '{key}' ({context}) must be a string, "
-                    f"got {type(item).__name__}"
-                )
+                raise WorkflowError(f"Item {i} in '{key}' ({context}) must be a string, " f"got {type(item).__name__}")
         return val
-    raise WorkflowError(
-        f"Field '{key}' in {context} must be a string or list, got {type(val).__name__}"
-    )
+    raise WorkflowError(f"Field '{key}' in {context} must be a string or list, got {type(val).__name__}")
 
 
 # Liberal field alias: accept both 'output' and 'outputs'
-_OUTPUTS_ALIASES = re.compile(r'^outputs?$', re.IGNORECASE)
+_OUTPUTS_ALIASES = re.compile(r"^outputs?$", re.IGNORECASE)
 
 
-def _find_outputs_key(data: dict) -> Optional[str]:
+def _find_outputs_key(data: dict) -> str | None:
     """Find the outputs key, accepting 'output' or 'outputs' (liberal parsing)."""
     for k in data:
         if _OUTPUTS_ALIASES.match(str(k)):
@@ -232,15 +217,14 @@ def _find_outputs_key(data: dict) -> Optional[str]:
 # Validation helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_inputs(data: dict, context: str) -> InputsSpec:
     """Parse and validate the 'inputs' block."""
     raw = data.get("inputs")
     if raw is None:
         raise WorkflowError(f"Missing required field 'inputs' in {context}")
     if not isinstance(raw, dict):
-        raise WorkflowError(
-            f"Field 'inputs' in {context} must be a mapping, got {type(raw).__name__}"
-        )
+        raise WorkflowError(f"Field 'inputs' in {context} must be a mapping, got {type(raw).__name__}")
     required = _coerce_str_list(raw.get("required"), "inputs.required", context)
     optional = _coerce_str_list(raw.get("optional"), "inputs.optional", context)
     ctx_list = _coerce_str_list(raw.get("context"), "inputs.context", context)
@@ -253,17 +237,14 @@ def _parse_agents(data: dict, context: str) -> dict:
     if raw is None:
         raise WorkflowError(f"Missing required field 'agents' in {context}")
     if not isinstance(raw, dict):
-        raise WorkflowError(
-            f"Field 'agents' in {context} must be a mapping, got {type(raw).__name__}"
-        )
+        raise WorkflowError(f"Field 'agents' in {context} must be a mapping, got {type(raw).__name__}")
     if not raw:
         raise WorkflowError(f"Field 'agents' in {context} must not be empty")
     agents = {}
     for purpose, role in raw.items():
         if not isinstance(role, str):
             raise WorkflowError(
-                f"Agent role for '{purpose}' in {context} must be a string, "
-                f"got {type(role).__name__}"
+                f"Agent role for '{purpose}' in {context} must be a string, " f"got {type(role).__name__}"
             )
         role = role.strip()
         if role not in VALID_ROLES:
@@ -278,18 +259,14 @@ def _parse_agents(data: dict, context: str) -> dict:
 def _parse_pipeline_step(raw: dict, step_index: int, context: str) -> PipelineStep:
     """Parse and validate one pipeline step."""
     if not isinstance(raw, dict):
-        raise WorkflowError(
-            f"Pipeline step {step_index} in {context} must be a mapping, "
-            f"got {type(raw).__name__}"
-        )
+        raise WorkflowError(f"Pipeline step {step_index} in {context} must be a mapping, " f"got {type(raw).__name__}")
     step_ctx = f"pipeline step {step_index} of {context}"
 
     role = _require_str(raw, "role", step_ctx)
     if role not in VALID_ROLES:
         name_hint = raw.get("name", f"(step {step_index})")
         raise WorkflowError(
-            f"Unknown role '{role}' in step '{name_hint}'. "
-            f"Valid roles: {', '.join(sorted(VALID_ROLES))}"
+            f"Unknown role '{role}' in step '{name_hint}'. " f"Valid roles: {', '.join(sorted(VALID_ROLES))}"
         )
 
     name = _require_str(raw, "name", step_ctx)
@@ -297,9 +274,7 @@ def _parse_pipeline_step(raw: dict, step_index: int, context: str) -> PipelineSt
     operation = raw.get("operation")
     if operation is not None:
         if not isinstance(operation, str):
-            raise WorkflowError(
-                f"Field 'operation' in step '{name}' must be a string"
-            )
+            raise WorkflowError(f"Field 'operation' in step '{name}' must be a string")
         operation = operation.strip()
         if operation not in VALID_OPERATIONS:
             raise WorkflowError(
@@ -309,60 +284,42 @@ def _parse_pipeline_step(raw: dict, step_index: int, context: str) -> PipelineSt
         # Operation-specific required fields
         if operation == "create_branch":
             if not raw.get("branch_pattern"):
-                raise WorkflowError(
-                    f"Step '{name}' uses create_branch but missing branch_pattern"
-                )
+                raise WorkflowError(f"Step '{name}' uses create_branch but missing branch_pattern")
         elif operation == "tag_and_push":
             if not raw.get("target_branch"):
-                raise WorkflowError(
-                    f"Step '{name}' uses tag_and_push but missing target_branch"
-                )
+                raise WorkflowError(f"Step '{name}' uses tag_and_push but missing target_branch")
 
     foreach = raw.get("foreach")
     if foreach is not None and not isinstance(foreach, str):
-        raise WorkflowError(
-            f"Field 'foreach' in step '{name}' must be a string"
-        )
+        raise WorkflowError(f"Field 'foreach' in step '{name}' must be a string")
 
     deliverable = raw.get("deliverable")
     if deliverable is not None and not isinstance(deliverable, str):
-        raise WorkflowError(
-            f"Field 'deliverable' in step '{name}' must be a string"
-        )
+        raise WorkflowError(f"Field 'deliverable' in step '{name}' must be a string")
 
     inputs_raw = raw.get("inputs")
     step_inputs = _coerce_str_list(inputs_raw, "inputs", f"step '{name}'")
 
     optional_val = raw.get("optional", False)
     if not isinstance(optional_val, bool):
-        raise WorkflowError(
-            f"Field 'optional' in step '{name}' must be a boolean"
-        )
+        raise WorkflowError(f"Field 'optional' in step '{name}' must be a boolean")
 
     branch = raw.get("branch")
     if branch is not None and not isinstance(branch, str):
-        raise WorkflowError(
-            f"Field 'branch' in step '{name}' must be a string"
-        )
+        raise WorkflowError(f"Field 'branch' in step '{name}' must be a string")
 
     branch_pattern = raw.get("branch_pattern")
     if branch_pattern is not None and not isinstance(branch_pattern, str):
-        raise WorkflowError(
-            f"Field 'branch_pattern' in step '{name}' must be a string"
-        )
+        raise WorkflowError(f"Field 'branch_pattern' in step '{name}' must be a string")
 
     target_branch = raw.get("target_branch")
     if target_branch is not None and not isinstance(target_branch, str):
-        raise WorkflowError(
-            f"Field 'target_branch' in step '{name}' must be a string"
-        )
+        raise WorkflowError(f"Field 'target_branch' in step '{name}' must be a string")
 
     autonomous_criterion = raw.get("autonomous_criterion")
     if autonomous_criterion is not None:
         if not isinstance(autonomous_criterion, str):
-            raise WorkflowError(
-                f"Field 'autonomous_criterion' in step '{name}' must be a string"
-            )
+            raise WorkflowError(f"Field 'autonomous_criterion' in step '{name}' must be a string")
         autonomous_criterion = autonomous_criterion.strip()
         if autonomous_criterion not in VALID_AUTONOMOUS_CRITERION:
             raise WorkflowError(
@@ -373,9 +330,7 @@ def _parse_pipeline_step(raw: dict, step_index: int, context: str) -> PipelineSt
     when = raw.get("when")
     if when is not None:
         if not isinstance(when, str):
-            raise WorkflowError(
-                f"Field 'when' in step '{name}' must be a string"
-            )
+            raise WorkflowError(f"Field 'when' in step '{name}' must be a string")
         when = when.strip()
         if when not in VALID_WHEN_PREDICATES:
             raise WorkflowError(
@@ -417,9 +372,7 @@ def _parse_outputs(data: dict, context: str) -> OutputsSpec:
         raise WorkflowError(f"Missing required field 'outputs' in {context}")
     raw = data[key]
     if not isinstance(raw, dict):
-        raise WorkflowError(
-            f"Field 'outputs' in {context} must be a mapping, got {type(raw).__name__}"
-        )
+        raise WorkflowError(f"Field 'outputs' in {context} must be a mapping, got {type(raw).__name__}")
     # format: string or list
     if "format" not in raw:
         raise WorkflowError(f"Missing required field 'outputs.format' in {context}")
@@ -429,15 +382,9 @@ def _parse_outputs(data: dict, context: str) -> OutputsSpec:
     elif isinstance(fmt, list):
         for i, item in enumerate(fmt):
             if not isinstance(item, str):
-                raise WorkflowError(
-                    f"outputs.format[{i}] in {context} must be a string, "
-                    f"got {type(item).__name__}"
-                )
+                raise WorkflowError(f"outputs.format[{i}] in {context} must be a string, " f"got {type(item).__name__}")
     else:
-        raise WorkflowError(
-            f"outputs.format in {context} must be a string or list, "
-            f"got {type(fmt).__name__}"
-        )
+        raise WorkflowError(f"outputs.format in {context} must be a string or list, " f"got {type(fmt).__name__}")
 
     location = _require_str(raw, "location", f"outputs block of {context}")
 
@@ -447,6 +394,7 @@ def _parse_outputs(data: dict, context: str) -> OutputsSpec:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def load_workflow(workflow_name: str, kanban_root=None) -> WorkflowDefinition:
     """Load a workflow definition by name.
@@ -493,10 +441,7 @@ def load_workflow(workflow_name: str, kanban_root=None) -> WorkflowDefinition:
     # workflow type (directory name), not the file stem.  For flat forms the
     # expected name equals the file stem, which also equals workflow_name.
     if name != expected_name:
-        raise WorkflowError(
-            f"Workflow name '{name}' does not match filename '{expected_name}' "
-            f"(from {path})"
-        )
+        raise WorkflowError(f"Workflow name '{name}' does not match filename '{expected_name}' " f"(from {path})")
 
     # --- description ---
     description = _require_str(data, "description", context)

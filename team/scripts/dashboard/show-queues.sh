@@ -76,10 +76,10 @@
 #   TERM=dumb, NO_COLOR=1  — disable all ANSI codes
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve script dir ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_resolve_project_name (and, through it, the
 # shared dual-channel error emitter).

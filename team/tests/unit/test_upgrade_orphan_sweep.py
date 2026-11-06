@@ -31,6 +31,14 @@ WHAT IS TESTED
 3. **Clean upgrade.** An install that holds only files the deposited tree
    contains reports zero orphans and creates no ``retired/`` directory.
 
+4. **Skill staging.** The fixture dev tree ships one skill; the install's
+   ``.installed-skills`` record also names two skills the tree no longer
+   ships. An operator-added skill survives a report-only and a ``--force``
+   run byte-identical, is never moved to ``retired/`` and is named as
+   operator-owned. The formerly shipped skill that is byte-identical to its
+   recorded copy is removed; the one with a single edited byte is kept,
+   named, and never moved aside either.
+
 SANDBOX DESIGN
 --------------
 Each test builds a throwaway kanban root and dev tree under ``tmp_path``.
@@ -50,6 +58,7 @@ can turn a skip into a prompt.
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 import shutil
 import subprocess
@@ -57,6 +66,7 @@ import subprocess
 import pytest
 
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts (dev-tree layout, relative to this test file)
@@ -81,6 +91,8 @@ _LIB_NAMES = [
     "subagent_deploy.sh",
     "script_common.sh",
     "config_loader.sh",
+    "dev_tree.sh",
+    "pp_run_ops.sh",
     "semver.sh",
 ]
 
@@ -155,6 +167,7 @@ def _build_dev_tree(dev_tree: pathlib.Path) -> None:
             shutil.copy2(src, scripts_lib / name)
     shutil.copy2(_REAL_UPGRADE_SH, team / "scripts" / "upgrade.sh")
     (team / "scripts" / "upgrade.sh").chmod(0o755)
+    seed_provider_home_rule(team)
 
     _write(dev_tree / "docs" / "guide.md", b"# Guide\n")
     _write(dev_tree / "subagents" / "MANIFEST.txt", b"# Empty manifest\n")
@@ -219,9 +232,12 @@ def _run_upgrade(sandbox: dict[str, pathlib.Path], *, force: bool) -> subprocess
         "bash",
         str(kanban_root / "scripts" / "upgrade.sh"),
         "--no-backup",
-        "--wake-tier", "none",
-        "--dev-tree", str(sandbox["dev_tree"]),
-        "--stamp-version", "sandbox-test",
+        "--wake-tier",
+        "none",
+        "--dev-tree",
+        str(sandbox["dev_tree"]),
+        "--stamp-version",
+        "sandbox-test",
     ]
     if force:
         args.append("--force")
@@ -238,10 +254,7 @@ def _run_upgrade(sandbox: dict[str, pathlib.Path], *, force: bool) -> subprocess
 
 
 def _snapshot(kanban_root: pathlib.Path, rels: list[str]) -> dict[str, bytes | None]:
-    return {
-        rel: (kanban_root / rel).read_bytes() if (kanban_root / rel).is_file() else None
-        for rel in rels
-    }
+    return {rel: (kanban_root / rel).read_bytes() if (kanban_root / rel).is_file() else None for rel in rels}
 
 
 def _graveyard(kanban_root: pathlib.Path) -> pathlib.Path | None:
@@ -265,9 +278,9 @@ def _summary_line(output: str) -> str:
 
 def _assert_ok(result: subprocess.CompletedProcess) -> str:
     output = result.stdout + result.stderr
-    assert result.returncode == 0, (
-        f"upgrade.sh exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"upgrade.sh exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     return output
 
 
@@ -294,15 +307,13 @@ def test_orphans_reported_and_left_without_force_then_moved_aside_with_force(
     lines = _orphan_lines(output)
     not_named = [rel for rel in _ORPHANS if not any(f" {rel} " in f"{ln} " for ln in lines)]
     assert not not_named, f"Orphans not reported by relative path: {not_named}\n{output}"
-    assert _snapshot(kanban_root, _ORPHANS) == before, (
-        f"An orphan changed or moved without --force.\n{output}"
-    )
+    assert _snapshot(kanban_root, _ORPHANS) == before, f"An orphan changed or moved without --force.\n{output}"
     assert not (kanban_root / "retired").exists(), f"retired/ created without --force.\n{output}"
     summary = _summary_line(output)
     assert f"{len(_ORPHANS)} file(s) left in place" in summary, summary
-    assert "--force" in output and "re-run" in output, (
-        f"The report-only run does not name the --force re-run.\n{output}"
-    )
+    assert (
+        "--force" in output and "re-run" in output
+    ), f"The report-only run does not name the --force re-run.\n{output}"
 
     # Run 2: move aside.
     output = _assert_ok(_run_upgrade(sandbox, force=True))
@@ -317,8 +328,7 @@ def test_orphans_reported_and_left_without_force_then_moved_aside_with_force(
         f"missing {sorted(set(before) - set(moved_bytes))}"
     )
     not_narrated = [
-        rel for rel in _ORPHANS
-        if not any(f"{rel} -> retired/{ts}/{rel}" in ln for ln in _orphan_lines(output))
+        rel for rel in _ORPHANS if not any(f"{rel} -> retired/{ts}/{rel}" in ln for ln in _orphan_lines(output))
     ]
     assert not not_narrated, f"No move-aside line for: {not_narrated}\n{output}"
     summary = _summary_line(output)
@@ -338,13 +348,8 @@ def test_projects_protected_outside_and_operator_plugin_files_untouched_by_both_
         output = _assert_ok(_run_upgrade(sandbox, force=force))
         after = _snapshot(kanban_root, _UNTOUCHED)
         changed = [rel for rel in _UNTOUCHED if after[rel] != before[rel]]
-        assert not changed, (
-            f"Changed or moved by the {'--force' if force else 'report-only'} run: {changed}\n{output}"
-        )
-        reported = [
-            rel for rel in _UNTOUCHED
-            if any(f" {rel} " in f"{ln} " for ln in _orphan_lines(output))
-        ]
+        assert not changed, f"Changed or moved by the {'--force' if force else 'report-only'} run: {changed}\n{output}"
+        reported = [rel for rel in _UNTOUCHED if any(f" {rel} " in f"{ln} " for ln in _orphan_lines(output))]
         assert not reported, f"Reported as orphans but out of scope: {reported}\n{output}"
 
     graveyard = _graveyard(kanban_root)
@@ -362,6 +367,92 @@ def test_clean_upgrade_reports_zero_orphans_and_moves_nothing(tmp_path: pathlib.
         output = _assert_ok(_run_upgrade(sandbox, force=force))
         assert _orphan_lines(output) == [], f"Orphan lines on a clean install:\n{output}"
         assert _summary_line(output).split("Orphans:", 1)[1].strip() == "none", output
-        assert not (kanban_root / "retired").exists(), (
-            f"retired/ created on a clean install.\n{output}"
-        )
+        assert not (kanban_root / "retired").exists(), f"retired/ created on a clean install.\n{output}"
+
+
+# ---------------------------------------------------------------------------
+# Skill staging: operator skills are never swept; formerly shipped skills go
+# only when unedited
+# ---------------------------------------------------------------------------
+
+_SHIPPED_SKILL = "claude/kanban-skill"
+_RETIRED_UNEDITED_SKILL = "claude/old-skill"
+_RETIRED_EDITED_SKILL = "codex/old-edited-skill"
+_OPERATOR_SKILL = "claude/my-skill"
+
+
+def _skill_files(name: str) -> dict[str, bytes]:
+    """The files of a fixture skill, relative to its directory."""
+    return {
+        "SKILL.md": f"---\nname: {name}\ndescription: Fixture skill {name}.\n---\nBody.\n".encode(),
+        "scripts/run.sh": f"echo {name}\n".encode(),
+    }
+
+
+def _stage_skill(kanban_root: pathlib.Path, skill: str) -> None:
+    for rel, data in _skill_files(skill.split("/")[1]).items():
+        _write(kanban_root / "skills" / skill / rel, data)
+
+
+def _build_skill_sandbox(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
+    """A current sandbox whose dev tree ships one skill and whose install
+    records it and two skills the dev tree no longer ships."""
+    sandbox = _build_sandbox(tmp_path, with_extras=False)
+    kanban_root = sandbox["kanban_root"]
+    for rel, data in _skill_files(_SHIPPED_SKILL.split("/")[1]).items():
+        _write(sandbox["dev_tree"] / "skills" / _SHIPPED_SKILL / rel, data)
+
+    record = ["# pgai-agent-kanban: skills shipped to the staging directory by install.sh"]
+    for skill in (_SHIPPED_SKILL, _RETIRED_UNEDITED_SKILL, _RETIRED_EDITED_SKILL):
+        _stage_skill(kanban_root, skill)
+        for rel, data in sorted(_skill_files(skill.split("/")[1]).items()):
+            record.append(f"{hashlib.sha256(data).hexdigest()}  skills/{skill}/{rel}")
+    _write(kanban_root / ".installed-skills", ("\n".join(record) + "\n").encode())
+
+    edited = kanban_root / "skills" / _RETIRED_EDITED_SKILL / "SKILL.md"
+    data = bytearray(edited.read_bytes())
+    data[-2] ^= 0x01
+    edited.write_bytes(bytes(data))
+    _stage_skill(kanban_root, _OPERATOR_SKILL)
+    return sandbox
+
+
+def _tree(directory: pathlib.Path) -> dict[str, bytes]:
+    return {str(p.relative_to(directory)): p.read_bytes() for p in sorted(directory.rglob("*")) if p.is_file()}
+
+
+def test_operator_skill_never_swept_and_only_the_unedited_formerly_shipped_skill_removed(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Report-only and --force runs keep the operator skill and the edited
+    formerly shipped skill byte-identical in place, never in retired/; the
+    unedited formerly shipped skill is removed and the record rewritten."""
+    sandbox = _build_skill_sandbox(tmp_path)
+    kanban_root = sandbox["kanban_root"]
+    skills = kanban_root / "skills"
+    operator_before = _tree(skills / _OPERATOR_SKILL)
+    edited_before = _tree(skills / _RETIRED_EDITED_SKILL)
+
+    output = _assert_ok(_run_upgrade(sandbox, force=False))
+    assert not (
+        skills / _RETIRED_UNEDITED_SKILL
+    ).exists(), f"An unedited skill the tree no longer ships was kept.\n{output}"
+    assert f"Removed formerly shipped skill: skills/{_RETIRED_UNEDITED_SKILL}" in output, output
+    assert f"Kept formerly shipped skill: skills/{_RETIRED_EDITED_SKILL}" in output, output
+    assert f"Skills removed:    {_RETIRED_UNEDITED_SKILL}" in output, output
+    assert f"Skills kept:       {_RETIRED_EDITED_SKILL}" in output, output
+    record = (kanban_root / ".installed-skills").read_text(encoding="utf-8")
+    recorded = sorted(ln.split()[-1] for ln in record.splitlines() if ln and not ln.startswith("#"))
+    assert recorded == sorted(f"skills/{_SHIPPED_SKILL}/{rel}" for rel in _skill_files("kanban-skill")), record
+
+    for force in (False, True):
+        if force:
+            output = _assert_ok(_run_upgrade(sandbox, force=True))
+        assert _tree(skills / _OPERATOR_SKILL) == operator_before, output
+        assert _tree(skills / _RETIRED_EDITED_SKILL) == edited_before, output
+        assert f"Operator-owned skill (left alone): skills/{_OPERATOR_SKILL}" in output, output
+        operator_summary = [ln for ln in output.splitlines() if ln.strip().startswith("Operator skills:")]
+        assert len(operator_summary) == 1 and _OPERATOR_SKILL in operator_summary[0], output
+        assert _orphan_lines(output) == [], f"A skill was reported as an orphan.\n{output}"
+        retired = kanban_root / "retired"
+        assert not retired.exists() or not list(retired.rglob("skills")), f"A skill was moved to retired/.\n{output}"

@@ -46,7 +46,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
-from typing import Iterable, Mapping, Optional
+from collections.abc import Iterable, Mapping
 
 from pgai_agent_kanban.dashboard.column_render.board_snapshot import BOARD_COLUMNS, column_env_suffix
 from pgai_agent_kanban.dashboard.column_render.multi import sources_from_env
@@ -86,9 +86,7 @@ def _active_rc(release_state: pathlib.Path) -> str:
     from pgai_agent_kanban.task_status import first_value_line, read_section
 
     try:
-        body = read_section(
-            release_state.read_text(encoding="utf-8"), "Active RC", exact_heading=True, comments=True
-        )
+        body = read_section(release_state.read_text(encoding="utf-8"), "Active RC", exact_heading=True, comments=True)
     except (OSError, UnicodeDecodeError, ValueError):
         body = None
     value = first_value_line(body) if body else ""
@@ -107,7 +105,7 @@ def _last_released(kanban_root: pathlib.Path, project: str) -> str:
     return "none" if not value or value == "v0.0.0" else value
 
 
-def requirements_last_released(kanban_root: "pathlib.Path | str", project: str) -> str:
+def requirements_last_released(kanban_root: pathlib.Path | str, project: str) -> str:
     """The last release the requirements pane classifies *project*'s requirements against.
 
     :func:`_last_released` -- the git-tag reader -- with ``none`` read as
@@ -150,11 +148,11 @@ def _defer_line(kanban_root: pathlib.Path, project: str, bugs_dir: str) -> str:
 
 
 def gather_board_env(
-    kanban_root: "pathlib.Path | str",
+    kanban_root: pathlib.Path | str,
     *,
     dashboard_max_rows: str = "",
-    environ: Optional[Mapping[str, str]] = None,
-    column_types: Optional[Iterable[str]] = None,
+    environ: Mapping[str, str] | None = None,
+    column_types: Iterable[str] | None = None,
 ) -> dict:
     """Return the environment mapping ``column_render_gather_board_multi`` exports.
 
@@ -222,11 +220,11 @@ def gather_board_env(
 
 
 def gather_board_sources(
-    kanban_root: "pathlib.Path | str",
+    kanban_root: pathlib.Path | str,
     *,
     dashboard_max_rows: str = "",
-    environ: Optional[Mapping[str, str]] = None,
-    column_types: Optional[Iterable[str]] = None,
+    environ: Mapping[str, str] | None = None,
+    column_types: Iterable[str] | None = None,
 ) -> dict:
     """Map each board column type to its per-project ``ProjectSource`` list (registry order).
 
@@ -234,7 +232,10 @@ def gather_board_sources(
     :func:`gather_board_env`).
     """
     env = gather_board_env(
-        kanban_root, dashboard_max_rows=dashboard_max_rows, environ=environ, column_types=column_types,
+        kanban_root,
+        dashboard_max_rows=dashboard_max_rows,
+        environ=environ,
+        column_types=column_types,
     )
     wanted = None if column_types is None else frozenset(column_types)
     return {

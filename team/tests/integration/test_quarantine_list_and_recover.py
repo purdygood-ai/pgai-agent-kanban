@@ -54,25 +54,33 @@ def _sandbox_env(kanban_root: pathlib.Path) -> dict[str, str]:
         env.pop(name, None)
     temp_dir = kanban_root / "tmp"
     temp_dir.mkdir(exist_ok=True)
-    env.update({
-        "KANBAN_ROOT": str(kanban_root),
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp_dir),
-        "TEAM_ROOT": str(kanban_root),
-        "TERM": "dumb",
-    })
+    env.update(
+        {
+            "KANBAN_ROOT": str(kanban_root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp_dir),
+            "TEAM_ROOT": str(kanban_root),
+            "TERM": "dumb",
+        }
+    )
     return env
 
 
 def _run(argv: list[str], kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        argv, capture_output=True, text=True, env=_sandbox_env(kanban_root),
-        cwd=str(kanban_root), timeout=120, stdin=subprocess.DEVNULL,
+        argv,
+        capture_output=True,
+        text=True,
+        env=_sandbox_env(kanban_root),
+        cwd=str(kanban_root),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
     )
 
 
-def _quarantine(kanban_root: pathlib.Path, parent_dir: pathlib.Path, filename: str,
-                project_name: str) -> subprocess.CompletedProcess:
+def _quarantine(
+    kanban_root: pathlib.Path, parent_dir: pathlib.Path, filename: str, project_name: str
+) -> subprocess.CompletedProcess:
     """Run the real ``_disc_maybe_quarantine`` once with threshold 1."""
     state_dir = kanban_root / "projects" / _PROJECT / ".discovery-state"
     script = textwrap.dedent(f"""\
@@ -175,8 +183,7 @@ def test_rename_that_is_not_a_plain_base_name_is_refused_and_nothing_moves(two_p
     root = two_project_root
     project = _rejected_bug(root)
 
-    refused = _run([str(_RECOVER_REJECTED), "--project", _PROJECT, "--file", "BUG-3-x.md",
-                    "--rename", rename], root)
+    refused = _run([str(_RECOVER_REJECTED), "--project", _PROJECT, "--file", "BUG-3-x.md", "--rename", rename], root)
     assert refused.returncode == 1, _diagnostic(refused)
     lines = refused.stderr.splitlines()
     assert "error:   recover_rejected.rename_not_basename" in lines, _diagnostic(refused)
@@ -193,8 +200,9 @@ def test_refused_rename_remedy_run_as_printed_restores_under_the_base_name(two_p
     root = two_project_root
     project = _rejected_bug(root)
 
-    refused = _run([str(_RECOVER_REJECTED), "--project", _PROJECT, "--file", "BUG-3-x.md",
-                    "--rename", "../../escaped.md"], root)
+    refused = _run(
+        [str(_RECOVER_REJECTED), "--project", _PROJECT, "--file", "BUG-3-x.md", "--rename", "../../escaped.md"], root
+    )
     assert refused.returncode == 1, _diagnostic(refused)
 
     remedy = next(line for line in refused.stderr.splitlines() if line.startswith("remedy:"))
@@ -209,8 +217,9 @@ def test_rename_to_a_plain_base_name_restores_under_the_new_name(two_project_roo
     root = two_project_root
     project = _rejected_bug(root)
 
-    recovered = _run([str(_RECOVER_REJECTED), "--project", _PROJECT, "--file", "BUG-3-x.md",
-                      "--rename", "BUG-0003-x.md"], root)
+    recovered = _run(
+        [str(_RECOVER_REJECTED), "--project", _PROJECT, "--file", "BUG-3-x.md", "--rename", "BUG-0003-x.md"], root
+    )
     assert recovered.returncode == 0, _diagnostic(recovered)
     assert (project / "bugs" / "BUG-0003-x.md").read_text(encoding="utf-8") == "r\n"
     assert not (project / "rejected" / "BUG-3-x.md").exists()

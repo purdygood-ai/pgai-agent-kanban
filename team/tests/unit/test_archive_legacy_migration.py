@@ -96,9 +96,7 @@ def _files_under(directory: pathlib.Path) -> list[pathlib.Path]:
 def _run(sandbox: ArchiveSandbox, **kwargs):
     out: list[str] = []
     err: list[str] = []
-    run = run_archive(
-        OpsContext(kanban_root=sandbox.root), sandbox.project, out=out.append, err=err.append, **kwargs
-    )
+    run = run_archive(OpsContext(kanban_root=sandbox.root), sandbox.project, out=out.append, err=err.append, **kwargs)
     return run, out, err
 
 
@@ -301,4 +299,3 @@ def test_accept_chain_lock_migrates_under_a_lock_its_own_chain_holds(tmp_path: p
     assert result.status == RESULT_OK, "\n".join(lines)
     assert len(result.rows) == len(_SEEDED)
     assert _files_under(_legacy_dir(sandbox)) == []
-

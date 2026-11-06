@@ -43,7 +43,9 @@ _NOW = "2026-01-01T00:00:00+00:00"
 
 
 def test_parse_action_args_reads_liberally_and_writes_canonically() -> None:
-    parsed = parse_action_args(["Verb=restamp_fixed_in.sh  PROJECT=pgai-agent-kanban", "version=2.28.0;bugs=bug-0412, "])
+    parsed = parse_action_args(
+        ["Verb=restamp_fixed_in.sh  PROJECT=pgai-agent-kanban", "version=2.28.0;bugs=bug-0412, "]
+    )
     assert parsed == {
         "verb": "restamp-fixed-in",
         "project": "pgai-agent-kanban",
@@ -51,7 +53,10 @@ def test_parse_action_args_reads_liberally_and_writes_canonically() -> None:
         "bugs": "BUG-0412",
     }
     assert format_action_args(parsed) == [
-        "verb=restamp-fixed-in", "project=pgai-agent-kanban", "version=v2.28.0", "bugs=BUG-0412",
+        "verb=restamp-fixed-in",
+        "project=pgai-agent-kanban",
+        "version=v2.28.0",
+        "bugs=BUG-0412",
     ]
 
 
@@ -59,8 +64,13 @@ def test_parse_action_args_names_every_fault() -> None:
     with pytest.raises(ActionArgsError) as excinfo:
         parse_action_args(["verb=restamp-fixed-in", "project=Bad_Name", "bugs=12", "extra=1", "loose"])
     problems = " | ".join(excinfo.value.problems)
-    for fragment in ("'loose' is not a key=value pair", "extra is not an argument", "project 'Bad_Name'",
-                     "version= is missing", "bugs '12'"):
+    for fragment in (
+        "'loose' is not a key=value pair",
+        "extra is not an argument",
+        "project 'Bad_Name'",
+        "version= is missing",
+        "bugs '12'",
+    ):
         assert fragment in problems
 
 

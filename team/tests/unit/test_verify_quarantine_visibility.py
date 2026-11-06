@@ -33,6 +33,10 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shlex
+import shutil
+
+import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -85,9 +89,9 @@ def test_failing_quarantine_helper_is_recorded_and_run_reaches_summary(tmp_path)
     assert step_c_fail, f"no FAIL line naming Step C\n{_diagnostic(result)}"
     fail_line = lines[step_c_fail[0]]
     # The helper's own error output is shown on the FAIL line.
-    assert "ini_parser.sh" in fail_line and "No such file or directory" in fail_line, (
-        f"Step C FAIL line does not show the helper's output: {fail_line!r}\n{_diagnostic(result)}"
-    )
+    assert (
+        "ini_parser.sh" in fail_line and "No such file or directory" in fail_line
+    ), f"Step C FAIL line does not show the helper's output: {fail_line!r}\n{_diagnostic(result)}"
 
     cleanup = [i for i, line in enumerate(lines) if line.strip() == "=== CLEANUP ==="]
     summary = [i for i, line in enumerate(lines) if line.strip() == "=== SUMMARY ==="]
@@ -101,8 +105,7 @@ def test_failing_quarantine_helper_is_recorded_and_run_reaches_summary(tmp_path)
     # and remedy lines.
     stderr_lines = result.stderr.splitlines()
     assert any(
-        line.startswith("error:") and line.split(":", 1)[1].strip() == _ERROR_KEY
-        for line in stderr_lines
+        line.startswith("error:") and line.split(":", 1)[1].strip() == _ERROR_KEY for line in stderr_lines
     ), _diagnostic(result)
     for field in ("message:", "remedy:"):
         values = [line.split(":", 1)[1].strip() for line in stderr_lines if line.startswith(field)]
@@ -127,7 +130,7 @@ def test_verifier_script_parses(tmp_path):
     assert result.returncode == 0, _diagnostic(result)
 
 
-def _run_without_dev_tree_flag(tmp_path: pathlib.Path, env: str = ""):
+def _run_without_dev_tree_flag(tmp_path: pathlib.Path, env: str = "", verifier: pathlib.Path = _VERIFIER):
     sandbox = tmp_path / "sandbox"
     temp_root = sandbox / "tmp"
     temp_root.mkdir(parents=True, exist_ok=True)
@@ -136,20 +139,40 @@ def _run_without_dev_tree_flag(tmp_path: pathlib.Path, env: str = ""):
         f'KANBAN_ROOT="{sandbox}" '
         f'PGAI_AGENT_KANBAN_ROOT_PATH="{sandbox}" '
         f'PGAI_AGENT_KANBAN_TEMP_DIR="{temp_root}" {env} '
-        f'bash "{_VERIFIER}"'
+        f'bash "{verifier}"'
     )
     return run_bash(tmp_path, script, timeout=180, cwd=tmp_path)
 
 
-def test_no_dev_tree_known_is_refused_with_a_runnable_remedy(tmp_path):
-    result = _run_without_dev_tree_flag(tmp_path)
+def _verifier_under_a_dev_tree_path(tmp_path: pathlib.Path) -> pathlib.Path:
+    """Copy the verifier and the lib trees it sources into a checkout whose
+    path contains develop/pgai-agent-kanban, the operator's dev-tree shape."""
+    checkout_team = tmp_path / "home" / "develop" / "pgai-agent-kanban" / "team"
+    shutil.copytree(_TEAM_ROOT / "verification", checkout_team / "verification")
+    shutil.copytree(_TEAM_ROOT / "scripts" / "lib", checkout_team / "scripts" / "lib")
+    return checkout_team / "verification" / _VERIFIER.name
+
+
+def _remedy_dev_tree(remedy: str) -> str:
+    """The value the remedy command passes to --dev-tree."""
+    words = shlex.split(remedy.split(":", 1)[1])
+    return words[words.index("--dev-tree") + 1]
+
+
+@pytest.mark.parametrize("location", ["shipped", "under-develop-pgai-agent-kanban"])
+def test_no_dev_tree_known_is_refused_with_a_runnable_remedy(tmp_path, location):
+    verifier = _VERIFIER if location == "shipped" else _verifier_under_a_dev_tree_path(tmp_path)
+    result = _run_without_dev_tree_flag(tmp_path, verifier=verifier)
 
     assert result.returncode == 1, _diagnostic(result)
     assert "error:   verify_quarantine_visibility.dev_tree_unresolved" in result.stderr
     remedy = next(l for l in result.stderr.splitlines() if l.startswith("remedy:"))
     assert "<" not in remedy and ">" not in remedy, remedy
     assert "--dev-tree /srv/develop/my-app" in remedy
-    assert "develop/pgai-agent-kanban" not in result.stdout + result.stderr
+    # What the script guessed is the --dev-tree value; the remedy also names
+    # the script's own path, which may sit in any checkout.
+    dev_tree = _remedy_dev_tree(remedy)
+    assert dev_tree == "/srv/develop/my-app" and "develop/pgai-agent-kanban" not in dev_tree, remedy
     assert "=== STEP A" not in result.stdout, "no check may run without a dev tree"
 
 

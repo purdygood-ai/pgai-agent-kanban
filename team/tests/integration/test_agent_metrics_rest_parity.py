@@ -75,9 +75,7 @@ from tests.fixtures.rc_rollup_history import (
 # A rendered agent row: "<agent>  <wall>  <tokens>  <tasks>  <total tokens>
 # <total tasks>", whitespace padded, the three averages with one decimal
 # ('--' when absent) and the two totals as thousands-separated integers.
-_ROW_RE = re.compile(
-    r"^\s*(\S+)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+([\d,]+)\s+([\d,]+)\s*$"
-)
+_ROW_RE = re.compile(r"^\s*(\S+)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+([\d,]+)\s+([\d,]+)\s*$")
 
 # The footer after the rows: "<label>: <N> shipped RCs (<M> cancelled
 # excluded)", the label "window", "all" or "since vX.Y.Z".
@@ -144,9 +142,7 @@ def _seed_history(board_root: pathlib.Path) -> tuple[pathlib.Path, list[RcSeed]]
     """
     project_dir = build_synthetic_board(board_root)
     rc_dir = project_dir / "metrics" / "rc"
-    seeds = build_rc_history(
-        rc_dir, _HISTORY_SIZE, cancelled=_CANCELLED_INDICES, agents_for=_history_agents
-    )
+    seeds = build_rc_history(rc_dir, _HISTORY_SIZE, cancelled=_CANCELLED_INDICES, agents_for=_history_agents)
     assert len(seeds) == _HISTORY_SIZE
     assert seeds[_SINCE_INDEX].version == _SINCE_VERSION, (
         f"the builder's version series moved: index {_SINCE_INDEX} is "
@@ -183,9 +179,7 @@ def _hand_rows(selected: Iterable[RcSeed]) -> list[dict]:
         for agent, load in seed.agents.items():
             if load.tasks <= 0:
                 continue
-            acc = sums.setdefault(
-                agent, {"rc_count": 0, "tasks": 0, "tokens": 0, "wall_seconds": 0.0, "wall_tasks": 0}
-            )
+            acc = sums.setdefault(agent, {"rc_count": 0, "tasks": 0, "tokens": 0, "wall_seconds": 0.0, "wall_tasks": 0})
             acc["rc_count"] += 1
             acc["tasks"] += load.tasks
             acc["tokens"] += load.input + load.output + load.cache_read + load.cache_write
@@ -271,10 +265,13 @@ def _run_cli(board_root: pathlib.Path, span_args: Sequence[str]) -> str:
     agent_metrics_sh = board_root / "scripts" / "dashboard" / "agent-metrics.sh"
     result = subprocess.run(
         [
-            "bash", str(agent_metrics_sh),
-            "--project", PROJECT_NAME,
+            "bash",
+            str(agent_metrics_sh),
+            "--project",
+            PROJECT_NAME,
             *span_args,
-            "--kanban-root", str(board_root),
+            "--kanban-root",
+            str(board_root),
             "--no-color",
         ],
         capture_output=True,
@@ -282,9 +279,9 @@ def _run_cli(board_root: pathlib.Path, span_args: Sequence[str]) -> str:
         env=_cli_env(board_root),
         timeout=15,
     )
-    assert result.returncode == 0, (
-        f"agent-metrics.sh {' '.join(span_args)} exited {result.returncode}: {result.stderr!r}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"agent-metrics.sh {' '.join(span_args)} exited {result.returncode}: {result.stderr!r}"
     return result.stdout
 
 
@@ -420,9 +417,7 @@ def _seed_rc_rollups(project_dir: pathlib.Path) -> None:
         },
     }
     for version, payload in rollups.items():
-        (rc_dir / f"{version}.json").write_text(
-            json.dumps({"outcome": "shipped", **payload}), encoding="utf-8"
-        )
+        (rc_dir / f"{version}.json").write_text(json.dumps({"outcome": "shipped", **payload}), encoding="utf-8")
 
 
 def test_agent_metrics_per_task_wall_matches_between_cli_and_rest(

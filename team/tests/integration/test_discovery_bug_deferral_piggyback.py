@@ -41,7 +41,6 @@ import pathlib
 import re
 import subprocess
 import textwrap
-from typing import Optional
 
 from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
 
@@ -83,7 +82,7 @@ def _run_discovery(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -128,7 +127,7 @@ def _add_bug_file(
     bug_id: str = "BUG-0001",
     slug: str = "test-fix",
     status: str = "open",
-    severity: Optional[str] = "low",
+    severity: str | None = "low",
 ) -> pathlib.Path:
     """Create a bug file. severity=None omits the **Severity:** field entirely."""
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
@@ -136,10 +135,7 @@ def _add_bug_file(
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     severity_line = f"**Severity:** {severity}\n\n" if severity is not None else ""
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"{severity_line}"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"{severity_line}" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -153,9 +149,9 @@ def _set_defer_posture(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    deferred_bugs: Optional[bool] = None,
-    deferred_bug_level: Optional[str] = None,
-    defer_piggyback: Optional[bool] = None,
+    deferred_bugs: bool | None = None,
+    deferred_bug_level: str | None = None,
+    defer_piggyback: bool | None = None,
 ) -> None:
     """Append a [release] section to project.cfg setting the deferral posture.
 
@@ -242,9 +238,7 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
         ## Status: running.
         """
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True)
         trigger = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
             _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
@@ -281,9 +275,9 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
                 f"line: {line!r}\nexpected suffix: {expected_suffix!r}"
             )
 
-        assert f"piggybacking 4 deferred bugs (trigger: {trigger_id} medium)" in result.stderr, (
-            f"Expected the piggyback narration naming count/trigger/severity.\nstderr:\n{result.stderr}"
-        )
+        assert (
+            f"piggybacking 4 deferred bugs (trigger: {trigger_id} medium)" in result.stderr
+        ), f"Expected the piggyback narration naming count/trigger/severity.\nstderr:\n{result.stderr}"
 
         assert _bug_status(trigger) == "running"
         backlog_text = _bug_backlog_text(root, "project-a")
@@ -301,9 +295,7 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
         still read ## Status: open and are unmarked in the cache.
         """
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False)
         _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
             _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
@@ -333,18 +325,14 @@ class TestPiggybackCarriesDeferredBugsOntoATrigger:
 
 
 class TestPiggybackNeverFiresWithoutATrigger:
-    def test_only_low_bugs_open_writes_no_bundle_even_with_piggyback_true(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_only_low_bugs_open_writes_no_bundle_even_with_piggyback_true(self, two_project_root: pathlib.Path) -> None:
         """level=low, piggyback=true, only low bugs open: no bundle is
         written at all -- there is no trigger, so there is nothing to
         piggyback on. (The hygiene sweep, covered elsewhere, is the only
         other path that can bundle this litter.)
         """
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True)
         bug1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
         bug2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
         # Keep the requirements queue non-empty so the hygiene sweep is
@@ -367,9 +355,9 @@ class TestPiggybackNeverFiresWithoutATrigger:
         result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project-a"), (
-            f"Expected no bug bundle -- no trigger is present to piggyback on.\nstderr:\n{result.stderr}"
-        )
+        assert not _bundle_files(
+            root, "project-a"
+        ), f"Expected no bug bundle -- no trigger is present to piggyback on.\nstderr:\n{result.stderr}"
         assert "piggybacking" not in result.stderr.lower(), result.stderr
         assert _bug_status(bug1) == "open"
         assert _bug_status(bug2) == "open"

@@ -33,7 +33,6 @@ from pgai_agent_kanban.cm.bundle_family import (
     parse_bundled_item_basenames,
 )
 
-
 # ---------------------------------------------------------------------------
 # find_bundle_file
 # ---------------------------------------------------------------------------
@@ -175,10 +174,14 @@ def test_compute_next_attempt_increments_after_matching_cancelled_record(tmp_pat
     history_dir = state_dir / "history"
     history_dir.mkdir(parents=True)
     (history_dir / "v2.0.0-cancelled-2026-07-27T00-00-00Z.json").write_text(
-        json.dumps({
-            "rc": "v2.0.0", "outcome": "cancelled",
-            "family_key": "family-abc123", "attempt": 1,
-        }),
+        json.dumps(
+            {
+                "rc": "v2.0.0",
+                "outcome": "cancelled",
+                "family_key": "family-abc123",
+                "attempt": 1,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -194,10 +197,14 @@ def test_compute_next_attempt_ignores_different_family(tmp_path: Path) -> None:
     history_dir = state_dir / "history"
     history_dir.mkdir(parents=True)
     (history_dir / "v2.0.0-cancelled-2026-07-27T00-00-00Z.json").write_text(
-        json.dumps({
-            "rc": "v2.0.0", "outcome": "cancelled",
-            "family_key": "family-different", "attempt": 1,
-        }),
+        json.dumps(
+            {
+                "rc": "v2.0.0",
+                "outcome": "cancelled",
+                "family_key": "family-different",
+                "attempt": 1,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -213,10 +220,14 @@ def test_compute_next_attempt_does_not_advance_on_shipped_record(tmp_path: Path)
     history_dir = state_dir / "history"
     history_dir.mkdir(parents=True)
     (history_dir / "v1.9.0-shipped-marker.json").write_text(
-        json.dumps({
-            "rc": "v1.9.0", "outcome": "shipped",
-            "family_key": "family-abc123", "attempt": 1,
-        }),
+        json.dumps(
+            {
+                "rc": "v1.9.0",
+                "outcome": "shipped",
+                "family_key": "family-abc123",
+                "attempt": 1,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -255,9 +266,7 @@ def test_compute_next_attempt_excludes_given_path(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    attempt, history = compute_next_attempt(
-        "family-abc123", str(state_dir), exclude_path=str(self_path)
-    )
+    attempt, history = compute_next_attempt("family-abc123", str(state_dir), exclude_path=str(self_path))
     assert attempt == 1
     assert history == []
 
@@ -308,12 +317,14 @@ def test_compute_bundle_family_same_cargo_new_version_increments(tmp_path: Path)
     first_record = compute_bundle_family(str(requirements_dir), "v2.0.0", str(state_dir))
     assert first_record["attempt"] == 1
     (history_dir / "v2.0.0-cancelled-2026-07-20T00-00-00Z.json").write_text(
-        json.dumps({
-            "rc": "v2.0.0",
-            "outcome": "cancelled",
-            "family_key": first_record["family_key"],
-            "attempt": first_record["attempt"],
-        }),
+        json.dumps(
+            {
+                "rc": "v2.0.0",
+                "outcome": "cancelled",
+                "family_key": first_record["family_key"],
+                "attempt": first_record["attempt"],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -344,12 +355,14 @@ def test_compute_bundle_family_different_cargo_starts_fresh_family(tmp_path: Pat
     )
     first_record = compute_bundle_family(str(requirements_dir), "v2.0.0", str(state_dir))
     (history_dir / "v2.0.0-cancelled-2026-07-20T00-00-00Z.json").write_text(
-        json.dumps({
-            "rc": "v2.0.0",
-            "outcome": "cancelled",
-            "family_key": first_record["family_key"],
-            "attempt": first_record["attempt"],
-        }),
+        json.dumps(
+            {
+                "rc": "v2.0.0",
+                "outcome": "cancelled",
+                "family_key": first_record["family_key"],
+                "attempt": first_record["attempt"],
+            }
+        ),
         encoding="utf-8",
     )
 

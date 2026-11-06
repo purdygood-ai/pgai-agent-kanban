@@ -107,8 +107,7 @@ def _seed_project(root: pathlib.Path, name: str, *, release_state: bool = True) 
     os.utime(status_file, (old_time, old_time))
     if release_state:
         (project_dir / "release-state.md").write_text(
-            "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
-            "## RC Opened By Task\nnone\n",
+            "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
             encoding="utf-8",
         )
     return tasks_dir
@@ -136,10 +135,7 @@ def _two_project_sandbox(tmp_path: pathlib.Path) -> tuple[pathlib.Path, dict[str
 
 def test_projectless_dry_run_runs_every_registered_project(tmp_path: pathlib.Path) -> None:
     root, tasks = _two_project_sandbox(tmp_path)
-    seeded = {
-        name: tasks[name] / f"CLAUDE-{name}-old-terminal-task" / "status.md"
-        for name in _PROJECTS
-    }
+    seeded = {name: tasks[name] / f"CLAUDE-{name}-old-terminal-task" / "status.md" for name in _PROJECTS}
 
     result = run_bash(
         tmp_path,
@@ -152,9 +148,9 @@ def test_projectless_dry_run_runs_every_registered_project(tmp_path: pathlib.Pat
     assert "running once per registered project (2): alpha beta" in result.stdout, _diagnostic(result)
     for name in _PROJECTS:
         # Each project's own run walked its own tasks directory ...
-        assert f"Step 2: report terminal task folders in {tasks[name]} (none are deleted) ---" in result.stdout, (
-            _diagnostic(result)
-        )
+        assert (
+            f"Step 2: report terminal task folders in {tasks[name]} (none are deleted) ---" in result.stdout
+        ), _diagnostic(result)
         # ... and logged exactly one result line.
         assert result.stdout.count(f"cleanup: project '{name}': ok") == 1, _diagnostic(result)
         # The old terminal folder is counted, never deleted.
@@ -232,9 +228,9 @@ def test_project_flag_runs_only_the_named_project(tmp_path: pathlib.Path) -> Non
     assert result.returncode == 0, _diagnostic(result)
     assert "running once per registered project" not in result.stdout, _diagnostic(result)
     assert "cleanup: project '" not in result.stdout, _diagnostic(result)
-    assert f"Step 2: report terminal task folders in {tasks['beta']} (none are deleted) ---" in result.stdout, (
-        _diagnostic(result)
-    )
+    assert (
+        f"Step 2: report terminal task folders in {tasks['beta']} (none are deleted) ---" in result.stdout
+    ), _diagnostic(result)
     assert str(tasks["alpha"]) not in result.stdout, _diagnostic(result)
     assert result.stdout.count("cleanup: cleanup complete") == 1, _diagnostic(result)
 
@@ -268,9 +264,7 @@ def test_projectless_run_with_no_registered_project_is_a_logged_noop(
 # ---------------------------------------------------------------------------
 
 
-def test_projectless_run_with_both_roots_unset_fails_closed(
-    tmp_path: pathlib.Path, monkeypatch
-) -> None:
+def test_projectless_run_with_both_roots_unset_fails_closed(tmp_path: pathlib.Path, monkeypatch) -> None:
     """With neither root variable set, projects_cfg_path would fall back to
     $HOME/pgai_agent_kanban/projects.cfg. HOME points at a decoy holding a
     registry there; the run must refuse before iterating it."""
@@ -328,18 +322,14 @@ def test_every_shipped_template_schedules_cleanup() -> None:
     job line, so the parametrized check below is never vacuous, and every
     crontab template keeps the bare weekly line operators already have
     installed."""
-    templates = sorted(
-        p.name for pattern in _TEMPLATE_GLOBS for p in _TEMPLATE_DIR.glob(pattern)
-    )
+    templates = sorted(p.name for pattern in _TEMPLATE_GLOBS for p in _TEMPLATE_DIR.glob(pattern))
     assert templates, f"no templates found under {_TEMPLATE_DIR}"
     with_invocation = {name for name, _args in _INVOCATIONS}
     missing = [name for name in templates if name not in with_invocation]
     assert not missing, f"templates with no cleanup.sh job line: {missing}"
     for name in templates:
         if name.startswith("crontab"):
-            assert (name, "") in _INVOCATIONS, (
-                f"{name} no longer carries the bare weekly cleanup.sh line"
-            )
+            assert (name, "") in _INVOCATIONS, f"{name} no longer carries the bare weekly cleanup.sh line"
 
 
 @pytest.mark.parametrize(
@@ -390,9 +380,7 @@ def test_temp_only_keeps_live_task_worktrees_per_project(tmp_path: pathlib.Path)
     root, tasks = _two_project_sandbox(tmp_path)
     temp = root / "temp"
     for name in _PROJECTS:
-        (root / "projects" / name / "project.cfg").write_text(
-            f"[project]\nproject_name = {name}\n", encoding="utf-8"
-        )
+        (root / "projects" / name / "project.cfg").write_text(f"[project]\nproject_name = {name}\n", encoding="utf-8")
     _task(tasks["alpha"], "CODER-20260101-001-alpha-working", "WORKING")
     _task(tasks["alpha"], "CODER-20260101-002-alpha-done", "DONE")
     _task(tasks["beta"], "CODER-20260101-003-beta-working", "WORKING")
@@ -419,9 +407,9 @@ def test_temp_only_keeps_live_task_worktrees_per_project(tmp_path: pathlib.Path)
     for kept in (alpha_working, beta_working, beta_blocked):
         assert (kept / "untracked-work.txt").exists(), f"live task worktree removed: {kept}\n" + _diagnostic(result)
     assert not alpha_done.exists(), "a DONE task's worktree must be removed\n" + _diagnostic(result)
-    assert not beta_stray.exists(), (
-        "beta's worktrees are judged against beta's tasks, where this task does not exist\n" + _diagnostic(result)
-    )
+    assert (
+        not beta_stray.exists()
+    ), "beta's worktrees are judged against beta's tasks, where this task does not exist\n" + _diagnostic(result)
     assert foreign.is_dir(), "a non-allowlisted entry in a project temp dir is foreign and kept"
     assert not allowlisted.exists(), "an allowlisted transient in a project temp dir is still purged"
     assert (temp / "projects" / "alpha").is_dir() and (temp / "projects" / "beta").is_dir()

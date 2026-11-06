@@ -135,7 +135,9 @@ class _Sandbox:
             (tree / "team" / "tests" / sub).mkdir(parents=True, exist_ok=True)
         return tree
 
-    def run(self, script: pathlib.Path, args: list[str], dev_tree: pathlib.Path, **extra: str) -> subprocess.CompletedProcess:
+    def run(
+        self, script: pathlib.Path, args: list[str], dev_tree: pathlib.Path, **extra: str
+    ) -> subprocess.CompletedProcess:
         env = build_scrubbed_env(
             home_dir=self.home,
             extra_path_dirs=(self.bin,),
@@ -277,9 +279,7 @@ def test_installed_runner_resolves_files_in_the_resolved_dev_tree(
 
 
 @pytest.mark.parametrize("runner,rel", _TARGETED_RUNNERS, ids=_TARGETED_IDS)
-def test_checkout_runner_resolves_files_in_its_own_checkout(
-    tmp_path: pathlib.Path, runner: str, rel: str
-) -> None:
+def test_checkout_runner_resolves_files_in_its_own_checkout(tmp_path: pathlib.Path, runner: str, rel: str) -> None:
     sandbox = _Sandbox(tmp_path)
     checkout = sandbox.tree("worktree_checkout")
     elsewhere = sandbox.tree("configured_dev_tree")

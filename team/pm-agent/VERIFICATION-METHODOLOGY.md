@@ -54,11 +54,11 @@ The checklist is your scope. Everything you check should trace back to one of th
 
 Independent of the requirements doc. Cheap drift check.
 
-The schema for `release-state.md` holds exactly four fields: `## Active RC`, `## RC Opened At`, `## RC Opened By Task`, `## Last Released`. The first three are ephemeral RC-tracking state; `## Last Released` is written by `cm/release.sh` after every successful tag and read by the halt-after drain. Its presence is by design — do not report it as drift. The canonical Last Released answer is still derived from git tags via `pp_last_released_version`, never by parsing this file, so the "release-state vs. git tag drift" failure mode is gone by construction.
+The schema for `release-state.md` holds exactly four fields: `## Active RC`, `## RC Opened At`, `## RC Opened By Task`, `## Last Released`. The first three are ephemeral RC-tracking state; `## Last Released` is written by `cm/release.sh` after every successful tag and read by the halt-after drain. Its presence is by design — do not report it as drift. The canonical Last Released answer comes from `pp_last_released_version`, never from parsing this file: a matching release tag always wins, and the helper reads `## Last Released` only when no tag matches or the project has no git dev tree (`docs/cm-release-reference.md`, "Historical release state in full"). A stale field therefore never overrides a tag, so "release-state vs. git tag drift" cannot change the answer.
 
 What's still worth checking:
 
-- Resolve canonical Last Released via `pp_last_released_version "<project-name>"`. By definition this matches a git tag on `origin/main`, or returns `v0.0.0` for fresh systems — no extra verification step is needed.
+- Resolve canonical Last Released via `pp_last_released_version "<project-name>"`. By definition this is the highest matching release tag, else a well-formed `## Last Released`, else `v0.0.0` for a project that has never shipped — no extra verification step is needed.
 - Inspect the project's `release-state.md` at `$PGAI_AGENT_KANBAN_ROOT_PATH/projects/<project-name>/release-state.md`. Confirm:
   - It contains `Active RC`, `RC Opened At`, `RC Opened By Task`, and `Last Released` — those four fields.
   - `## Last Released` holds a well-formed `vX.Y.Z`, or is absent or empty on a project that has never shipped. Only a malformed value is drift; the field's presence is not.

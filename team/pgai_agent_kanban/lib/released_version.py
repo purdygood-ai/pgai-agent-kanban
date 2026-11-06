@@ -26,16 +26,20 @@ shows in its header row:
 ``last_released_version(kanban_root, project)``
     The project's last released version, by the tiers of
     ``pp_last_released_version`` in ``team/scripts/lib/project_paths.sh``:
-    with no ``project.cfg`` / ``PROJECT.cfg``, no ``[project] dev_tree_path``,
-    or a dev tree that is not a git repository, the ``## Last Released`` field
-    of the project's ``release-state.md`` (read through
-    ``cm.read_state_field``); otherwise the highest
-    ``<branch_prefix>vX.Y.Z`` tag (prefix stripped) merged into
-    ``<remote>/<prefix>main`` -- ``<remote>`` being the project's
-    ``git_remote_name``, ``origin`` when absent or blank
-    (:mod:`pgai_agent_kanban.lib.git_remote`; an invalid value skips this
-    tier) -- else into the local ``<prefix>main``, else among all local
-    tags. ``v0.0.0`` when nothing is found.
+
+      1. with no ``project.cfg`` / ``PROJECT.cfg``, no ``[project]
+         dev_tree_path``, or a dev tree that is not a git repository, skip
+         to tier 3;
+      2. the highest ``<branch_prefix>vX.Y.Z`` tag (prefix stripped) merged
+         into ``<remote>/<prefix>main`` -- ``<remote>`` being the project's
+         ``git_remote_name``, ``origin`` when absent or blank
+         (:mod:`pgai_agent_kanban.lib.git_remote`; an invalid value skips
+         this scan) -- else into the local ``<prefix>main``, else among all
+         local tags; a matching tag always wins;
+      3. when no tag matched, the ``## Last Released`` field of the project's
+         ``release-state.md`` (read through ``cm.read_state_field``), when it
+         is a well-formed ``vX.Y.Z``;
+      4. ``v0.0.0`` when neither a tag nor a valid state value exists.
 
 Both are local reads. Neither ever contacts a remote: the tag scans read the
 refs already on disk, the way the dashboard's render path always has (it
@@ -49,15 +53,16 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from pgai_agent_kanban.cm.read_state_field import read_state_field
+from pgai_agent_kanban.lib.dev_tree import project_dev_tree
 from pgai_agent_kanban.lib import git_remote
 from pgai_agent_kanban.lib.branch_prefix import (
     DEFAULT_PROJECT_NAME as FRAMEWORK_PROJECT,
     branch_prefix_from_cfg,
 )
-from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key
+from pgai_agent_kanban.lib.project_cfg import project_cfg_file
 from pgai_agent_kanban.lib.semver import version_sort_key
 
 __all__ = [
@@ -83,7 +88,7 @@ _RELEASE_TAG_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
 # ---------------------------------------------------------------------------
 
 
-def _git(repo: "pathlib.Path | str", args: Sequence[str]) -> Optional[str]:
+def _git(repo: pathlib.Path | str, args: Sequence[str]) -> str | None:
     """Run ``git -C <repo> <args>``; its stdout, or ``None`` when it fails."""
     try:
         done = subprocess.run(
@@ -101,15 +106,15 @@ def _git(repo: "pathlib.Path | str", args: Sequence[str]) -> Optional[str]:
 def _highest_release_tag(tags: str, prefix: str = "") -> str:
     """The highest ``<prefix>vX.Y.Z`` tag in *tags* (one per line), prefix stripped, or ``""``."""
     versions = [
-        line[len(prefix):]
+        line[len(prefix) :]
         for line in tags.splitlines()
-        if line.startswith(prefix) and _RELEASE_TAG_RE.match(line[len(prefix):])
+        if line.startswith(prefix) and _RELEASE_TAG_RE.match(line[len(prefix) :])
     ]
     return max(versions, key=version_sort_key) if versions else ""
 
 
 def latest_released_tag(
-    repo_root: "pathlib.Path | str",
+    repo_root: pathlib.Path | str,
     remote: str = git_remote.DEFAULT_REMOTE_NAME,
     prefix: str = "",
 ) -> str:
@@ -124,7 +129,7 @@ def latest_released_tag(
     return _highest_release_tag(_git(repo_root, ["tag", "--merged", f"{remote}/{prefix}main"]) or "", prefix)
 
 
-def _framework_refs(kanban_root: "pathlib.Path | str") -> Optional[tuple[str, str]]:
+def _framework_refs(kanban_root: pathlib.Path | str) -> tuple[str, str] | None:
     """The framework project's ``(remote, prefix)`` for :func:`latest_released_tag`.
 
     Read from ``<kanban_root>/projects/<FRAMEWORK_PROJECT>/project.cfg``;
@@ -144,7 +149,7 @@ def _framework_refs(kanban_root: "pathlib.Path | str") -> Optional[tuple[str, st
 # ---------------------------------------------------------------------------
 
 
-def _version_file(directory: "pathlib.Path | str") -> str:
+def _version_file(directory: pathlib.Path | str) -> str:
     """``<directory>/VERSION`` with all whitespace removed, or ``""``."""
     path = pathlib.Path(directory) / "VERSION"
     if not path.is_file():
@@ -172,8 +177,8 @@ def dashboard_repo_root() -> pathlib.Path:
 
 
 def kanban_version(
-    kanban_root: "pathlib.Path | str",
-    repo_root: "pathlib.Path | str | None" = None,
+    kanban_root: pathlib.Path | str,
+    repo_root: pathlib.Path | str | None = None,
     last_released: str = "",
 ) -> str:
     """Return the deployed framework version by the tier order in the module docstring.
@@ -206,7 +211,7 @@ def _released_from_state(project_root: pathlib.Path) -> str:
     return value if _RELEASE_TAG_RE.match(value) else ""
 
 
-def last_released_version(kanban_root: "pathlib.Path | str", project: str) -> str:
+def last_released_version(kanban_root: pathlib.Path | str, project: str) -> str:
     """Return *project*'s last released version by the tiers in the module docstring.
 
     Args:
@@ -218,7 +223,9 @@ def last_released_version(kanban_root: "pathlib.Path | str", project: str) -> st
     """
     project_root = pathlib.Path(kanban_root) / "projects" / project
     cfg = project_cfg_file(project_root)
-    dev_tree = read_cfg_key(cfg, "project", "dev_tree_path") if cfg is not None else ""
+    # The project's own tree only: a project naming no repository of its own
+    # must not read another project's tags as its release history.
+    dev_tree = project_dev_tree(project_root)
     if not dev_tree or _git(dev_tree, ["rev-parse", "--git-dir"]) is None:
         return _released_from_state(project_root) or NOTHING_RELEASED
 
@@ -237,4 +244,5 @@ def last_released_version(kanban_root: "pathlib.Path | str", project: str) -> st
             highest = _highest_release_tag(_git(dev_tree, ["tag", "--merged", ref]) or "", prefix)
     if not highest:
         highest = _highest_release_tag(_git(dev_tree, ["tag", "-l"]) or "", prefix)
-    return highest or NOTHING_RELEASED
+    # No matching tag anywhere: the version the release step recorded.
+    return highest or _released_from_state(project_root) or NOTHING_RELEASED

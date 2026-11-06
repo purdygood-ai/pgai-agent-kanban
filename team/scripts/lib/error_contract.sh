@@ -92,6 +92,11 @@ if ! declare -F pp_run_ops >/dev/null 2>&1; then
     unset _pgai_error_contract_runner
 fi
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_PGAI_ERROR_CONTRACT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _PGAI_ERROR_CONTRACT_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # pgai_format_error_contract <error_key> <message> <remedy>
 # Echoes the formatted three-line house-shape block. Returns 1 (no output)
@@ -121,7 +126,8 @@ pgai_format_error_contract() {
 # ---------------------------------------------------------------------------
 _pgai_error_contract_source_refusal_ledger() {
     local _dir
-    _dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || return 1
+    _dir="${_PGAI_ERROR_CONTRACT_LIB_DIR}"
+    [[ -n "${_dir}" ]] || return 1
     [[ -f "${_dir}/refusal_ledger.sh" ]] || return 1
     # shellcheck source=refusal_ledger.sh
     source "${_dir}/refusal_ledger.sh" 2>/dev/null

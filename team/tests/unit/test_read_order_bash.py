@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -96,9 +95,7 @@ def test_resolve_role_skips_missing_file_line_without_failing(
     """A manifest line naming an absent file is skipped, narrated, never fatal."""
     root = _make_root(tmp_path)
     (root / "PRESENT.md").write_text("present content\n", encoding="utf-8")
-    (root / "read-order" / "testrole.txt").write_text(
-        "PRESENT.md\nABSENT.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("PRESENT.md\nABSENT.md\n", encoding="utf-8")
 
     result = run_bash(tmp_path, _source(f"read_order_resolve_role testrole '{root}'"))
     assert result.returncode == 0
@@ -144,13 +141,9 @@ def test_byte_total_sums_exactly_the_emitted_files(tmp_path: pathlib.Path) -> No
     root = _make_root(tmp_path)
     (root / "A.md").write_text("12345", encoding="utf-8")  # 5 bytes
     (root / "B.md").write_text("1234567890", encoding="utf-8")  # 10 bytes
-    (root / "read-order" / "testrole.txt").write_text(
-        "A.md\nMISSING.md\nB.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("A.md\nMISSING.md\nB.md\n", encoding="utf-8")
 
-    result = run_bash(
-        tmp_path, _source(f"read_order_role_byte_total testrole '{root}'")
-    )
+    result = run_bash(tmp_path, _source(f"read_order_role_byte_total testrole '{root}'"))
     assert result.returncode == 0
     assert result.stdout.strip() == "15"
 

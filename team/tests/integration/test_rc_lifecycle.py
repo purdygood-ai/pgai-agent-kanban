@@ -38,7 +38,6 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-from typing import Optional
 
 import pytest
 from tests.fixtures.binary_guard import require_binary
@@ -54,6 +53,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="rc-lifecycle")
+
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
@@ -105,21 +105,25 @@ def _init_git_repo_with_remote(
     # Initialise the bare remote first.
     subprocess.run(
         ["git", "init", "--bare", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     # Initialise the non-bare repo.
     subprocess.run(
         ["git", "-C", str(repo_path), "init", f"--initial-branch={main_branch}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     # Create an initial commit on main_branch.
@@ -129,23 +133,26 @@ def _init_git_repo_with_remote(
     (repo_path / "release-notes").mkdir(parents=True, exist_ok=True)
     (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
-        ["git", "-C", str(repo_path), "add", "README.md",
-         "release-notes/PUBLISHED"],
-        capture_output=True, check=True,
+        ["git", "-C", str(repo_path), "add", "README.md", "release-notes/PUBLISHED"],
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "Initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     # Add the bare remote and push main_branch.
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", main_branch],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -193,10 +200,7 @@ def _build_kanban_root_for_rc(
 
     # --- projects.cfg ---
     (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\n"
-        "priority=1\n"
-        f"description=RC lifecycle test project\n"
-        "enabled=true\n",
+        f"[project:{project_name}]\n" "priority=1\n" f"description=RC lifecycle test project\n" "enabled=true\n",
         encoding="utf-8",
     )
 
@@ -252,9 +256,7 @@ def _build_kanban_root_for_rc(
 
     src_cm_dir = _KANBAN_PY_DIR / "cm"
     for py_file in src_cm_dir.glob("*.py"):
-        (cm_py_dir / py_file.name).write_text(
-            py_file.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
     copy_section_reader_modules(cm_py_dir.parent)
 
     return root
@@ -266,8 +268,8 @@ def _run_cm_script(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    repo_root: Optional[pathlib.Path] = None,
-    extra_env: Optional[dict] = None,
+    repo_root: pathlib.Path | None = None,
+    extra_env: dict | None = None,
     timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     """Run a CM script against a temporary kanban root.
@@ -302,8 +304,11 @@ def _run_cm_script(
 
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=base_env,
-        cwd=str(kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=timeout,
     )
 
 
@@ -311,7 +316,9 @@ def _git_local(repo_path: pathlib.Path, *args: str) -> str:
     """Run a git command in *repo_path* and return stripped stdout."""
     result = subprocess.run(
         ["git", "-C", str(repo_path)] + list(args),
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -320,7 +327,8 @@ def _git_branch_exists_local(repo_path: pathlib.Path, branch: str) -> bool:
     """Return True when *branch* exists as a local branch in *repo_path*."""
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/heads/{branch}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
@@ -329,7 +337,8 @@ def _git_tag_exists(repo_path: pathlib.Path, tag: str) -> bool:
     """Return True when *tag* exists in *repo_path*."""
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/tags/{tag}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
@@ -338,7 +347,8 @@ def _git_branch_exists_on_bare_remote(bare_remote: pathlib.Path, branch: str) ->
     """Return True when *branch* exists in the bare remote repo."""
     result = subprocess.run(
         ["git", "-C", str(bare_remote), "branch", "--list", branch],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return branch in result.stdout
 
@@ -347,7 +357,8 @@ def _git_tag_exists_on_bare_remote(bare_remote: pathlib.Path, tag: str) -> bool:
     """Return True when *tag* exists in the bare remote repo."""
     result = subprocess.run(
         ["git", "-C", str(bare_remote), "tag", "--list", tag],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return tag in result.stdout
 
@@ -384,7 +395,7 @@ def _add_tester_task(
     recommendation: str = "PASS",
     systemic_risk: str = "low",
     task_id_suffix: str = "001",
-    blockers: Optional[str] = None,
+    blockers: str | None = None,
 ) -> pathlib.Path:
     """Add a synthetic TESTER task folder to the project's tasks directory.
 
@@ -419,9 +430,7 @@ def _add_tester_task(
     (task_dir / "artifacts").mkdir(parents=True, exist_ok=True)
 
     (task_dir / "README.md").write_text(
-        f"# {task_id}\n\n"
-        f"## Role\nTESTER\n\n"
-        f"## Release Version\n{version}\n",
+        f"# {task_id}\n\n" f"## Role\nTESTER\n\n" f"## Release Version\n{version}\n",
         encoding="utf-8",
     )
 
@@ -453,9 +462,7 @@ def _add_tester_task(
 class TestFullRCLifecycleLocalOnly:
     """Full RC lifecycle with push_to_remote=false — local git state, no remote push."""
 
-    def test_full_lifecycle_produces_release_tag_on_main(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_full_lifecycle_produces_release_tag_on_main(self, tmp_path: pathlib.Path) -> None:
         """open-rc → coder merge → cm-release produces a version tag on main.
 
         Running cm-open-rc.sh followed by a simulated coder commit and then
@@ -473,18 +480,17 @@ class TestFullRCLifecycleLocalOnly:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Step 1: Open the RC.
         result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         rc_branch = f"rc/{version}"
         assert _git_branch_exists_local(repo_path, rc_branch), (
@@ -497,12 +503,13 @@ class TestFullRCLifecycleLocalOnly:
 
         # Step 3: Run cm-release.sh to close the RC.
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result.returncode == 0, (
-            f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Assert: the release tag exists locally.
         assert _git_tag_exists(repo_path, version), (
@@ -516,9 +523,7 @@ class TestFullRCLifecycleLocalOnly:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_full_lifecycle_clears_active_rc_in_release_state(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_full_lifecycle_clears_active_rc_in_release_state(self, tmp_path: pathlib.Path) -> None:
         """After cm-release.sh, release-state.md Active RC field is cleared to 'none'.
 
         The Active RC field in the project-scoped release-state.md is the gate that
@@ -526,6 +531,7 @@ class TestFullRCLifecycleLocalOnly:
         in flight.  Clearing it to 'none' is what re-enables the pipeline after ship.
         """
         import re as _re
+
         version = "v0.2.0"
         project_name = "state-clear-test"
 
@@ -533,31 +539,32 @@ class TestFullRCLifecycleLocalOnly:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result.returncode == 0, (
-            f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Assert: release-state.md Active RC is cleared to 'none'.
         release_state_path = kanban_root / "projects" / project_name / "release-state.md"
         state_text = release_state_path.read_text(encoding="utf-8")
         match = _re.search(r"##\s*Active RC\s*\n(.+?)(?=\n##|\Z)", state_text, _re.DOTALL)
         assert match is not None, (
-            f"Could not find '## Active RC' section in release-state.md.\n"
-            f"Content:\n{state_text}"
+            f"Could not find '## Active RC' section in release-state.md.\n" f"Content:\n{state_text}"
         )
         active_rc_value = match.group(1).strip()
         assert active_rc_value == "none", (
@@ -566,9 +573,7 @@ class TestFullRCLifecycleLocalOnly:
             f"stdout: {result.stdout}"
         )
 
-    def test_open_rc_preserves_last_released_field(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_open_rc_preserves_last_released_field(self, tmp_path: pathlib.Path) -> None:
         """cm-open-rc.sh carries forward a pre-existing ## Last Released value.
 
         Reproduces the precondition: release-state.md starts with ## Active RC: none
@@ -579,6 +584,7 @@ class TestFullRCLifecycleLocalOnly:
         roles/CM.md ("Release state") and must never be dropped or altered by open-rc.
         """
         import re as _re
+
         version = "v0.2.0"
         prior_last_released = "v0.1.0"
         project_name = "last-released-preserve-test"
@@ -587,9 +593,7 @@ class TestFullRCLifecycleLocalOnly:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Overwrite the idle release-state.md fixture with one carrying a
         # populated Last Released field, matching the reproduction's precondition.
@@ -608,30 +612,26 @@ class TestFullRCLifecycleLocalOnly:
         )
 
         result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         state_text = release_state_path.read_text(encoding="utf-8")
 
         # Assert: exactly the four canonical fields are present, in SOP order.
         headings = _re.findall(r"^## (.+)$", state_text, _re.MULTILINE)
-        assert headings == [
-            "Active RC", "RC Opened At", "RC Opened By Task", "Last Released"
-        ], (
+        assert headings == ["Active RC", "RC Opened At", "RC Opened By Task", "Last Released"], (
             f"release-state.md must contain exactly the four canonical SOP "
             f"fields in order; got {headings}.\nContent:\n{state_text}"
         )
 
         # Assert: Last Released still reads the pre-existing value, unchanged.
         match = _re.search(r"##\s*Last Released\s*\n(.+?)(?=\n##|\Z)", state_text, _re.DOTALL)
-        assert match is not None, (
-            f"'## Last Released' heading missing after cm-open-rc.sh.\n"
-            f"Content:\n{state_text}"
-        )
+        assert match is not None, f"'## Last Released' heading missing after cm-open-rc.sh.\n" f"Content:\n{state_text}"
         assert match.group(1).strip() == prior_last_released, (
             f"Expected Last Released = '{prior_last_released}' preserved after "
             f"cm-open-rc.sh, got '{match.group(1).strip()}'.\n"
@@ -639,9 +639,7 @@ class TestFullRCLifecycleLocalOnly:
             f"stdout: {result.stdout}"
         )
 
-    def test_open_rc_writes_none_for_last_released_on_fresh_project(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_open_rc_writes_none_for_last_released_on_fresh_project(self, tmp_path: pathlib.Path) -> None:
         """cm-open-rc.sh writes 'none' (not a fabricated version) when the
         overwritten release-state.md had no pre-existing ## Last Released field.
 
@@ -651,6 +649,7 @@ class TestFullRCLifecycleLocalOnly:
         consistent with how the other three fields represent "not set".
         """
         import re as _re
+
         version = "v0.1.0"
         project_name = "last-released-fresh-test"
 
@@ -660,25 +659,23 @@ class TestFullRCLifecycleLocalOnly:
 
         # _build_kanban_root_for_rc's fixture release-state.md has no
         # ## Last Released field at all -- the fresh-project case.
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-open-rc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         release_state_path = kanban_root / "projects" / project_name / "release-state.md"
         state_text = release_state_path.read_text(encoding="utf-8")
 
         match = _re.search(r"##\s*Last Released\s*\n(.+?)(?=\n##|\Z)", state_text, _re.DOTALL)
         assert match is not None, (
-            f"'## Last Released' heading missing on fresh-project open-rc run.\n"
-            f"Content:\n{state_text}"
+            f"'## Last Released' heading missing on fresh-project open-rc run.\n" f"Content:\n{state_text}"
         )
         assert match.group(1).strip() == "none", (
             f"Expected Last Released = 'none' (no fabricated version) on a "
@@ -686,9 +683,7 @@ class TestFullRCLifecycleLocalOnly:
             f"release-state.md content:\n{state_text}"
         )
 
-    def test_coder_commit_on_rc_branch_is_reachable_from_main_after_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_coder_commit_on_rc_branch_is_reachable_from_main_after_release(self, tmp_path: pathlib.Path) -> None:
         """After cm-release.sh, the coder's commit content is present on main.
 
         The single-lane RC lifecycle squashes the RC branch directly into main.
@@ -702,25 +697,27 @@ class TestFullRCLifecycleLocalOnly:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         rc_branch = f"rc/{version}"
         _simulate_coder_work(repo_path, rc_branch, commit_message="feat: coder work for v0.3.0")
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result.returncode == 0, (
-            f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-release.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Assert: feature.txt is present on main after the single-lane squash.
         _git_local(repo_path, "checkout", "main")
@@ -730,9 +727,7 @@ class TestFullRCLifecycleLocalOnly:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_open_rc_refused_when_rc_already_active(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_open_rc_refused_when_rc_already_active(self, tmp_path: pathlib.Path) -> None:
         """cm-open-rc.sh refuses to open a second RC when one is already in flight.
 
         The Active RC gate in cm-open-rc.sh prevents two simultaneous RCs on the
@@ -746,23 +741,25 @@ class TestFullRCLifecycleLocalOnly:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Open the first RC — must succeed.
         result_a = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version_a],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version_a],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_a.returncode == 0, (
-            f"First open-rc failed.\nstdout: {result_a.stdout}\nstderr: {result_a.stderr}"
-        )
+        assert result_a.returncode == 0, f"First open-rc failed.\nstdout: {result_a.stdout}\nstderr: {result_a.stderr}"
 
         # Attempt to open a second RC — must be refused.
         result_b = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version_b],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version_b],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_b.returncode != 0, (
             "cm-open-rc.sh must refuse to open a second RC while one is already active.\n"
@@ -778,9 +775,7 @@ class TestFullRCLifecycleLocalOnly:
 class TestBranchPrefixIsolation:
     """Branch-prefix isolation: all git branches observe the configured prefix."""
 
-    def test_branch_prefix_applied_to_rc_branch_name(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_branch_prefix_applied_to_rc_branch_name(self, tmp_path: pathlib.Path) -> None:
         """When branch_prefix=ai_, cm-open-rc.sh creates ai_rc/<version> instead of rc/<version>.
 
         Projects with a branch_prefix configured in project.cfg must have that prefix
@@ -794,23 +789,28 @@ class TestBranchPrefixIsolation:
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(
-            repo_path, bare_remote,
+            repo_path,
+            bare_remote,
             main_branch="ai_main",
         )
 
         kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path,
+            tmp_path,
+            project_name,
+            repo_path,
             push_to_remote="false",
             branch_prefix=prefix,
         )
 
         result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode == 0, (
-            f"cm-open-rc.sh with branch_prefix failed.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"cm-open-rc.sh with branch_prefix failed.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         # The RC branch must carry the prefix (ai_rc/v0.1.0).
@@ -826,9 +826,7 @@ class TestBranchPrefixIsolation:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_branch_prefix_preserved_through_full_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_branch_prefix_preserved_through_full_release(self, tmp_path: pathlib.Path) -> None:
         """With branch_prefix=ai_, the full lifecycle creates the tag and removes ai_rc/<v>.
 
         The tag and squash operations must also observe the prefix.  After cm-release.sh
@@ -841,41 +839,49 @@ class TestBranchPrefixIsolation:
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(
-            repo_path, bare_remote,
+            repo_path,
+            bare_remote,
             main_branch="ai_main",
         )
 
         kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path,
+            tmp_path,
+            project_name,
+            repo_path,
             push_to_remote="false",
             branch_prefix=prefix,
         )
 
         # Open RC.
         open_result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert open_result.returncode == 0, (
-            f"cm-open-rc.sh with branch_prefix failed.\n"
-            f"stdout: {open_result.stdout}\nstderr: {open_result.stderr}"
+            f"cm-open-rc.sh with branch_prefix failed.\n" f"stdout: {open_result.stdout}\nstderr: {open_result.stderr}"
         )
 
         # Simulate coder work on the prefixed RC branch.
         prefixed_rc_branch = f"{prefix}rc/{version}"
         _simulate_coder_work(
-            repo_path, prefixed_rc_branch,
+            repo_path,
+            prefixed_rc_branch,
             return_branch="ai_main",
         )
 
         # Run cm-release.sh.
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode == 0, (
-            f"cm-release.sh with prefix failed.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"cm-release.sh with prefix failed.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         # Assert the prefixed RC branch is gone after release.
@@ -896,9 +902,7 @@ class TestBranchPrefixIsolation:
 class TestIdempotentRelease:
     """A second cm-release.sh invocation after a completed release does not corrupt state."""
 
-    def test_release_tag_unchanged_after_second_release_invocation(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_tag_unchanged_after_second_release_invocation(self, tmp_path: pathlib.Path) -> None:
         """After a successful release, re-running cm-release.sh does not corrupt the tag.
 
         The idempotency property protects against double-invocation in automation:
@@ -917,31 +921,38 @@ class TestIdempotentRelease:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # First run: full lifecycle.
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
         result_first = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_first.returncode == 0, (
-            f"First cm-release.sh failed.\nstdout: {result_first.stdout}\nstderr: {result_first.stderr}"
-        )
+        assert (
+            result_first.returncode == 0
+        ), f"First cm-release.sh failed.\nstdout: {result_first.stdout}\nstderr: {result_first.stderr}"
 
         # Capture the tag SHA after the first run.
         tag_sha_after_first = _git_local(repo_path, "rev-parse", f"refs/tags/{version}")
 
         # Second run: no active RC, no rc/* branch — expected to exit non-zero.
         result_second = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         # The tag SHA must be unchanged (idempotent: second run did not re-tag).
@@ -963,9 +974,7 @@ class TestIdempotentRelease:
 class TestLocalOnlyVsPushBehavior:
     """push_to_remote=false keeps the RC branch local; push_to_remote=true uses a local bare remote."""
 
-    def test_rc_branch_not_pushed_to_remote_when_push_disabled(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_rc_branch_not_pushed_to_remote_when_push_disabled(self, tmp_path: pathlib.Path) -> None:
         """With push_to_remote=false, the RC branch is created locally but not on the remote.
 
         cm-open-rc.sh must skip the 'git push origin rc/<version>' step when
@@ -979,13 +988,14 @@ class TestLocalOnlyVsPushBehavior:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_open.returncode == 0, (
             f"cm-open-rc.sh (push_to_remote=false) failed.\n"
@@ -1006,9 +1016,7 @@ class TestLocalOnlyVsPushBehavior:
             f"Remote branches: {_git_local(bare_remote, 'branch', '--list')}"
         )
 
-    def test_full_lifecycle_completes_locally_when_push_disabled(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_full_lifecycle_completes_locally_when_push_disabled(self, tmp_path: pathlib.Path) -> None:
         """With push_to_remote=false, the full lifecycle ships the tag locally.
 
         The tag created by cm-release.sh must exist in the local repo.  The tag
@@ -1021,19 +1029,23 @@ class TestLocalOnlyVsPushBehavior:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             f"cm-release.sh (push_to_remote=false) failed.\n"
@@ -1053,9 +1065,7 @@ class TestLocalOnlyVsPushBehavior:
             f"output: {combined_output}"
         )
 
-    def test_rc_branch_pushed_to_remote_when_push_enabled(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_rc_branch_pushed_to_remote_when_push_enabled(self, tmp_path: pathlib.Path) -> None:
         """With push_to_remote=true, cm-open-rc.sh pushes the RC branch to the local bare remote.
 
         Uses a local bare git repo as 'origin' to simulate the push path without
@@ -1069,17 +1079,17 @@ class TestLocalOnlyVsPushBehavior:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="true"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="true")
 
         result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode == 0, (
-            f"cm-open-rc.sh (push_to_remote=true) failed.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"cm-open-rc.sh (push_to_remote=true) failed.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         rc_branch = f"rc/{version}"
@@ -1090,9 +1100,7 @@ class TestLocalOnlyVsPushBehavior:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_release_tag_pushed_to_remote_when_push_enabled(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_tag_pushed_to_remote_when_push_enabled(self, tmp_path: pathlib.Path) -> None:
         """With push_to_remote=true, cm-release.sh pushes the tag to the local bare remote.
 
         The release tag created by cm-release.sh must be present on the bare remote
@@ -1106,18 +1114,19 @@ class TestLocalOnlyVsPushBehavior:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="true"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="true")
 
         # Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         # Simulate coder work on the RC branch.
         rc_branch = f"rc/{version}"
@@ -1128,14 +1137,18 @@ class TestLocalOnlyVsPushBehavior:
         _git_local(repo_path, "checkout", rc_branch)
         subprocess.run(
             ["git", "-C", str(repo_path), "push", "origin", rc_branch],
-            capture_output=True, check=True,
+            capture_output=True,
+            check=True,
         )
         _git_local(repo_path, "checkout", "main")
 
         # Run cm-release.sh.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             f"cm-release.sh (push_to_remote=true) failed.\n"
@@ -1153,9 +1166,7 @@ class TestLocalOnlyVsPushBehavior:
 class TestTesterVerificationGate:
     """TESTER task state influences the ship-policy decision in cm-release.sh."""
 
-    def test_release_ships_when_tester_reports_pass(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_ships_when_tester_reports_pass(self, tmp_path: pathlib.Path) -> None:
         """When TESTER state is DONE with Recommendation=PASS, cm-release.sh ships normally.
 
         A TESTER task with State=DONE and Recommendation=PASS must result in a
@@ -1169,13 +1180,14 @@ class TestTesterVerificationGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
@@ -1183,8 +1195,11 @@ class TestTesterVerificationGate:
         _add_tester_task(kanban_root, project_name, version, state="DONE", recommendation="PASS")
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode == 0, (
             f"cm-release.sh failed when TESTER recommendation=PASS.\n"
@@ -1192,13 +1207,10 @@ class TestTesterVerificationGate:
         )
 
         assert _git_tag_exists(repo_path, version), (
-            f"Release tag '{version}' not found despite TESTER PASS.\n"
-            f"stdout: {result.stdout}"
+            f"Release tag '{version}' not found despite TESTER PASS.\n" f"stdout: {result.stdout}"
         )
 
-    def test_release_requeues_verification_when_tester_is_blocked(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_requeues_verification_when_tester_is_blocked(self, tmp_path: pathlib.Path) -> None:
         """When TESTER state is BLOCKED, cm-release.sh requeues verification
         once and ships nothing, without a HALT.
 
@@ -1215,40 +1227,48 @@ class TestTesterVerificationGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
         # Add a TESTER task with BLOCKED state and a recorded block cause.
         task_dir = _add_tester_task(
-            kanban_root, project_name, version, state="BLOCKED", blockers=block_cause,
+            kanban_root,
+            project_name,
+            version,
+            state="BLOCKED",
+            blockers=block_cause,
         )
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         out = f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        assert result.returncode == 4, (
-            f"cm-release.sh must exit 4 (waiting on requeued verification) when TESTER is BLOCKED.\n{out}"
-        )
+        assert (
+            result.returncode == 4
+        ), f"cm-release.sh must exit 4 (waiting on requeued verification) when TESTER is BLOCKED.\n{out}"
         assert "REQUEUE-VERIFICATION" in result.stdout, out
 
         # The release tag must NOT have been created.
-        assert not _git_tag_exists(repo_path, version), (
-            f"Release tag '{version}' was created despite TESTER being BLOCKED.\n{out}"
-        )
+        assert not _git_tag_exists(
+            repo_path, version
+        ), f"Release tag '{version}' was created despite TESTER being BLOCKED.\n{out}"
 
         # No HALT is written at either scope: a BLOCKED TESTER is retried, never a stop.
-        assert not (kanban_root / "projects" / project_name / "HALT").exists(), (
-            f"A project HALT file was written for a BLOCKED TESTER task.\n{out}"
-        )
+        assert not (
+            kanban_root / "projects" / project_name / "HALT"
+        ).exists(), f"A project HALT file was written for a BLOCKED TESTER task.\n{out}"
         assert not (kanban_root / "HALT").exists(), out
 
         # The TESTER task is back in BACKLOG carrying its block cause.
@@ -1262,9 +1282,7 @@ class TestTesterVerificationGate:
         assert record.is_file(), f"the RC's one verification retry is recorded\n{out}"
         assert f"tester_task={task_dir.name}" in record.read_text(encoding="utf-8")
 
-    def test_release_halts_when_tester_reports_high_systemic_risk(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_halts_when_tester_reports_high_systemic_risk(self, tmp_path: pathlib.Path) -> None:
         """When TESTER reports Systemic Risk=high, cm-release.sh must halt.
 
         High systemic risk indicates a broader framework regression.  Under
@@ -1280,9 +1298,7 @@ class TestTesterVerificationGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
         project_cfg = kanban_root / "projects" / project_name / "project.cfg"
         project_cfg.write_text(
             project_cfg.read_text(encoding="utf-8") + "\n[release]\nship_posture = matrix\n",
@@ -1290,22 +1306,30 @@ class TestTesterVerificationGate:
         )
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
         # Add a TESTER task with DONE state but high systemic risk.
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             state="DONE",
             recommendation="SHIP-WITH-CONCERNS",
             systemic_risk="high",
         )
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode != 0, (
             "cm-release.sh must exit non-zero when TESTER Systemic Risk is high.\n"
@@ -1337,19 +1361,22 @@ class TestTesterVerificationGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
         # Stale, superseded TESTER task — task ID sorts BEFORE the current one.
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             state="WONT-DO",
             recommendation="SHIP-WITH-SERIOUS-CONCERNS",
             systemic_risk="high",
@@ -1357,7 +1384,9 @@ class TestTesterVerificationGate:
         )
         # Current, correct TESTER task for the re-cut RC — task ID sorts AFTER.
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             state="DONE",
             recommendation="SHIP-WITH-CONCERNS",
             systemic_risk="low",
@@ -1365,16 +1394,17 @@ class TestTesterVerificationGate:
         )
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode == 0, (
             f"cm-release.sh failed when the CURRENT (DONE) TESTER task should have won.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        _tester_task_lines = [
-            line for line in result.stdout.splitlines() if "TESTER task:" in line
-        ]
+        _tester_task_lines = [line for line in result.stdout.splitlines() if "TESTER task:" in line]
         assert _tester_task_lines and "TESTER-20260101-011" in _tester_task_lines[0], (
             f"Step 4d did not select the current TESTER task (...-011); "
             f"the stale (...-005) task may have won instead.\nstdout: {result.stdout}"
@@ -1417,52 +1447,57 @@ class TestTesterVerificationGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         _simulate_coder_work(repo_path, f"rc/{version}")
 
         # Only one TESTER task exists, and its state is neither BLOCKED nor DONE.
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             state="WONT-DO",
             recommendation="SHIP-WITH-SERIOUS-CONCERNS",
             systemic_risk="high",
         )
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         out = f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        assert result.returncode == 0, (
-            f"cm-release.sh must ship (exit 0) when the found TESTER task's state is unrecognized.\n{out}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"cm-release.sh must ship (exit 0) when the found TESTER task's state is unrecognized.\n{out}"
 
-        assert _git_tag_exists(repo_path, version), (
-            f"Release tag '{version}' was not created for an unrecognized TESTER state.\n{out}"
-        )
+        assert _git_tag_exists(
+            repo_path, version
+        ), f"Release tag '{version}' was not created for an unrecognized TESTER state.\n{out}"
 
         notes_path = repo_path / "release-notes" / f"{version}.md"
         assert notes_path.exists(), f"release-notes/{version}.md was not created.\n{out}"
         notes_text = notes_path.read_text(encoding="utf-8")
-        assert "## Status\nKNOWN-BUGS" in notes_text, (
-            f"release-notes Status must be KNOWN-BUGS.\nrelease-notes contents:\n{notes_text}"
-        )
+        assert (
+            "## Status\nKNOWN-BUGS" in notes_text
+        ), f"release-notes Status must be KNOWN-BUGS.\nrelease-notes contents:\n{notes_text}"
         assert "## Status\nFUNCTIONAL" not in notes_text, (
-            "An unrecognized TESTER state must never ship FUNCTIONAL.\n"
-            f"release-notes contents:\n{notes_text}"
+            "An unrecognized TESTER state must never ship FUNCTIONAL.\n" f"release-notes contents:\n{notes_text}"
         )
 
         # No HALT at either scope -- see the BLOCKED sibling test above.
-        assert not (kanban_root / "projects" / project_name / "HALT").exists(), (
-            f"A project HALT file was written for an unrecognized TESTER state.\n{out}"
-        )
+        assert not (
+            kanban_root / "projects" / project_name / "HALT"
+        ).exists(), f"A project HALT file was written for an unrecognized TESTER state.\n{out}"
         assert not (kanban_root / "HALT").exists(), out
 
         bugs = sorted((kanban_root / "projects" / project_name / "bugs").glob("BUG-*.md"))
@@ -1476,9 +1511,7 @@ class TestTesterVerificationGate:
 class TestFidelityGate:
     """Post-squash fidelity gate: git diff --quiet rc/<v> main halts when trees diverge."""
 
-    def test_fidelity_gate_passes_on_clean_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fidelity_gate_passes_on_clean_release(self, tmp_path: pathlib.Path) -> None:
         """When no commit lands on main mid-RC, the fidelity gate passes and the tag is created.
 
         The single-lane squash makes main identical to the RC branch.  The fidelity
@@ -1492,22 +1525,26 @@ class TestFidelityGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Open the RC and add coder work.
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         rc_branch = f"rc/{version}"
         _simulate_coder_work(repo_path, rc_branch, commit_message="feat: clean feature")
 
         # Run cm-release.sh — no mid-RC commit on main, gate should pass.
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode == 0, (
             f"cm-release.sh failed when fidelity gate should have passed.\n"
@@ -1523,13 +1560,10 @@ class TestFidelityGate:
         # The gate OK line must appear in stdout.
         combined_output = result.stdout + result.stderr
         assert "Fidelity gate" in combined_output and "OK" in combined_output, (
-            "Expected 'Fidelity gate' and 'OK' in release output.\n"
-            f"output: {combined_output}"
+            "Expected 'Fidelity gate' and 'OK' in release output.\n" f"output: {combined_output}"
         )
 
-    def test_fidelity_gate_halts_when_main_diverges_mid_rc(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fidelity_gate_halts_when_main_diverges_mid_rc(self, tmp_path: pathlib.Path) -> None:
         """When a commit lands on main mid-RC, the fidelity gate fires before the tag.
 
         After the RC is opened and coder work is committed, an additional commit
@@ -1545,14 +1579,15 @@ class TestFidelityGate:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root_for_rc(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Open the RC and add coder work.
         _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         rc_branch = f"rc/{version}"
         _simulate_coder_work(repo_path, rc_branch, commit_message="feat: coder work")
@@ -1567,8 +1602,11 @@ class TestFidelityGate:
 
         # Run cm-release.sh — gate must fire.
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result.returncode != 0, (
             "cm-release.sh must exit non-zero when fidelity gate detects divergence.\n"
@@ -1584,6 +1622,5 @@ class TestFidelityGate:
         # The fidelity-gate divergence message must appear in output.
         combined_output = result.stdout + result.stderr
         assert "DIVERGENCE" in combined_output or "fidelity gate" in combined_output.lower(), (
-            "Expected divergence or fidelity gate error in output.\n"
-            f"output: {combined_output}"
+            "Expected divergence or fidelity gate error in output.\n" f"output: {combined_output}"
         )

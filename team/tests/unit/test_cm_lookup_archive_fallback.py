@@ -122,14 +122,36 @@ def _ledger_sandbox(parent: pathlib.Path) -> ArchiveSandbox:
     box = ArchiveSandbox(parent, active_rc="none", last_released="v1.2.0")
     box.set_archive_count(2)
     (box.root / "tmp").mkdir(exist_ok=True)
-    _write_bug(box, 1, "dashboard-crash", "done", "The dashboard crashes on load.",
-               affects="v1.0.0", fixed_in="v1.1.0", public_id="KI-1.0.0.1")
-    _write_bug(box, 2, "internal-lint-noise", "done", "A lint printed noise on every run.",
-               fixed_in="v1.2.0")
-    _write_bug(box, 3, "queue-marker-drift", "done", "Queue markers drifted after a restart.",
-               affects="v1.1.0", fixed_in="v1.2.0")
-    _write_bug(box, 4, "slow-board", "done", "The board took ten seconds to render.",
-               affects="v1.0.0", fixed_in="v1.2.0", public_id="KI-1.0.0.2")
+    _write_bug(
+        box,
+        1,
+        "dashboard-crash",
+        "done",
+        "The dashboard crashes on load.",
+        affects="v1.0.0",
+        fixed_in="v1.1.0",
+        public_id="KI-1.0.0.1",
+    )
+    _write_bug(box, 2, "internal-lint-noise", "done", "A lint printed noise on every run.", fixed_in="v1.2.0")
+    _write_bug(
+        box,
+        3,
+        "queue-marker-drift",
+        "done",
+        "Queue markers drifted after a restart.",
+        affects="v1.1.0",
+        fixed_in="v1.2.0",
+    )
+    _write_bug(
+        box,
+        4,
+        "slow-board",
+        "done",
+        "The board took ten seconds to render.",
+        affects="v1.0.0",
+        fixed_in="v1.2.0",
+        public_id="KI-1.0.0.2",
+    )
     _write_bug(box, 5, "help-typo", "done", "The help text misspelled a flag.", fixed_in="v1.2.0")
     _write_bug(box, 6, "export-hang", "open", "Export hangs on a large project.", affects="v1.1.0")
     for version, slug in (("v1.0.0", "first"), ("v1.1.0", "second"), ("v1.2.0", "third")):
@@ -149,8 +171,7 @@ def _repo(parent: pathlib.Path) -> pathlib.Path:
         "v1.2.0": (
             "2026-03-10",
             "None\n",
-            "- BUG-0002 — lint noise\n- BUG-0003 — marker drift\n- BUG-0004 — slow board\n"
-            "- BUG-0005 — help typo\n",
+            "- BUG-0002 — lint noise\n- BUG-0003 — marker drift\n- BUG-0004 — slow board\n" "- BUG-0005 — help typo\n",
         ),
     }
     for version, (date, features, fixes) in bodies.items():
@@ -180,7 +201,10 @@ def _archive_now(box: ArchiveSandbox) -> tuple[str, ...]:
 
 def _regenerate(repo: pathlib.Path, box: ArchiveSandbox, published_changelog=None) -> str:
     return regenerate(
-        repo, _VERSIONS, load_published_manifest(repo), _bugs_dir(box),
+        repo,
+        _VERSIONS,
+        load_published_manifest(repo),
+        _bugs_dir(box),
         published_changelog=published_changelog,
     )
 
@@ -204,7 +228,11 @@ def _run_restamp(box: ArchiveSandbox, args: list[str], tmp_path: pathlib.Path) -
     )
     return subprocess.run(
         [str(_RESTAMP_SH), "--project", box.project, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
         stdin=subprocess.DEVNULL,
     )
 
@@ -228,11 +256,11 @@ def test_category_dir_of_a_live_project_maps_to_that_roots_archive(tmp_path: pat
 @pytest.mark.parametrize(
     ("relative", "category"),
     [
-        ("projects/demo/tasks", CATEGORY_BUGS),   # directory not named for the category
-        ("bugs", CATEGORY_BUGS),                   # single-project install: no per-project archive
-        ("elsewhere/demo/bugs", CATEGORY_BUGS),    # parent's parent is not projects/
-        ("projects/Demo/bugs", CATEGORY_BUGS),     # project name is not a safe path component
-        ("projects/demo/queues", "queues"),        # not an item category
+        ("projects/demo/tasks", CATEGORY_BUGS),  # directory not named for the category
+        ("bugs", CATEGORY_BUGS),  # single-project install: no per-project archive
+        ("elsewhere/demo/bugs", CATEGORY_BUGS),  # parent's parent is not projects/
+        ("projects/Demo/bugs", CATEGORY_BUGS),  # project name is not a safe path component
+        ("projects/demo/queues", "queues"),  # not an item category
     ],
 )
 def test_category_dir_outside_the_live_project_shape_has_no_archive(
@@ -342,9 +370,7 @@ def test_writeback_stamps_a_named_bug_archived_since_capture(
     archived = _archived_bugs_dir(box) / "BUG-0002-internal-lint-noise.md"
     live_before = _snapshot(_bugs_dir(box))
 
-    result = stamp_fixed_in(
-        _bugs_dir(box), "v1.2.0", ["BUG-0002-internal-lint-noise.md", "BUG-0098-never-filed.md"]
-    )
+    result = stamp_fixed_in(_bugs_dir(box), "v1.2.0", ["BUG-0002-internal-lint-noise.md", "BUG-0098-never-filed.md"])
     out = capsys.readouterr().out
 
     assert parse_bug_file(archived).fixed_in == "v1.2.0"
@@ -404,14 +430,21 @@ def test_module_cli_renders_the_same_changelog_after_archiving(tmp_path: pathlib
     home.mkdir()
     env = build_scrubbed_env(
         home_dir=home,
-        extra_env={"PYTHONPATH": str(_TEAM_DIR), "PYTHONHASHSEED": "0",
-                   "PGAI_AGENT_KANBAN_TEMP_DIR": str(box.root / "tmp")},
+        extra_env={
+            "PYTHONPATH": str(_TEAM_DIR),
+            "PYTHONHASHSEED": "0",
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(box.root / "tmp"),
+        },
     )
 
     def render() -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, "-m", "pgai_agent_kanban.cm.changelog_writer", str(repo), str(_bugs_dir(box))],
-            capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(tmp_path),
+            timeout=60,
             stdin=subprocess.DEVNULL,
         )
 

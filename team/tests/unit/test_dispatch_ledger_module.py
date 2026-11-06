@@ -45,7 +45,12 @@ def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProce
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -55,9 +60,16 @@ def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProce
 
 
 def test_digit_fields_are_stored_as_integers() -> None:
-    now = datetime.datetime(2026, 1, 2, 3, 4, 5, 678, tzinfo=datetime.timezone.utc)
+    now = datetime.datetime(2026, 1, 2, 3, 4, 5, 678, tzinfo=datetime.UTC)
     record = dispatch_ledger.dispatch_record(
-        "returned", "coder", "claude", "/logs/coder-batch.log", "120", "300", "1", now=now,
+        "returned",
+        "coder",
+        "claude",
+        "/logs/coder-batch.log",
+        "120",
+        "300",
+        "1",
+        now=now,
     )
     assert record == {
         "recorded_at": "2026-01-02T03:04:05Z",
@@ -115,15 +127,18 @@ def test_the_newest_record_wins(tmp_path: pathlib.Path) -> None:
 def test_blank_and_malformed_lines_are_skipped(tmp_path: pathlib.Path) -> None:
     ledger = tmp_path / "dispatch.jsonl"
     ledger.write_text(
-        "\n".join([
-            json.dumps({"batch_log": "/good.log", "offset_start": 10, "offset_end": None}),
-            "",
-            "   ",
-            '{"batch_log": "/torn.log", "offset_st',
-            "[1, 2]",
-            json.dumps({"batch_log": "", "offset_start": 99}),
-            json.dumps({"event": "returned"}),
-        ]) + "\n",
+        "\n".join(
+            [
+                json.dumps({"batch_log": "/good.log", "offset_start": 10, "offset_end": None}),
+                "",
+                "   ",
+                '{"batch_log": "/torn.log", "offset_st',
+                "[1, 2]",
+                json.dumps({"batch_log": "", "offset_start": 99}),
+                json.dumps({"event": "returned"}),
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
     assert dispatch_ledger.latest_dispatch_span(str(ledger)) == ("/good.log", "10", "")
@@ -157,20 +172,41 @@ def test_missing_ledger_raises(tmp_path: pathlib.Path) -> None:
 def test_append_and_latest_commands_round_trip(tmp_path: pathlib.Path) -> None:
     ledger = tmp_path / "dispatch.jsonl"
     opened = _run_module(
-        tmp_path, "append", "--", str(ledger), "dispatched", "coder", "claude", "/b.log", "17", "", "",
+        tmp_path,
+        "append",
+        "--",
+        str(ledger),
+        "dispatched",
+        "coder",
+        "claude",
+        "/b.log",
+        "17",
+        "",
+        "",
     )
     assert (opened.returncode, opened.stdout, opened.stderr) == (0, "", "")
     latest = _run_module(tmp_path, "latest", "--", str(ledger))
     assert (latest.returncode, latest.stdout, latest.stderr) == (0, "/b.log\t17\t\n", "")
 
     closed = _run_module(
-        tmp_path, "append", "--", str(ledger), "returned", "coder", "claude", "/b.log", "17", "40", "2",
+        tmp_path,
+        "append",
+        "--",
+        str(ledger),
+        "returned",
+        "coder",
+        "claude",
+        "/b.log",
+        "17",
+        "40",
+        "2",
     )
     assert closed.returncode == 0, closed.stderr
     latest = _run_module(tmp_path, "latest", "--", str(ledger))
     assert latest.stdout == "/b.log\t17\t40\n"
     assert [json.loads(ln)["event"] for ln in ledger.read_text(encoding="utf-8").splitlines()] == [
-        "dispatched", "returned",
+        "dispatched",
+        "returned",
     ]
 
 
@@ -186,7 +222,15 @@ def test_latest_command_exits_one_silently_without_a_usable_record(tmp_path: pat
 def test_append_command_names_the_ledger_it_cannot_write(tmp_path: pathlib.Path) -> None:
     ledger = tmp_path / "no-such-dir" / "dispatch.jsonl"
     result = _run_module(
-        tmp_path, "append", "--", str(ledger), "dispatched", "coder", "claude", "/b.log", "0",
+        tmp_path,
+        "append",
+        "--",
+        str(ledger),
+        "dispatched",
+        "coder",
+        "claude",
+        "/b.log",
+        "0",
     )
     assert result.returncode == 1
     assert result.stdout == ""

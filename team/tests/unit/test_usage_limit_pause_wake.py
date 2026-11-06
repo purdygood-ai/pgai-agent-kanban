@@ -30,7 +30,7 @@ _WRITER = "WRITER-20261011-003-usage-writer"
 
 
 def _iso(dt: datetime.datetime) -> str:
-    return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return dt.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def test_usage_limit_pauses_every_role_until_the_reset_then_resumes(tmp_path):
@@ -38,7 +38,7 @@ def test_usage_limit_pauses_every_role_until_the_reset_then_resumes(tmp_path):
     box.add_task(_FIRST, state="BACKLOG")
     box.add_task(_SECOND, state="BACKLOG")
     box.add_task(_WRITER, state="BACKLOG")
-    reset = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)).replace(microsecond=0)
+    reset = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)).replace(microsecond=0)
     (box.control_dir / "mode").write_text("usage-limit\n", encoding="utf-8")
     (box.control_dir / "usage-limit.txt").write_text(
         f"Claude usage limit reached. Your limit resets {_iso(reset)}.\n", encoding="utf-8"

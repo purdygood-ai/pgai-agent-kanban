@@ -21,7 +21,6 @@ Coverage:
 from __future__ import annotations
 
 import os
-import pathlib
 import stat
 
 import pytest
@@ -30,7 +29,9 @@ from pgai_agent_kanban.cm.auto_ship_notes import auto_ship_line, main, place_aut
 
 _T2 = "cm-release.trigger-2.systemic-risk-high"
 _T8 = "cm-release.trigger-8.last-3-rcs-non-functional"
-_LINE_2 = "Auto-shipped under ship_posture=always (would have halted: trigger 2 — cm-release.trigger-2.systemic-risk-high)"
+_LINE_2 = (
+    "Auto-shipped under ship_posture=always (would have halted: trigger 2 — cm-release.trigger-2.systemic-risk-high)"
+)
 _LINE_8 = "Auto-shipped under ship_posture=always (would have halted: trigger 8 — cm-release.trigger-8.last-3-rcs-non-functional)"
 
 
@@ -46,10 +47,7 @@ def test_a_body_that_says_nothing_is_replaced(body):
 
 
 def test_existing_text_follows_the_lines_after_one_blank_line():
-    text = (
-        "## Known Issues\nThis release is shipped non-functional.\n- A finding.\n\n"
-        "## Bugs Skipped\nNone.\n"
-    )
+    text = "## Known Issues\nThis release is shipped non-functional.\n- A finding.\n\n" "## Bugs Skipped\nNone.\n"
     assert place_auto_ship_lines(text, [_LINE_8, _LINE_2]) == (
         f"## Known Issues\n{_LINE_8}\n{_LINE_2}\n\nThis release is shipped non-functional.\n- A finding.\n\n"
         "## Bugs Skipped\nNone.\n"
@@ -101,9 +99,7 @@ def test_cli_rewrites_in_place_and_keeps_the_file_mode(tmp_path, capsys):
 
     assert main([str(notes), "--stop", "8", _T8, "--stop", "2", _T2]) == 0
 
-    assert notes.read_text(encoding="utf-8") == (
-        f"## Status\nFUNCTIONAL\n\n## Known Issues\n{_LINE_8}\n{_LINE_2}\n"
-    )
+    assert notes.read_text(encoding="utf-8") == (f"## Status\nFUNCTIONAL\n\n## Known Issues\n{_LINE_8}\n{_LINE_2}\n")
     assert stat.S_IMODE(notes.stat().st_mode) == 0o644
     assert "Stamped auto-ship line(s) under ## Known Issues in release-notes/v1.0.0.md" in capsys.readouterr().out
 

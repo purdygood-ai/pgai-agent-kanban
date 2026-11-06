@@ -282,7 +282,7 @@ Tips:
 
 The CM subagent creates the RC branch (`rc/vX.Y.Z`) from the prefixed main branch AND atomically updates the project's `release-state.md` (`Active RC`, `RC Opened At`, `RC Opened By Task`) before any feature tickets begin. The release-state file is per-install at `$KANBAN_ROOT/projects/<project-name>/release-state.md` and is owned by the CM scripts.
 
-Why this matters: CODER agents are prohibited from modifying state files (e.g., `release-state.md`). A CODER create-rc-branch ticket can push the branch but cannot update release-state.md, which causes the CM-release ticket to find "Active RC: none" and block. CM owns RC branch creation for exactly this reason. Released-version state (Last Released) is derived from git tags via `pp_last_released_version`, not stored in `release-state.md`.
+Why this matters: CODER agents are prohibited from modifying state files (e.g., `release-state.md`). A CODER create-rc-branch ticket can push the branch but cannot update release-state.md, which causes the CM-release ticket to find "Active RC: none" and block. CM owns RC branch creation for exactly this reason. Released-version state (Last Released) is read through `pp_last_released_version`: a matching release tag wins, and `release-state.md`'s `## Last Released` answers only when no tag matches or the project has no git dev tree.
 
 Correct ticket 1 shape:
 ```

@@ -126,15 +126,13 @@ def _wait_until_gone(pid: int) -> None:
 
 def _flock_holder_argv(path: pathlib.Path) -> list[str]:
     """A process that opens *path* itself, takes an exclusive flock and sleeps."""
-    code = textwrap.dedent(
-        f"""\
+    code = textwrap.dedent(f"""\
         import fcntl, os, time
         fd = os.open({str(path)!r}, os.O_RDONLY)
         fcntl.flock(fd, fcntl.LOCK_EX)
         print("locked", flush=True)
         time.sleep(600)
-        """
-    )
+        """)
     return [sys.executable, "-c", code]
 
 
@@ -160,9 +158,9 @@ def test_unlinked_lock_with_a_live_flock_on_the_old_inode_is_not_let_go(tmp_path
 
         os.killpg(child.pid, signal.SIGKILL)
         child.communicate(timeout=10)
-        assert ops_locks._holder_let_go(lock, _DEAD_PID, inode, probe_fd) is True, (
-            "once the last process holding the old inode's flock exits, the lock is let go"
-        )
+        assert (
+            ops_locks._holder_let_go(lock, _DEAD_PID, inode, probe_fd) is True
+        ), "once the last process holding the old inode's flock exits, the lock is let go"
     finally:
         os.close(probe_fd)
 
@@ -178,8 +176,7 @@ def test_force_release_refuses_while_an_inherited_descriptor_still_holds_the_loc
     # the child holding the flock on the unlinked inode.
     holder_script = tmp_path / "holder.sh"
     holder_script.write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             #!/usr/bin/env bash
             lock={str(lock)!r}
             printf 'holder=wake-coder\\npid=%s\\nop=wake\\ntask=none\\n' "$$" > "$lock"
@@ -190,8 +187,7 @@ def test_force_release_refuses_while_an_inherited_descriptor_still_holds_the_loc
             trap 'rm -f -- "$lock"; exit 0' TERM
             echo ready
             while :; do wait; done
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     # Started under a wrapper shell that reaps it, as the wake's own parent
@@ -237,8 +233,7 @@ def _orphan_held_lock(tmp_path: pathlib.Path, sessions) -> tuple[pathlib.Path, s
     child_pid_file = tmp_path / "child.pid"
     holder_script = tmp_path / "holder.sh"
     holder_script.write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             #!/usr/bin/env bash
             lock={str(lock)!r}
             printf 'holder=wake-coder\\npid=%s\\nop=wake\\ntask=CODER-1\\n' "$$" > "$lock"
@@ -248,8 +243,7 @@ def _orphan_held_lock(tmp_path: pathlib.Path, sessions) -> tuple[pathlib.Path, s
             echo "$!" > {str(child_pid_file)!r}
             echo ready
             while :; do wait; done
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     wrapper = sessions.start(["bash", "-c", 'bash "$0" & echo "holder=$!"; wait; sleep 600', str(holder_script)])

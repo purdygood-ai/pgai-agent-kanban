@@ -146,10 +146,7 @@ def version_series(count: int, *, major: int = 0, first_minor: int = 9, per_mino
     series of 40 crosses v0.20.0 -- lexicographic and semantic order
     disagree across that boundary, which is what a version-bound test
     needs."""
-    return [
-        f"v{major}.{first_minor + i // per_minor}.{i % per_minor}"
-        for i in range(count)
-    ]
+    return [f"v{major}.{first_minor + i // per_minor}.{i % per_minor}" for i in range(count)]
 
 
 def default_agents(index: int) -> dict[str, AgentLoad]:
@@ -163,18 +160,33 @@ def default_agents(index: int) -> dict[str, AgentLoad]:
     coder_tasks = 1 + index % 3
     agents = {
         "cm": AgentLoad(
-            tasks=2, input=1000 + index, output=200, cache_read=10 * index, cache_write=5,
-            wall_seconds=2 * 300.0, wall_task_count=2,
+            tasks=2,
+            input=1000 + index,
+            output=200,
+            cache_read=10 * index,
+            cache_write=5,
+            wall_seconds=2 * 300.0,
+            wall_task_count=2,
         ),
         "coder": AgentLoad(
-            tasks=coder_tasks, input=5000 + 7 * index, output=1500, cache_read=100 * index,
-            cache_write=50, wall_seconds=coder_tasks * 1200.0, wall_task_count=coder_tasks,
+            tasks=coder_tasks,
+            input=5000 + 7 * index,
+            output=1500,
+            cache_read=100 * index,
+            cache_write=50,
+            wall_seconds=coder_tasks * 1200.0,
+            wall_task_count=coder_tasks,
         ),
     }
     if index % 2 == 0:
         agents["writer"] = AgentLoad(
-            tasks=1, input=3000 + index, output=900, cache_read=0, cache_write=0,
-            wall_seconds=2700.0, wall_task_count=1,
+            tasks=1,
+            input=3000 + index,
+            output=900,
+            cache_read=0,
+            cache_write=0,
+            wall_seconds=2700.0,
+            wall_task_count=1,
         )
     return agents
 

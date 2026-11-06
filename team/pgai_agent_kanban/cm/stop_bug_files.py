@@ -141,7 +141,7 @@ def warn_unresolved(finding: Finding, bugs_dir: pathlib.Path) -> None:
     )
 
 
-def bug_file_for_id(bugs_dir: pathlib.Path, bug_id: str) -> "pathlib.Path | None":
+def bug_file_for_id(bugs_dir: pathlib.Path, bug_id: str) -> pathlib.Path | None:
     """Return the bug file for *bug_id* under *bugs_dir*, or None.
 
     *bug_id* is a normalized ``BUG-NNNN`` id. The lexically first
@@ -218,7 +218,7 @@ def resolve_stop_bug_files(report_path: str, bugs_dir: str, cause: str) -> list:
     return [str(path.resolve()) for path in stop_bug_paths(report_path, bugs_dir, cause)]
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.stop_bug_files",

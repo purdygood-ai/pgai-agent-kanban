@@ -16,6 +16,7 @@
 #
 # Usage:
 #   bash verify_quarantine_visibility.sh [--dev-tree <path>] [--kanban-root <path>]
+#   bash verify_quarantine_visibility.sh --help    # print this usage and exit 0
 #
 # Defaults:
 #   --dev-tree     PGAI_DEV_TREE_PATH, else the project's [project]
@@ -34,6 +35,11 @@
 # reaches CLEANUP and SUMMARY, which emits the checks_failed error contract.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no dev tree is resolved, no sandbox is built, no check runs.
+# shellcheck source=../scripts/lib/header_help.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../scripts/lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # ---------------------------------------------------------------------------
 # Argument parsing

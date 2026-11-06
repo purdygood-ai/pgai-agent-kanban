@@ -46,7 +46,6 @@ import re
 import shutil
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants derived from this file's location.
@@ -279,7 +278,9 @@ def _read_source_branch_field(readme_path: pathlib.Path) -> str:
 
 
 def _find_task_readme(
-    tasks_root: pathlib.Path, role_prefix: str, name_contains: str = "",
+    tasks_root: pathlib.Path,
+    role_prefix: str,
+    name_contains: str = "",
 ) -> pathlib.Path:
     """Find the single task README under tasks_root for the given role prefix.
 
@@ -289,13 +290,12 @@ def _find_task_readme(
     work task are both role=CODER).
     """
     dirs = [
-        d for d in tasks_root.iterdir()
-        if d.is_dir() and d.name.startswith(role_prefix)
-        and (not name_contains or name_contains in d.name)
+        d
+        for d in tasks_root.iterdir()
+        if d.is_dir() and d.name.startswith(role_prefix) and (not name_contains or name_contains in d.name)
     ]
     assert len(dirs) == 1, (
-        f"Expected exactly one {role_prefix}*{name_contains}* task folder; found: "
-        f"{[d.name for d in dirs]}"
+        f"Expected exactly one {role_prefix}*{name_contains}* task folder; found: " f"{[d.name for d in dirs]}"
     )
     return dirs[0] / "README.md"
 
@@ -310,7 +310,8 @@ class TestReleaseSourceBranchNormalization:
     the materializer-computed canonical RC branch."""
 
     def test_doubled_prefix_source_branch_normalizes_with_narration(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """A doubled-prefix source_branch normalizes to the canonical RC branch.
 
@@ -326,8 +327,7 @@ class TestReleaseSourceBranchNormalization:
 
         result = _run_pm_materialize(plan_file, root, proj)
         assert result.returncode == 0, (
-            f"Expected success; got {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected success; got {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         readme = _find_task_readme(proj / "tasks", "CODER-")
@@ -338,7 +338,8 @@ class TestReleaseSourceBranchNormalization:
         assert "ai_rc/v9.9.9" in result.stderr
 
     def test_accepted_spellings_produce_byte_identical_canonical_branch(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """canonical, unprefixed 'rc/<version>', and bare '<version>' all
         normalize to the same '## Source Branch' value.
@@ -350,9 +351,7 @@ class TestReleaseSourceBranchNormalization:
         resolved_values = []
 
         for i, spelling in enumerate(spellings):
-            root = _build_release_kanban_root(
-                tmp_path, branch_prefix="ai_", root_name=f"kanban_spelling_{i}"
-            )
+            root = _build_release_kanban_root(tmp_path, branch_prefix="ai_", root_name=f"kanban_spelling_{i}")
             proj = root / "projects" / "branch_guard_cert"
             plan = _build_release_plan("branch_guard_cert", "v9.9.9", spelling)
             plan_file = tmp_path / f"plan_{i}.json"
@@ -360,19 +359,18 @@ class TestReleaseSourceBranchNormalization:
 
             result = _run_pm_materialize(plan_file, root, proj)
             assert result.returncode == 0, (
-                f"Spelling {spelling!r} failed to materialize; "
-                f"got {result.returncode}.\nstderr: {result.stderr}"
+                f"Spelling {spelling!r} failed to materialize; " f"got {result.returncode}.\nstderr: {result.stderr}"
             )
             readme = _find_task_readme(proj / "tasks", "CODER-")
             resolved_values.append(_read_source_branch_field(readme))
 
         assert resolved_values == ["ai_rc/v9.9.9"] * 3, (
-            f"Expected byte-identical canonical branch across all three "
-            f"spellings; got: {resolved_values}"
+            f"Expected byte-identical canonical branch across all three " f"spellings; got: {resolved_values}"
         )
 
     def test_irreconcilable_value_fails_closed_with_no_tasks_written(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """An irreconcilable source_branch exits non-zero with zero task folders.
 
@@ -397,10 +395,9 @@ class TestReleaseSourceBranchNormalization:
 
         # No task folders written — fail-closed, no partial materialization.
         tasks_root = proj / "tasks"
-        task_dirs = [
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name != "queues"
-        ] if tasks_root.is_dir() else []
+        task_dirs = (
+            [d for d in tasks_root.iterdir() if d.is_dir() and d.name != "queues"] if tasks_root.is_dir() else []
+        )
         assert len(task_dirs) == 0, (
             f"Expected zero task folders after guard fired; "
             f"found: {[d.name for d in task_dirs]}\n"
@@ -408,7 +405,8 @@ class TestReleaseSourceBranchNormalization:
         )
 
     def test_garbage_source_branch_fails_closed(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """A garbage, non-branch-shaped source_branch string is refused, not accepted."""
         root = _build_release_kanban_root(tmp_path, branch_prefix="ai_")
@@ -421,14 +419,14 @@ class TestReleaseSourceBranchNormalization:
         assert result.returncode != 0
 
         tasks_root = proj / "tasks"
-        task_dirs = [
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name != "queues"
-        ] if tasks_root.is_dir() else []
+        task_dirs = (
+            [d for d in tasks_root.iterdir() if d.is_dir() and d.name != "queues"] if tasks_root.is_dir() else []
+        )
         assert len(task_dirs) == 0
 
     def test_golden_path_correct_name_produces_zero_narration(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """A plan already emitting the canonical branch name produces zero narration.
 
@@ -446,9 +444,9 @@ class TestReleaseSourceBranchNormalization:
 
         readme = _find_task_readme(proj / "tasks", "CODER-")
         assert _read_source_branch_field(readme) == "ai_rc/v9.9.9"
-        assert "BRANCH NORMALIZATION" not in result.stderr, (
-            f"Expected zero narration on the golden path; stderr: {result.stderr}"
-        )
+        assert (
+            "BRANCH NORMALIZATION" not in result.stderr
+        ), f"Expected zero narration on the golden path; stderr: {result.stderr}"
 
 
 class TestFeatureParentBranchNormalization:
@@ -456,7 +454,8 @@ class TestFeatureParentBranchNormalization:
     materializer-computed canonical mainline branch."""
 
     def test_doubled_prefix_parent_branch_normalizes_to_canonical_mainline(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """A doubled-prefix parent_branch normalizes; the mainline is canonical.
 
@@ -464,9 +463,7 @@ class TestFeatureParentBranchNormalization:
         parent_branch — the create-shared-branch task's source is the
         canonical (correctly prefixed) mainline.
         """
-        root = _build_release_kanban_root(
-            tmp_path, branch_prefix="ai_", root_name="kanban_feature_guard"
-        )
+        root = _build_release_kanban_root(tmp_path, branch_prefix="ai_", root_name="kanban_feature_guard")
         proj = root / "projects" / "branch_guard_cert"
         plan = _feature_plan("branch_guard_cert", "ai_ai_main")
         plan_file = tmp_path / "plan.json"
@@ -474,8 +471,7 @@ class TestFeatureParentBranchNormalization:
 
         result = _run_pm_materialize(plan_file, root, proj)
         assert result.returncode == 0, (
-            f"Expected success; got {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected success; got {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         readme = _find_task_readme(proj / "tasks", "CODER-", name_contains="create-shared-branch")
@@ -484,12 +480,11 @@ class TestFeatureParentBranchNormalization:
         assert "ai_ai_main" in result.stderr
 
     def test_irreconcilable_parent_branch_fails_closed(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """An irreconcilable parent_branch exits non-zero with zero task folders written."""
-        root = _build_release_kanban_root(
-            tmp_path, branch_prefix="ai_", root_name="kanban_feature_guard_fail"
-        )
+        root = _build_release_kanban_root(tmp_path, branch_prefix="ai_", root_name="kanban_feature_guard_fail")
         proj = root / "projects" / "branch_guard_cert"
         plan = _feature_plan("branch_guard_cert", "develop")
         plan_file = tmp_path / "plan.json"
@@ -501,10 +496,9 @@ class TestFeatureParentBranchNormalization:
         assert "ai_main" in result.stderr
 
         tasks_root = proj / "tasks"
-        task_dirs = [
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name != "queues"
-        ] if tasks_root.is_dir() else []
+        task_dirs = (
+            [d for d in tasks_root.iterdir() if d.is_dir() and d.name != "queues"] if tasks_root.is_dir() else []
+        )
         assert len(task_dirs) == 0
 
 
@@ -512,13 +506,12 @@ class TestAlternatePrefixNoHardcoding:
     """Proves branch_prefix is read from project.cfg — no hardcoded 'ai_'."""
 
     def test_alternate_prefix_produces_analogous_canonical_branch(
-        self, tmp_path: pathlib.Path,
+        self,
+        tmp_path: pathlib.Path,
     ) -> None:
         """Acceptance criterion 5: an alternate prefix ('x_') proves no 'ai_'
         hardcoding anywhere in the branch-normalization guard."""
-        root = _build_release_kanban_root(
-            tmp_path, branch_prefix="x_", root_name="kanban_alt_prefix"
-        )
+        root = _build_release_kanban_root(tmp_path, branch_prefix="x_", root_name="kanban_alt_prefix")
         proj = root / "projects" / "branch_guard_cert"
         plan = _build_release_plan("branch_guard_cert", "v9.9.9", "x_rc/x_v9.9.9")
         plan_file = tmp_path / "plan.json"
@@ -526,8 +519,7 @@ class TestAlternatePrefixNoHardcoding:
 
         result = _run_pm_materialize(plan_file, root, proj)
         assert result.returncode == 0, (
-            f"Expected success; got {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected success; got {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         readme = _find_task_readme(proj / "tasks", "CODER-")

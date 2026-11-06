@@ -58,7 +58,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Generator, Iterator
+from collections.abc import Generator, Iterator
 
 import pytest
 
@@ -118,9 +118,7 @@ def _cli_env(board: pathlib.Path, temp_dir: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def _run_cli(
-    board: pathlib.Path, script: str, args: list[str], temp_dir: pathlib.Path
-) -> subprocess.CompletedProcess:
+def _run_cli(board: pathlib.Path, script: str, args: list[str], temp_dir: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(board / "scripts" / script), *args],
         capture_output=True,
@@ -181,6 +179,17 @@ def _seed(case, board: pathlib.Path) -> None:
         case.seed(board, board / "projects" / PROJECT_NAME)
 
 
+def _apply_case_env(case, board: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set a case's environment overrides in this process before anything
+    runs: ``_cli_env`` copies ``os.environ`` and the REST server inherits it,
+    so the CLI, the route and the in-process resolver read the same values."""
+    for name, value in (getattr(case, "env", None) or (lambda _root: {}))(board).items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+
+
 # ---------------------------------------------------------------------------
 # Stdout parity
 # ---------------------------------------------------------------------------
@@ -208,9 +217,9 @@ def test_rest_envelope_stdout_matches_the_cli_stdout_byte_for_byte(
 
     with _rest_server(board, tmp_path, monkeypatch) as handle:
         status, body = _get_json(_rest_url(handle, case.rest_route, case.rest_query))
-    assert status == (200 if cli.returncode == 0 else 500), (
-        f"GET {case.rest_route} answered HTTP {status} for a CLI exit of {cli.returncode}: {body}"
-    )
+    assert status == (
+        200 if cli.returncode == 0 else 500
+    ), f"GET {case.rest_route} answered HTTP {status} for a CLI exit of {cli.returncode}: {body}"
 
     cli_value = {"exit_code": cli.returncode, "stdout": cli.stdout}
     rest_value = strip_envelope(body, envelope_keys=_ENVELOPE_ONLY_KEYS)
@@ -234,13 +243,12 @@ def test_both_renderers_carry_the_shared_resolvers_result(
     carries every line the ledger builds from that same result -- so the
     text and JSON renderers are proven against one derivation, and neither
     surface's output is parsed back into data."""
+    _apply_case_env(case, board, monkeypatch)
     _seed(case, board)
     resolved = case.resolve(board)
 
     cli = _run_cli(board, case.script, case.cli_args(board), tmp_path / "cli_tmp")
-    assert cli.returncode == 0, (
-        f"{case.script} exited {cli.returncode}\nstdout: {cli.stdout}\nstderr: {cli.stderr}"
-    )
+    assert cli.returncode == 0, f"{case.script} exited {cli.returncode}\nstdout: {cli.stdout}\nstderr: {cli.stderr}"
     for needle in case.expect_stdout_contains:
         assert needle in cli.stdout, (
             f"{case.script} stdout does not carry the seeded value {needle!r} -- the seed "
@@ -291,9 +299,9 @@ def test_rest_read_refuses_a_malformed_board_like_its_cli_twin(
 
     with _rest_server(board, tmp_path, monkeypatch) as handle:
         status, body = _get_json(_rest_url(handle, case.rest_route, case.rest_query))
-    assert status == case.rest_status, (
-        f"GET {case.rest_route} answered HTTP {status}, expected {case.rest_status}: {body}"
-    )
+    assert (
+        status == case.rest_status
+    ), f"GET {case.rest_route} answered HTTP {status}, expected {case.rest_status}: {body}"
     assert {"error", "message", "remedy"} <= set(body), body
     rest_triple = {k: body[k] for k in ("error", "message", "remedy")}
 
@@ -318,11 +326,7 @@ def test_delegated_read_verb_names_a_test_that_exists_in_its_module(
     assert case.test.startswith("test_"), f"{case.verb}: {case.test!r} is not a pytest test name"
 
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-    defined = {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    defined = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     assert case.test in defined, (
         f"{case.verb}: {module_path.name} defines no module-level function {case.test!r}; "
         f"its test functions are {sorted(n for n in defined if n.startswith('test_'))}"
@@ -339,9 +343,7 @@ def test_every_census_read_verb_has_a_golden_pair_case() -> None:
     by at least one ledger case, and no case names a verb the census does
     not carry -- the same two facts the parity gate reports, asserted here
     so a pytest run alone also fails loudly on a missing golden pair."""
-    census_reads = {
-        v.name for v in load_manifest().values() if v.status == "active" and v.verb_class == "read"
-    }
+    census_reads = {v.name for v in load_manifest().values() if v.status == "active" and v.verb_class == "read"}
     covered = verbs_with_a_case()
     missing = sorted(census_reads - covered)
     unknown = sorted(covered - census_reads)

@@ -186,9 +186,9 @@ def test_a_task_named_in_two_queue_files_leaves_both_and_reaches_both_archive_qu
     assert sorted(result.queue_lines) == sorted((coder_line, tester_line))
     archive_queues = _archive_root(box) / "tasks" / "queues"
     for agent, line in (("coder", coder_line), ("tester", tester_line)):
-        assert line not in box.queue_file(agent).read_text(encoding="utf-8").splitlines(), (
-            f"{agent}_backlog.md still names the archived task"
-        )
+        assert (
+            line not in box.queue_file(agent).read_text(encoding="utf-8").splitlines()
+        ), f"{agent}_backlog.md still names the archived task"
         assert (archive_queues / f"{agent}_backlog.md").read_text(encoding="utf-8").splitlines() == [line]
     assert live_line in box.queue_file("coder").read_text(encoding="utf-8").splitlines()
 
@@ -363,7 +363,10 @@ def test_accept_chain_lock_still_skips_a_lock_held_by_an_unrelated_process(sandb
     try:
         holder = acquire_lock(
             repo_lock_path(sandbox.root, sandbox.project),
-            holder="wake-chain", pid=other.pid, op="wake-chain:demo", task="none",
+            holder="wake-chain",
+            pid=other.pid,
+            op="wake-chain:demo",
+            task="none",
         )
         try:
             result = apply(planned, log=_quiet, accept_chain_lock=True)
@@ -429,7 +432,9 @@ def test_cross_filesystem_apply_copies_then_removes_with_the_same_result(scenari
         assert (_archive_root(box) / relpath).read_bytes() == data, relpath
         assert not (box.project_root / relpath).exists(), relpath
     archived_task = _archive_root(box) / task.relpath
-    assert {p.relative_to(archived_task).as_posix(): p.read_bytes() for p in archived_task.rglob("*") if p.is_file()} == task_files
+    assert {
+        p.relative_to(archived_task).as_posix(): p.read_bytes() for p in archived_task.rglob("*") if p.is_file()
+    } == task_files
     assert (archived_task / "artifacts").is_dir() and (archived_task / "logs").is_dir(), "empty sub-directories lost"
     assert not list(_archive_root(box).rglob("*.archive-staging")), "a staging copy was left behind"
 
@@ -581,7 +586,7 @@ def test_restore_appends_one_restore_row(sandbox) -> None:
 
     rows = _ledger(sandbox)
     assert rows[: len(rows_before)] == rows_before
-    assert rows[len(rows_before):] == result.rows and len(result.rows) == 1
+    assert rows[len(rows_before) :] == result.rows and len(result.rows) == 1
     row = result.rows[0]
     assert (row.category, row.item_id, row.release) == (CATEGORY_RESTORE, bug.item_id, "v1.0.0")
     assert row.source == f"archive/{sandbox.project}/{bug.relpath}"

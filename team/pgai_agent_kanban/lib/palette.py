@@ -141,7 +141,7 @@ class PaletteKeyError(PaletteFileError):
 # ---------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _load_palette_cached(path_str: str) -> tuple[str, ...]:
     """Read and parse the file at *path_str* into an ordered hex-color tuple.
 
@@ -288,7 +288,7 @@ def ansi_code(color_name: str, use_color: bool) -> str:
 _SEMANTIC_KEY_LINE_RE = re.compile(r"^%(\S+)\s+(\S+)")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _load_semantic_palette_cached(path_str: str) -> tuple[tuple[str, str], ...]:
     """Read and parse the semantic-key section of *path_str*.
 

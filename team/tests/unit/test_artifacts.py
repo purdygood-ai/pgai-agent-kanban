@@ -33,6 +33,7 @@ try:
     )
 except ImportError:
     import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib.artifacts import (  # type: ignore[no-redef]
         get_project_path,
@@ -206,9 +207,7 @@ def test_get_next_version_honours_existing_next_version_field(
     """get_next_version uses the existing ## Next Version field when PROJECT.md exists."""
     project_dir = tmp_path / "artifacts" / "pre-existing"
     project_dir.mkdir(parents=True)
-    (project_dir / "PROJECT.md").write_text(
-        "# Project: pre-existing\n\n## Next Version\n5\n", encoding="utf-8"
-    )
+    (project_dir / "PROJECT.md").write_text("# Project: pre-existing\n\n## Next Version\n5\n", encoding="utf-8")
     version_path = get_next_version("pre-existing", kanban_root=tmp_path)
     assert version_path == tmp_path / "artifacts" / "pre-existing" / "v5"
 

@@ -47,7 +47,9 @@ _AGENTS = ("pm", "coder", "writer", "tester", "cm", "overwatch")
 _PENDING = "CODER-20260101-001-pending-work"
 
 _PASS_STREAM = '{"type":"thread.started","thread_id":"t"}\n{"type":"turn.completed","usage":{}}\n'
-_RATE_LIMIT_STREAM = '{"type":"error","message":"stream error: exceeded retry limit, last status: 429 Too Many Requests"}\n'
+_RATE_LIMIT_STREAM = (
+    '{"type":"error","message":"stream error: exceeded retry limit, last status: 429 Too Many Requests"}\n'
+)
 _USAGE_LIMIT_STREAM = '{"type":"error","message":"You\'ve hit your usage limit. Try again in 2h."}\n'
 _REJECT_STREAM = '{"type":"error","message":"The model `gpt-nope` does not exist or you do not have access to it."}\n'
 
@@ -83,8 +85,9 @@ def _exec_calls(calls: pathlib.Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _preflight(tmp_path: pathlib.Path, *, runs: int = 1, ttl: str = "3600", timeout: str = "60",
-               model: str = "gpt-test") -> tuple[list[int], str, float]:
+def _preflight(
+    tmp_path: pathlib.Path, *, runs: int = 1, ttl: str = "3600", timeout: str = "60", model: str = "gpt-test"
+) -> tuple[list[int], str, float]:
     """Call provider_model_preflight *runs* times; return each status, the log and the wall time."""
     log = tmp_path / "wake.log"
     script = tmp_path / "preflight.sh"
@@ -257,7 +260,11 @@ class _Sandbox:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(self.root / "scripts" / "wake" / "codex.sh"), "--agent=coder"],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=240,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=240,
         )
 
 

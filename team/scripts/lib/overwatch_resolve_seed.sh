@@ -20,6 +20,11 @@
 # Source this file to get overwatch_resolve_seed_comment_block:
 #   source "$(dirname "${BASH_SOURCE[0]}")/overwatch_resolve_seed.sh"
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_OVERWATCH_RESOLVE_SEED_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _OVERWATCH_RESOLVE_SEED_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # overwatch_resolve_seed_comment_block
 #
@@ -32,7 +37,7 @@
 # ---------------------------------------------------------------------------
 overwatch_resolve_seed_comment_block() {
     local _seed
-    _seed="$(dirname "${BASH_SOURCE[0]}")/../../config/overwatch_resolve_seed.txt"
+    _seed="${_OVERWATCH_RESOLVE_SEED_LIB_DIR}/../../config/overwatch_resolve_seed.txt"
     if [[ ! -f "$_seed" ]]; then
         echo "overwatch_resolve_seed.sh: seed block file not found: ${_seed}" >&2
         return 1

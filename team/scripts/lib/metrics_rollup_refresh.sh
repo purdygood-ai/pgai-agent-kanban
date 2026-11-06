@@ -36,12 +36,16 @@
 # ("$(dirname "${BASH_SOURCE[0]}")/metrics_aggregator.py") -- each tree
 # finds itself; the live install and a dev tree each run their own copy.
 #
-# Always returns 0. A failed refresh narrates one "[metrics] WARNING" line
-# on stderr and leaves the previously written rollup in place -- the task's
-# own outcome never depends on metrics succeeding, exactly as release
-# finalize's own metrics step is non-blocking. All narration goes to
-# stderr; the caller decides where it lands (the wake driver appends it to
-# the task log).
+# Always returns 0. A failed refresh -- the aggregator missing from beside
+# this file, or exiting non-zero -- narrates one "[metrics] WARNING" line
+# on stderr, leaves one operator inbox entry naming the rollup, the cause
+# (a missing aggregator's path included) and the command that re-runs the
+# refresh by hand (operator_inbox_notice, --once: a re-run meeting the same
+# failure adds no second entry), and leaves the previously written rollup
+# in place -- the task's own outcome
+# never depends on metrics succeeding, exactly as release finalize's own
+# metrics step is non-blocking. All narration goes to stderr; the caller
+# decides where it lands (the wake driver appends it to the task log).
 #
 # What it deliberately does NOT do:
 #   - It never scans for stale rollups. Only a tokens.json written while
@@ -53,9 +57,10 @@
 #     "Cumulative history.csv").
 #
 # Dependencies: bash 4+, python3 (the aggregator), pp_run_ops for the
-# workflow_type read (pgai_agent_kanban.lib.json_field) and read_md_field
-# (md_field.sh) for the Release Version read, both self-sourced below; safe
-# to source standalone.
+# workflow_type read (pgai_agent_kanban.lib.json_field), read_md_field
+# (md_field.sh) for the Release Version read and operator_inbox_notice
+# (operator_inbox_notice.sh) for the failed-refresh entry, all self-sourced
+# below; safe to source standalone.
 
 if ! declare -F pp_run_ops >/dev/null 2>&1; then
   # shellcheck source=pp_run_ops.sh
@@ -63,6 +68,13 @@ if ! declare -F pp_run_ops >/dev/null 2>&1; then
 fi
 # shellcheck source=md_field.sh
 source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
+# shellcheck source=operator_inbox_notice.sh
+source "$(dirname "${BASH_SOURCE[0]}")/operator_inbox_notice.sh"
+
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_METRICS_ROLLUP_REFRESH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _METRICS_ROLLUP_REFRESH_LIB_DIR=""
 
 # ---------------------------------------------------------------------------
 # _metrics_rollup_read_release_version <readme_path>
@@ -77,6 +89,32 @@ source "$(dirname "${BASH_SOURCE[0]}")/md_field.sh"
 # ---------------------------------------------------------------------------
 _metrics_rollup_read_release_version() {
   read_md_field --value "$1" "Release Version" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# _metrics_rollup_inbox_notice <task_dir> <kanban_root> <project_name>
+#     <version> <rollup> <aggregator> <workflow_type> <cause>
+#
+# One operator inbox entry for a refresh that did not happen, sourced as the
+# task whose tokens.json landed. <cause> says why ("the aggregator exited
+# 3"); the entry names <rollup> and the shell-quoted aggregator command that
+# re-runs the refresh. Narrates the entry ID, or why none was written, on
+# stderr; always returns 0.
+# ---------------------------------------------------------------------------
+_metrics_rollup_inbox_notice() {
+  local task_dir="$1" kanban_root="$2" project_name="$3" version="$4"
+  local rollup="$5" aggregator="$6" workflow_type="$7" cause="$8"
+  local by_hand entry
+  by_hand="python3 $(printf '%q' "$aggregator") --project $(printf '%q' "$project_name") --rc $(printf '%q' "$version") --kanban-root $(printf '%q' "$kanban_root") --workflow-type $(printf '%q' "$workflow_type")"
+  if entry="$(operator_inbox_notice "$kanban_root" "$project_name" "$(basename "$task_dir")" \
+      "The metrics rollup ${rollup} was not refreshed after $(basename "$task_dir") landed its tokens.json: ${cause}. Re-run the refresh by hand?" \
+      "The rollup keeps its finalize-time contents, so ${version}'s metrics leave out this task's tokens and wall time; the task's own result is unaffected." \
+      "Run \`${by_hand}\`. List this entry with \`$(printf '%q' "${kanban_root}/scripts/inbox.sh") --project $(printf '%q' "$project_name") list\` and close it with the same script's close command.")"; then
+    echo "[metrics] Operator inbox: ${entry} records the refresh that failed." >&2
+  else
+    echo "[metrics] WARNING: ${entry}" >&2
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -108,19 +146,26 @@ metrics_rollup_refresh_for_task() {
   local rollup="${kanban_root}/projects/${project_name}/metrics/rc/${version}.json"
   [[ -f "$rollup" ]] || return 0
 
-  local aggregator
-  aggregator="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/metrics_aggregator.py"
-  if [[ ! -f "$aggregator" ]]; then
-    echo "[metrics] WARNING: rollup refresh for ${version} skipped: aggregator not found at ${aggregator}; ${rollup} keeps its finalize-time contents" >&2
-    return 0
-  fi
-
   # Preserve the rollup's own workflow_type across the refresh; a rollup
   # whose field cannot be read is refreshed under the aggregator's default.
+  # Read before the aggregator check so a missing aggregator's inbox entry
+  # carries the complete by-hand command.
   local workflow_type
   workflow_type="$(pp_run_ops pgai_agent_kanban.lib.json_field --file --string-only --default release \
     "$rollup" workflow_type 2>/dev/null)" || workflow_type=""
   [[ -n "$workflow_type" ]] || workflow_type="release"
+
+  local aggregator
+  aggregator="${_METRICS_ROLLUP_REFRESH_LIB_DIR}/metrics_aggregator.py"
+  if [[ ! -f "$aggregator" ]]; then
+    # CENSUS CLASS: CONVERT (docs/blocking-site-census.md) -- an install
+    # missing its aggregator stops refreshing rollups; the finalize-time
+    # rollup is still valid and the task's result is unaffected.
+    echo "[metrics] WARNING: rollup refresh for ${version} skipped: aggregator not found at ${aggregator}; ${rollup} keeps its finalize-time contents" >&2
+    _metrics_rollup_inbox_notice "$task_dir" "$kanban_root" "$project_name" "$version" "$rollup" \
+      "$aggregator" "$workflow_type" "the aggregator ${aggregator} is missing (reinstall the kanban so that file is present)"
+    return 0
+  fi
 
   echo "[metrics] rollup refresh: $(basename "$task_dir") landed tokens.json for ${version}; recomputing ${rollup}" >&2
 
@@ -140,6 +185,8 @@ metrics_rollup_refresh_for_task() {
     # CENSUS CLASS: CONVERT (docs/blocking-site-census.md) -- a refresh that
     # fails is a metrics-quality finding. The rollup written at finalize is
     # still on disk and still valid; the task's result is unaffected.
+    _metrics_rollup_inbox_notice "$task_dir" "$kanban_root" "$project_name" "$version" "$rollup" \
+      "$aggregator" "$workflow_type" "the aggregator exited ${refresh_rc}"
     echo "[metrics] WARNING: rollup refresh for ${version} exited with code ${refresh_rc}; ${rollup} keeps its finalize-time contents. Re-run by hand: python3 ${aggregator} --project ${project_name} --rc ${version} --kanban-root ${kanban_root} --workflow-type ${workflow_type}" >&2
   fi
   return 0

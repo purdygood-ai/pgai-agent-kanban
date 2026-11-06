@@ -119,8 +119,7 @@ def test_all_seven_roles_over_tiny_budgets_still_exits_zero(
 ) -> None:
     """Every role over budget simultaneously is still a clean (exit 0) run."""
     lines = [
-        f"budget_bytes_{role} = {_TINY_BUDGET}"
-        for role in ("po", "pm", "coder", "writer", "tester", "cm", "overwatch")
+        f"budget_bytes_{role} = {_TINY_BUDGET}" for role in ("po", "pm", "coder", "writer", "tester", "cm", "overwatch")
     ]
     cfg = _write_cfg(tmp_path, "[governance]\n" + "\n".join(lines) + "\n")
     result = _run(tmp_path, "--kanban-cfg", str(cfg))
@@ -204,9 +203,7 @@ def test_assembled_total_matches_read_order_role_byte_total(
     call against the real tree -- confirming the script reads through
     read_order.sh rather than re-summing the manifest itself."""
     lib = _TEAM_ROOT / "scripts" / "lib" / "read_order.sh"
-    independent = run_bash(
-        tmp_path, f"source {lib} && read_order_role_byte_total coder"
-    )
+    independent = run_bash(tmp_path, f"source {lib} && read_order_role_byte_total coder")
     assert independent.returncode == 0
     expected_total = independent.stdout.strip()
 
@@ -259,9 +256,7 @@ def test_over_budget_role_prints_narration_line_without_verbose_flag(
         for line in result.stdout.splitlines()
         if line.startswith("lint_governance_byte_budgets:") and "coder" in line
     ]
-    assert len(narration_lines) == 1, (
-        f"expected exactly one narration line for 'coder', got:\n{result.stdout}"
-    )
+    assert len(narration_lines) == 1, f"expected exactly one narration line for 'coder', got:\n{result.stdout}"
     assert "coder" in narration_lines[0]
     assert "assembled=" in narration_lines[0]
     assert f"budget={_TINY_BUDGET} bytes" in narration_lines[0]
@@ -277,9 +272,7 @@ def test_over_budget_role_produces_one_findings_file_entry_naming_role(
         f"[governance]\nbudget_bytes_coder = {_TINY_BUDGET}\n",
     )
     findings_path = tmp_path / "findings.json"
-    result = _run(
-        tmp_path, "--kanban-cfg", str(cfg), "--findings-file", str(findings_path)
-    )
+    result = _run(tmp_path, "--kanban-cfg", str(cfg), "--findings-file", str(findings_path))
     assert result.returncode == 0
     findings = json.loads(findings_path.read_text(encoding="utf-8"))
     assert len(findings) == 1, f"expected one finding, got: {findings}"
@@ -303,9 +296,7 @@ def test_under_budget_role_produces_no_narration_and_empty_findings_file(
         f"[governance]\nbudget_bytes_coder = {_HUGE_BUDGET}\n",
     )
     findings_path = tmp_path / "findings.json"
-    result = _run(
-        tmp_path, "--kanban-cfg", str(cfg), "--findings-file", str(findings_path)
-    )
+    result = _run(tmp_path, "--kanban-cfg", str(cfg), "--findings-file", str(findings_path))
     assert result.returncode == 0
     assert "lint_governance_byte_budgets:" not in result.stdout
     findings = json.loads(findings_path.read_text(encoding="utf-8"))
@@ -328,9 +319,7 @@ def test_findings_file_written_even_when_no_role_is_over_budget(
         + "\n",
     )
     findings_path = tmp_path / "findings.json"
-    result = _run(
-        tmp_path, "--kanban-cfg", str(cfg), "--findings-file", str(findings_path)
-    )
+    result = _run(tmp_path, "--kanban-cfg", str(cfg), "--findings-file", str(findings_path))
     assert result.returncode == 0
     assert findings_path.is_file()
     assert json.loads(findings_path.read_text(encoding="utf-8")) == []

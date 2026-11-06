@@ -55,7 +55,6 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Optional
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -123,7 +122,7 @@ class CauseCheck:
     paths: tuple = ()
 
 
-def halt_written_at(halt_path: "str | os.PathLike[str]", text: Optional[str] = None) -> Optional[datetime.datetime]:
+def halt_written_at(halt_path: str | os.PathLike[str], text: str | None = None) -> datetime.datetime | None:
     """When the HALT was written: the timestamp on its first line, else its mtime.
 
     None when neither can be read.
@@ -143,10 +142,10 @@ def halt_written_at(halt_path: "str | os.PathLike[str]", text: Optional[str] = N
         mtime = os.path.getmtime(halt_path)
     except OSError:
         return None
-    return datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc)
+    return datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC)
 
 
-def task_id_in(text: Optional[str]) -> Optional[str]:
+def task_id_in(text: str | None) -> str | None:
     """The first task ID *text* names, or None."""
     if not text:
         return None
@@ -188,8 +187,8 @@ def _cargo_still_running(project_root: pathlib.Path, cargo: object) -> list:
 
 
 def check_rc_cancelled(
-    project_root: "str | os.PathLike[str]",
-    written_at: Optional[datetime.datetime],
+    project_root: str | os.PathLike[str],
+    written_at: datetime.datetime | None,
 ) -> CauseCheck:
     """``rc-cancelled``: an RC was cancelled after the HALT and its cargo rebundled.
 
@@ -216,7 +215,8 @@ def check_rc_cancelled(
             newest = (closed, path, record)
     if newest is None:
         return CauseCheck(
-            CLEAR_RC_CANCELLED, False,
+            CLEAR_RC_CANCELLED,
+            False,
             f"Active RC is none but no RC record shows a cancel at or after {written_at.isoformat()}",
             (str(release_state),),
         )
@@ -225,18 +225,20 @@ def check_rc_cancelled(
     running = _cargo_still_running(root, record.get("cargo"))
     if running:
         return CauseCheck(
-            CLEAR_RC_CANCELLED, False,
+            CLEAR_RC_CANCELLED,
+            False,
             f"{rc} was cancelled ({path.name}) but cargo still reads running: {', '.join(running)}",
             (str(release_state), str(path)),
         )
     return CauseCheck(
-        CLEAR_RC_CANCELLED, True,
+        CLEAR_RC_CANCELLED,
+        True,
         f"{rc} was cancelled at {record.get('closed_at')} ({path.name}), Active RC is none and no cargo reads running",
         (str(release_state), str(path)),
     )
 
 
-def check_task_reset(project_root: "str | os.PathLike[str]", task_id: Optional[str]) -> CauseCheck:
+def check_task_reset(project_root: str | os.PathLike[str], task_id: str | None) -> CauseCheck:
     """``task-reset``: *task_id* reads BACKLOG or WAITING."""
     if not task_id:
         return CauseCheck(CLEAR_TASK_RESET, False, "no task is named for this HALT")
@@ -254,9 +256,9 @@ def _git(dev_tree: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def check_notes_status_green(
-    version: Optional[str],
-    dev_tree: Optional[str],
-    rc_branch: Optional[str],
+    version: str | None,
+    dev_tree: str | None,
+    rc_branch: str | None,
 ) -> CauseCheck:
     """``notes-status-green``: trigger 9 re-checked on the RC branch.
 
@@ -279,7 +281,8 @@ def check_notes_status_green(
         listed = _git(dev_tree, "ls-tree", "--name-only", rc_branch, notes)
         if listed.returncode == 0 and not listed.stdout.strip():
             return CauseCheck(
-                CLEAR_NOTES_STATUS_GREEN, True,
+                CLEAR_NOTES_STATUS_GREEN,
+                True,
                 f"{rc_branch} has no {notes}; the release generates its own notes",
             )
         return CauseCheck(CLEAR_NOTES_STATUS_GREEN, False, f"{notes} on {rc_branch} cannot be read")
@@ -290,16 +293,18 @@ def check_notes_status_green(
         stamped = stamp_status_placeholder(text, _PROBE_STATUS)
         if stamped is None or status_section_has_placeholder(stamped) or not has_status_section(stamped):
             return CauseCheck(
-                CLEAR_NOTES_STATUS_GREEN, False,
+                CLEAR_NOTES_STATUS_GREEN,
+                False,
                 f"{notes} on {rc_branch} still holds a placeholder the release stamp cannot replace",
             )
     return CauseCheck(
-        CLEAR_NOTES_STATUS_GREEN, True,
+        CLEAR_NOTES_STATUS_GREEN,
+        True,
         f"{notes} on {rc_branch} carries a ## Status section the release stamp applies to",
     )
 
 
-def halt_after_version(reason: Optional[str], release_state_path: "str | os.PathLike[str]") -> Optional[str]:
+def halt_after_version(reason: str | None, release_state_path: str | os.PathLike[str]) -> str | None:
     """The version a completed HALT-AFTER drain stopped after.
 
     The ``rc:vX.Y.Z`` token in the HALT's reason when it names one, else
@@ -324,7 +329,7 @@ def halt_after_resume_text(version: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run one cause check and print its answer. Exit 0 answered; 2 usage error."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.overwatch.halt_clearing",
@@ -332,13 +337,17 @@ def main(argv: Optional[list] = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     check_p = sub.add_parser("check", help="Run one cause check.")
-    check_p.add_argument("--project-root", required=True, help="the project directory, e.g. $PGAI_AGENT_KANBAN_ROOT_PATH/projects/demo")
     check_p.add_argument(
-        "--check", required=True, choices=sorted([CLEAR_RC_CANCELLED, CLEAR_TASK_RESET, CLEAR_NOTES_STATUS_GREEN]),
+        "--project-root", required=True, help="the project directory, e.g. $PGAI_AGENT_KANBAN_ROOT_PATH/projects/demo"
+    )
+    check_p.add_argument(
+        "--check",
+        required=True,
+        choices=sorted([CLEAR_RC_CANCELLED, CLEAR_TASK_RESET, CLEAR_NOTES_STATUS_GREEN]),
         help="the cause check to run (required, no default): rc-cancelled (the RC was cancelled after the "
-             "HALT was written), task-reset (the --task task is back in BACKLOG or WAITING), or "
-             "notes-status-green (the RC's release notes pass the Status check; needs --version, "
-             "--dev-tree and --rc-branch)",
+        "HALT was written), task-reset (the --task task is back in BACKLOG or WAITING), or "
+        "notes-status-green (the RC's release notes pass the Status check; needs --version, "
+        "--dev-tree and --rc-branch)",
     )
     check_p.add_argument("--halt", default=None, help="the HALT file (rc-cancelled; default: PROJECT_ROOT/HALT)")
     check_p.add_argument("--task", default=None, help="the task ID (task-reset)")

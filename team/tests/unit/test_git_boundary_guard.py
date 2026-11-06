@@ -181,9 +181,7 @@ def _make_stub_git(tmp_path: pathlib.Path, *, exit_code: int = 0) -> pathlib.Pat
     stub_dir.mkdir()
     stub_git = stub_dir / "git"
     stub_git.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf 'STUBGIT-INVOKED:%s\\n' \"$*\"\n"
-        f"exit {exit_code}\n",
+        "#!/usr/bin/env bash\n" "printf 'STUBGIT-INVOKED:%s\\n' \"$*\"\n" f"exit {exit_code}\n",
         encoding="utf-8",
     )
     stub_git.chmod(0o755)
@@ -233,33 +231,23 @@ def _make_bare_repo_pair(root: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path
     origin = root / "origin.git"
     local = root / "local"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-    subprocess.run(
-        ["git", "init", "-q", "--initial-branch=main", str(local)], check=True
-    )
+    subprocess.run(["git", "init", "-q", "--initial-branch=main", str(local)], check=True)
     subprocess.run(
         ["git", "-C", str(local), "config", "user.email", "test@example.com"],
         check=True,
     )
-    subprocess.run(
-        ["git", "-C", str(local), "config", "user.name", "Test"], check=True
-    )
+    subprocess.run(["git", "-C", str(local), "config", "user.name", "Test"], check=True)
     (local / "README.md").write_text("test\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(local), "add", "."], check=True)
     subprocess.run(["git", "-C", str(local), "commit", "-q", "-m", "initial"], check=True)
-    subprocess.run(
-        ["git", "-C", str(local), "remote", "add", "origin", str(origin)], check=True
-    )
+    subprocess.run(["git", "-C", str(local), "remote", "add", "origin", str(origin)], check=True)
     return local, origin
 
 
 def _read_evidence(evidence_file: pathlib.Path) -> list[dict]:
     if not evidence_file.exists():
         return []
-    return [
-        json.loads(line)
-        for line in evidence_file.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    return [json.loads(line) for line in evidence_file.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def test_shim_is_syntactically_valid_bash() -> None:
@@ -303,9 +291,7 @@ def test_cm_role_remote_verbs_pass_through(tmp_path: pathlib.Path, verb: str) ->
     stub_dir = _make_stub_git(tmp_path)
     evidence = tmp_path / "evidence.jsonl"
 
-    result = _run_shim(
-        verb, "--dry-run", role="cm", evidence_file=evidence, path_prepend_dirs=(stub_dir,)
-    )
+    result = _run_shim(verb, "--dry-run", role="cm", evidence_file=evidence, path_prepend_dirs=(stub_dir,))
 
     assert result.returncode == 0
     assert f"STUBGIT-INVOKED:{verb} --dry-run" in result.stdout
@@ -322,9 +308,7 @@ def test_pass_through_preserves_nonzero_exit_status(tmp_path: pathlib.Path) -> N
     stub_dir = _make_stub_git(tmp_path, exit_code=17)
     evidence = tmp_path / "evidence.jsonl"
 
-    result = _run_shim(
-        "push", "origin", "main", role="cm", evidence_file=evidence, path_prepend_dirs=(stub_dir,)
-    )
+    result = _run_shim("push", "origin", "main", role="cm", evidence_file=evidence, path_prepend_dirs=(stub_dir,))
 
     assert result.returncode == 17
     assert "STUBGIT-INVOKED:push origin main" in result.stdout
@@ -378,7 +362,11 @@ def test_push_to_remote_name_resolving_under_throwaway_root_is_not_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -388,7 +376,9 @@ def test_push_to_remote_name_resolving_under_throwaway_root_is_not_refused(
     assert _read_evidence(evidence) == []
     origin_head = subprocess.run(
         ["git", "-C", str(origin), "rev-parse", "HEAD"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     assert origin_head.returncode == 0, "the push must have actually reached the bare origin"
 
@@ -405,7 +395,11 @@ def test_push_to_path_destination_under_throwaway_root_is_not_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", str(origin), "HEAD",
+        "-C",
+        str(local),
+        "push",
+        str(origin),
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -430,7 +424,11 @@ def test_push_to_path_destination_outside_throwaway_root_is_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", str(origin), "HEAD",
+        "-C",
+        str(local),
+        "push",
+        str(origin),
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -465,12 +463,19 @@ def test_push_outside_root_still_refused_when_root_has_projects_component_at_dep
     )
     origin_refs_before = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(configured_root)},
@@ -483,7 +488,10 @@ def test_push_outside_root_still_refused_when_root_has_projects_component_at_dep
     assert records[0]["argv"][-3:] == ["push", "origin", "HEAD"]
     origin_refs_after = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     assert origin_refs_after == origin_refs_before
 
@@ -508,7 +516,11 @@ def test_push_to_sibling_of_bare_project_subtree_root_is_still_exempt(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(project_root)},
@@ -537,12 +549,19 @@ def test_push_outside_root_still_refused_when_configured_root_is_bare_projects_n
     )
     origin_refs_before = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: "/projects/name"},
@@ -555,7 +574,10 @@ def test_push_outside_root_still_refused_when_configured_root_is_bare_projects_n
     assert records[0]["argv"][-3:] == ["push", "origin", "HEAD"]
     origin_refs_after = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     assert origin_refs_after == origin_refs_before
 
@@ -575,7 +597,9 @@ def test_push_to_path_destination_inside_bare_projects_name_root_remains_exempt(
     destination = f"{configured_root}/inside/work"
 
     result = _run_shim(
-        "push", destination, "HEAD",
+        "push",
+        destination,
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         path_prepend_dirs=(stub_dir,),
@@ -608,9 +632,7 @@ def test_push_outside_root_still_refused_when_projects_parent_is_not_the_framewo
     real_framework_root = tmp_path / "real_framework_root"
     real_framework_root.mkdir()
     (fake_kanban_root / "kanban.cfg").write_text(
-        "[paths]\n"
-        f"tmp_root = {real_framework_root.parent}\n"
-        f"tmp_subdir = {real_framework_root.name}\n",
+        "[paths]\n" f"tmp_root = {real_framework_root.parent}\n" f"tmp_subdir = {real_framework_root.name}\n",
         encoding="utf-8",
     )
 
@@ -626,12 +648,19 @@ def test_push_outside_root_still_refused_when_projects_parent_is_not_the_framewo
     )
     origin_refs_before = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={
@@ -647,7 +676,10 @@ def test_push_outside_root_still_refused_when_projects_parent_is_not_the_framewo
     assert records[0]["argv"][-3:] == ["push", "origin", "HEAD"]
     origin_refs_after = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     assert origin_refs_after == origin_refs_before
 
@@ -666,7 +698,11 @@ def test_push_to_remote_name_resolving_outside_throwaway_root_is_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -687,9 +723,7 @@ def test_push_to_remote_name_resolving_to_real_looking_url_is_still_refused(
     throwaway_root = tmp_path / "throwaway_root"
     throwaway_root.mkdir()
     local = throwaway_root / "local"
-    subprocess.run(
-        ["git", "init", "-q", "--initial-branch=main", str(local)], check=True
-    )
+    subprocess.run(["git", "init", "-q", "--initial-branch=main", str(local)], check=True)
     subprocess.run(
         ["git", "-C", str(local), "config", "user.email", "test@example.com"],
         check=True,
@@ -700,7 +734,12 @@ def test_push_to_remote_name_resolving_to_real_looking_url_is_still_refused(
     subprocess.run(["git", "-C", str(local), "commit", "-q", "-m", "initial"], check=True)
     subprocess.run(
         [
-            "git", "-C", str(local), "remote", "add", "origin",
+            "git",
+            "-C",
+            str(local),
+            "remote",
+            "add",
+            "origin",
             "git@example.invalid:someorg/somerepo.git",
         ],
         check=True,
@@ -708,7 +747,11 @@ def test_push_to_remote_name_resolving_to_real_looking_url_is_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "origin", "HEAD",
+        "-C",
+        str(local),
+        "push",
+        "origin",
+        "HEAD",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -728,13 +771,13 @@ def test_push_with_no_explicit_destination_is_not_exempted(tmp_path: pathlib.Pat
     throwaway_root = tmp_path / "throwaway_root"
     throwaway_root.mkdir()
     local, _origin = _make_bare_repo_pair(throwaway_root)
-    subprocess.run(
-        ["git", "-C", str(local), "push", "-q", "-u", "origin", "main"], check=True
-    )
+    subprocess.run(["git", "-C", str(local), "push", "-q", "-u", "origin", "main"], check=True)
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push",
+        "-C",
+        str(local),
+        "push",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -772,7 +815,12 @@ def test_fetch_from_repo_with_no_remote_configured_is_not_refused_or_recorded(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "fetch", "origin", "--tags", "--quiet",
+        "-C",
+        str(local),
+        "fetch",
+        "origin",
+        "--tags",
+        "--quiet",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -807,7 +855,12 @@ def test_fetch_from_repo_with_no_remote_configured_outside_root_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "fetch", "origin", "--tags", "--quiet",
+        "-C",
+        str(local),
+        "fetch",
+        "origin",
+        "--tags",
+        "--quiet",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -843,7 +896,12 @@ def test_fetch_against_gone_working_directory_is_not_refused_or_recorded(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(gone), "fetch", "origin", "--tags", "--quiet",
+        "-C",
+        str(gone),
+        "fetch",
+        "origin",
+        "--tags",
+        "--quiet",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -870,7 +928,12 @@ def test_fetch_against_gone_working_directory_outside_root_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(gone), "fetch", "origin", "--tags", "--quiet",
+        "-C",
+        str(gone),
+        "fetch",
+        "origin",
+        "--tags",
+        "--quiet",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -900,7 +963,12 @@ def test_fetch_from_repo_with_configured_remote_outside_root_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "fetch", "origin", "--tags", "--quiet",
+        "-C",
+        str(local),
+        "fetch",
+        "origin",
+        "--tags",
+        "--quiet",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -932,7 +1000,12 @@ def test_fetch_option_consumed_value_ahead_of_remote_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "fetch", "--depth", "5", "origin",
+        "-C",
+        str(local),
+        "fetch",
+        "--depth",
+        "5",
+        "origin",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -964,7 +1037,13 @@ def test_push_option_consumed_value_ahead_of_remote_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "-o", "ci.skip", "origin", "main",
+        "-C",
+        str(local),
+        "push",
+        "-o",
+        "ci.skip",
+        "origin",
+        "main",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -1017,12 +1096,17 @@ def test_option_value_ahead_of_remote_invocation_outside_root_is_refused_and_ref
     )
     origin_refs_before = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), *verb_args,
+        "-C",
+        str(local),
+        *verb_args,
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -1032,10 +1116,13 @@ def test_option_value_ahead_of_remote_invocation_outside_root_is_refused_and_ref
     assert "error:" in result.stderr
     records = _read_evidence(evidence)
     assert len(records) == 1
-    assert records[0]["argv"][-len(verb_args):] == list(verb_args)
+    assert records[0]["argv"][-len(verb_args) :] == list(verb_args)
     origin_refs_after = subprocess.run(
         ["git", "-C", str(origin), "for-each-ref"],
-        capture_output=True, text=True, timeout=10, check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
     ).stdout
     assert origin_refs_after == origin_refs_before
 
@@ -1059,7 +1146,9 @@ def test_option_value_ahead_of_remote_invocation_inside_root_is_still_exempt(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), *verb_args,
+        "-C",
+        str(local),
+        *verb_args,
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -1098,7 +1187,12 @@ def test_fetch_unlisted_value_consuming_option_outside_root_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "fetch", "--totally-unlisted-fetch-option", "some-value", "origin",
+        "-C",
+        str(local),
+        "fetch",
+        "--totally-unlisted-fetch-option",
+        "some-value",
+        "origin",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -1109,7 +1203,10 @@ def test_fetch_unlisted_value_consuming_option_outside_root_still_refused(
     records = _read_evidence(evidence)
     assert len(records) == 1
     assert records[0]["argv"][-4:] == [
-        "fetch", "--totally-unlisted-fetch-option", "some-value", "origin",
+        "fetch",
+        "--totally-unlisted-fetch-option",
+        "some-value",
+        "origin",
     ]
 
 
@@ -1129,7 +1226,13 @@ def test_push_unlisted_value_consuming_option_outside_root_still_refused(
     evidence = tmp_path / "evidence.jsonl"
 
     result = _run_shim(
-        "-C", str(local), "push", "--totally-unlisted-push-option", "some-value", "origin", "main",
+        "-C",
+        str(local),
+        "push",
+        "--totally-unlisted-push-option",
+        "some-value",
+        "origin",
+        "main",
         role="coder",
         evidence_file=evidence,
         extra_env={GIT_GUARD_THROWAWAY_ROOT_ENV: str(throwaway_root)},
@@ -1140,7 +1243,11 @@ def test_push_unlisted_value_consuming_option_outside_root_still_refused(
     records = _read_evidence(evidence)
     assert len(records) == 1
     assert records[0]["argv"][-5:] == [
-        "push", "--totally-unlisted-push-option", "some-value", "origin", "main",
+        "push",
+        "--totally-unlisted-push-option",
+        "some-value",
+        "origin",
+        "main",
     ]
 
 
@@ -1148,9 +1255,7 @@ def test_role_undeterminable_fails_open_and_records_unknown(tmp_path: pathlib.Pa
     stub_dir = _make_stub_git(tmp_path)
     evidence = tmp_path / "evidence.jsonl"
 
-    result = _run_shim(
-        "fetch", "--dry-run", role=None, evidence_file=evidence, path_prepend_dirs=(stub_dir,)
-    )
+    result = _run_shim("fetch", "--dry-run", role=None, evidence_file=evidence, path_prepend_dirs=(stub_dir,))
 
     assert result.returncode == 0
     assert "STUBGIT-INVOKED:fetch --dry-run" in result.stdout
@@ -1162,9 +1267,7 @@ def test_role_undeterminable_fails_open_and_records_unknown(tmp_path: pathlib.Pa
 def test_missing_evidence_file_fails_open_without_recording(tmp_path: pathlib.Path) -> None:
     stub_dir = _make_stub_git(tmp_path)
 
-    result = _run_shim(
-        "fetch", "--dry-run", role="coder", evidence_file=None, path_prepend_dirs=(stub_dir,)
-    )
+    result = _run_shim("fetch", "--dry-run", role="coder", evidence_file=None, path_prepend_dirs=(stub_dir,))
 
     # Fails open: no evidence sink configured means the refusal never fires
     # and the command reaches the resolved binary, per the guard's
@@ -1228,9 +1331,7 @@ def test_cm_role_remote_verb_behind_global_options_passes_through(
     args = [opt.format(repo=repo) for opt in global_opts] + [verb, "--dry-run"]
     evidence = tmp_path / "evidence.jsonl"
 
-    result = _run_shim(
-        *args, role="cm", evidence_file=evidence, path_prepend_dirs=(stub_dir,)
-    )
+    result = _run_shim(*args, role="cm", evidence_file=evidence, path_prepend_dirs=(stub_dir,))
 
     assert result.returncode == 0
     assert f"STUBGIT-INVOKED:{' '.join(args)}" in result.stdout
@@ -1322,7 +1423,7 @@ def test_recursion_sentinel_skips_policy_on_seeded_reentry(tmp_path: pathlib.Pat
     stub_git = stub_dir / "git"
     stub_git.write_text(
         "#!/usr/bin/env bash\n"
-        "printf 'STUBGIT-INVOKED:%s DEPTH=%s\\n' \"$*\" \"${PGAI_GIT_GUARD_DEPTH:-unset}\"\n"
+        'printf \'STUBGIT-INVOKED:%s DEPTH=%s\\n\' "$*" "${PGAI_GIT_GUARD_DEPTH:-unset}"\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -1367,10 +1468,7 @@ def test_process_watchdog_sees_no_second_shim_and_bounded_descendants(
     stub_dir.mkdir()
     stub_git = stub_dir / "git"
     stub_git.write_text(
-        "#!/usr/bin/env bash\n"
-        "sleep 0.4\n"
-        "printf 'STUBGIT-INVOKED:%s\\n' \"$*\"\n"
-        "exit 0\n",
+        "#!/usr/bin/env bash\n" "sleep 0.4\n" "printf 'STUBGIT-INVOKED:%s\\n' \"$*\"\n" "exit 0\n",
         encoding="utf-8",
     )
     stub_git.chmod(0o755)
@@ -1445,9 +1543,7 @@ def test_shim_hand_off_dies_when_its_caller_is_killed_by_a_timeout(
     stub_git = stub_dir / "git"
     marker = tmp_path / "stub-alive-marker"
     stub_git.write_text(
-        "#!/usr/bin/env bash\n"
-        f"touch {str(marker)!r}\n"
-        "exec sleep 30\n",
+        "#!/usr/bin/env bash\n" f"touch {str(marker)!r}\n" "exec sleep 30\n",
         encoding="utf-8",
     )
     stub_git.chmod(0o755)
@@ -1530,9 +1626,7 @@ def test_shim_body_contains_no_bare_git_invocation() -> None:
         if re.search(r"(?<![\w./$-])git(?![\w-])", working):
             violations.append(f"{lineno}: {line}")
 
-    assert not violations, "bare git invocation(s) found outside sanctioned idioms:\n" + "\n".join(
-        violations
-    )
+    assert not violations, "bare git invocation(s) found outside sanctioned idioms:\n" + "\n".join(violations)
 
 
 def test_shim_self_corrects_when_path_resolves_to_an_unrelated_shim_copy(

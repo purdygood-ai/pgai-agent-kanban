@@ -54,6 +54,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="version-resolve-bash")
 
+
 _LIB = "scripts/lib/version_resolve.sh"
 
 
@@ -231,15 +232,13 @@ def test_materialize_writes_resolved_tags_tree_to_a_distinct_location(
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
     assert "CLEAN_PATH=" in result.stdout
-    clean_path_line = [
-        line for line in result.stdout.splitlines() if line.startswith("CLEAN_PATH=")
-    ][0]
+    clean_path_line = [line for line in result.stdout.splitlines() if line.startswith("CLEAN_PATH=")][0]
     clean_path = clean_path_line.split("=", 1)[1]
     assert clean_path != str(repo), "materialized tree must live outside the repo's own directory"
     assert "b" in result.stdout
-    assert "C_ABSENT_OK" in result.stdout, (
-        "ai_v1.1.0's tree must not contain c.txt (added only in the tag-2.0.0 commit)"
-    )
+    assert (
+        "C_ABSENT_OK" in result.stdout
+    ), "ai_v1.1.0's tree must not contain c.txt (added only in the tag-2.0.0 commit)"
 
 
 def test_materialize_and_prune_leave_repo_branch_and_worktree_list_unchanged(
@@ -400,9 +399,7 @@ def test_run_with_clean_source_chains_a_preexisting_exit_trap(
     assert "PRE_EXISTING_CLEANUP_RAN" in result.stdout
     # The pre-existing trap must fire at real script exit, i.e. after the
     # "main script continuing" line — not be triggered/consumed mid-run.
-    assert result.stdout.index("main script continuing") < result.stdout.index(
-        "PRE_EXISTING_CLEANUP_RAN"
-    )
+    assert result.stdout.index("main script continuing") < result.stdout.index("PRE_EXISTING_CLEANUP_RAN")
 
 
 # ---------------------------------------------------------------------------
@@ -414,23 +411,17 @@ def test_forward_only_check_allows_strictly_newer_target_cross_decade(
     tmp_path: pathlib.Path,
 ) -> None:
     """v0.17.1 is strictly newer than v0.9.7 (cross-decade ordering, AC5)."""
-    result = run_bash(
-        tmp_path, _source("version_resolve_forward_only_check v0.9.7 v0.17.1")
-    )
+    result = run_bash(tmp_path, _source("version_resolve_forward_only_check v0.9.7 v0.17.1"))
     assert result.returncode == 0
 
 
 def test_forward_only_check_refuses_older_target(tmp_path: pathlib.Path) -> None:
-    result = run_bash(
-        tmp_path, _source("version_resolve_forward_only_check v0.17.1 v0.9.7")
-    )
+    result = run_bash(tmp_path, _source("version_resolve_forward_only_check v0.17.1 v0.9.7"))
     assert result.returncode != 0
 
 
 def test_forward_only_check_refuses_equal_versions(tmp_path: pathlib.Path) -> None:
-    result = run_bash(
-        tmp_path, _source("version_resolve_forward_only_check v0.17.1 v0.17.1")
-    )
+    result = run_bash(tmp_path, _source("version_resolve_forward_only_check v0.17.1 v0.17.1"))
     assert result.returncode != 0
 
 

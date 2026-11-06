@@ -40,24 +40,62 @@ _OTHER_MODEL_CLIS = frozenset({"gemini", "aider", "llm", "ollama"})
 
 #: Modules a model API call goes through: model SDKs and HTTP clients.
 _MODEL_API_MODULES = (
-    "anthropic", "openai", "google.generativeai", "google.genai", "cohere",
-    "mistralai", "litellm", "ollama", "requests", "httpx", "aiohttp",
-    "urllib3", "urllib.request", "http.client",
+    "anthropic",
+    "openai",
+    "google.generativeai",
+    "google.genai",
+    "cohere",
+    "mistralai",
+    "litellm",
+    "ollama",
+    "requests",
+    "httpx",
+    "aiohttp",
+    "urllib3",
+    "urllib.request",
+    "http.client",
 )
 
-_DISPATCH_PATH = re.compile(r"(?:^|[/\s\"'])wake/[A-Za-z0-9_.-]+\.sh\b|\bwake-(?:batch|now)\.sh\b|\bprovider_dispatch\b")
+_DISPATCH_PATH = re.compile(
+    r"(?:^|[/\s\"'])wake/[A-Za-z0-9_.-]+\.sh\b|\bwake-(?:batch|now)\.sh\b|\bprovider_dispatch\b"
+)
 _MODEL_API_URL = re.compile(
     r"https?://[^\s\"']*(?:api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com"
     r"|/v1/messages\b|/v1/chat/completions\b)"
 )
 
-_LAUNCHERS = {
-    ("subprocess", name) for name in ("run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput")
-} | {
-    ("os", name) for name in ("system", "popen", "execv", "execve", "execvp", "execvpe", "execl", "execle",
-                              "execlp", "execlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "spawnl",
-                              "spawnle", "spawnlp", "spawnlpe", "posix_spawn", "posix_spawnp")
-} | {("asyncio", "create_subprocess_exec"), ("asyncio", "create_subprocess_shell")}
+_LAUNCHERS = (
+    {
+        ("subprocess", name)
+        for name in ("run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput")
+    }
+    | {
+        ("os", name)
+        for name in (
+            "system",
+            "popen",
+            "execv",
+            "execve",
+            "execvp",
+            "execvpe",
+            "execl",
+            "execle",
+            "execlp",
+            "execlpe",
+            "spawnv",
+            "spawnve",
+            "spawnvp",
+            "spawnvpe",
+            "spawnl",
+            "spawnle",
+            "spawnlp",
+            "spawnlpe",
+            "posix_spawn",
+            "posix_spawnp",
+        )
+    }
+    | {("asyncio", "create_subprocess_exec"), ("asyncio", "create_subprocess_shell")}
+)
 
 
 def provider_clis() -> frozenset[str]:
@@ -70,8 +108,12 @@ def _docstring_nodes(tree: ast.AST) -> set[int]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             body = node.body
-            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
-                    and isinstance(body[0].value.value, str):
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
                 ids.add(id(body[0].value))
     return ids
 
@@ -175,11 +217,10 @@ def test_the_scan_reports_every_construct_it_forbids(tmp_path: pathlib.Path) -> 
         "URL = 'https://api.anthropic.com/v1/messages'\n",
         encoding="utf-8",
     )
-    (package / "rows.yaml").write_text("# wake-now.sh in a comment is fine\nrun: wake-now.sh --agent pm\n",
-                                       encoding="utf-8")
-    (package / "clean.py").write_text(
-        "import subprocess\nsubprocess.run(['git', 'status'])\n", encoding="utf-8"
+    (package / "rows.yaml").write_text(
+        "# wake-now.sh in a comment is fine\nrun: wake-now.sh --agent pm\n", encoding="utf-8"
     )
+    (package / "clean.py").write_text("import subprocess\nsubprocess.run(['git', 'status'])\n", encoding="utf-8")
 
     found = scan_package(package, provider_clis())
     text = "\n".join(found)

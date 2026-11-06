@@ -98,6 +98,11 @@
 #     Returns 0 if crontab is non-empty.
 #     Intended to be called at the end of install.sh after crontab handling.
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_SAFE_OVERWRITE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _SAFE_OVERWRITE_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # _safe_overwrite_backup_path <target>
 # Internal helper: derive the $HOME/.<basename>.before-install-YYYYMMDD-HHMMSS.bak
@@ -414,7 +419,7 @@ _safe_overwrite_crontab_backups_keep() {
     if [[ -n "$_root" && -f "$_cfg" ]]; then
         if ! declare -F read_ini >/dev/null 2>&1; then
             # shellcheck source=ini_parser.sh
-            source "$(dirname "${BASH_SOURCE[0]}")/ini_parser.sh"
+            source "${_SAFE_OVERWRITE_LIB_DIR}/ini_parser.sh"
         fi
         _value="$(read_ini "$_cfg" install crontab_backups_keep "")" || _value=""
     fi
@@ -429,7 +434,7 @@ _safe_overwrite_crontab_backups_keep() {
     if [[ ! "$_value" =~ ^[0-9]+$ || -z "$_digits" ]]; then
         if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
             # shellcheck source=error_contract.sh
-            source "$(dirname "${BASH_SOURCE[0]}")/error_contract.sh"
+            source "${_SAFE_OVERWRITE_LIB_DIR}/error_contract.sh"
         fi
         # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
         # design, gating a destructive step. The count decides how many

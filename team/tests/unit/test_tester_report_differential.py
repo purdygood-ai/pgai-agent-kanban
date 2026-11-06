@@ -42,7 +42,6 @@ import functools
 import json
 import pathlib
 import re
-from typing import Optional
 
 import pytest
 
@@ -77,7 +76,7 @@ _BUG_ID_RE = re.compile(r"BUG-(\d{4,})", re.IGNORECASE)
 @dataclasses.dataclass(frozen=True)
 class _Row:
     report: str
-    finding: Optional[int]
+    finding: int | None
     field: str
     values: dict
     resolved: str
@@ -131,19 +130,21 @@ def _read_differential(path: pathlib.Path) -> tuple:
             for reader in legacy.READERS
             if reader in cell and cell[reader] != _NOT_READ_CELL
         }
-        rows.append(_Row(
-            report=report,
-            finding=int(finding_cell) if finding_cell.isdigit() else None,
-            field=cell.get("field", ""),
-            values=values,
-            resolved=cell.get("resolved", ""),
-            reason=cell.get("reason", ""),
-            line=number,
-        ))
+        rows.append(
+            _Row(
+                report=report,
+                finding=int(finding_cell) if finding_cell.isdigit() else None,
+                field=cell.get("field", ""),
+                values=values,
+                resolved=cell.get("resolved", ""),
+                reason=cell.get("reason", ""),
+                line=number,
+            )
+        )
     return rows, problems
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _differential() -> tuple:
     return _read_differential(_DIFFERENTIAL)
 
@@ -166,8 +167,7 @@ def _row_text(disagreement: legacy.Disagreement) -> str:
         "",
         disagreement.field,
         *(
-            (_ABSENT_CELL if values[reader] is None else str(values[reader]))
-            if reader in values else _NOT_READ_CELL
+            (_ABSENT_CELL if values[reader] is None else str(values[reader])) if reader in values else _NOT_READ_CELL
             for reader in (legacy.STOP_BUG_FILES, legacy.RESOLUTION_MATRIX)
         ),
         "<resolved value>",
@@ -181,12 +181,12 @@ def _row_text(disagreement: legacy.Disagreement) -> str:
 # ---------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _readings(report_name: str) -> dict:
     return legacy.legacy_readings(_CORPUS / report_name)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _computed_disagreements() -> dict:
     return {
         disagreement.key: disagreement
@@ -195,9 +195,10 @@ def _computed_disagreements() -> dict:
     }
 
 
-def _parsed_value(findings: list, report_fields, finding: Optional[int], field: str):
+def _parsed_value(findings: list, report_fields, finding: int | None, field: str):
     """A field from a parse (Finding objects or golden JSON dicts): the
     finding count for the split, a report-level field, or a finding's."""
+
     def get(obj, name):
         return obj[name] if isinstance(obj, dict) else getattr(obj, name)
 
@@ -297,7 +298,9 @@ def test_each_legacy_consumer_reads_through_its_recorded_reading(
     large = "yes" if any(f["fix_effort"] == "large" for f in shared) else "no"
     values = legacy_ship_policy.report_values(report)
     if values["has_large_fix_effort"] != large:
-        mismatches.append(f"ship-policy has_large_fix_effort: {values['has_large_fix_effort']}, the reading predicts {large}")
+        mismatches.append(
+            f"ship-policy has_large_fix_effort: {values['has_large_fix_effort']}, the reading predicts {large}"
+        )
 
     parsed = legacy_matrix.parse_tester_report_findings(report_path.read_text(encoding="utf-8"))
     all_filed = all(f["filed_as"] is not None for f in matrix)
@@ -337,9 +340,10 @@ def test_differential_lists_exactly_the_reports_where_legacy_readers_disagree() 
         + "\n".join(_row_text(d) for d in missing)
     )
     extra = sorted((row for key, row in listed.items() if key not in computed), key=lambda r: r.line)
-    assert extra == [], (
-        f"{_DIFFERENTIAL.name} lists disagreements the legacy readers do not have; delete these rows: "
-        + ", ".join(f"line {row.line} ({row.report} finding {row.finding} {row.field})" for row in extra)
+    assert (
+        extra == []
+    ), f"{_DIFFERENTIAL.name} lists disagreements the legacy readers do not have; delete these rows: " + ", ".join(
+        f"line {row.line} ({row.report} finding {row.finding} {row.field})" for row in extra
     )
     assert sorted({key[0] for key in listed}) == sorted({key[0] for key in computed})
 
@@ -357,8 +361,12 @@ def test_differential_rows_carry_each_readers_value() -> None:
         else:
             row_values = row.values
         if row_values != expected:
-            wrong.append(f"line {row.line}: lists {row.values}, the readers read {expected} -> {_row_text(disagreement)}")
-    assert wrong == [], f"{_DIFFERENTIAL.name} rows whose reader values are not what the readers read:\n" + "\n".join(wrong)
+            wrong.append(
+                f"line {row.line}: lists {row.values}, the readers read {expected} -> {_row_text(disagreement)}"
+            )
+    assert wrong == [], f"{_DIFFERENTIAL.name} rows whose reader values are not what the readers read:\n" + "\n".join(
+        wrong
+    )
 
 
 def test_every_differential_row_carries_a_resolution_and_a_reason() -> None:

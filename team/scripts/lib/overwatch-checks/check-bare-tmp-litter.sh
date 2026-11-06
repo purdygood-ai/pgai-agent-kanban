@@ -8,19 +8,33 @@
 # task state, and never auto-fixes anything.
 #
 # Detection:
-#   1. Discover all pre-dispatch litter snapshots written by the wake bracket:
-#        ${PGAI_AGENT_KANBAN_TEMP_DIR}/tasks/*/litter/pre_dispatch_tmp_snapshot
+#   1. Discover the pre-dispatch litter snapshots the wake bracket wrote for
+#      the swept project's tasks, in the one directory the wake writes them:
+#        <project temp dir>/tasks/*/litter/pre_dispatch_tmp_snapshot
+#      where <project temp dir> is resolved as described under "Snapshot
+#      discovery root" below. No other directory is read.
 #      Each snapshot records the /tmp state at the moment the agent was dispatched.
-#      Snapshot format:
+#      Snapshot format (written by wake_tmp_litter_take_snapshot in temp.sh):
 #        Line 1: epoch=<N>          — session start epoch (seconds since Unix epoch)
-#        Lines 2+: <mtime_epoch>\t<basename>  — /tmp top-level entries at snapshot time
+#        Lines 2+: one record per /tmp top-level entry, dot-named ones included:
+#          <mtime_epoch>\t<basename>     — a basename without a line feed,
+#                                          byte for byte
+#          esc=<mtime_epoch>\t<escaped>  — a basename holding a line feed,
+#                                          each backslash written `\\` and
+#                                          each line feed `\n`
+#      Everything after a record's first tab is the name. Records are keyed
+#      through temp.sh's _wake_tmp_litter_snapshot_record_key, and /tmp
+#      entries through _wake_tmp_litter_record_key, so an entry matches its
+#      record whatever its name holds.
 #
 #   2. Build the "known task window": the union of all session epochs across
 #      discovered snapshots.  The earliest session start and the latest mtime
 #      in any snapshot bracket the window inside which a /tmp entry is
 #      "framework-session-attributed."
 #
-#   3. Scan /tmp top-level entries and flag each that satisfies ALL of:
+#   3. Scan /tmp top-level entries, dot-named ones included (enumerated in a
+#      subshell, so the caller's dotglob and other shell options are left as
+#      they were), and flag each that satisfies ALL of:
 #        a. Owned by the framework user (the OS user running the kanban).
 #        b. mtime is AFTER the earliest known task session start epoch.
 #        c. Not present in ANY snapshot's pre-session name set
@@ -34,12 +48,29 @@
 #
 # Dedup state file:
 #   ${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}/overwatch/litter-reported.txt
-#   One line per reported /tmp basename; check only ever appends.
+#   One LF-terminated line per reported /tmp basename; check only ever appends.
+#     <basename>       — a basename without a line feed, byte for byte
+#     esc=<escaped>    — a basename holding a line feed, escaped as in the
+#                        snapshot's esc= record
+#   On read every line suppresses the basename it spells byte for byte, and
+#   an esc= line also suppresses the line-feed name it decodes to, so a
+#   plain name that happens to start with `esc=` still deduplicates.
 #   Reset the file to re-report already-flagged entries (operator action).
 #
 # Snapshot discovery root:
-#   Resolved via PGAI_AGENT_KANBAN_TEMP_DIR (env var) or the kanban default
-#   temp root (see team/scripts/lib/temp.sh for the resolution order and fallback).
+#   <project temp dir> is the PP_TEMP_DIR that pp_load_config
+#   (team/scripts/lib/project_paths.sh) exports for OVERWATCH_PROJECT -- the
+#   same value wake_bracket_pre_dispatch writes under -- so with <temp root>
+#   the framework temp root:
+#     <temp root>/projects/<project>  -- project.cfg sets no [project] temp_dir
+#     <temp root>/<temp_dir>          -- project.cfg [project] temp_dir is set
+#     <temp root>                     -- the project has no config file
+#                                        (pp_load_config fails; the wake then
+#                                        falls back to pgai_temp_dir too)
+#   <temp root> is PGAI_AGENT_KANBAN_TEMP_DIR or the kanban default temp root
+#   (see team/scripts/lib/temp.sh for the resolution order and fallback).
+#   The value is resolved fresh for every sweep; an inherited PP_TEMP_DIR is
+#   never used, since the sweep runner does not set it per project.
 #
 # Module contract:
 #   - Sourceable without side effects.
@@ -49,7 +80,8 @@
 #     not fatal to the sweep).
 #
 # Required environment variables (set by OVERWATCH driver or sweep runner):
-#   KANBAN_ROOT        — absolute path to the kanban root
+#   KANBAN_ROOT        — absolute path to the kanban root (its
+#                        projects/<project>/project.cfg names the temp_dir)
 #   OVERWATCH_PROJECT  — project name (e.g. "pgai-agent-kanban")
 #
 # Optional:
@@ -61,59 +93,57 @@
 # Exit codes:
 #   0 — always (REPORT-ONLY check)
 
+# This file's directory, as an absolute path
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CBTL_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CBTL_SELF_DIR=""
+
 # overwatch_registered_projects: the shared projects.cfg reader.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
 # ---------------------------------------------------------------------------
 # _cbtl_resolve_env
-# Resolve KANBAN_ROOT and OVERWATCH_PROJECT from the environment.
+# Resolve KANBAN_ROOT and OVERWATCH_PROJECT from the environment, and load
+# the temp root resolver (temp.sh) and the project config loader
+# (project_paths.sh) from beside this tree when the caller has not.
 # Sets _CBTL_FW_TEMP_ROOT in the calling scope.
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _cbtl_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-bare-tmp-litter: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-bare-tmp-litter: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-bare-tmp-litter: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-bare-tmp-litter || return 1
 
     # Resolve the framework temp root via temp.sh's pgai_temp_dir, the one
     # resolver. A missing temp.sh beside this tree is a broken install: say
     # so, naming the path, rather than guessing the root by hand.
-    local _temp_sh=""
-    if ! declare -f pgai_temp_dir >/dev/null 2>&1; then
-        local _lib_dir
-        _lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || true
-        _temp_sh="${_lib_dir}/../temp.sh"
+    # The same file carries the snapshot record-key helpers the scan keys
+    # every name through.
+    local _temp_sh="${_CBTL_SELF_DIR}/../temp.sh"
+    if ! declare -f pgai_temp_dir >/dev/null 2>&1 \
+        || ! declare -f _wake_tmp_litter_record_key >/dev/null 2>&1 \
+        || ! declare -f _wake_tmp_litter_snapshot_record_key >/dev/null 2>&1; then
         if [[ -f "${_temp_sh}" ]]; then
             # shellcheck source=/dev/null
             source "${_temp_sh}"
         fi
     fi
 
-    if ! declare -f pgai_temp_dir >/dev/null 2>&1; then
-        echo "check-bare-tmp-litter: WARNING: temp root resolver not found at ${_temp_sh}; skipping temp-root resolution" >&2
+    if ! declare -f pgai_temp_dir >/dev/null 2>&1 \
+        || ! declare -f _wake_tmp_litter_record_key >/dev/null 2>&1 \
+        || ! declare -f _wake_tmp_litter_snapshot_record_key >/dev/null 2>&1; then
+        echo "check-bare-tmp-litter: WARNING: temp root resolver or litter record-key helpers not found at ${_temp_sh}; skipping the check (reinstall the kanban so lib/temp.sh is present)" >&2
+        return 1
+    fi
+
+    # pp_load_config resolves the project temp dir the wake writes
+    # snapshots under; the check reads only that directory.
+    local _project_paths_sh="${_CBTL_SELF_DIR}/../project_paths.sh"
+    if ! declare -f pp_load_config >/dev/null 2>&1 && [[ -f "${_project_paths_sh}" ]]; then
+        # shellcheck source=/dev/null
+        source "${_project_paths_sh}"
+    fi
+    if ! declare -f pp_load_config >/dev/null 2>&1; then
+        echo "check-bare-tmp-litter: WARNING: project config loader pp_load_config not found at ${_project_paths_sh}; skipping the check (reinstall the kanban so lib/project_paths.sh is present)" >&2
         return 1
     fi
     _CBTL_FW_TEMP_ROOT="$(pgai_temp_dir)"
@@ -131,7 +161,8 @@ _cbtl_load_protocol() {
         return 0
     fi
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+    lib_dir="${_CBTL_SELF_DIR}"
+    [[ -n "${lib_dir}" ]] || {
         echo "check-bare-tmp-litter: cannot resolve lib dir" >&2
         return 1
     }
@@ -145,16 +176,37 @@ _cbtl_load_protocol() {
 }
 
 # ---------------------------------------------------------------------------
-# _cbtl_discover_snapshots <fw_temp_root>
-# Print one snapshot path per line for all discovered pre-dispatch snapshot files.
-# Outputs to stdout; returns 0 (missing temp root is not an error — just no sessions).
+# _cbtl_project_temp_dir <project> <fw_temp_root>
+# Echo the temp dir wake_bracket_pre_dispatch writes <project>'s snapshots
+# under: the PP_TEMP_DIR pp_load_config exports for <project>, or
+# <fw_temp_root> when pp_load_config fails (no config file), the wake's own
+# pgai_temp_dir fallback. pp_load_config runs in a subshell, so none of the
+# PP_* names it exports reaches the sweep, and an inherited PP_TEMP_DIR
+# never stands in for the project's own.
+# ---------------------------------------------------------------------------
+_cbtl_project_temp_dir() {
+    local project="$1"
+    local fw_temp_root="$2"
+    local dir=""
+    if dir="$(pp_load_config "${project}" >/dev/null 2>&1 && printf '%s' "${PP_TEMP_DIR:-}")" \
+        && [[ -n "${dir}" ]]; then
+        printf '%s' "${dir}"
+    else
+        printf '%s' "${fw_temp_root}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# _cbtl_discover_snapshots <project_temp_dir>
+# Print one path per line for every pre-dispatch snapshot file at
+# <project_temp_dir>/tasks/*/litter/pre_dispatch_tmp_snapshot.
+# Outputs to stdout; returns 0 (a missing directory is not an error — just no sessions).
 # ---------------------------------------------------------------------------
 _cbtl_discover_snapshots() {
-    local fw_temp_root="$1"
-    local snap_glob="${fw_temp_root}/tasks/*/litter/pre_dispatch_tmp_snapshot"
+    local project_temp_dir="$1"
 
     local f
-    for f in ${snap_glob}; do
+    for f in "${project_temp_dir}"/tasks/*/litter/pre_dispatch_tmp_snapshot; do
         [[ -f "$f" ]] || continue
         echo "$f"
     done
@@ -164,11 +216,13 @@ _cbtl_discover_snapshots() {
 # _cbtl_read_snapshot <snapshot_file> <epoch_var> <pre_names_assoc>
 # Read a snapshot file into caller-scoped variables.
 #   <epoch_var>       — name of a variable to set to the session epoch (integer)
-#   <pre_names_assoc> — name of an associative array to populate with pre-session basenames
+#   <pre_names_assoc> — name of an associative array to populate with the
+#                       record key (_wake_tmp_litter_record_key) of every
+#                       pre-session entry
 #
-# Snapshot format:
-#   Line 1: epoch=<N>
-#   Lines 2+: <mtime_epoch>\t<basename>
+# Snapshot format (see the header): line 1 `epoch=<N>`, then one
+# `<mtime_epoch>\t<basename>` or `esc=<mtime_epoch>\t<escaped>` record per
+# entry, keyed by _wake_tmp_litter_snapshot_record_key (temp.sh).
 #
 # Returns 0 on success, 1 on error.
 # ---------------------------------------------------------------------------
@@ -191,13 +245,74 @@ _cbtl_read_snapshot() {
         printf -v "${epoch_var}" '%s' "0"
     fi
 
-    # Read pre-session names
-    while IFS=$'\t' read -r _mt _bn; do
-        [[ -z "${_bn}" || "${_bn}" == epoch=* ]] && continue
-        _cbtl_pre_names["${_bn}"]=1
+    # Read pre-session record keys
+    local _cbtl_rec _cbtl_rec_key
+    while IFS= read -r _cbtl_rec; do
+        _wake_tmp_litter_snapshot_record_key _cbtl_rec_key "${_cbtl_rec}" || continue
+        _cbtl_pre_names["${_cbtl_rec_key}"]=1
     done < <(tail -n +2 "${snapshot_file}" 2>/dev/null)
 
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cbtl_read_dedup <dedup_file> <reported_assoc>
+# Populate the caller's associative array <reported_assoc> with the record
+# keys (_wake_tmp_litter_record_key) the dedup file suppresses: `r:<line>`
+# for every non-empty line, plus `e:<escaped>` for a line `esc=<escaped>`.
+# A missing file suppresses nothing.
+# ---------------------------------------------------------------------------
+_cbtl_read_dedup() {
+    local dedup_file="$1"
+    local -n _cbtl_reported="$2"  # nameref to caller's assoc array
+    [[ -f "${dedup_file}" ]] || return 0
+    local _cbtl_line
+    while IFS= read -r _cbtl_line; do
+        [[ -z "${_cbtl_line}" ]] && continue
+        _cbtl_reported["r:${_cbtl_line}"]=1
+        if [[ "${_cbtl_line}" == esc=* ]]; then
+            _cbtl_reported["e:${_cbtl_line#esc=}"]=1
+        fi
+    done < "${dedup_file}"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cbtl_dedup_line <out_var> <basename>
+# Assign to <out_var> the dedup-file line recording <basename>: the name
+# itself when it holds no line feed, `esc=<escaped>` (the escaping of
+# _wake_tmp_litter_record_key) when it does, so the line round-trips through
+# _cbtl_read_dedup to the key the scan looks the entry up by.
+# ---------------------------------------------------------------------------
+_cbtl_dedup_line() {
+    local _cbtl_key
+    _wake_tmp_litter_record_key _cbtl_key "$2"
+    if [[ "${_cbtl_key}" == e:* ]]; then
+        printf -v "$1" 'esc=%s' "${_cbtl_key#e:}"
+    else
+        printf -v "$1" '%s' "$2"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# _cbtl_list_tmp_entries
+# Print every top-level /tmp entry path, dot-named ones included, each
+# NUL-terminated so a name holding a line feed (trailing or not) survives
+# intact. The glob runs in a subshell with its own glob settings, so the
+# caller's dotglob, nullglob, failglob and GLOBIGNORE are never touched;
+# `.` and `..` never match.
+# ---------------------------------------------------------------------------
+_cbtl_list_tmp_entries() {
+    (
+        unset GLOBIGNORE
+        shopt -s dotglob nullglob
+        shopt -u failglob
+        local _cbtl_entry
+        for _cbtl_entry in /tmp/*; do
+            [[ -e "${_cbtl_entry}" || -L "${_cbtl_entry}" ]] || continue
+            printf '%s\0' "${_cbtl_entry}"
+        done
+    )
 }
 
 # ---------------------------------------------------------------------------
@@ -250,6 +365,11 @@ overwatch_check_bare_tmp_litter() {
 
     echo "check-bare-tmp-litter: framework user=${fw_user} fw_temp_root=${fw_temp_root}" >&2
 
+    # The one directory the wake writes this project's snapshots under.
+    local project_temp_dir snap_dir
+    project_temp_dir="$(_cbtl_project_temp_dir "${project}" "${fw_temp_root}")"
+    snap_dir="${project_temp_dir}/tasks/*/litter/"
+
     # Resolve the framework temp root basename for exclusion.
     local fw_temp_basename
     fw_temp_basename="$(basename "${fw_temp_root}")"
@@ -258,9 +378,9 @@ overwatch_check_bare_tmp_litter() {
     local snapshots=()
     while IFS= read -r snap; do
         snapshots+=("${snap}")
-    done < <(_cbtl_discover_snapshots "${fw_temp_root}")
+    done < <(_cbtl_discover_snapshots "${project_temp_dir}")
 
-    echo "check-bare-tmp-litter: discovered ${#snapshots[@]} snapshot(s) under ${fw_temp_root}/tasks/" >&2
+    echo "check-bare-tmp-litter: discovered ${#snapshots[@]} snapshot(s) under ${snap_dir}" >&2
 
     if [[ "${#snapshots[@]}" -eq 0 ]]; then
         echo "check-bare-tmp-litter: no task snapshots found; nothing to check" >&2
@@ -269,7 +389,7 @@ overwatch_check_bare_tmp_litter() {
             "${project}" \
             "skipped-no-snapshots" \
             "none" \
-            "No pre-dispatch litter snapshots found under ${fw_temp_root}/tasks/; nothing to check" \
+            "No pre-dispatch litter snapshots found under ${snap_dir}; nothing to check" \
         || true
         return 0
     fi
@@ -281,12 +401,12 @@ overwatch_check_bare_tmp_litter() {
     # before ANY session.  This is conservative: we skip entries present
     # before any session started rather than trying to correlate per-task.
     local earliest_epoch=0
-    declare -A _all_pre_names  # basename -> 1
+    declare -A _all_pre_names=()  # record key -> 1
 
     local snap
     for snap in "${snapshots[@]}"; do
         local snap_epoch=0
-        declare -A _snap_pre_names
+        declare -A _snap_pre_names=()
 
         if _cbtl_read_snapshot "${snap}" snap_epoch _snap_pre_names; then
             if [[ "${snap_epoch}" -gt 0 ]]; then
@@ -308,23 +428,19 @@ overwatch_check_bare_tmp_litter() {
     echo "check-bare-tmp-litter: earliest_session_epoch=${earliest_epoch} known_pre_names=${#_all_pre_names[@]}" >&2
 
     # Load the dedup state file into memory.
-    declare -A _already_reported  # basename -> 1
-    if [[ -f "${dedup_file}" ]]; then
-        while IFS= read -r _bn; do
-            [[ -z "${_bn}" ]] && continue
-            _already_reported["${_bn}"]=1
-        done < "${dedup_file}"
-    fi
-    echo "check-bare-tmp-litter: already_reported=${#_already_reported[@]} entries in dedup file" >&2
+    declare -A _already_reported=()  # record key -> 1
+    _cbtl_read_dedup "${dedup_file}" _already_reported
+    echo "check-bare-tmp-litter: already_reported=${#_already_reported[@]} keys from dedup file" >&2
 
-    # Scan /tmp top-level entries.
+    # Scan /tmp top-level entries, dot-named ones included. Each basename is
+    # cut from its path by parameter expansion, which keeps a trailing line
+    # feed that $(basename ...) would strip.
     local flagged=()
     local entry
-    for entry in /tmp/*; do
-        [[ -e "${entry}" || -L "${entry}" ]] || continue
-
-        local bn
-        bn="$(basename "${entry}")"
+    while IFS= read -r -d '' entry; do
+        local bn key
+        bn="${entry#/tmp/}"
+        _wake_tmp_litter_record_key key "${bn}"
 
         # Skip the framework temp root.
         [[ "${bn}" == "${fw_temp_basename}" ]] && continue
@@ -337,10 +453,10 @@ overwatch_check_bare_tmp_litter() {
         esac
 
         # Skip entries already reported.
-        [[ -n "${_already_reported[${bn}]+_}" ]] && continue
+        [[ -n "${_already_reported[${key}]+_}" ]] && continue
 
         # Skip entries that were present before any known session (not litter).
-        [[ -n "${_all_pre_names[${bn}]+_}" ]] && continue
+        [[ -n "${_all_pre_names[${key}]+_}" ]] && continue
 
         # Check ownership — only flag entries owned by the framework user.
         local owner
@@ -364,7 +480,7 @@ overwatch_check_bare_tmp_litter() {
 
         # All gates passed — this entry is candidate litter.
         flagged+=("${bn}")
-    done
+    done < <(_cbtl_list_tmp_entries)
 
     echo "check-bare-tmp-litter: flagged ${#flagged[@]} new litter entry(ies)" >&2
 
@@ -392,8 +508,11 @@ overwatch_check_bare_tmp_litter() {
 
         echo "check-bare-tmp-litter: flagged /tmp/${bn} (owner=${fw_user}; litter from crashed session)" >&2
 
-        # Append to the dedup state file so this entry is not re-reported.
-        printf '%s\n' "${bn}" >> "${dedup_file}" 2>/dev/null || \
+        # Append to the dedup state file so this entry is not re-reported:
+        # one line whatever the name holds (_cbtl_dedup_line).
+        local dedup_line
+        _cbtl_dedup_line dedup_line "${bn}"
+        printf '%s\n' "${dedup_line}" >> "${dedup_file}" 2>/dev/null || \
             echo "check-bare-tmp-litter: WARNING: failed to write dedup entry for ${bn} to ${dedup_file}" >&2
     done
 

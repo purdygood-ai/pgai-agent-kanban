@@ -104,6 +104,11 @@ fi
 # shellcheck source=release_version_file.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release_version_file.sh"
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_CM_RELEASE_NOTES_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _CM_RELEASE_NOTES_LIB_DIR=""
+
 # Step 11b's scratch render goes under the framework temp root, resolved by
 # the shared wrapper one directory up (scripts/lib/temp.sh in the repo and
 # the installed layout alike). A missing copy exits here, at source time --
@@ -197,13 +202,13 @@ cm_release_generate_notes() {
               -name "${ACTIVE_RC}-*.md" -print0 2>/dev/null | sort -z)
   fi
 
-  # Directory this file itself lives in -- resolved via BASH_SOURCE, never
+  # Directory this file itself lives in -- resolved at load, never
   # guessed, so the lookup stays correct in both the dev-tree layout
   # (team/scripts/lib/cm/) and the flattened installed layout
   # (scripts/lib/cm/). Passed to the generator via
   # PGAI_CM_INTERNAL_ID_SCRUB_DIR so it loads the shared internal-ID scrub
   # (internal_id_scrub.py, ships beside this file) from this same tree.
-  _cm_release_notes_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _cm_release_notes_lib_dir="${_CM_RELEASE_NOTES_LIB_DIR}"
 
   # Generate the structured release notes file with the package module
   # pgai_agent_kanban.cm.release_notes_generator (its module docstring

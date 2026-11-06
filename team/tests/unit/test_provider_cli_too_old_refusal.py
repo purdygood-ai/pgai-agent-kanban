@@ -110,9 +110,7 @@ def _install_fake_claude(tmp_path: pathlib.Path) -> pathlib.Path:
     return bin_dir
 
 
-def _env_with_fake_claude(
-    bin_dir: pathlib.Path, *, mode: str = "ok", version: str = "2.1.276"
-) -> dict[str, str]:
+def _env_with_fake_claude(bin_dir: pathlib.Path, *, mode: str = "ok", version: str = "2.1.276") -> dict[str, str]:
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["FAKE_CLAUDE_MODE"] = mode
@@ -125,9 +123,7 @@ def _env_with_fake_claude(
 
 
 def _run(harness: str, env: dict[str, str], timeout: float = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", "-c", harness], capture_output=True, text=True, env=env, timeout=timeout
-    )
+    return subprocess.run(["bash", "-c", harness], capture_output=True, text=True, env=env, timeout=timeout)
 
 
 def _provider_header(tmp_path: pathlib.Path) -> str:
@@ -172,9 +168,7 @@ def _extract_function_snippet(func_name: str, source_file: pathlib.Path) -> str:
     """)
 
 
-def _write_status_file(
-    tmp_path: pathlib.Path, task_id: str, *, state: str, zero_progress_count: int
-) -> pathlib.Path:
+def _write_status_file(tmp_path: pathlib.Path, task_id: str, *, state: str, zero_progress_count: int) -> pathlib.Path:
     """A real-shaped status.md carrying an existing durable ## Zero Progress
     record, so "not incremented" is observable as an unchanged count rather
     than as an absent section."""
@@ -279,9 +273,7 @@ echo; echo "RC=$rc"
         "",
     ],
 )
-def test_other_provider_failures_never_match_the_cli_too_old_signature(
-    tmp_path: pathlib.Path, text: str
-) -> None:
+def test_other_provider_failures_never_match_the_cli_too_old_signature(tmp_path: pathlib.Path, text: str) -> None:
     """A transient error, a different 400, a safeguard refusal, a rate limit,
     or empty output is not this condition -- each keeps its own handling."""
     bin_dir = _install_fake_claude(tmp_path)

@@ -245,7 +245,9 @@ temp_purge_remove() {
         _reap_out="$(pp_run_ops pgai_agent_kanban.lib.process_reap "${_reap_args[@]}" 2>&1)" || _reap_rc=$?
         while IFS= read -r _reap_line; do
             [[ -n "$_reap_line" ]] || continue
-            if [[ "$DRY_RUN" == "true" ]]; then
+            if [[ "$_reap_line" != pid=* ]]; then
+                log "temp purge: process scan of $_path: $_reap_line"
+            elif [[ "$DRY_RUN" == "true" ]]; then
                 log "[DRY-RUN] temp purge: would stop a process running in $_path: $_reap_line"
             else
                 log "temp purge: stopped a process running in $_path before removing it: $_reap_line"

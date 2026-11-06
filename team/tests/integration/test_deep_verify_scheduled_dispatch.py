@@ -37,7 +37,6 @@ import os
 import pathlib
 import subprocess
 
-import pytest
 
 from tests.fixtures.scrubbed_subprocess_env import scrub_agent_scoped_env
 

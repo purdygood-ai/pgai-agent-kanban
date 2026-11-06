@@ -54,8 +54,7 @@ def _bundle(
 def _query(tmp_path: pathlib.Path, req_dir: pathlib.Path, type_slug: str):
     result = run_bash(
         tmp_path,
-        f"source {_STATE_LIB} && source {_STEPS_LIB} && "
-        f"_disc_pending_bundle_of_type '{req_dir}' '{type_slug}'",
+        f"source {_STATE_LIB} && source {_STEPS_LIB} && " f"_disc_pending_bundle_of_type '{req_dir}' '{type_slug}'",
     )
     return result
 
@@ -147,9 +146,7 @@ class TestDoneBundleIsNotPending:
         assert result.returncode != 0, result.stdout
         assert result.stdout.strip() == "", result.stdout
 
-    def test_done_bundle_alongside_a_pending_one_reports_only_the_pending_one(
-        self, tmp_path
-    ):
+    def test_done_bundle_alongside_a_pending_one_reports_only_the_pending_one(self, tmp_path):
         req_dir = tmp_path / "requirements"
         _bundle(req_dir, "v1.2.1-bugfix-bundle-20260901.md", status="done")
         pending = _bundle(req_dir, "v1.2.3-bugfix-bundle-20260923.md", status="open")

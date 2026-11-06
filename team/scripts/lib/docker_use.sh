@@ -62,6 +62,11 @@
 [[ -n "${_PGAI_DOCKER_USE_SH_LOADED:-}" ]] && return 0
 _PGAI_DOCKER_USE_SH_LOADED=1
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_DOCKER_USE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _DOCKER_USE_LIB_DIR=""
+
 _DOCKER_USE_WARNED=0
 
 docker_use_log_path() {
@@ -108,11 +113,6 @@ _docker_use_on_exit() {
             "duration=${duration}s" "exit=${rc}"
         _DOCKER_USE_SESSION_SCRIPT=""
     fi
-    if [[ -n "${_DOCKER_USE_PREV_EXIT_TRAP:-}" ]]; then
-        # Hand the previous handler the same $? it would have seen.
-        ( exit "$rc" )
-        eval "${_DOCKER_USE_PREV_EXIT_TRAP}"
-    fi
     return "$rc"
 }
 
@@ -129,10 +129,12 @@ docker_use_session_begin() {
     _DOCKER_USE_SESSION_START="$(date +%s)"
     docker_use_record START "$script_name" "$images"
 
-    local -a _prev=()
-    eval "_prev=($(trap -p EXIT))"
-    _DOCKER_USE_PREV_EXIT_TRAP="${_prev[2]:-}"
-    trap _docker_use_on_exit EXIT
+    # Chained after the caller's own EXIT trap, which still runs.
+    if ! declare -F exit_trap_add >/dev/null 2>&1; then
+        # shellcheck source=scripts/lib/exit_trap.sh
+        source "${_DOCKER_USE_LIB_DIR}/exit_trap.sh"
+    fi
+    exit_trap_add _docker_use_on_exit
     return 0
 }
 

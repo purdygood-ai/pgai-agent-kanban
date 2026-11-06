@@ -53,7 +53,7 @@
 # Argument parsing
 # Done before strict mode so error messages print cleanly on bad flags.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source operator_args.sh (canonical flag parsing and --help rendering).
 # shellcheck source=lib/operator_args.sh

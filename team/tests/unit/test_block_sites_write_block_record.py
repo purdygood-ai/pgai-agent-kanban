@@ -36,7 +36,7 @@ import pathlib
 import re
 import subprocess
 import textwrap
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 
@@ -116,8 +116,14 @@ def _status_text(state: str = "WORKING", extra: str = "") -> str:
         """) + extra
 
 
-def _make_sandbox(tmp_path: pathlib.Path, *, role: str | None = "CODER", state: str = "WORKING",
-                  status_extra: str = "", readme_extra: str = "") -> Sandbox:
+def _make_sandbox(
+    tmp_path: pathlib.Path,
+    *,
+    role: str | None = "CODER",
+    state: str = "WORKING",
+    status_extra: str = "",
+    readme_extra: str = "",
+) -> Sandbox:
     sb = Sandbox(tmp_path / "kanban")
     sb.task_dir.mkdir(parents=True)
     (sb.task_dir / "logs").mkdir()
@@ -168,10 +174,22 @@ def _write_dispatch(sb: Sandbox, tail: str, *, span_seconds: int) -> None:
     minute, second = divmod(span_seconds, 60)
     ledger = sb.task_dir / "logs" / "dispatch.jsonl"
     rows = [
-        {"event": "dispatched", "batch_log": str(sb.batch_log), "offset_start": start,
-         "offset_end": None, "exit_code": None, "recorded_at": "2026-01-01T10:00:00Z"},
-        {"event": "returned", "batch_log": str(sb.batch_log), "offset_start": start,
-         "offset_end": end, "exit_code": 0, "recorded_at": f"2026-01-01T10:{minute:02d}:{second:02d}Z"},
+        {
+            "event": "dispatched",
+            "batch_log": str(sb.batch_log),
+            "offset_start": start,
+            "offset_end": None,
+            "exit_code": None,
+            "recorded_at": "2026-01-01T10:00:00Z",
+        },
+        {
+            "event": "returned",
+            "batch_log": str(sb.batch_log),
+            "offset_start": start,
+            "offset_end": end,
+            "exit_code": 0,
+            "recorded_at": f"2026-01-01T10:{minute:02d}:{second:02d}Z",
+        },
     ]
     ledger.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
@@ -201,7 +219,8 @@ def _extract(names: list[str], source: pathlib.Path) -> str:
 
 def _prelude(sb: Sandbox) -> str:
     """Shared bash prelude: real status writers and Block Record helpers, stubbed markers."""
-    return textwrap.dedent(f"""\
+    return (
+        textwrap.dedent(f"""\
         set -euo pipefail
         cd '{_TEAM_DIR}'
         export LOG_FILE='{sb.batch_log}'
@@ -211,12 +230,23 @@ def _prelude(sb: Sandbox) -> str:
         source '{_LIB}/error_contract.sh'
         source '{_LIB}/block_record.sh'
         source '{_LIB}/md_field.sh'
-        """) + _extract(
-        ["ensure_status_file", "_read_status_section", "get_state", "normalize_status_file",
-         "set_state", "set_block", "set_state_or_insert", "set_block_or_append",
-         "block_task_with_record", "block_task_with_unreadable_state"],
-        _LIB / "wake_task_state.sh",
-    ) + textwrap.dedent(f"""\
+        """)
+        + _extract(
+            [
+                "ensure_status_file",
+                "_read_status_section",
+                "get_state",
+                "normalize_status_file",
+                "set_state",
+                "set_block",
+                "set_state_or_insert",
+                "set_block_or_append",
+                "block_task_with_record",
+                "block_task_with_unreadable_state",
+            ],
+            _LIB / "wake_task_state.sh",
+        )
+        + textwrap.dedent(f"""\
         mark_backlog() {{ echo "$1 [$2]" >> '{sb.root}/markers.log'; }}
         transition_task_state() {{ set_state "$2" "$3"; }}
         task_id='{_TASK_ID}'
@@ -228,6 +258,7 @@ def _prelude(sb: Sandbox) -> str:
         KANBAN_ROOT='{sb.root}'
         LAST_TASK_FINAL_STATE=""
         """)
+    )
 
 
 def _run(sb: Sandbox, body: str) -> subprocess.CompletedProcess:
@@ -236,7 +267,11 @@ def _run(sb: Sandbox, body: str) -> subprocess.CompletedProcess:
         extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(sb.root / "tmp"), "PGAI_AGENT_KANBAN_ROOT_PATH": str(sb.root)},
     )
     result = subprocess.run(
-        ["bash", "-c", _prelude(sb) + body], capture_output=True, text=True, timeout=120, env=env,
+        ["bash", "-c", _prelude(sb) + body],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
     )
     assert result.returncode == 0, f"site driver failed (exit {result.returncode}):\n{result.stderr}"
     return result
@@ -249,29 +284,38 @@ def _run(sb: Sandbox, body: str) -> subprocess.CompletedProcess:
 
 def _drive_missing_readme(tmp_path):
     sb = _make_sandbox(tmp_path, role=None)
-    _run(sb, _extract(["process_one_task"], _LIB / "wake_driver.sh") + textwrap.dedent("""\
+    _run(
+        sb,
+        _extract(["process_one_task"], _LIB / "wake_driver.sh") + textwrap.dedent("""\
         _PENDING_TASK="$task_id"
         AGENT=writer
         _resolve_debug_gate() { echo false; }
         get_first_pending_task() { echo "${_PENDING_TASK}"; }
         setup_project_directories() { :; }
         process_one_task
-        """))
+        """),
+    )
     return sb
 
 
 def _prep_body(agent: str, effort: str) -> str:
     return _extract(
-        ["get_role_from_readme", "get_assigned_agent_from_readme", "role_is_valid_agent",
-         "get_model_override_from_readme"],
+        [
+            "get_role_from_readme",
+            "get_assigned_agent_from_readme",
+            "role_is_valid_agent",
+            "get_model_override_from_readme",
+        ],
         _LIB / "wake_readme_meta.sh",
-    ) + textwrap.dedent(f"""\
+    ) + textwrap.dedent(
+        f"""\
         source '{_LIB}/wake_driver_prep.sh'
         AGENT={agent}; ACTIVE_PROVIDER=claude; _CURRENT_PROJECT=demo; _debug_gate=false
         role=""; SUBAGENT=""; selected_model=""; model_source=""; selected_effort=""; effort_source=""; task_debug_log=""
         {effort}
         wd_prepare_task
-        """)
+        """
+    )
 
 
 def _drive_invalid_assignment(tmp_path):
@@ -326,16 +370,22 @@ def _drive_workflow_type(tmp_path):
     # when the reader itself fails, which the stub reproduces.
     sb = _make_sandbox(tmp_path, role="CODER", readme_extra=_SOURCE_BRANCH_FIELD)
     _make_repo(sb)
-    _run(sb, _worktree_body(sb, subagent="coder", role="CODER",
-                            stubs="get_workflow_type_from_readme() { return 1; }"))
+    _run(sb, _worktree_body(sb, subagent="coder", role="CODER", stubs="get_workflow_type_from_readme() { return 1; }"))
     return sb
 
 
 def _drive_plugin_load(tmp_path):
     sb = _make_sandbox(tmp_path, role="WRITER", readme_extra=_SOURCE_BRANCH_FIELD)
     _make_repo(sb)
-    _run(sb, _worktree_body(sb, subagent="writer", role="WRITER",
-                            stubs='wf_load_plugin() { WF_LOAD_ERROR="manifest missing"; return 1; }'))
+    _run(
+        sb,
+        _worktree_body(
+            sb,
+            subagent="writer",
+            role="WRITER",
+            stubs='wf_load_plugin() { WF_LOAD_ERROR="manifest missing"; return 1; }',
+        ),
+    )
     return sb
 
 
@@ -363,8 +413,15 @@ def _drive_worktree_create_rc_missing(tmp_path):
 def _drive_tester_plugin_load(tmp_path):
     sb = _make_sandbox(tmp_path, role="TESTER", readme_extra=_SOURCE_BRANCH_FIELD)
     _make_repo(sb)
-    _run(sb, _worktree_body(sb, subagent="tester", role="TESTER",
-                            stubs='wf_load_plugin() { WF_LOAD_ERROR="manifest missing"; return 1; }'))
+    _run(
+        sb,
+        _worktree_body(
+            sb,
+            subagent="tester",
+            role="TESTER",
+            stubs='wf_load_plugin() { WF_LOAD_ERROR="manifest missing"; return 1; }',
+        ),
+    )
     return sb
 
 
@@ -384,9 +441,14 @@ def _drive_tester_worktree_create(tmp_path):
 
 def _drive_per_task_timeout(tmp_path):
     sb = _make_sandbox(tmp_path, role="WRITER")
+    # A spent requeue budget: a timeout after committed work is blocked, not
+    # requeued onto its branch, so the block site's record and evidence show.
+    (sb.root / "kanban.cfg").write_text("[overwatch]\nrequeue_budget = 0\n", encoding="utf-8")
     _make_repo(sb, feature_commits=2)
     _write_dispatch(sb, "agent working\nagent still working\n", span_seconds=3000)
-    _run(sb, textwrap.dedent(f"""\
+    _run(
+        sb,
+        textwrap.dedent(f"""\
         source '{_LIB}/wake_driver_finalize.sh'
         narrate_model_mismatch() {{ :; }}
         metrics_rollup_refresh_for_task() {{ :; }}
@@ -401,7 +463,8 @@ def _drive_per_task_timeout(tmp_path):
         _task_worktree_path='{sb.repo}'; _task_feature_branch='{_FEATURE_BRANCH}'; _task_source_branch='{_RC_BRANCH}'
         _canonical_dev_tree_path='{sb.repo}'; _park_resting_branch=""
         wd_finalize_task
-        """))
+        """),
+    )
     return sb
 
 
@@ -421,18 +484,33 @@ _TRANSIENT_TAIL = "agent working\nAPI Error: 529 overloaded_error\n"
 def _drive_transient_below_cap(tmp_path):
     sb = _make_sandbox(tmp_path, role="CODER")
     _write_dispatch(sb, _TRANSIENT_TAIL, span_seconds=900)
-    _run(sb, _lifecycle_body('role=CODER; SUBAGENT=coder; TRANSIENT_RETRY_CAP=3; '
-                             'handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" 1 >/dev/null'))
+    _run(
+        sb,
+        _lifecycle_body(
+            "role=CODER; SUBAGENT=coder; TRANSIENT_RETRY_CAP=3; "
+            'handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" 1 >/dev/null'
+        ),
+    )
     return sb
 
 
 def _drive_transient_at_cap(tmp_path):
-    sb = _make_sandbox(tmp_path, role="CODER", status_extra=(
-        "\n## Transient Retry\nreason_code: transient_api_error\nretry_count: 2\n"
-        "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n"))
+    sb = _make_sandbox(
+        tmp_path,
+        role="CODER",
+        status_extra=(
+            "\n## Transient Retry\nreason_code: transient_api_error\nretry_count: 2\n"
+            "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n"
+        ),
+    )
     _write_dispatch(sb, _TRANSIENT_TAIL, span_seconds=900)
-    _run(sb, _lifecycle_body('role=CODER; SUBAGENT=coder; TRANSIENT_RETRY_CAP=3; '
-                             'handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" 1 >/dev/null'))
+    _run(
+        sb,
+        _lifecycle_body(
+            "role=CODER; SUBAGENT=coder; TRANSIENT_RETRY_CAP=3; "
+            'handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" 1 >/dev/null'
+        ),
+    )
     return sb
 
 
@@ -451,8 +529,10 @@ def _gate_sandbox(tmp_path, *, merged: bool, dirty: bool = False, empty_commit: 
 
 
 def _gate_call(sb: Sandbox) -> str:
-    return (f'coder_writer_completion_gate "$task_id" "$task_status" writer '
-            f'"{_FEATURE_BRANCH}" "{_RC_BRANCH}" "{sb.repo}" >/dev/null')
+    return (
+        f'coder_writer_completion_gate "$task_id" "$task_status" writer '
+        f'"{_FEATURE_BRANCH}" "{_RC_BRANCH}" "{sb.repo}" >/dev/null'
+    )
 
 
 def _drive_gate_merge_not_found(tmp_path):
@@ -489,8 +569,12 @@ _ZERO_PROGRESS_AT_CAP = (
 def _drive_zero_progress(tmp_path, tail: str, span_seconds: int) -> Sandbox:
     sb = _make_sandbox(tmp_path, role="CM", status_extra=_ZERO_PROGRESS_AT_CAP)
     _write_dispatch(sb, tail, span_seconds=span_seconds)
-    _run(sb, _lifecycle_body('ZERO_PROGRESS_CAP=3; '
-                             'handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" 0 >/dev/null'))
+    _run(
+        sb,
+        _lifecycle_body(
+            "ZERO_PROGRESS_CAP=3; " 'handle_working_after_exit "$task_id" "$task_status" "$LOG_FILE" 0 >/dev/null'
+        ),
+    )
     return sb
 
 
@@ -503,23 +587,31 @@ def _drive_zero_progress_short_span(tmp_path):
 
 
 def _drive_zero_progress_model_not_found(tmp_path):
-    return _drive_zero_progress(
-        tmp_path, "Error: model not found: example-model-name\n", span_seconds=900)
+    return _drive_zero_progress(tmp_path, "Error: model not found: example-model-name\n", span_seconds=900)
 
 
 def _drive_overwatch_transient_ceiling(tmp_path):
-    sb = _make_sandbox(tmp_path, role="PM", state="BLOCKED", status_extra=(
-        "\n## Transient Retry\nreason_code: transient_api_error\nretry_count: 3\n"
-        "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n"))
+    sb = _make_sandbox(
+        tmp_path,
+        role="PM",
+        state="BLOCKED",
+        status_extra=(
+            "\n## Transient Retry\nreason_code: transient_api_error\nretry_count: 3\n"
+            "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n"
+        ),
+    )
     _write_dispatch(sb, _TRANSIENT_TAIL, span_seconds=900)
     (sb.root / "projects" / "demo" / "overwatch" / "backups").mkdir(parents=True)
-    _run(sb, textwrap.dedent(f"""\
+    _run(
+        sb,
+        textwrap.dedent(f"""\
         source '{_LIB}/overwatch_protocol.sh'
         source '{_LIB}/overwatch-checks/check-transient-api-error.sh'
         export OVERWATCH_PROJECT=demo
         _CTAE_TASK_ID="$task_id"; _CTAE_STATUS_FILE="$task_status"; _CTAE_CURRENT_COUNT=3; _CTAE_CAP=3
         _ctae_do_escalate
-        """))
+        """),
+    )
     return sb
 
 
@@ -547,25 +639,27 @@ SITES: tuple[Site, ...] = (
     Site("worktree plugin load failure", _drive_plugin_load, "plugin_load_failed", "WRITER"),
     Site("worktree source branch field missing", _drive_source_branch_field, "source_branch_missing", "CODER"),
     Site("worktree create failure", _drive_worktree_create, "worktree_create_failed", "CODER"),
-    Site("worktree create with source branch absent", _drive_worktree_create_rc_missing,
-         "source_branch_missing", "CODER"),
+    Site(
+        "worktree create with source branch absent", _drive_worktree_create_rc_missing, "source_branch_missing", "CODER"
+    ),
     Site("tester plugin load failure", _drive_tester_plugin_load, "plugin_load_failed", "TESTER"),
-    Site("tester source branch field missing", _drive_tester_source_branch_field,
-         "source_branch_missing", "TESTER"),
-    Site("tester detached worktree create failure", _drive_tester_worktree_create,
-         "worktree_create_failed", "TESTER"),
+    Site("tester source branch field missing", _drive_tester_source_branch_field, "source_branch_missing", "TESTER"),
+    Site("tester detached worktree create failure", _drive_tester_worktree_create, "worktree_create_failed", "TESTER"),
     Site("finalize per-task timeout", _drive_per_task_timeout, "per_task_timeout", "WRITER"),
     Site("transient error below cap", _drive_transient_below_cap, "transient_api_error", "CODER", "no"),
     Site("transient error at cap", _drive_transient_at_cap, "transient_api_error", "CODER"),
     Site("completion gate merge not found", _drive_gate_merge_not_found, "gate_merge_not_found", "WRITER"),
-    Site("completion gate merge evidence not found", _drive_gate_merge_evidence_not_found,
-         "gate_merge_evidence_not_found", "WRITER"),
+    Site(
+        "completion gate merge evidence not found",
+        _drive_gate_merge_evidence_not_found,
+        "gate_merge_evidence_not_found",
+        "WRITER",
+    ),
     Site("completion gate dirty worktree", _drive_gate_dirty_worktree, "gate_dirty_worktree", "WRITER"),
     Site("completion gate empty commit", _drive_gate_empty_commit, "gate_empty_commit", "WRITER"),
     Site("zero-progress cap, clean normal-span exit", _drive_zero_progress_clean, "zero_progress", "CM"),
     Site("zero-progress cap, dispatch under 60 s", _drive_zero_progress_short_span, "provider_refusal", "CM"),
-    Site("zero-progress cap, model-not-found tail", _drive_zero_progress_model_not_found,
-         "provider_refusal", "CM"),
+    Site("zero-progress cap, model-not-found tail", _drive_zero_progress_model_not_found, "provider_refusal", "CM"),
     Site("overwatch transient retry ceiling", _drive_overwatch_transient_ceiling, "transient_api_error", "PM"),
 )
 
@@ -607,7 +701,11 @@ def test_pre_dispatch_block_writes_placeholders_for_unknown_evidence(tmp_path: p
     sb = _drive_missing_readme(tmp_path)
     evidence = parse_evidence(load_block_record(sb.status).evidence)
     assert (evidence["worktree"], evidence["branch"], evidence["ahead"], evidence["merged"]) == (
-        "gone", "none", "0", "no")
+        "gone",
+        "none",
+        "0",
+        "no",
+    )
 
 
 def test_provider_refusal_record_names_the_signal(tmp_path: pathlib.Path) -> None:
@@ -641,7 +739,7 @@ def test_every_blocked_state_write_in_lib_calls_block_record_write() -> None:
         lines = path.read_text(encoding="utf-8").splitlines()
         for i, line in enumerate(lines):
             if _BLOCKED_WRITE_RE.match(line):
-                window = "\n".join(lines[i:i + _WINDOW])
+                window = "\n".join(lines[i : i + _WINDOW])
                 if "block_record_write" not in window:
                     missing.append(f"{path.relative_to(_TEAM_DIR)}:{i + 1}")
     assert not missing, "BLOCKED state writes without a block_record_write call: " + ", ".join(missing)

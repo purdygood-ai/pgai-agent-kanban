@@ -179,21 +179,25 @@ RUN_COMMAND = "python3 team/scripts/lint_section_parsers.py"
 TEST_DIR_NAMES = frozenset({"tests", "test"})
 
 #: Files never scanned: the reader and its bash library (repository-relative).
-EXEMPT_FILES = frozenset({
-    "team/pgai_agent_kanban/task_status.py",
-    "team/scripts/lib/md_field.sh",
-})
+EXEMPT_FILES = frozenset(
+    {
+        "team/pgai_agent_kanban/task_status.py",
+        "team/scripts/lib/md_field.sh",
+    }
+)
 
 #: The classes of site an allowlist entry may name: none of them reads a value.
-SITE_CLASSES = frozenset({
-    "section-writer",
-    "ledger-heading",
-    "heading-counter",
-    "structure-lint",
-    "presence-check",
-    "remedy-text",
-    "header-exempt",
-})
+SITE_CLASSES = frozenset(
+    {
+        "section-writer",
+        "ledger-heading",
+        "heading-counter",
+        "structure-lint",
+        "presence-check",
+        "remedy-text",
+        "header-exempt",
+    }
+)
 
 # A string-literal opener: optional prefix letters, then a quote.
 _Q = r"""[rRbBuUfF]{0,2}["']"""
@@ -210,15 +214,20 @@ _QUANTIFIER_RE = re.compile(r"#\{(\d*)(,?)(\d*)\}")
 
 #: Heading-detection shapes, checked in this order; the first that matches
 #: names the site.
-SHAPES: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("startswith", re.compile(r"\.startswith\(\s*\(?\s*" + _Q + r"\s*##")),
     ("equals", re.compile(r"[=!]=\s*" + _Q + r"##|" + _Q + r"##[^\"'\n]*[\"']\*?\s*[=!]=")),
     ("anchored", re.compile(r"\^" + _WS + r"*" + _GROUP + _HASHES)),
     ("re-match", re.compile(r"\bre\.(?:match|fullmatch)\(\s*" + _Q + _WS + r"?" + _GROUP + _HASHES)),
-    ("unanchored", re.compile(
-        r"\b(?:[ef]?grep|rg)\b[^|;&\n]*?\s(?:-e\s*)?[\"']?" + _HASHES
-        + r"|\bawk\b.*?(?:/|~\s*[\"']|index\([^,\n]*,\s*[\"'])[ \t]*" + _HASHES
-    )),
+    (
+        "unanchored",
+        re.compile(
+            r"\b(?:[ef]?grep|rg)\b[^|;&\n]*?\s(?:-e\s*)?[\"']?"
+            + _HASHES
+            + r"|\bawk\b.*?(?:/|~\s*[\"']|index\([^,\n]*,\s*[\"'])[ \t]*"
+            + _HASHES
+        ),
+    ),
 )
 
 #: A direct call of the section reader's CLI from bash (the ``cli-read``
@@ -228,9 +237,7 @@ _CLI_FIELD_RE = re.compile(r"(?:^|\s)--field(?:=|\s|$)")
 
 # A Python assignment whose value opens on a ``##`` string: ``target =
 # f"## {heading}"``, ``self._head: str = "## " + name``.
-_PY_HEADING_ASSIGN_RE = re.compile(
-    r"^\s*(?P<name>[A-Za-z_][\w.]*)\s*(?::[^=\n]+)?=\s*" + _Q + r"\s*" + _HASHES
-)
+_PY_HEADING_ASSIGN_RE = re.compile(r"^\s*(?P<name>[A-Za-z_][\w.]*)\s*(?::[^=\n]+)?=\s*" + _Q + r"\s*" + _HASHES)
 # A bash assignment whose value opens on ``##``: ``target="## $h"``,
 # ``local head='## State'``.
 _SH_HEADING_ASSIGN_RE = re.compile(
@@ -308,11 +315,7 @@ def docstring_lines(text: str) -> set[int]:
         if not body:
             continue
         first = body[0]
-        if (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
-        ):
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
             lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
     return lines
 
@@ -351,14 +354,8 @@ def heading_variables(lines) -> frozenset[str]:
 def _compares_with(line: str, name: str) -> bool:
     """True when *line* compares something with the variable *name*."""
     word = re.escape(name)
-    py = (
-        rf"[=!]=\s*{word}(?![\w.(\[])|(?<![\w.]){word}\s*[=!]="
-        rf"|\.startswith\(\s*\(?\s*{word}(?![\w.(\[])"
-    )
-    sh = (
-        rf"\s[=!]=?\s+\"?\$\{{?{word}(?!\w)"
-        rf"|\$\{{?{word}\}}?\"?\s+[=!]=?\s"
-    )
+    py = rf"[=!]=\s*{word}(?![\w.(\[])|(?<![\w.]){word}\s*[=!]=" rf"|\.startswith\(\s*\(?\s*{word}(?![\w.(\[])"
+    sh = rf"\s[=!]=?\s+\"?\$\{{?{word}(?!\w)" rf"|\$\{{?{word}\}}?\"?\s+[=!]=?\s"
     return re.search(py, line) is not None or re.search(sh, line) is not None
 
 
@@ -497,10 +494,7 @@ def load_allowlist(path: Path, allow_rel: str) -> tuple[list[Entry], list[Findin
                 kind="allowlist-missing",
                 file=allow_rel,
                 line=0,
-                summary=(
-                    f"allowlist {allow_rel} not found; every heading-detection site is "
-                    "reported as unlisted"
-                ),
+                summary=(f"allowlist {allow_rel} not found; every heading-detection site is " "reported as unlisted"),
                 remedy=f"{RUN_COMMAND} --list-sites",
             )
         )
@@ -514,10 +508,7 @@ def load_allowlist(path: Path, allow_rel: str) -> tuple[list[Entry], list[Findin
         if len(fields) != 4 or not all(fields):
             problem = "is not '<path>\\t<class>\\t<reason>\\t<code>' with every field filled"
         elif fields[1] not in SITE_CLASSES:
-            problem = (
-                f"names the class {fields[1]!r}, which is not one of "
-                f"{', '.join(sorted(SITE_CLASSES))}"
-            )
+            problem = f"names the class {fields[1]!r}, which is not one of " f"{', '.join(sorted(SITE_CLASSES))}"
         if problem:
             findings.append(
                 Finding(
@@ -619,21 +610,41 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit codes:\n  0  Always (findings are narrated, never fatal).\n"
         ),
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--python-dir", metavar="PATH", action="append", default=None,
-                        help="Directory whose *.py files are scanned; repeatable "
-                             f"(default: {', '.join(DEFAULT_PYTHON_DIRS)}).")
-    parser.add_argument("--bash-dir", metavar="PATH", action="append", default=None,
-                        help=f"Directory whose *.sh files are scanned; repeatable (default: {', '.join(DEFAULT_BASH_DIRS)}).")
-    parser.add_argument("--allowlist", metavar="PATH", default=DEFAULT_ALLOWLIST,
-                        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write findings as a JSON array to PATH (always written).")
-    parser.add_argument("--list-sites", action="store_true",
-                        help="Print every site found and whether the allowlist names it, then exit 0.")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print each file's site count as it is scanned.")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--python-dir",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="Directory whose *.py files are scanned; repeatable " f"(default: {', '.join(DEFAULT_PYTHON_DIRS)}).",
+    )
+    parser.add_argument(
+        "--bash-dir",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help=f"Directory whose *.sh files are scanned; repeatable (default: {', '.join(DEFAULT_BASH_DIRS)}).",
+    )
+    parser.add_argument(
+        "--allowlist",
+        metavar="PATH",
+        default=DEFAULT_ALLOWLIST,
+        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).",
+    )
+    parser.add_argument(
+        "--findings-file", metavar="PATH", default=None, help="Write findings as a JSON array to PATH (always written)."
+    )
+    parser.add_argument(
+        "--list-sites",
+        action="store_true",
+        help="Print every site found and whether the allowlist names it, then exit 0.",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print each file's site count as it is scanned.")
     return parser
 
 
@@ -705,10 +716,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if findings:
-        message = (
-            f"{len(findings)} section-parser finding(s) against {allowlist_rel}; "
-            "see the lines printed above"
-        )
+        message = f"{len(findings)} section-parser finding(s) against {allowlist_rel}; " "see the lines printed above"
         remedy = (
             "read each unlisted section through task_status.read_section or read_md_field, "
             "remove every stale allowlist entry, then re-run: "

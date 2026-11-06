@@ -64,7 +64,7 @@ class OpsContext:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> "OpsContext":
+    def from_env(cls) -> OpsContext:
         """Construct an OpsContext from the process environment.
 
         Resolution order for the kanban root (highest to lowest precedence):
@@ -230,7 +230,6 @@ def context_for_project(path: Path, *, intake_dir: bool = False) -> tuple[OpsCon
     ctx = OpsContext(kanban_root=project_root.parent.parent)
     if ctx.project_root(project_name).resolve() != project_root:
         raise OpsError(
-            f"cannot derive project from path {project_root} "
-            f"(expected layout <kanban_root>/projects/<project>/)"
+            f"cannot derive project from path {project_root} " f"(expected layout <kanban_root>/projects/<project>/)"
         )
     return ctx, project_name

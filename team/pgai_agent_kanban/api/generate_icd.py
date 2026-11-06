@@ -183,11 +183,7 @@ def read_supported_versions(baselines_dir: pathlib.Path) -> set[str]:
     manifest = pathlib.Path(baselines_dir) / _SUPPORTED_MANIFEST_NAME
     if not manifest.is_file():
         return set()
-    return {
-        line.strip()
-        for line in manifest.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
+    return {line.strip() for line in manifest.read_text(encoding="utf-8").splitlines() if line.strip()}
 
 
 def existing_baseline_versions(baselines_dir: pathlib.Path) -> list[str]:
@@ -275,10 +271,7 @@ def freeze_baseline(
     if not baseline_path.exists():
         # No baseline for this version yet.  It is created only when this
         # version is the bump — newer than every baseline already frozen.
-        newer_existing = [
-            v for v in existing_baseline_versions(baselines_dir)
-            if not semver.lt(v, version)
-        ]
+        newer_existing = [v for v in existing_baseline_versions(baselines_dir) if not semver.lt(v, version)]
         if newer_existing:
             print(
                 f"WARNING: no baseline frozen for ICD_VERSION {version!r}: "
@@ -302,8 +295,7 @@ def freeze_baseline(
         # baseline follows the artifact until the version is added to SUPPORTED.
         _write_baseline(baseline_path, json_bytes)
         print(
-            f"Unpublished baseline refreshed at {baseline_path}  "
-            f"(version {version!r} is not listed in SUPPORTED)"
+            f"Unpublished baseline refreshed at {baseline_path}  " f"(version {version!r} is not listed in SUPPORTED)"
         )
         return baseline_path
 
@@ -337,10 +329,7 @@ def freeze_baseline(
             f"freezes as a new version, or pass --refreeze to deliberately rewrite "
             f"the published baseline."
         ),
-        (
-            f"printf '{next_version}\\n' > {icd_version_file} && "
-            "bash team/scripts/generate-icd.sh"
-        ),
+        (f"printf '{next_version}\\n' > {icd_version_file} && " "bash team/scripts/generate-icd.sh"),
     )
     # CENSUS-ANCHOR: generate-icd-published-baseline-01
     sys.exit(1)

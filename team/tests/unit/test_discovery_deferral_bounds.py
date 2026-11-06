@@ -72,12 +72,16 @@ def _bound_exceeded(
     )
     return subprocess.run(
         ["bash", "-c", script, "bounds", deferred, str(len(files)), max_count, max_age_days],
-        capture_output=True, text=True, env=_env(tmp_path), cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path),
+        cwd=str(tmp_path),
+        timeout=60,
     )
 
 
 def _today() -> datetime.date:
-    return datetime.datetime.now(datetime.timezone.utc).date()
+    return datetime.datetime.now(datetime.UTC).date()
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +136,11 @@ class TestBugFiledDate:
         result = subprocess.run(
             ["bash", str(_PP_RUN_OPS), "pgai_agent_kanban.discovery.items", "bug-ages"],
             input=f"{dated}\n{undated}\n",
-            capture_output=True, text=True, env=_env(tmp_path), cwd=str(tmp_path), timeout=60,
+            capture_output=True,
+            text=True,
+            env=_env(tmp_path),
+            cwd=str(tmp_path),
+            timeout=60,
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.splitlines() == [

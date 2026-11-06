@@ -61,7 +61,8 @@ import dataclasses
 import pathlib
 import re
 import sys
-from typing import Iterable, TextIO
+from typing import TextIO
+from collections.abc import Iterable
 
 # Run by file path (``python3 .../shipped_bundle_items.py``) this module has no
 # parent package and the interpreter puts only its own directory on sys.path,
@@ -79,15 +80,15 @@ from pgai_agent_kanban.task_status import read_section  # noqa: E402
 __all__ = ["PromotionCounts", "promote_shipped_bundle_items", "main"]
 
 # A version at the start of the ## Target Version body.
-_TARGET_VERSION_RE = re.compile(r'v[\d.]+', re.IGNORECASE)
+_TARGET_VERSION_RE = re.compile(r"v[\d.]+", re.IGNORECASE)
 
 # An item path in backtick-paren notation on a ## Bundled Items line.
-_ITEM_PATH_RE = re.compile(r'\(\`([^`]+)\`\)')
+_ITEM_PATH_RE = re.compile(r"\(\`([^`]+)\`\)")
 
 # The ## Status heading and a "running" value on the next line, the value
 # rewritten in place to "done".
 _STATUS_RUNNING_RE = re.compile(
-    r'^(##\s+Status\s*\n\s*)running(\s*)$',
+    r"^(##\s+Status\s*\n\s*)running(\s*)$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -106,9 +107,9 @@ class PromotionCounts:
 
 def promote_shipped_bundle_items(
     requirements_dir,
-    shipped_tags: "Iterable[str] | None",
+    shipped_tags: Iterable[str] | None,
     dry_run: bool,
-    out: "TextIO | None" = None,
+    out: TextIO | None = None,
 ) -> PromotionCounts:
     """Promote the ``running`` items of every shipped bundle under
     *requirements_dir* to ``done`` (module docstring). *shipped_tags* is the
@@ -128,14 +129,14 @@ def promote_shipped_bundle_items(
     if not every_bundle_shipped and not shipped:
         say("  no shipped release tag given: no bundle is treated as shipped, nothing is promoted")
 
-    for bundle_file in sorted(requirements_dir.glob('*.md')):
-        if bundle_file.name.lower() in ('readme.md',):
+    for bundle_file in sorted(requirements_dir.glob("*.md")):
+        if bundle_file.name.lower() in ("readme.md",):
             continue
-        if 'bundle' not in bundle_file.name.lower():
+        if "bundle" not in bundle_file.name.lower():
             continue
 
         try:
-            text = bundle_file.read_text(encoding='utf-8')
+            text = bundle_file.read_text(encoding="utf-8")
         except OSError as e:
             say(f"  WARN: cannot read {bundle_file.name}: {e}")
             continue
@@ -174,7 +175,7 @@ def promote_shipped_bundle_items(
                 continue
 
             try:
-                content = p.read_text(encoding='utf-8')
+                content = p.read_text(encoding="utf-8")
             except OSError as e:
                 say(f"    WARN: cannot read {p.name}: {e}")
                 counts.skipped_missing += 1
@@ -192,13 +193,13 @@ def promote_shipped_bundle_items(
                 say(f"    [DRY RUN] would promote (running -> done): {p.name}")
             else:
                 new_content = (
-                    content[:status_m.start()]
+                    content[: status_m.start()]
                     + status_m.group(1)
                     + "done"
                     + status_m.group(2)
-                    + content[status_m.end():]
+                    + content[status_m.end() :]
                 )
-                p.write_text(new_content, encoding='utf-8')
+                p.write_text(new_content, encoding="utf-8")
                 say(f"    promoted (running -> done): {p.name}")
             counts.promoted += 1
 
@@ -211,7 +212,7 @@ def promote_shipped_bundle_items(
     return counts
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.shipped_bundle_items",
@@ -239,8 +240,7 @@ def main(argv: "list | None" = None) -> int:
     args = parser.parse_args(argv)
     if args.treat_all_shipped and args.shipped_tags:
         parser.error(
-            "--treat-all-shipped takes no SHIPPED_TAG; pass the shipped versions "
-            "or --treat-all-shipped, not both"
+            "--treat-all-shipped takes no SHIPPED_TAG; pass the shipped versions " "or --treat-all-shipped, not both"
         )
     shipped_tags = None if args.treat_all_shipped else args.shipped_tags
     promote_shipped_bundle_items(args.requirements_dir, shipped_tags, args.dry_run)

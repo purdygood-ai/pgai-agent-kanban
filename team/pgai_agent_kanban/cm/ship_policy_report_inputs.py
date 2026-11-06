@@ -135,7 +135,6 @@ import os
 import pathlib
 import re
 import sys
-from typing import Optional
 
 # Run by file path (``python3 .../ship_policy_report_inputs.py``) this module
 # has no parent package and the interpreter puts only its own directory on
@@ -152,7 +151,6 @@ if not __package__:
 from pgai_agent_kanban.cm.read_state_field import read_state_field  # noqa: E402
 from pgai_agent_kanban.cm.release_version import VERSION_SHAPE_RE, version_token  # noqa: E402
 from pgai_agent_kanban.reports.tester_report import (  # noqa: E402
-    Finding,
     TesterReport,
     parse_report_text,
     read_report_text,
@@ -192,7 +190,7 @@ def all_findings(report: TesterReport) -> list:
     return flat
 
 
-def finding_dimensions(report: TesterReport) -> "tuple[str, str]":
+def finding_dimensions(report: TesterReport) -> tuple[str, str]:
     """``(regression, integrity)`` merged over the high-risk findings; see
     the module docstring, "Finding dimensions"."""
     regression = UNKNOWN
@@ -216,7 +214,7 @@ def _cleaned(raw: str) -> str:
     return _DECORATION_RE.sub(" ", raw).strip().strip("_").strip()
 
 
-def _matrix_token(token: Optional[str], raw: Optional[str], leading_none: bool) -> str:
+def _matrix_token(token: str | None, raw: str | None, leading_none: bool) -> str:
     """The matrix token for one report-level value: the parser's *token*, or
     ``none`` / ``unparseable`` (module docstring, "Report values")."""
     if raw is None:
@@ -256,8 +254,8 @@ class TesterTaskLookup:
     the same order.
     """
 
-    task_dir: Optional[str] = None
-    state: Optional[str] = None
+    task_dir: str | None = None
+    state: str | None = None
     mismatches: list = dataclasses.field(default_factory=list)
     notes: list = dataclasses.field(default_factory=list)
 
@@ -274,7 +272,7 @@ def _first_word(value: str) -> str:
     return m.group(1).lower().replace("_", "-").rstrip("-") if m else ""
 
 
-def _read_task_field(path: str, heading: str) -> Optional[str]:
+def _read_task_field(path: str, heading: str) -> str | None:
     """*heading*'s value in the task file at *path*, or None when the file
     is missing or the heading has no value (read_state_field's "none")."""
     value = read_state_field(path, heading)
@@ -375,7 +373,7 @@ def _run_lookup(tasks_dir: str, active_rc: str) -> None:
         print(line)
 
 
-def _load(report_path: str) -> Optional[TesterReport]:
+def _load(report_path: str) -> TesterReport | None:
     """The parsed report at *report_path*, or None when it cannot be read."""
     try:
         return parse_report_text(read_report_text(report_path))
@@ -407,8 +405,7 @@ def _run_values(report_path: str) -> None:
     report = _load(report_path)
     if report is None:
         print(
-            f"report not readable at {report_path}: recommendation and "
-            f"systemic risk defaulted to none",
+            f"report not readable at {report_path}: recommendation and " f"systemic risk defaulted to none",
             file=sys.stderr,
         )
         report = TesterReport(recommendation=None, systemic_risk=None, summary=None, findings=[])
@@ -425,7 +422,7 @@ def _run_values(report_path: str) -> None:
         print(f"{key}={value}")
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.ship_policy_report_inputs",

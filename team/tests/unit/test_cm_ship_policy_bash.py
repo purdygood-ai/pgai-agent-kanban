@@ -235,7 +235,7 @@ def test_a_requeued_task_not_finished_yet_decides_pending_never_a_ship(tmp_path,
 
 
 def test_a_pending_decision_stamps_no_release_notes_status(tmp_path):
-    script = f"source {_LIB} && echo \"[$(cm_ship_policy_notes_status VERIFICATION-PENDING)]\""
+    script = f'source {_LIB} && echo "[$(cm_ship_policy_notes_status VERIFICATION-PENDING)]"'
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[]"
@@ -525,9 +525,7 @@ def test_missing_report_path_reads_unknown(tmp_path):
         ("no", "breakage", "no breakage"),
     ],
 )
-def test_deeper_finding_heading_reads_same_values_as_level_3(
-    tmp_path, heading_prefix, regression, integrity, expected
-):
+def test_deeper_finding_heading_reads_same_values_as_level_3(tmp_path, heading_prefix, regression, integrity, expected):
     """A finding under "#### Finding" or "##### Finding" reads exactly the
     values the identical finding reads under "### Finding" -- the
     **Field:** value lines are the contract, not the heading level."""
@@ -548,7 +546,7 @@ def test_level_4_no_none_finding_reaches_the_same_ship_known_issue_verdict(tmp_p
             tmp_path,
             f"source {_LIB} && "
             f"read -r reg integ < <(read_ship_policy_finding_dimensions '{report}') && "
-            "cm_ship_policy done high ship-with-serious-concerns no yes \"$reg\" \"$integ\"",
+            'cm_ship_policy done high ship-with-serious-concerns no yes "$reg" "$integ"',
         )
         assert result.returncode == 0, result.stderr
         verdicts[prefix] = result.stdout.strip()
@@ -588,7 +586,7 @@ def test_findings_nested_under_step_subsections_read_their_own_fields(tmp_path):
 
 
 def test_findings_section_heading_alone_never_starts_a_block(tmp_path):
-    """"## Findings" is a section heading, not a finding: a report whose
+    """ "## Findings" is a section heading, not a finding: a report whose
     fields sit directly under it with no finding heading yields zero blocks
     and reads unknown rather than picking those fields up."""
     report = _write_report(
@@ -666,11 +664,11 @@ def _decision_from_report(tmp_path: pathlib.Path, report_path: pathlib.Path, tes
     result = run_bash(
         tmp_path,
         f"source {_LIB} && "
-        f"declare -A v && while IFS= read -r line; do v[\"${{line%%=*}}\"]=\"${{line#*=}}\"; done "
+        f'declare -A v && while IFS= read -r line; do v["${{line%%=*}}"]="${{line#*=}}"; done '
         f"< <(read_ship_policy_report_values '{report_path}' 2>/dev/null) && "
         f"read -r reg integ < <(read_ship_policy_finding_dimensions '{report_path}' 2>/dev/null) && "
-        f"cm_ship_policy '{tester_state}' \"${{v[systemic_risk]}}\" \"${{v[recommendation]}}\" "
-        f"\"${{v[has_large_fix_effort]}}\" yes \"$reg\" \"$integ\"",
+        f'cm_ship_policy \'{tester_state}\' "${{v[systemic_risk]}}" "${{v[recommendation]}}" '
+        f'"${{v[has_large_fix_effort]}}" yes "$reg" "$integ"',
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
@@ -715,9 +713,7 @@ def test_decorated_recommendation_reads_the_token_it_names(tmp_path, recommendat
 
 
 def test_bold_serious_concerns_report_yields_ship_non_functional_never_functional(tmp_path):
-    report = _write_report(
-        tmp_path, _report_with_values("**Recommendation:** **SHIP-WITH-SERIOUS-CONCERNS**", "low")
-    )
+    report = _write_report(tmp_path, _report_with_values("**Recommendation:** **SHIP-WITH-SERIOUS-CONCERNS**", "low"))
     assert _decision_from_report(tmp_path, report) == "SHIP-NON-FUNCTIONAL"
 
 
@@ -803,18 +799,36 @@ def test_missing_report_reads_none_for_every_value(tmp_path):
 @pytest.mark.parametrize(
     "args, expected, reason",
     [
-        (("done", "low", "unparseable", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS",
-         "an unparseable recommendation takes the SHIP-WITH-CONCERNS row"),
-        (("done", "low", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS",
-         "an absent recommendation on a DONE task takes the SHIP-WITH-CONCERNS row"),
-        (("done", "low", "shipp-with-concernz", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS",
-         "a garbled recommendation passed straight in still never ships FUNCTIONAL"),
-        (("done", "unparseable", "pass", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS",
-         "an unparseable systemic risk floors a PASS to the SHIP-WITH-CONCERNS row"),
-        (("done", "unparseable", "ship-with-serious-concerns", "no", "yes", "no", "none"), "SHIP-NON-FUNCTIONAL",
-         "the floor never loosens a stricter recommendation"),
-        (("done", "none", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL",
-         "systemic risk none reads as not-high, not as unreadable"),
+        (
+            ("done", "low", "unparseable", "no", "yes", "no", "none"),
+            "SHIP-KNOWN-BUGS",
+            "an unparseable recommendation takes the SHIP-WITH-CONCERNS row",
+        ),
+        (
+            ("done", "low", "none", "no", "yes", "no", "none"),
+            "SHIP-KNOWN-BUGS",
+            "an absent recommendation on a DONE task takes the SHIP-WITH-CONCERNS row",
+        ),
+        (
+            ("done", "low", "shipp-with-concernz", "no", "yes", "no", "none"),
+            "SHIP-KNOWN-BUGS",
+            "a garbled recommendation passed straight in still never ships FUNCTIONAL",
+        ),
+        (
+            ("done", "unparseable", "pass", "no", "yes", "no", "none"),
+            "SHIP-KNOWN-BUGS",
+            "an unparseable systemic risk floors a PASS to the SHIP-WITH-CONCERNS row",
+        ),
+        (
+            ("done", "unparseable", "ship-with-serious-concerns", "no", "yes", "no", "none"),
+            "SHIP-NON-FUNCTIONAL",
+            "the floor never loosens a stricter recommendation",
+        ),
+        (
+            ("done", "none", "pass", "no", "yes", "no", "none"),
+            "SHIP-FUNCTIONAL",
+            "systemic risk none reads as not-high, not as unreadable",
+        ),
     ],
 )
 def test_matrix_never_ships_functional_on_an_unreadable_value(tmp_path, args, expected, reason):

@@ -44,7 +44,7 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 
 _RANDOMLY_INSTALLED = importlib.util.find_spec("pytest_randomly") is not None
 
-_FIXTURE_TEST_MODULE = '''
+_FIXTURE_TEST_MODULE = """
 def test_a():
     assert True
 
@@ -63,22 +63,20 @@ def test_d():
 
 def test_e():
     assert True
-'''
+"""
 
 # The fixture's own conftest.py delegates to the real production hook
 # (imported from tests/conftest.py) rather than reimplementing it, so this
 # test exercises the actual seam an operator invokes, not a stand-in.
-_FIXTURE_CONFTEST_MODULE = f'''
+_FIXTURE_CONFTEST_MODULE = f"""
 import sys
 
 sys.path.insert(0, {str(_TEAM_DIR)!r})
 from tests.conftest import pytest_collection_modifyitems  # noqa: F401
-'''
+"""
 
 
-def _seeded_collection_order(
-    fixture_dir: pathlib.Path, workdir: pathlib.Path, label: str, seed: str
-) -> list[str]:
+def _seeded_collection_order(fixture_dir: pathlib.Path, workdir: pathlib.Path, label: str, seed: str) -> list[str]:
     """Collect the fixture suite with PGAI_TEST_ORDER=shuffle:<seed> and no
     other ordering flag -- the exact command line an operator reproducing a
     divergence would type -- and return the per-test collection order.
@@ -112,11 +110,7 @@ def _seeded_collection_order(
         timeout=180,
         env=child_env,
     )
-    order = [
-        line.strip()
-        for line in result.stdout.splitlines()
-        if "::" in line
-    ]
+    order = [line.strip() for line in result.stdout.splitlines() if "::" in line]
     if not order:
         raise AssertionError(
             f"Nested pytest invocation collected no tests.\n"

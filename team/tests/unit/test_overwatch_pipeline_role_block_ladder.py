@@ -52,8 +52,8 @@ from pgai_agent_kanban.task_status import read_section, section_value, set_or_ap
 _PROJECT = "pipeline-proj"
 _VERSION = "v1.4.2"
 _CODE = "source_branch_missing"
-_BLOCKED_AT = datetime.datetime(2026, 1, 1, 11, 0, 0, tzinfo=datetime.timezone.utc)
-_FIRST_LOOK = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_BLOCKED_AT = datetime.datetime(2026, 1, 1, 11, 0, 0, tzinfo=datetime.UTC)
+_FIRST_LOOK = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _BLOCKERS = "The source branch ai_rc/v1.4.2 named in the README does not exist in the dev tree."
 
 # The operator's ladder, written out by hand: the cool-down recorded at the
@@ -81,8 +81,14 @@ class Root:
         self.project = self.root / "projects" / _PROJECT
         self.task_dir = self.project / "tasks" / self.task
         self.queue = self.project / "tasks" / "queues" / f"{role.lower()}_backlog.md"
-        for d in (self.project / "overwatch" / "backups", self.queue.parent, self.task_dir / "artifacts",
-                  self.root / "locks", self.root / "tmp", self.root / "logs"):
+        for d in (
+            self.project / "overwatch" / "backups",
+            self.queue.parent,
+            self.task_dir / "artifacts",
+            self.root / "locks",
+            self.root / "tmp",
+            self.root / "logs",
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8")
         (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8")
@@ -123,9 +129,7 @@ class Root:
             text = set_or_append_section(text, heading, body)
         self.status.write_text(text, encoding="utf-8")
         write_block_record(self.status, _CODE, self.role, [], now=at)
-        self.queue.write_text(
-            f"# {self.role} Backlog\n\n## Queue\n\n- [B] {self.task} — example\n", encoding="utf-8"
-        )
+        self.queue.write_text(f"# {self.role} Backlog\n\n## Queue\n\n- [B] {self.task} — example\n", encoding="utf-8")
 
     def look(self, at: datetime.datetime) -> dw.StopResult:
         """One decision-wake firing at *at*; the task's own stop result."""
@@ -146,8 +150,14 @@ class Root:
 
 def _sandbox(tmp_path, monkeypatch, role: str) -> Root:
     root = Root(tmp_path, role)
-    for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME", "HALT_OVERWATCH",
-                 "OVERWATCH_FIRING_TIMESTAMP", "OVERWATCH_LOCK_WAIT_SECONDS"):
+    for name in (
+        "PGAI_TASKS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_PROJECT_NAME",
+        "HALT_OVERWATCH",
+        "OVERWATCH_FIRING_TIMESTAMP",
+        "OVERWATCH_LOCK_WAIT_SECONDS",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KANBAN_ROOT", str(root.root))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root.root))
@@ -181,9 +191,11 @@ def test_pipeline_role_block_on_a_decision_only_row_is_requeued_three_times_befo
         assert kanban.field("State") == "BLOCKED"
 
         acted = kanban.look(due)
-        assert (acted.outcome.kind, acted.outcome.name, acted.result) == ("verb", "requeue", dx.STATUS_EXECUTED), (
-            acted.detail
-        )
+        assert (acted.outcome.kind, acted.outcome.name, acted.result) == (
+            "verb",
+            "requeue",
+            dx.STATUS_EXECUTED,
+        ), acted.detail
         assert kanban.field("State") == "BACKLOG" and kanban.field("Needs Human") == "no"
         record = load_block_record(kanban.status)
         assert (record.attempts, record.requeues) == (requeue, requeue)
@@ -263,14 +275,26 @@ def test_coder_block_on_the_same_decision_only_row_goes_to_its_decision_on_the_f
 @pytest.mark.parametrize("attempts", [0, 1, 3, 9])
 def test_cm_ship_policy_halt_block_goes_to_the_resolution_stage_never_a_requeue(attempts):
     record = BlockRecord(
-        reason_code="ship_policy_halt", owner_role="CM", attempts=attempts,
-        first_blocked_at=_BLOCKED_AT.isoformat(), last_blocked_at=_BLOCKED_AT.isoformat(),
-        cooldown_until="none", evidence="none", resume="fresh",
+        reason_code="ship_policy_halt",
+        owner_role="CM",
+        attempts=attempts,
+        first_blocked_at=_BLOCKED_AT.isoformat(),
+        last_blocked_at=_BLOCKED_AT.isoformat(),
+        cooldown_until="none",
+        evidence="none",
+        resume="fresh",
     )
-    outcome = dc.decide(dc.DecisionInput(
-        subject=dc.SUBJECT_BLOCK, project=_PROJECT, task_id=_TASK_IDS["CM"], record=record, task_state="BLOCKED",
-        active_rc=_VERSION, now=_FIRST_LOOK,
-    ))
+    outcome = dc.decide(
+        dc.DecisionInput(
+            subject=dc.SUBJECT_BLOCK,
+            project=_PROJECT,
+            task_id=_TASK_IDS["CM"],
+            record=record,
+            task_state="BLOCKED",
+            active_rc=_VERSION,
+            now=_FIRST_LOOK,
+        )
+    )
     assert (outcome.kind, outcome.name) == (dc.OUTCOME_VERB, dc.VERB_RESOLUTION_STAGE), outcome
     assert outcome.classifier.action == "defer_to_resolution_stage"
     assert not outcome.classifier.pipeline_ladder

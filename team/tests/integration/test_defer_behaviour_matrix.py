@@ -47,7 +47,6 @@ import pathlib
 import re
 import subprocess
 import textwrap
-from typing import Optional
 
 from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
 
@@ -117,8 +116,8 @@ def _run_discovery(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
-    finder_stdout_capture: Optional[pathlib.Path] = None,
+    extra_env: dict | None = None,
+    finder_stdout_capture: pathlib.Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -132,11 +131,10 @@ def _run_discovery(
     import os
 
     capture_fragment = (
-        _finder_stdout_capture_fragment(finder_stdout_capture)
-        if finder_stdout_capture is not None
-        else ""
+        _finder_stdout_capture_fragment(finder_stdout_capture) if finder_stdout_capture is not None else ""
     )
-    script = textwrap.dedent(f"""\
+    script = (
+        textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
         source "{_SCRIPTS_LIB}/ini_parser.sh"
@@ -144,10 +142,13 @@ def _run_discovery(
         source "{_SCRIPTS_LIB}/semver.sh"
         source "{_SCRIPTS_LIB}/project_paths.sh"
         source "{_SCRIPTS_LIB}/discovery.sh"
-    """) + capture_fragment + textwrap.dedent(f"""\
+    """)
+        + capture_fragment
+        + textwrap.dedent(f"""\
         discovery_run_pipeline "{project_name}"
         echo "DISCOVERY_STATUS=${{DISCOVERY_LAST_STATUS}}"
     """)
+    )
 
     base_env = dict(os.environ)
     base_env["KANBAN_ROOT"] = str(kanban_root)
@@ -208,14 +209,10 @@ def _run_discovery_until_requirements_decompose(
                 if not status_file.exists():
                     continue
                 if "BACKLOG" in status_file.read_text(encoding="utf-8"):
-                    status_file.write_text(
-                        f"# {task_dir.name}\n## State\nDONE\n", encoding="utf-8"
-                    )
+                    status_file.write_text(f"# {task_dir.name}\n## State\nDONE\n", encoding="utf-8")
                     if pm_backlog.exists():
                         backlog_text = pm_backlog.read_text(encoding="utf-8")
-                        backlog_text = backlog_text.replace(
-                            f"[ ] {task_dir.name}", f"[x] {task_dir.name}"
-                        )
+                        backlog_text = backlog_text.replace(f"[ ] {task_dir.name}", f"[x] {task_dir.name}")
                         pm_backlog.write_text(backlog_text, encoding="utf-8")
         result = _run_discovery(kanban_root, project_name)
         assert result.returncode == 0, result.stderr
@@ -227,7 +224,7 @@ def _add_bug_file(
     bug_id: str = "BUG-0001",
     slug: str = "test-fix",
     status: str = "open",
-    severity: Optional[str] = "low",
+    severity: str | None = "low",
 ) -> pathlib.Path:
     """Create a bug file. severity=None omits the **Severity:** field entirely."""
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
@@ -235,10 +232,7 @@ def _add_bug_file(
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     severity_line = f"**Severity:** {severity}\n\n" if severity is not None else ""
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"{severity_line}"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"{severity_line}" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -275,9 +269,9 @@ def _set_defer_posture(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    deferred_bugs: Optional[bool] = None,
-    deferred_bug_level: Optional[str] = None,
-    defer_piggyback: Optional[bool] = None,
+    deferred_bugs: bool | None = None,
+    deferred_bug_level: str | None = None,
+    defer_piggyback: bool | None = None,
 ) -> None:
     """Append a [release] section to project.cfg setting the deferral posture."""
     cfg_path = kanban_root / "projects" / project_name / "project.cfg"
@@ -326,8 +320,6 @@ def _install_pm_agent_stub(kanban_root: pathlib.Path, project_name: str) -> None
         encoding="utf-8",
     )
     stub_pm.chmod(0o755)
-
-
 
 
 def _bundle_files(kanban_root: pathlib.Path, project_name: str) -> list[pathlib.Path]:
@@ -384,9 +376,7 @@ class TestLevelLowMediumBugPiggybackTrue:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True)
         trigger = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
             _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
@@ -401,9 +391,7 @@ class TestLevelLowMediumBugPiggybackTrue:
 
         assert result.returncode == 0, result.stderr
         bundles = _bundle_files(root, "project-a")
-        finder_stdout_text = (
-            finder_stdout.read_text(encoding="utf-8") if finder_stdout.exists() else ""
-        )
+        finder_stdout_text = finder_stdout.read_text(encoding="utf-8") if finder_stdout.exists() else ""
         assert bundles, (
             "Expected one bundle carrying the trigger.\n"
             f"stderr:\n{result.stderr}\n"
@@ -420,9 +408,9 @@ class TestLevelLowMediumBugPiggybackTrue:
         trigger_id = trigger.name.replace(".md", "")
         trigger_line = _bundled_items_line_for(bundle_text, "BUG-0001")
         assert trigger_line, bundle_text
-        assert "hygiene ride-along" not in trigger_line, (
-            f"The trigger's own line must carry no annotation.\n{trigger_line}"
-        )
+        assert (
+            "hygiene ride-along" not in trigger_line
+        ), f"The trigger's own line must carry no annotation.\n{trigger_line}"
 
         expected_suffix = _expected_ride_along_suffix(trigger_id)
         for low_bug in low_bugs:
@@ -454,9 +442,7 @@ class TestLevelLowMediumBugPiggybackFalse:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False)
         _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="trigger", severity="medium")
         low_bugs = [
             _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="low-a", severity="low"),
@@ -474,19 +460,19 @@ class TestLevelLowMediumBugPiggybackFalse:
         assert any("BUG-0001" in i for i in item_ids), item_ids
         for low_bug in low_bugs:
             item_id = low_bug.name.replace(".md", "")
-            assert not any(item_id in i for i in item_ids), (
-                f"{item_id} must not ride along when piggyback=false.\n{item_ids}"
-            )
+            assert not any(
+                item_id in i for i in item_ids
+            ), f"{item_id} must not ride along when piggyback=false.\n{item_ids}"
 
-        backlog_text = (
-            root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md"
-        ).read_text(encoding="utf-8")
+        backlog_text = (root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md").read_text(
+            encoding="utf-8"
+        )
         for low_bug in low_bugs:
             assert _bug_status(low_bug) == "open", low_bug
             item_id = low_bug.name.replace(".md", "")
-            assert f"[x] {item_id}" not in backlog_text, (
-                f"{item_id} must remain uncached in bug_backlog.md while deferred.\n{backlog_text}"
-            )
+            assert (
+                f"[x] {item_id}" not in backlog_text
+            ), f"{item_id} must remain uncached in bug_backlog.md while deferred.\n{backlog_text}"
 
         _run_discovery_until_requirements_decompose(root, "project-a", req_file)
         _assert_requirements_file_still_decomposes(req_file, "low+medium+piggyback=false")
@@ -508,9 +494,9 @@ class TestLevelMediumMediumBug:
         result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project-a"), (
-            f"level=medium with a medium bug must open no bundle.\nstderr:\n{result.stderr}"
-        )
+        assert not _bundle_files(
+            root, "project-a"
+        ), f"level=medium with a medium bug must open no bundle.\nstderr:\n{result.stderr}"
         assert _bug_status(bug) == "open"
 
         _assert_requirements_file_still_decomposes(req_file, "medium+medium")
@@ -532,9 +518,9 @@ class TestLevelHighAnyBug:
         result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert not _bundle_files(root, "project-a"), (
-            f"level=high defers every bug -- no bundle should open.\nstderr:\n{result.stderr}"
-        )
+        assert not _bundle_files(
+            root, "project-a"
+        ), f"level=high defers every bug -- no bundle should open.\nstderr:\n{result.stderr}"
         assert _bug_status(bug) == "open"
 
         _assert_requirements_file_still_decomposes(req_file, "high+any")

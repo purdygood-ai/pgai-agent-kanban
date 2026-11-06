@@ -66,9 +66,7 @@ def board(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     temp_dir = tmp_path / "scratch"
     for directory in (root, home, temp_dir):
         directory.mkdir()
-    (root / "projects.cfg").write_text(
-        "[project:aa]\npriority = 1\n\n[project:bb]\npriority = 2\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text("[project:aa]\npriority = 1\n\n[project:bb]\npriority = 2\n", encoding="utf-8")
     for name in ("aa", "bb"):
         (root / "projects" / name / "tasks" / "queues").mkdir(parents=True)
     return {"root": root, "home": home, "temp_dir": temp_dir}
@@ -195,9 +193,7 @@ def test_details_with_no_project_named_refuses_offering_both_sources(board, scri
     ],
     ids=["why", "verdict-report"],
 )
-def test_help_says_details_needs_a_project_from_either_source(
-    board, script, paragraph_start, option_line
-) -> None:
+def test_help_says_details_needs_a_project_from_either_source(board, script, paragraph_start, option_line) -> None:
     result = _run(script, ["--help"], board, project_name=None)
 
     assert result.returncode == 0

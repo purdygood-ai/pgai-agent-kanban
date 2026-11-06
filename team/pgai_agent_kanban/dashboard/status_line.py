@@ -73,7 +73,7 @@ import dataclasses
 import pathlib
 import re
 import sys
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 # Run by file path (``python3 .../status_line.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -136,7 +136,7 @@ _COMPACT_BUG_ID_RE = re.compile(r"(BUG-[0-9]+)", re.IGNORECASE)
 
 
 def halt_rows(
-    scopes: Iterable[tuple[str, "pathlib.Path | str"]],
+    scopes: Iterable[tuple[str, pathlib.Path | str]],
 ) -> list[tuple[str, str, str]]:
     """Return ``(state, scope, described_event)`` for every active scope.
 
@@ -176,16 +176,14 @@ def halt_rows(
 # ---------------------------------------------------------------------------
 
 
-def pending_approval_count(kanban_root: "pathlib.Path | str") -> int:
+def pending_approval_count(kanban_root: pathlib.Path | str) -> int:
     """Return how many HUMAN-APPROVE gate tasks are WAITING or BACKLOG.
 
     Scans ``projects/*/tasks/HUMAN-APPROVE-*/status.md`` under
     *kanban_root*; the state is read by :func:`read_state`.
     """
     count = 0
-    for status_file in pathlib.Path(kanban_root).glob(
-        "projects/*/tasks/HUMAN-APPROVE-*/status.md"
-    ):
+    for status_file in pathlib.Path(kanban_root).glob("projects/*/tasks/HUMAN-APPROVE-*/status.md"):
         if status_file.is_file() and read_state(status_file) in _PENDING_APPROVAL_STATES:
             count += 1
     return count
@@ -196,7 +194,7 @@ def pending_approval_count(kanban_root: "pathlib.Path | str") -> int:
 # ---------------------------------------------------------------------------
 
 
-def _read_text(path: pathlib.Path) -> "str | None":
+def _read_text(path: pathlib.Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -208,11 +206,11 @@ class _IntakeRecord:
     """One intake file as the dashboard counts it."""
 
     path: pathlib.Path
-    status: str      # first token of ``## Status``, lowercased; "" when absent
-    severity: str    # the ``**Severity:**`` value, trimmed; "" when absent
+    status: str  # first token of ``## Status``, lowercased; "" when absent
+    severity: str  # the ``**Severity:**`` value, trimmed; "" when absent
 
 
-def _intake_records(intake_dir: "pathlib.Path | str") -> list[_IntakeRecord]:
+def _intake_records(intake_dir: pathlib.Path | str) -> list[_IntakeRecord]:
     """Return every readable ``*.md`` intake file in *intake_dir*, in file-name order.
 
     README files and unreadable files are skipped; a missing directory
@@ -230,15 +228,17 @@ def _intake_records(intake_dir: "pathlib.Path | str") -> list[_IntakeRecord]:
             continue
         status = section_value(text, "Status").split()
         severity = _BUG_SEVERITY_RE.search(text)
-        records.append(_IntakeRecord(
-            path=item_file,
-            status=status[0].lower() if status else "",
-            severity=severity.group(1).strip() if severity else "",
-        ))
+        records.append(
+            _IntakeRecord(
+                path=item_file,
+                status=status[0].lower() if status else "",
+                severity=severity.group(1).strip() if severity else "",
+            )
+        )
     return records
 
 
-def deferred_bug_ids(bugs_dir: "pathlib.Path | str", level: str) -> list[str]:
+def deferred_bug_ids(bugs_dir: pathlib.Path | str, level: str) -> list[str]:
     """Return the compact IDs of the open bugs in *bugs_dir* *level* defers.
 
     A bug is a candidate when its ``## Status`` is ``open``; README files
@@ -281,7 +281,7 @@ class BugStatusSplit:
         return self.open + self.deferred + self.needs_operator
 
 
-def bug_status_split(bugs_dir: "pathlib.Path | str", level: str = "") -> BugStatusSplit:
+def bug_status_split(bugs_dir: pathlib.Path | str, level: str = "") -> BugStatusSplit:
     """Return *bugs_dir*'s open / deferred / needs-operator bug counts.
 
     An ``open`` bug counts as deferred when :func:`severity_defer_decision`
@@ -303,7 +303,7 @@ def bug_status_split(bugs_dir: "pathlib.Path | str", level: str = "") -> BugStat
     return BugStatusSplit(open=open_count, deferred=deferred, needs_operator=needs_operator)
 
 
-def needs_operator_keys(intake_dir: "pathlib.Path | str") -> list[str]:
+def needs_operator_keys(intake_dir: pathlib.Path | str) -> list[str]:
     """Return the key (file name without ``.md``) of every needs-operator item in *intake_dir*.
 
     *intake_dir* is a project's ``bugs/`` or ``priority/`` directory; the
@@ -323,9 +323,9 @@ def needs_operator_keys(intake_dir: "pathlib.Path | str") -> list[str]:
 
 
 def status_facts(
-    kanban_root: "pathlib.Path | str",
-    halt_scopes: Sequence[tuple[str, "pathlib.Path | str"]],
-    defer_counts: Sequence[tuple[str, str, Sequence["pathlib.Path | str"]]],
+    kanban_root: pathlib.Path | str,
+    halt_scopes: Sequence[tuple[str, pathlib.Path | str]],
+    defer_counts: Sequence[tuple[str, str, Sequence[pathlib.Path | str]]],
 ) -> list[tuple[str, ...]]:
     """Return every fact the status line needs, as field tuples.
 
@@ -368,18 +368,26 @@ def _build_parser() -> argparse.ArgumentParser:
             "--defer-count."
         ),
     )
-    facts.add_argument("kanban_root", metavar="KANBAN_ROOT",
-                       help="the kanban root whose projects/*/tasks are scanned for approvals")
     facts.add_argument(
-        "--halt-scope", nargs=2, action="append", default=[], metavar=("NAME", "DIR"),
-        help="a halt scope to check, in display order: its name (GLOBAL or a "
-             "project) and the directory holding its HALT / HALT-AFTER files",
+        "kanban_root", metavar="KANBAN_ROOT", help="the kanban root whose projects/*/tasks are scanned for approvals"
     )
     facts.add_argument(
-        "--defer-count", nargs="+", action="append", default=[],
+        "--halt-scope",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("NAME", "DIR"),
+        help="a halt scope to check, in display order: its name (GLOBAL or a "
+        "project) and the directory holding its HALT / HALT-AFTER files",
+    )
+    facts.add_argument(
+        "--defer-count",
+        nargs="+",
+        action="append",
+        default=[],
         metavar="NAME LEVEL BUGS_DIR",
         help="count open bugs LEVEL (low, medium or high) defers across zero "
-             "or more BUGS_DIR directories, reported under NAME",
+        "or more BUGS_DIR directories, reported under NAME",
     )
 
     ids = sub.add_parser(
@@ -392,7 +400,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the status-line CLI: print the bottom status line's facts.
 
     ``facts KANBAN_ROOT [--halt-scope NAME DIR ...] [--defer-count NAME LEVEL

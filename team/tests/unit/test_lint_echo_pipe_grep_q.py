@@ -70,30 +70,28 @@ _spec.loader.exec_module(lint)
 
 # Line 3 and line 4 are the two race sites; the rest test the same text
 # without a pipe and must never be reported.
-SEEDED = textwrap.dedent(
-    """\
+SEEDED = textwrap.dedent("""\
     #!/usr/bin/env bash
     set -euo pipefail
     if echo "$x" | grep -q y; then :; fi
     printf '%s\\n' "$x" | grep -qE '^v[0-9]+'
     grep -q y <<< "$x"
     [[ $x =~ ^v[0-9]+ ]]
-    """
-)
+    """)
 
-CLEAN = textwrap.dedent(
-    """\
+CLEAN = textwrap.dedent("""\
     #!/usr/bin/env bash
     grep -qE '^v[0-9]+' <<< "$x"
     [[ $x =~ y ]] && echo yes
-    """
-)
+    """)
 
 ONE_SITE = '#!/usr/bin/env bash\necho "$x" | grep -q y\n'
 
 
 def _make_tree(
-    tmp_path: Path, files: dict[str, str], allowlist: str | None = "# fixture allowlist\n",
+    tmp_path: Path,
+    files: dict[str, str],
+    allowlist: str | None = "# fixture allowlist\n",
 ) -> Path:
     """Build ``<root>/<rel>`` for each of *files* and the allowlist (omitted
     when *allowlist* is None); return the root."""
@@ -112,9 +110,11 @@ def _run(root: Path, tmp_path: Path, *extra: str) -> tuple[int, str, list[dict]]
     """Run the lint against *root*; return (exit code, stdout, findings)."""
     findings_file = tmp_path / "findings.json"
     proc = subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), "--root", str(root),
-         "--findings-file", str(findings_file), *extra],
-        capture_output=True, text=True, timeout=60, cwd=str(tmp_path),
+        [sys.executable, str(_LINT_SCRIPT), "--root", str(root), "--findings-file", str(findings_file), *extra],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     findings = json.loads(findings_file.read_text(encoding="utf-8"))
@@ -151,13 +151,16 @@ def test_here_string_and_bash_regex_forms_are_not_reported():
 
 
 def test_sites_in_test_paths_are_not_scanned(tmp_path):
-    root = _make_tree(tmp_path, {
-        "team/scripts/lib/checks/tests/check-thing.sh": ONE_SITE,
-        "team/tests/unit/helper.sh": ONE_SITE,
-        "team/scripts/test-sweep-runner.sh": ONE_SITE,
-        "team/scripts/test_helper.sh": ONE_SITE,
-        "team/scripts/contest-entry.sh": ONE_SITE,
-    })
+    root = _make_tree(
+        tmp_path,
+        {
+            "team/scripts/lib/checks/tests/check-thing.sh": ONE_SITE,
+            "team/tests/unit/helper.sh": ONE_SITE,
+            "team/scripts/test-sweep-runner.sh": ONE_SITE,
+            "team/scripts/test_helper.sh": ONE_SITE,
+            "team/scripts/contest-entry.sh": ONE_SITE,
+        },
+    )
 
     _rc, out, findings = _run(root, tmp_path)
 
@@ -170,41 +173,49 @@ def test_sites_in_test_paths_are_not_scanned(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text", [
-    'echo "$x" \\\n  | grep -q y\n',
-    'echo "$x" |\n  grep -q y\n',
-    'r=$(echo "$x" | grep -q y && echo ok)\n',
-    'z="$(printf %s "$x" | /usr/bin/grep -sq y)"\n',
-    'v=`echo "$x" | grep -q y`\n',
-    'echo "$x" | tr a b | grep --quiet y\n',
-    'echo "$x" | grep --silent y\n',
-    'echo "$x" | egrep -iq y\n',
-    '! echo "$x" | LC_ALL=C command grep -F -q y\n',
-    'echo "$x" | grep y -q\n',
-    'while read -r l; do echo "$l" | grep -q y; done < f\n',
-    'case "$x" in a) echo "$x" | grep -q y ;; esac\n',
-    'echo "${x//|/,}" | grep -q y\n',
-    'diff <(echo a | grep -q b) /dev/null\n',
-], ids=lambda t: t.strip().replace("\n", " ")[:40])
+@pytest.mark.parametrize(
+    "text",
+    [
+        'echo "$x" \\\n  | grep -q y\n',
+        'echo "$x" |\n  grep -q y\n',
+        'r=$(echo "$x" | grep -q y && echo ok)\n',
+        'z="$(printf %s "$x" | /usr/bin/grep -sq y)"\n',
+        'v=`echo "$x" | grep -q y`\n',
+        'echo "$x" | tr a b | grep --quiet y\n',
+        'echo "$x" | grep --silent y\n',
+        'echo "$x" | egrep -iq y\n',
+        '! echo "$x" | LC_ALL=C command grep -F -q y\n',
+        'echo "$x" | grep y -q\n',
+        'while read -r l; do echo "$l" | grep -q y; done < f\n',
+        'case "$x" in a) echo "$x" | grep -q y ;; esac\n',
+        'echo "${x//|/,}" | grep -q y\n',
+        "diff <(echo a | grep -q b) /dev/null\n",
+    ],
+    ids=lambda t: t.strip().replace("\n", " ")[:40],
+)
 def test_race_shapes_written_any_way_are_reported(text):
     assert _sites(text) == [1], text
 
 
-@pytest.mark.parametrize("text", [
-    'echo "a | grep -q y"\n',
-    "echo 'x' || grep -q y file\n",
-    '# echo "$x" | grep -q y\n',
-    'cat <<EOF\necho "$x" | grep -q y\nEOF\n',
-    "cat <<-'EOF'\n\techo \"$x\" | grep -q y\n\tEOF\n",
-    'echo "$x" | grep -c y\n',
-    'echo "$x" | grep y > /dev/null\n',
-    'echo "$x" | grep -e q y\n',
-    'echo "$x" | grep -eq\n',
-    'echo "$x" | grep y -- -q\n',
-    '(( n = 1 << 2 ))\necho done\n',
-    'echo "$x"; grep -q y file\n',
-    '[[ $x =~ ^(echo|grep)$ ]]\n',
-], ids=lambda t: t.strip().replace("\n", " ")[:40])
+@pytest.mark.parametrize(
+    "text",
+    [
+        'echo "a | grep -q y"\n',
+        "echo 'x' || grep -q y file\n",
+        '# echo "$x" | grep -q y\n',
+        'cat <<EOF\necho "$x" | grep -q y\nEOF\n',
+        "cat <<-'EOF'\n\techo \"$x\" | grep -q y\n\tEOF\n",
+        'echo "$x" | grep -c y\n',
+        'echo "$x" | grep y > /dev/null\n',
+        'echo "$x" | grep -e q y\n',
+        'echo "$x" | grep -eq\n',
+        'echo "$x" | grep y -- -q\n',
+        "(( n = 1 << 2 ))\necho done\n",
+        'echo "$x"; grep -q y file\n',
+        "[[ $x =~ ^(echo|grep)$ ]]\n",
+    ],
+    ids=lambda t: t.strip().replace("\n", " ")[:40],
+)
 def test_text_that_is_not_a_pipeline_into_quiet_grep_is_not_reported(text):
     assert _sites(text) == [], text
 
@@ -230,12 +241,15 @@ def test_grep_is_quiet_reads_option_clusters():
 
 
 def test_install_sh_and_shebang_scripts_are_scanned_and_python_is_not(tmp_path):
-    root = _make_tree(tmp_path, {
-        "install.sh": ONE_SITE,
-        "team/scripts/wake/guard/git": ONE_SITE,
-        "team/scripts/tool.py": '#!/usr/bin/env bash\necho "$x" | grep -q y\n',
-        "team/scripts/notes.txt": ONE_SITE,
-    })
+    root = _make_tree(
+        tmp_path,
+        {
+            "install.sh": ONE_SITE,
+            "team/scripts/wake/guard/git": ONE_SITE,
+            "team/scripts/tool.py": '#!/usr/bin/env bash\necho "$x" | grep -q y\n',
+            "team/scripts/notes.txt": ONE_SITE,
+        },
+    )
 
     _rc, out, findings = _run(root, tmp_path)
 
@@ -249,7 +263,8 @@ def test_install_sh_and_shebang_scripts_are_scanned_and_python_is_not(tmp_path):
 
 def test_listed_file_above_its_count_reports_every_site(tmp_path):
     root = _make_tree(
-        tmp_path, {"team/scripts/seeded.sh": SEEDED},
+        tmp_path,
+        {"team/scripts/seeded.sh": SEEDED},
         allowlist="team/scripts/seeded.sh\t1\n",
     )
 
@@ -261,7 +276,8 @@ def test_listed_file_above_its_count_reports_every_site(tmp_path):
 
 def test_tree_matching_its_allowlist_is_clean(tmp_path):
     root = _make_tree(
-        tmp_path, {"team/scripts/seeded.sh": SEEDED},
+        tmp_path,
+        {"team/scripts/seeded.sh": SEEDED},
         allowlist="# header\n\nteam/scripts/seeded.sh   2\n",
     )
 
@@ -273,7 +289,8 @@ def test_tree_matching_its_allowlist_is_clean(tmp_path):
 
 def test_listed_file_below_its_count_asks_to_tighten_the_entry(tmp_path):
     root = _make_tree(
-        tmp_path, {"team/scripts/seeded.sh": SEEDED, "team/scripts/clean.sh": CLEAN},
+        tmp_path,
+        {"team/scripts/seeded.sh": SEEDED, "team/scripts/clean.sh": CLEAN},
         allowlist="team/scripts/seeded.sh\t3\nteam/scripts/clean.sh\t1\n",
     )
 
@@ -297,7 +314,8 @@ def test_entry_for_a_file_that_is_not_scanned_asks_to_remove_it(tmp_path):
 
 def test_malformed_allowlist_line_is_reported_and_ignored(tmp_path):
     root = _make_tree(
-        tmp_path, {"team/scripts/clean.sh": CLEAN},
+        tmp_path,
+        {"team/scripts/clean.sh": CLEAN},
         allowlist="team/scripts/clean.sh\tmany\n",
     )
 
@@ -334,7 +352,10 @@ def test_emit_allowlist_prints_measured_counts(tmp_path):
     root = _make_tree(tmp_path, {"team/scripts/seeded.sh": SEEDED, "team/scripts/clean.sh": CLEAN})
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--root", str(root), "--emit-allowlist"],
-        capture_output=True, text=True, timeout=60, cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
     )
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == "team/scripts/seeded.sh\t2\n"
@@ -343,7 +364,10 @@ def test_emit_allowlist_prints_measured_counts(tmp_path):
 def test_help_exits_zero_and_names_the_race_free_forms():
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--help"],
-        capture_output=True, text=True, timeout=60, cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(_TEAM_DIR),
     )
     assert proc.returncode == 0, proc.stderr
     assert "<<<" in proc.stdout and "=~" in proc.stdout
@@ -363,7 +387,7 @@ def _runner_block(runner: Path) -> str:
     assert start != -1, f"{runner.name} does not run the echo/printf-into-quiet-grep lint"
     end = _BLOCK_END_RE.search(text, start)
     assert end is not None, f"{runner.name}: the lint's block has no closing unset"
-    return text[start:end.end()]
+    return text[start : end.end()]
 
 
 def _seeded_tree_with_lint(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -396,8 +420,12 @@ def test_runner_wiring_records_a_seeded_finding_and_returns_zero(tmp_path, runne
     )
 
     proc = subprocess.run(
-        ["bash", str(driver)], cwd=root / "team", env=env,
-        capture_output=True, text=True, timeout=120,
+        ["bash", str(driver)],
+        cwd=root / "team",
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -406,7 +434,9 @@ def test_runner_wiring_records_a_seeded_finding_and_returns_zero(tmp_path, runne
     ours = [f for f in data["findings"] if f.get("lint") == "echo_pipe_grep_q"]
     assert [(f["kind"], f["file"], f["line"]) for f in ours] == [
         ("unlisted", "team/scripts/seeded.sh", 2),
-    ], proc.stdout + proc.stderr
+    ], (
+        proc.stdout + proc.stderr
+    )
 
 
 def _pre_merge_lint() -> pre_merge.RatchetLint:

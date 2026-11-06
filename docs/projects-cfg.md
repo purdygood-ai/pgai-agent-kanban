@@ -14,7 +14,7 @@ $PGAI_AGENT_KANBAN_ROOT_PATH/projects.cfg
 
 The wake scripts, the dashboard, and the project-management scripts (`create-project.sh`, `add-project.sh`, `remove-project.sh`) all read this file through the helpers in `scripts/lib/projects.sh`. Operators normally edit it through those scripts, but hand-editing is supported and expected for small adjustments.
 
-`projects.cfg` is a runtime file. It is not version-controlled with the framework; each installation owns its own copy. The shipped reference template is `example_projects.cfg` at the repository root — copy it to the kanban root to bootstrap a new installation.
+`projects.cfg` is a runtime file. It is not version-controlled with the framework; each installation owns its own copy. The shipped reference template is `projects.cfg_example` at the repository root — copy it to the kanban root to bootstrap a new installation.
 
 ## Format Specification
 
@@ -39,12 +39,12 @@ Syntax rules:
 - **Section header** — `[project:NAME]` alone on its line, where `NAME` matches `^[a-z0-9][a-z0-9-]*$` (`PROJECTS_CFG_NAME_RE` in `scripts/lib/projects_cfg.sh`) and corresponds to a directory under `$KANBAN_ROOT/projects/<NAME>/`. A section with any other name, or with text after its `]`, registers no project; other section name patterns are rejected with a clear error pointing at the offending line.
 - **Fields** — one `key=value` pair per line, under the section that owns them. Keys are lowercase with underscores. Whitespace around the `=` is not required but is tolerated.
 - **Comments** — lines beginning with `#` are ignored. Blank lines are ignored.
-- **Empty sections are valid** — a `[project:foo]` header with no fields registers the project at default values. A warning is emitted if `priority` is needed but unset.
+- **Empty sections are valid** — a `[project:foo]` header with no fields registers the project at default values.
 - **Duplicate section names** — last definition wins.
 
 The format is intentionally extensible: new `dashboard_*` fields can be added in future releases without changing the file structure or the parser API.
 
-Refer to `example_projects.cfg` in the repository root for a fully annotated template suitable for copy-and-edit.
+Refer to `projects.cfg_example` in the repository root for a fully annotated template suitable for copy-and-edit.
 
 ## Field Reference
 
@@ -52,7 +52,7 @@ The following fields are recognized under each `[project:NAME]` section:
 
 | Field                | Type       | Default                                    | Purpose                                                                 |
 |----------------------|------------|--------------------------------------------|-------------------------------------------------------------------------|
-| `priority`           | integer    | none (required for ordering)               | Wake-script iteration order; lower value = higher priority.             |
+| `priority`           | integer    | `999` (sorted last; ties by file order)    | Optional. Wake-script iteration order; lower value = higher priority.   |
 | `description`        | free-text  | empty string                               | Human-readable description; documentation and display only.             |
 | `enabled`            | boolean    | `true`                                     | When `false`, project is skipped by the wake-script iteration loop.     |
 | `dashboard_color`    | `#RRGGBB`  | palette fallback                           | Color tag for the project on the unified visibility dashboard.          |
@@ -60,12 +60,10 @@ The following fields are recognized under each `[project:NAME]` section:
 
 Validation rules:
 
-- **`priority`** — integer. Projects without a `priority` are treated as lowest priority for iteration order.
+- **`priority`** — optional plain integer. An absent or non-integer value (`priority=abc`) reads as `999`, so the project sorts last; projects with equal priority keep their order in the file. The wake loop (`projects_cfg_list`) and the Python registry (`GET /projects`, the dashboards) order projects identically.
 - **`enabled`** — accepts `true` or `false`. Any other value is rejected.
 - **`dashboard_color`** — must be `#RRGGBB` (six hex digits with a leading `#`). The forms `0xRRGGBB` and short `#RGB` are rejected.
 - **`dashboard_max_rows`** — positive integer in the range `5`–`100`. Values outside that range are clamped to the nearest endpoint with a warning. Non-integer values are rejected.
-
-Future fields reserved for later releases (commented out in `example_projects.cfg`) include `dashboard_refresh_seconds`. These have no effect today and are mentioned only so operators know not to use those names for ad-hoc keys.
 
 ## Precedence
 

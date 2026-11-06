@@ -27,7 +27,6 @@ from pgai_agent_kanban.cm.write_rc_state import (
     write_open,
 )
 
-
 # ---------------------------------------------------------------------------
 # archive_cancelled — basic behaviour
 # ---------------------------------------------------------------------------
@@ -40,10 +39,15 @@ def test_archive_cancelled_moves_file_to_history(tmp_path: Path) -> None:
     state_file = state_dir / "v1.5.0.json"
     state_file.write_text(
         json.dumps(
-            {"rc": "v1.5.0", "opened_at": "2026-01-01T00:00:00Z",
-             "closed_at": "2026-01-02T00:00:00Z", "outcome": "cancelled"},
+            {
+                "rc": "v1.5.0",
+                "opened_at": "2026-01-01T00:00:00Z",
+                "closed_at": "2026-01-02T00:00:00Z",
+                "outcome": "cancelled",
+            },
             indent=2,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -55,9 +59,9 @@ def test_archive_cancelled_moves_file_to_history(tmp_path: Path) -> None:
     archived = list(history_dir.iterdir())
     assert len(archived) == 1, f"Expected 1 archive file, found {len(archived)}"
     archive_name = archived[0].name
-    assert archive_name.startswith("v1.5.0-cancelled-"), (
-        f"Archive filename must start with version-cancelled-: {archive_name!r}"
-    )
+    assert archive_name.startswith(
+        "v1.5.0-cancelled-"
+    ), f"Archive filename must start with version-cancelled-: {archive_name!r}"
 
 
 def test_archive_cancelled_preserves_json_content(tmp_path: Path) -> None:
@@ -95,16 +99,14 @@ def test_archive_cancelled_frees_version_slot(tmp_path: Path) -> None:
 
     archive_cancelled(str(state_file), "v2.0.0", "2026-07-01T12:00:00Z")
 
-    assert not state_file.exists(), (
-        "Version slot must be removed so open-rc can write a fresh record here"
-    )
+    assert not state_file.exists(), "Version slot must be removed so open-rc can write a fresh record here"
 
 
 def test_archive_cancelled_is_noop_when_file_absent(tmp_path: Path) -> None:
     """archive_cancelled silently does nothing when the file does not exist."""
     state_file = tmp_path / "v0.0.1.json"
     result = archive_cancelled(str(state_file), "v0.0.1", "2026-01-01T00:00:00Z")
-    assert result == '', "Should return empty string when file absent"
+    assert result == "", "Should return empty string when file absent"
 
 
 def test_archive_cancelled_does_not_move_non_cancelled_file(tmp_path: Path) -> None:
@@ -119,7 +121,7 @@ def test_archive_cancelled_does_not_move_non_cancelled_file(tmp_path: Path) -> N
 
     result = archive_cancelled(str(state_file), "v1.0.0", "2026-01-01T00:00:00Z")
 
-    assert result == '', "Should not archive a non-cancelled file"
+    assert result == "", "Should not archive a non-cancelled file"
     assert state_file.exists(), "Non-cancelled file must remain in place"
 
 
@@ -136,7 +138,7 @@ def test_archive_cancelled_idempotent_on_repeated_call(tmp_path: Path) -> None:
     archive_cancelled(str(state_file), "v1.5.0", "2026-01-02T00:00:00Z")
     # Second call: file is gone, should be a no-op
     result = archive_cancelled(str(state_file), "v1.5.0", "2026-01-02T00:00:00Z")
-    assert result == '', "Second archive call must be a no-op (file already gone)"
+    assert result == "", "Second archive call must be a no-op (file already gone)"
 
 
 def test_archive_cancelled_creates_history_dir_when_absent(tmp_path: Path) -> None:
@@ -183,9 +185,7 @@ def test_archive_cancelled_second_cycle_produces_distinct_archive(tmp_path: Path
 
     history_dir = state_dir / "history"
     archived = sorted(history_dir.iterdir())
-    assert len(archived) == 2, (
-        f"Two cancel cycles must produce two distinct archive files; found: {archived}"
-    )
+    assert len(archived) == 2, f"Two cancel cycles must produce two distinct archive files; found: {archived}"
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +200,15 @@ def test_promote_cancelled_to_history_moves_cancelled_file(tmp_path: Path) -> No
     state_file = state_dir / "v1.7.0.json"
     state_file.write_text(
         json.dumps(
-            {"rc": "v1.7.0", "opened_at": "2026-03-01T00:00:00Z",
-             "closed_at": "2026-03-02T00:00:00Z", "outcome": "cancelled"},
+            {
+                "rc": "v1.7.0",
+                "opened_at": "2026-03-01T00:00:00Z",
+                "closed_at": "2026-03-02T00:00:00Z",
+                "outcome": "cancelled",
+            },
             indent=2,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -217,7 +222,7 @@ def test_promote_cancelled_to_history_moves_cancelled_file(tmp_path: Path) -> No
 def test_promote_cancelled_to_history_is_noop_when_file_absent(tmp_path: Path) -> None:
     """promote_cancelled_to_history returns '' when no file exists at the slot."""
     result = promote_cancelled_to_history(str(tmp_path / "v0.1.0.json"))
-    assert result == ''
+    assert result == ""
 
 
 def test_promote_cancelled_to_history_is_noop_for_in_progress(tmp_path: Path) -> None:
@@ -228,7 +233,7 @@ def test_promote_cancelled_to_history_is_noop_for_in_progress(tmp_path: Path) ->
         encoding="utf-8",
     )
     result = promote_cancelled_to_history(str(state_file))
-    assert result == ''
+    assert result == ""
     assert state_file.exists(), "in_progress record must not be moved"
 
 
@@ -240,7 +245,7 @@ def test_promote_cancelled_to_history_is_noop_for_shipped(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     result = promote_cancelled_to_history(str(state_file))
-    assert result == ''
+    assert result == ""
     assert state_file.exists(), "shipped record must not be moved"
 
 
@@ -249,9 +254,7 @@ def test_promote_cancelled_to_history_is_noop_for_shipped(tmp_path: Path) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_cancel_then_archive_frees_slot_for_reopen(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_cancel_then_archive_frees_slot_for_reopen(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """Full round-trip: write_cancel → archive_cancelled frees slot → write_open succeeds.
 
     This covers the core acceptance criterion: after cancel + archive, writing a
@@ -265,10 +268,10 @@ def test_cancel_then_archive_frees_slot_for_reopen(
     # Simulate what open-rc does when it first opens the RC
     state_file.write_text(
         json.dumps(
-            {"rc": "v1.26.4", "opened_at": "2026-07-20T01:00:00Z",
-             "closed_at": None, "outcome": "in_progress"},
+            {"rc": "v1.26.4", "opened_at": "2026-07-20T01:00:00Z", "closed_at": None, "outcome": "in_progress"},
             indent=2,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
     assert json.loads(state_file.read_text())["outcome"] == "in_progress"

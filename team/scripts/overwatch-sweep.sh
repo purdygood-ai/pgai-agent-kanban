@@ -106,12 +106,12 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script's directory and resolve library paths.
 # ---------------------------------------------------------------------------
-_SWEEP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SWEEP_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _SWEEP_LIB_DIR="${_SWEEP_SCRIPT_DIR}/lib"
 _SWEEP_CHECKS_DIR="${_SWEEP_LIB_DIR}/overwatch-checks"
 

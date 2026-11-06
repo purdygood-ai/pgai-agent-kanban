@@ -36,7 +36,8 @@ import sys
 import threading
 import time
 import uuid
-from typing import Callable, Iterator, NamedTuple, Optional
+from typing import NamedTuple
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -57,7 +58,10 @@ class PrivateTmux(NamedTuple):
     def run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [self.real_tmux, "-L", self.socket_name, *args],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
 
 
@@ -69,7 +73,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
     bin_dir.mkdir()
     wrapper = bin_dir / "tmux"
     wrapper.write_text(
-        f"#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket_name)} \"$@\"\n",
+        f'#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket_name)} "$@"\n',
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
@@ -91,7 +95,7 @@ def _counting_renderer(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Pa
     renderer = tmp_path / "renderer.sh"
     renderer.write_text(
         f"#!/usr/bin/env bash\necho start >> {shlex.quote(str(starts))}\n"
-        "printf 'rendered line %s' \"$(wc -l < " + shlex.quote(str(starts)) + ")\"\n",
+        "printf 'rendered line %s' \"$(wc -l < " + shlex.quote(str(starts)) + ')"\n',
         encoding="utf-8",
     )
     renderer.chmod(0o755)
@@ -111,7 +115,7 @@ def _wait_for(predicate, timeout: float, what: str) -> None:
     raise AssertionError(f"timed out after {timeout}s waiting for {what}")
 
 
-def _option_value(tmux: PrivateTmux, session: str) -> Optional[str]:
+def _option_value(tmux: PrivateTmux, session: str) -> str | None:
     """The session's status option, surrounding whitespace dropped.
 
     tmux prints a set option's value followed by a newline, so an option
@@ -123,15 +127,15 @@ def _option_value(tmux: PrivateTmux, session: str) -> Optional[str]:
     return stdout.strip() if stdout else None
 
 
-def _rendered_number(value: Optional[str]) -> int:
+def _rendered_number(value: str | None) -> int:
     """N from a ``rendered line N`` value; 0 for anything else, empty included."""
     match = re.fullmatch(r"rendered\s+line\s+(\d+)", (value or "").strip())
     return int(match.group(1)) if match else 0
 
 
 def _wait_for_option(
-    tmux: PrivateTmux, session: str, accept: Callable[[Optional[str]], bool], timeout: float, what: str
-) -> Optional[str]:
+    tmux: PrivateTmux, session: str, accept: Callable[[str | None], bool], timeout: float, what: str
+) -> str | None:
     """Poll the session's option until ``accept`` takes its value; return that value.
 
     The value returned is the read the verdict rests on, so a test asserts on
@@ -156,7 +160,11 @@ class _AttachedClient:
         self._master = master
         self.proc = subprocess.Popen(
             [tmux.real_tmux, "-L", tmux.socket_name, "attach-session", "-t", f"={session}"],
-            stdin=slave, stdout=slave, stderr=slave, env=tmux.env, close_fds=True,
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=tmux.env,
+            close_fds=True,
         )
         os.close(slave)
         self._reader = threading.Thread(target=self._drain, daemon=True)
@@ -190,11 +198,17 @@ def test_loop_renders_only_while_attached_and_ends_with_its_session(
 
     loop = subprocess.Popen(
         ["bash", str(_LOOP), "--session", session, "--interval", str(_INTERVAL), "--", str(renderer)],
-        env=private_tmux.env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        env=private_tmux.env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     try:
         _wait_for_option(
-            private_tmux, session, lambda value: value == "rendered line 1", 15,
+            private_tmux,
+            session,
+            lambda value: value == "rendered line 1",
+            15,
             "the loop's first render to land in the option",
         )
         # No client: several intervals pass with no further render. Proving
@@ -208,7 +222,10 @@ def test_loop_renders_only_while_attached_and_ends_with_its_session(
             # Renders resume: the option comes to hold a third render's line,
             # which only a render made while the client is attached can write.
             shown = _wait_for_option(
-                private_tmux, session, lambda value: _rendered_number(value) >= 3, 20,
+                private_tmux,
+                session,
+                lambda value: _rendered_number(value) >= 3,
+                20,
                 "a render made while a client is attached to land in the option",
             )
         finally:
@@ -250,12 +267,18 @@ def test_an_empty_render_leaves_the_previous_line_in_the_option(
 
     loop = subprocess.Popen(
         ["bash", str(_LOOP), "--session", session, "--interval", str(_INTERVAL), "--", str(renderer)],
-        env=private_tmux.env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+        env=private_tmux.env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     try:
         # A line is stored even though its render exited non-zero.
         _wait_for_option(
-            private_tmux, session, lambda value: value == "rendered line 1", 15,
+            private_tmux,
+            session,
+            lambda value: value == "rendered line 1",
+            15,
             "the first render's line to land in the option",
         )
 
@@ -265,14 +288,17 @@ def test_an_empty_render_leaves_the_previous_line_in_the_option(
             # The first read tmux answers with a value is the verdict; an
             # option overwritten with "" would read back as "".
             shown = _wait_for_option(
-                private_tmux, session, lambda value: value is not None, 15,
+                private_tmux,
+                session,
+                lambda value: value is not None,
+                15,
                 "tmux to report the option's value",
             )
         finally:
             client.close()
-        assert shown == "rendered line 1", (
-            f"after {_starts(starts)} renders, the last of them empty, the option read {shown!r}"
-        )
+        assert (
+            shown == "rendered line 1"
+        ), f"after {_starts(starts)} renders, the last of them empty, the option read {shown!r}"
 
         assert private_tmux.run("kill-session", "-t", f"={session}").returncode == 0
         loop.wait(timeout=_INTERVAL * 5 + 10)
@@ -283,13 +309,15 @@ def test_an_empty_render_leaves_the_previous_line_in_the_option(
             loop.wait()
 
 
-def test_loop_exits_at_once_when_the_session_does_not_exist(
-    private_tmux: PrivateTmux, tmp_path: pathlib.Path
-) -> None:
+def test_loop_exits_at_once_when_the_session_does_not_exist(private_tmux: PrivateTmux, tmp_path: pathlib.Path) -> None:
     renderer, starts = _counting_renderer(tmp_path)
     result = subprocess.run(
         ["bash", str(_LOOP), "--session", "no-such-session", "--interval", "1", "--", str(renderer)],
-        env=private_tmux.env, capture_output=True, text=True, timeout=30, check=False,
+        env=private_tmux.env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert _starts(starts) == 0
@@ -308,7 +336,11 @@ def test_loop_exits_at_once_when_the_session_does_not_exist(
 )
 def test_malformed_command_line_exits_2(args: list[str], tmp_path: pathlib.Path) -> None:
     result = subprocess.run(
-        ["bash", str(_LOOP), *args], capture_output=True, text=True, timeout=30, check=False,
+        ["bash", str(_LOOP), *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
         env=build_scrubbed_env(home_dir=tmp_path),
     )
     assert result.returncode == 2, result.stdout + result.stderr
@@ -317,7 +349,11 @@ def test_malformed_command_line_exits_2(args: list[str], tmp_path: pathlib.Path)
 
 def test_help_exits_0_and_describes_every_flag(tmp_path: pathlib.Path) -> None:
     result = subprocess.run(
-        ["bash", str(_LOOP), "--help"], capture_output=True, text=True, timeout=30, check=False,
+        ["bash", str(_LOOP), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
         env=build_scrubbed_env(home_dir=tmp_path),
     )
     assert result.returncode == 0, result.stderr

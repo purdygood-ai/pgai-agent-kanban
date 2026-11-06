@@ -55,9 +55,7 @@ def _crontab_stub(bin_dir: pathlib.Path, calls_log: pathlib.Path) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
     stub = bin_dir / "crontab"
     stub.write_text(
-        "#!/usr/bin/env bash\n"
-        f'printf "%s\\n" "$*" >> "{calls_log}"\n'
-        "exit 0\n",
+        "#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{calls_log}"\n' "exit 0\n",
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -100,23 +98,18 @@ def test_wake_tier_none_installs_no_os_crontab(tmp_path: pathlib.Path) -> None:
     _crontab_stub(bin_dir, calls_log)
     env = _sandbox_env(tmp_path, root, bin_dir)
 
-    result = _run_install(
-        ["--force", "--wake-tier", "none", "--stamp-version", "v0.0.0-sandbox-test"], env
-    )
+    result = _run_install(["--force", "--wake-tier", "none", "--stamp-version", "v0.0.0-sandbox-test"], env)
     output = f"{result.stdout}\n{result.stderr}"
 
     assert result.returncode == 0, f"install.sh --wake-tier none failed:\n{output}"
     assert "Invalid wake tier" not in output, output
-    assert "Crontab: skipped — --no-system-cron or --wake-tier none set" in output, (
-        f"the crontab hook did not take the no-OS-crontab branch:\n{output}"
-    )
+    assert (
+        "Crontab: skipped — --no-system-cron or --wake-tier none set" in output
+    ), f"the crontab hook did not take the no-OS-crontab branch:\n{output}"
     assert not calls_log.exists(), (
-        "crontab was invoked during an install with --wake-tier none:\n"
-        f"{calls_log.read_text(encoding='utf-8')}"
+        "crontab was invoked during an install with --wake-tier none:\n" f"{calls_log.read_text(encoding='utf-8')}"
     )
-    assert "--wake-tier=small" in output, (
-        f"the pseudocron hook should keep the default tier (small):\n{output}"
-    )
+    assert "--wake-tier=small" in output, f"the pseudocron hook should keep the default tier (small):\n{output}"
     assert "--wake-tier=none" not in output, output
 
 

@@ -52,8 +52,7 @@ def _run_by_path(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProc
 def test_help_by_path_without_pythonpath_exits_zero_with_usage(tmp_path, flag):
     result = _run_by_path(tmp_path, flag)
     assert result.returncode == 0, (
-        f"{_PROMOTE_SCRIPT.name} {flag} exited {result.returncode}; "
-        f"stderr:\n{result.stderr}"
+        f"{_PROMOTE_SCRIPT.name} {flag} exited {result.returncode}; " f"stderr:\n{result.stderr}"
     )
     assert "Traceback" not in result.stderr, result.stderr
     assert "ModuleNotFoundError" not in result.stderr, result.stderr

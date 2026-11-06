@@ -133,6 +133,8 @@ def _seeded_tree(tmp_path: pathlib.Path) -> pathlib.Path:
     shutil.copytree(_SCRIPTS_DIR / "lib", scripts / "lib", ignore=shutil.ignore_patterns("__pycache__"))
     for name in _LINTS:
         shutil.copy2(_SCRIPTS_DIR / name, scripts / name)
+    # lint_dual_channel_pair.py imports its file walk from this sibling.
+    shutil.copy2(_SCRIPTS_DIR / "lint_gate_census_compliance.py", scripts / "lint_gate_census_compliance.py")
     (tree / "team" / "pgai_agent_kanban").symlink_to(_TEAM_DIR / "pgai_agent_kanban")
     _write(tree / "team" / "tests" / "unit" / "test_seeded_golden.py", _GOLDEN_SOURCE)
     _write(tree / "team" / "tests" / "unit" / "test_seeded_skips.py", _SKIPS_SOURCE)
@@ -157,9 +159,7 @@ def _sandbox_env(tmp_path: pathlib.Path) -> dict:
 
 
 @pytest.mark.parametrize("runner", _RUNNERS)
-def test_runner_call_sites_merge_each_test_authoring_lint_per_instance(
-    runner: str, tmp_path: pathlib.Path
-) -> None:
+def test_runner_call_sites_merge_each_test_authoring_lint_per_instance(runner: str, tmp_path: pathlib.Path) -> None:
     tree = _seeded_tree(tmp_path)
     team = tree / "team"
     out = tmp_path / "aggregate.json"
@@ -183,18 +183,18 @@ def test_runner_call_sites_merge_each_test_authoring_lint_per_instance(
     )
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert "quality-class finding(s) (exit" not in result.stderr, (
-        f"a converted lint exited non-zero inside the runner block:\n{result.stderr}"
-    )
+    assert (
+        "quality-class finding(s) (exit" not in result.stderr
+    ), f"a converted lint exited non-zero inside the runner block:\n{result.stderr}"
     merged_all = json.loads(out.read_text(encoding="utf-8"))["findings"]
     findings = [f for f in merged_all if _is_seeded(f)]
     by_lint = Counter(f["lint"] for f in findings)
     for lint, count in _LINTS.values():
         assert by_lint[lint] == count, (lint, findings)
         for finding in (f for f in merged_all if f["lint"] == lint):
-            assert "exit_code" not in finding and "detail" not in finding, (
-                f"{lint} reached the aggregate as a coarse pass/fail entry: {finding}"
-            )
+            assert (
+                "exit_code" not in finding and "detail" not in finding
+            ), f"{lint} reached the aggregate as a coarse pass/fail entry: {finding}"
             assert finding["severity"] == "quality", finding
             assert finding.get("cause") and finding.get("remedy"), finding
     ap = next(f for f in findings if f["lint"] == "test_anti_patterns")

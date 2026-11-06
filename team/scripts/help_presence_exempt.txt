@@ -1,9 +1,12 @@
 # help_presence_exempt.txt
 # Exempt list for lint_help_presence.py.
 #
-# Each line names the basename of a script under team/scripts/ that is
-# exempt from the help-presence lint requirement.  Blank lines and lines
-# beginning with # are ignored.
+# Each line names a script exempt from the help-presence lint requirement:
+# a bare basename, or a trailing path such as wake/claude.sh; an entry
+# matches every scanned script whose path ends with it.  Blank lines and
+# lines beginning with # are ignored.  Sourced libraries (any lib/
+# directory) and workflow plugins are exempt by the lint's own rule and are
+# never listed here.
 #
 # Exemption categories:
 #
@@ -17,15 +20,14 @@
 #                       the operator command line.  They do not accept
 #                       operator flags and have no help surface.
 #
+#   library-parsed      Thin shims that hand "$@" to a sourced library,
+#                       which parses the command line and answers --help
+#                       itself.  The shim's own text has no handler for
+#                       the lint to see.
+#
 # ---------------------------------------------------------------------------
-# process-internal: parses positional arguments (bundle_file, version, ...)
-# via sys.argv with no --help/-h handling; invoked by cm/finalize.sh and
-# cm/release_finalize.sh as a release-mechanics helper, not directly by
-# operators in normal operation.  Flagged when the scan set widened to cover
-# .py entry points; left unexempted from a --help contract of its own for a
-# follow-up ticket to add rather than fixed here.  Named as a bare basename
-# (not "cm/promote_bundled_items.py") so the entry matches both the default
-# two-directory scan and a direct --scripts-dir scan of cm/ alone — the
-# only script with this basename in the tree lives in cm/.
-promote_bundled_items.py
+# library-parsed: each wake shim sources lib/wake_entry.sh, whose argument
+# loop prints the wake usage and exits 0 on --help/-h.
+wake/claude.sh
+wake/codex.sh
 # ---------------------------------------------------------------------------

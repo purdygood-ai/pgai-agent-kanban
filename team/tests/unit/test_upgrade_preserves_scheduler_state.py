@@ -49,9 +49,7 @@ def _hand_tuned_pseudocron_cfg() -> str:
 
 
 class TestPlainUpgradeLeavesCrontabAlone:
-    def test_crontab_with_foreign_and_kanban_lines_is_byte_identical(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_crontab_with_foreign_and_kanban_lines_is_byte_identical(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         sandbox.write_crontab(_kanban_and_foreign_crontab(sandbox.root))
         before = sandbox.crontab_bytes()
@@ -59,15 +57,13 @@ class TestPlainUpgradeLeavesCrontabAlone:
         result = sandbox.run_upgrade_phase2()
 
         assert result.returncode == 0, diagnostic(result)
-        assert sandbox.crontab_bytes() == before, (
-            "an upgrade without --wake-tier must not write the crontab\n" + diagnostic(result)
-        )
+        assert (
+            sandbox.crontab_bytes() == before
+        ), "an upgrade without --wake-tier must not write the crontab\n" + diagnostic(result)
         assert "Detected installed tier: small" in result.stdout, diagnostic(result)
         assert "Crontab: left untouched" in result.stdout, diagnostic(result)
 
-    def test_tier_header_without_a_wake_job_is_detected_as_none(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_tier_header_without_a_wake_job_is_detected_as_none(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         root = sandbox.root
         sandbox.write_crontab(
@@ -80,16 +76,14 @@ class TestPlainUpgradeLeavesCrontabAlone:
         result = sandbox.run_upgrade_phase2()
 
         assert result.returncode == 0, diagnostic(result)
-        assert "Detected installed tier: none" in result.stdout, (
-            "a crontab with no wake job line has no wake tier installed\n" + diagnostic(result)
-        )
+        assert (
+            "Detected installed tier: none" in result.stdout
+        ), "a crontab with no wake job line has no wake tier installed\n" + diagnostic(result)
         assert sandbox.crontab_bytes() == before, diagnostic(result)
 
 
 class TestPseudocronStateSurvivesUpgrade:
-    def test_empty_crontab_upgrade_reports_no_pseudocron_failure_and_keeps_cfg(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_empty_crontab_upgrade_reports_no_pseudocron_failure_and_keeps_cfg(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         sandbox.write_crontab("")
         sandbox.pseudocron_cfg.write_text(_hand_tuned_pseudocron_cfg(), encoding="utf-8")
@@ -100,14 +94,12 @@ class TestPseudocronStateSurvivesUpgrade:
 
         assert result.returncode == 0, diagnostic(result)
         assert "Pseudocron: installation failed" not in output, diagnostic(result)
-        assert sandbox.pseudocron_cfg.read_bytes() == before, (
-            "an upgrade must leave a hand-tuned pseudocron.cfg byte-identical\n" + diagnostic(result)
-        )
+        assert (
+            sandbox.pseudocron_cfg.read_bytes() == before
+        ), "an upgrade must leave a hand-tuned pseudocron.cfg byte-identical\n" + diagnostic(result)
         assert sandbox.crontab_bytes() == b"", diagnostic(result)
 
-    def test_pseudocron_cfg_without_a_tier_header_skips_the_hook(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_pseudocron_cfg_without_a_tier_header_skips_the_hook(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         sandbox.pseudocron_cfg.write_text(
             "# operator-written schedule\n*/10 * * * * scripts/wake-batch.sh --agent=pm\n",
@@ -123,22 +115,18 @@ class TestPseudocronStateSurvivesUpgrade:
         assert "Pseudocron: installation failed" not in output, diagnostic(result)
         assert sandbox.pseudocron_cfg.read_bytes() == before, diagnostic(result)
 
-    def test_keep_existing_leaves_a_hand_tuned_cfg_byte_identical(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_keep_existing_leaves_a_hand_tuned_cfg_byte_identical(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         sandbox.pseudocron_cfg.write_text(_hand_tuned_pseudocron_cfg(), encoding="utf-8")
         before = sandbox.pseudocron_cfg.read_bytes()
 
-        result = sandbox.run(
-            ["bash", INSTALL_PSEUDOCRON_SCRIPT, "--wake-tier=small", "--keep-existing", "--yes"]
-        )
+        result = sandbox.run(["bash", INSTALL_PSEUDOCRON_SCRIPT, "--wake-tier=small", "--keep-existing", "--yes"])
 
         assert result.returncode == 0, diagnostic(result)
-        assert sandbox.pseudocron_cfg.read_bytes() == before, (
-            "--keep-existing must never overwrite an existing pseudocron.cfg\n" + diagnostic(result)
-        )
+        assert (
+            sandbox.pseudocron_cfg.read_bytes() == before
+        ), "--keep-existing must never overwrite an existing pseudocron.cfg\n" + diagnostic(result)
         assert "kept as-is" in result.stdout + result.stderr, diagnostic(result)
-        assert (sandbox.root / "pseudocron.env").is_file(), (
-            "--keep-existing still seeds a missing pseudocron.env\n" + diagnostic(result)
-        )
+        assert (
+            sandbox.root / "pseudocron.env"
+        ).is_file(), "--keep-existing still seeds a missing pseudocron.env\n" + diagnostic(result)

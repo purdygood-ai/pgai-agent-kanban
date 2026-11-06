@@ -57,7 +57,13 @@ from pgai_agent_kanban.dashboard.column_render.multi import compute_layout  # no
 from pgai_agent_kanban.lib.palette import resolve_semantic_color  # noqa: E402
 
 RED, YELLOW, GREEN, WHITE, DIM, RESET, MAGENTA = (
-    "\033[0;31m", "\033[0;33m", "\033[0;32m", "\033[0;37m", "\033[2m", "\033[0m", "\033[0;35m",
+    "\033[0;31m",
+    "\033[0;33m",
+    "\033[0;32m",
+    "\033[0;37m",
+    "\033[2m",
+    "\033[0m",
+    "\033[0;35m",
 )
 COLOR = Palette(True, RED, YELLOW, GREEN, WHITE, DIM, RESET, needs_operator=MAGENTA)
 PLAIN = Palette(False)
@@ -171,9 +177,9 @@ def test_middle_position_window_gives_unused_rows_to_the_other_bucket() -> None:
 @pytest.mark.parametrize(
     "n, rows, active, expected",
     [
-        (20, 5, 1, (0, 4)),     # near the start: pinned to the top, one marker below
+        (20, 5, 1, (0, 4)),  # near the start: pinned to the top, one marker below
         (20, 5, 18, (16, 20)),  # near the end: pinned to the bottom, one marker above
-        (20, 5, 10, (9, 12)),   # middle: centred, markers on both sides
+        (20, 5, 10, (9, 12)),  # middle: centred, markers on both sides
     ],
 )
 def test_active_window_keeps_the_active_item_visible(n, rows, active, expected) -> None:
@@ -196,8 +202,14 @@ def test_input_column_lists_newest_first_and_colours_by_status(tmp_path) -> None
     _write(bugs / "BUG-0003-c.md", "## Status\nrunning\n", 2)
     _write(bugs / "README.md", "## Status\nrunning\n", 9)
     lines = render_input_column(
-        bugs, rows=10, width=38, is_requirements=False, active_rc="", last_released="",
-        max_rows=20, palette=COLOR,
+        bugs,
+        rows=10,
+        width=38,
+        is_requirements=False,
+        active_rc="",
+        last_released="",
+        max_rows=20,
+        palette=COLOR,
     )
     assert lines == [f"{GREEN}BUG-0002{RESET}", f"{YELLOW}BUG-0003{RESET}", f"{WHITE}BUG-0001{RESET}"]
 
@@ -206,8 +218,14 @@ def test_input_column_cuts_to_max_rows_with_a_more_row(tmp_path) -> None:
     for i in range(5):
         _write(tmp_path / "bugs" / f"BUG-000{i}.md", "", i)
     lines = render_input_column(
-        tmp_path / "bugs", rows=10, width=38, is_requirements=False, active_rc="", last_released="",
-        max_rows=3, palette=PLAIN,
+        tmp_path / "bugs",
+        rows=10,
+        width=38,
+        is_requirements=False,
+        active_rc="",
+        last_released="",
+        max_rows=3,
+        palette=PLAIN,
     )
     assert lines == ["BUG-0004", "BUG-0003", "... and 3 more"]
 
@@ -218,8 +236,14 @@ def test_requirements_window_follows_the_active_rc_and_ignores_file_status(tmp_p
         status = "running" if minor == 2 else "done"
         _write(reqs / f"v1.{minor}.0-req.md", f"## Target Version\nv1.{minor}.0\n\n## Status\n{status}\n", 10 - minor)
     lines = render_input_column(
-        reqs, rows=4, width=38, is_requirements=True, active_rc="v1.6.0", last_released="v1.3.0",
-        max_rows=20, palette=COLOR,
+        reqs,
+        rows=4,
+        width=38,
+        is_requirements=True,
+        active_rc="v1.6.0",
+        last_released="v1.3.0",
+        max_rows=20,
+        palette=COLOR,
     )
     assert lines == [
         "... (5 more above)",
@@ -228,8 +252,14 @@ def test_requirements_window_follows_the_active_rc_and_ignores_file_status(tmp_p
         "... (3 more below)",
     ]
     full = render_input_column(
-        reqs, rows=20, width=38, is_requirements=True, active_rc="v1.6.0", last_released="v1.3.0",
-        max_rows=20, palette=COLOR,
+        reqs,
+        rows=20,
+        width=38,
+        is_requirements=True,
+        active_rc="v1.6.0",
+        last_released="v1.3.0",
+        max_rows=20,
+        palette=COLOR,
     )
     # v1.2.0's own "## Status running" plays no part: it is shipped, so green.
     assert f"{GREEN}v1.2.0{RESET}" in full
@@ -240,8 +270,14 @@ def test_missing_or_empty_input_directory_renders_empty(tmp_path) -> None:
     (tmp_path / "empty").mkdir()
     for path in (tmp_path / "absent", tmp_path / "empty"):
         assert render_input_column(
-            path, rows=5, width=20, is_requirements=False, active_rc="", last_released="",
-            max_rows=20, palette=PLAIN,
+            path,
+            rows=5,
+            width=20,
+            is_requirements=False,
+            active_rc="",
+            last_released="",
+            max_rows=20,
+            palette=PLAIN,
         ) == ["(empty)"]
 
 
@@ -251,10 +287,19 @@ def test_malformed_posture_warns_only_on_cards_whose_file_says_open(tmp_path) ->
     _write(bugs / "BUG-0002.md", "no status heading\n", 2)
     _write(bugs / "BUG-0003.md", "## Status\ndone\n", 1)
     defer = DeferCards(mode="malformed", glyph_defer_warning="!")
-    lines = _plain(render_input_column(
-        bugs, rows=5, width=38, is_requirements=False, active_rc="", last_released="",
-        max_rows=20, palette=COLOR, defer=defer,
-    ))
+    lines = _plain(
+        render_input_column(
+            bugs,
+            rows=5,
+            width=38,
+            is_requirements=False,
+            active_rc="",
+            last_released="",
+            max_rows=20,
+            palette=COLOR,
+            defer=defer,
+        )
+    )
     assert lines == ["BUG-0001 !", "BUG-0002", "BUG-0003"]
 
 
@@ -266,20 +311,29 @@ def _intake_states(project: pathlib.Path) -> pathlib.Path:
     no bundle listing it, so it stays running.
     """
     bugs = project / "bugs"
-    for mtime, (number, status) in enumerate((("9001", "needs-operator"), ("9002", "duplicate"),
-                                             ("9003", "running"), ("9004", "running")), start=1):
+    for mtime, (number, status) in enumerate(
+        (("9001", "needs-operator"), ("9002", "duplicate"), ("9003", "running"), ("9004", "running")), start=1
+    ):
         _write(bugs / f"BUG-{number}-state.md", f"# BUG-{number}\n\n## Status\n{status}\n", mtime)
-    _write(project / "requirements" / "v0.1.0-bugfix-bundle.md",
-           "# Requirements: v0.1.0\n\n## Status\ndone\n\n## Target Version\nv0.1.0\n\n"
-           f"## Bundled Items\n\n- BUG-9003-state.md (`{bugs / 'BUG-9003-state.md'}`)\n")
+    _write(
+        project / "requirements" / "v0.1.0-bugfix-bundle.md",
+        "# Requirements: v0.1.0\n\n## Status\ndone\n\n## Target Version\nv0.1.0\n\n"
+        f"## Bundled Items\n\n- BUG-9003-state.md (`{bugs / 'BUG-9003-state.md'}`)\n",
+    )
     return bugs
 
 
 def test_input_column_draws_needs_operator_duplicate_and_carried(tmp_path) -> None:
     bugs = _intake_states(tmp_path)
     coloured = render_input_column(
-        bugs, rows=10, width=38, is_requirements=False, active_rc="", last_released="",
-        max_rows=20, palette=COLOR,
+        bugs,
+        rows=10,
+        width=38,
+        is_requirements=False,
+        active_rc="",
+        last_released="",
+        max_rows=20,
+        palette=COLOR,
     )
     assert coloured == [
         f"{YELLOW}BUG-9004{RESET}",
@@ -288,8 +342,14 @@ def test_input_column_draws_needs_operator_duplicate_and_carried(tmp_path) -> No
         f"{MAGENTA}BUG-9001{RESET}",
     ]
     plain = render_input_column(
-        bugs, rows=10, width=38, is_requirements=False, active_rc="", last_released="",
-        max_rows=20, palette=PLAIN,
+        bugs,
+        rows=10,
+        width=38,
+        is_requirements=False,
+        active_rc="",
+        last_released="",
+        max_rows=20,
+        palette=PLAIN,
     )
     assert plain == ["BUG-9004", "BUG-9003 [carried]", "BUG-9002", "BUG-9001 [needs-op]"]
 
@@ -307,12 +367,15 @@ def _queue(tmp_path: pathlib.Path, entries: list) -> tuple:
 
 
 def test_queue_column_reads_state_from_status_md_before_the_marker(tmp_path) -> None:
-    backlog, tasks = _queue(tmp_path, [
-        (" ", "CODER-20260101-001-stale-marker", "BLOCKED"),
-        ("x", "CODER-20260101-002-wont-do", "WONT-DO"),
-        ("x", "CODER-20260101-003-done", "DONE"),
-        ("A", "CODER-20260101-004-no-status", None),
-    ])
+    backlog, tasks = _queue(
+        tmp_path,
+        [
+            (" ", "CODER-20260101-001-stale-marker", "BLOCKED"),
+            ("x", "CODER-20260101-002-wont-do", "WONT-DO"),
+            ("x", "CODER-20260101-003-done", "DONE"),
+            ("A", "CODER-20260101-004-no-status", None),
+        ],
+    )
     lines = render_queue_column(backlog, rows=10, width=22, tasks_dir=tasks, max_rows=20, palette=COLOR)
     assert lines == [
         f"{YELLOW}20260101-004{RESET}",
@@ -330,7 +393,12 @@ def test_queue_column_cuts_to_max_rows_with_a_more_row(tmp_path) -> None:
 
 def test_missing_backlog_renders_empty(tmp_path) -> None:
     assert render_queue_column(
-        tmp_path / "nope.md", rows=5, width=22, tasks_dir=tmp_path, max_rows=20, palette=PLAIN,
+        tmp_path / "nope.md",
+        rows=5,
+        width=22,
+        tasks_dir=tmp_path,
+        max_rows=20,
+        palette=PLAIN,
     ) == ["(empty)"]
 
 
@@ -360,7 +428,11 @@ def test_sources_from_env_pads_short_lists_by_position() -> None:
     }
     alpha, beta = sources_from_env(env)
     assert (alpha.name, alpha.color, alpha.max_rows, alpha.backlog_file, alpha.active_rc) == (
-        "alpha", "#378ADD", 5, "/a/q.md", "v1.0.0",
+        "alpha",
+        "#378ADD",
+        5,
+        "/a/q.md",
+        "v1.0.0",
     )
     assert alpha.defer.mode == "on" and alpha.defer.ids == {"BUG-0001", "BUG-0002"}
     assert beta.color.startswith("#") and beta.max_rows == 20
@@ -388,7 +460,11 @@ def test_multi_requirements_classify_by_target_version_alone(tmp_path) -> None:
     _write(reqs / "v1.2.0-decomposing.md", "## Target Version\nv1.2.0\n\n## Status\nrunning\n")
     source = ProjectSource("alpha", "#378ADD", input_dir=str(reqs), active_rc="v1.1.0", last_released="v1.0.0")
     lines = render_multi_project_column(
-        [source], subcommand="input", column_type="requirements", width=38, palette=COLOR,
+        [source],
+        subcommand="input",
+        column_type="requirements",
+        width=38,
+        palette=COLOR,
     )
     assert [line.split(" ", 1)[1] for line in lines] == [
         f"{WHITE}v1.2.0{RESET}",
@@ -419,7 +495,9 @@ def test_multi_column_marker_survives_truncation_of_a_narrow_pane(tmp_path) -> N
 
 def test_multi_column_with_no_rows_renders_empty() -> None:
     source = ProjectSource("alpha", "#378ADD")
-    assert render_multi_project_column([source], subcommand="input", column_type="bugs", width=20, palette=PLAIN) == ["(empty)"]
+    assert render_multi_project_column([source], subcommand="input", column_type="bugs", width=20, palette=PLAIN) == [
+        "(empty)"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -429,10 +507,22 @@ def test_multi_column_with_no_rows_renders_empty() -> None:
 
 def test_cli_queue_mode_prints_the_pane(tmp_path, capsys) -> None:
     backlog, tasks = _queue(tmp_path, [("x", "CODER-20260101-001-a", "WONT-DO")])
-    assert cli.main([
-        "queue", f"--backlog-file={backlog}", "--rows=5", "--width=22", f"--tasks-dir={tasks}",
-        "--max-rows=20", "--use-color=true", f"--green={GREEN}", f"--reset={RESET}",
-    ]) == 0
+    assert (
+        cli.main(
+            [
+                "queue",
+                f"--backlog-file={backlog}",
+                "--rows=5",
+                "--width=22",
+                f"--tasks-dir={tasks}",
+                "--max-rows=20",
+                "--use-color=true",
+                f"--green={GREEN}",
+                f"--reset={RESET}",
+            ]
+        )
+        == 0
+    )
     assert capsys.readouterr().out == f"{GREEN}20260101-001{RESET}\n"
 
 
@@ -455,9 +545,19 @@ def test_cli_multi_mode_reads_projects_from_the_environment(tmp_path, capsys, mo
 
 def test_cli_input_mode_draws_needs_operator_in_the_palette_colour(tmp_path, capsys) -> None:
     bugs = _intake_states(tmp_path)
-    assert cli.main([
-        "input", f"--input-dir={bugs}", "--rows=10", "--width=38", "--use-color=true", f"--reset={RESET}",
-    ]) == 0
+    assert (
+        cli.main(
+            [
+                "input",
+                f"--input-dir={bugs}",
+                "--rows=10",
+                "--width=38",
+                "--use-color=true",
+                f"--reset={RESET}",
+            ]
+        )
+        == 0
+    )
     last = capsys.readouterr().out.splitlines()[-1]
     assert last == f"{resolve_semantic_color('status_needs_operator', True)}BUG-9001{RESET}"
 

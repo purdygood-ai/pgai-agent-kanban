@@ -47,8 +47,7 @@ _DOC_LINT_SH = _TEAM_DIR / "scripts" / "harness" / "doc-lint.sh"
 
 # Every required feature token doc-lint.sh's FEATURE_PATTERNS names.
 _ALL_FEATURE_TOKENS = (
-    "debian rocky9 branch_prefix push_to_remote dev_tree_path "
-    "wake-batch.sh install.sh blocked_minutes"
+    "debian rocky9 branch_prefix push_to_remote dev_tree_path " "wake-batch.sh install.sh blocked_minutes"
 )
 
 
@@ -67,9 +66,7 @@ def _run(args: list[str], *, cwd: pathlib.Path = _REPO_ROOT) -> subprocess.Compl
     # Without PGAI_PROJECT_NAME a usage refusal's dual-channel emitter
     # records nothing in any project's refusal ledger.
     env = {k: v for k, v in os.environ.items() if k != "PGAI_PROJECT_NAME"}
-    return subprocess.run(
-        args, capture_output=True, text=True, timeout=30, cwd=str(cwd), env=env
-    )
+    return subprocess.run(args, capture_output=True, text=True, timeout=30, cwd=str(cwd), env=env)
 
 
 def _diagnostic(result: subprocess.CompletedProcess) -> str:
@@ -112,9 +109,7 @@ def _write(doc_root: pathlib.Path, rel_path: str, content: str) -> pathlib.Path:
 
 
 class TestCmdSuiteRemedy:
-    def test_failing_command_names_cause_and_next_diagnostic_step(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_failing_command_names_cause_and_next_diagnostic_step(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs1"
         _write(
             doc_root,
@@ -133,9 +128,7 @@ class TestCmdSuiteRemedy:
         # Exempt from a numbered fix-command block — this is NOT a claimed fix.
         assert "To fix:" not in result.stdout
 
-    def test_skip_annotation_named_in_remedy_actually_clears_the_gate(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_skip_annotation_named_in_remedy_actually_clears_the_gate(self, tmp_path: pathlib.Path) -> None:
         """The next-diagnostic-step direction (add a skip annotation) is
         actionable: applying it makes the suite pass."""
         doc_root = tmp_path / "docs2"
@@ -152,9 +145,7 @@ class TestCmdSuiteRemedy:
         assert "SKIP-BLOCK" in result.stdout or "skip=1" in result.stdout
         assert "fail=0" in result.stdout, _diagnostic(result)
 
-    def test_passing_command_reports_pass_with_no_remedy(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_passing_command_reports_pass_with_no_remedy(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs3"
         _write(doc_root, "README.md", "# Test doc\n\n```bash\ntrue\n```\n")
 
@@ -169,9 +160,7 @@ class TestCmdSuiteRemedy:
 
 
 class TestLinksSuiteRemedy:
-    def test_dead_link_prints_cause_to_fix_and_rule(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_dead_link_prints_cause_to_fix_and_rule(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs4"
         readme = _write(
             doc_root,
@@ -185,12 +174,10 @@ class TestLinksSuiteRemedy:
         assert "Cause:" in result.stdout
         assert "To fix:" in result.stdout
         assert "Rule:" in result.stdout
-        assert f'grep -n -F \'does-not-exist.md\' "{readme}"' in result.stdout
+        assert f"grep -n -F 'does-not-exist.md' \"{readme}\"" in result.stdout
         assert "--suite links" in result.stdout  # re-run pointer names the suite to re-check
 
-    def test_locate_command_in_remedy_finds_the_offending_line(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_locate_command_in_remedy_finds_the_offending_line(self, tmp_path: pathlib.Path) -> None:
         """Step 1 of the 'To fix' block (grep -n -F) is deterministic and
         verbatim-runnable: executing it for real locates the offending line."""
         doc_root = tmp_path / "docs5"
@@ -223,9 +210,7 @@ class TestLinksSuiteRemedy:
 
 
 class TestFossilGrepsSuiteRemedy:
-    def test_fossil_hit_prints_cause_to_fix_and_rule(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fossil_hit_prints_cause_to_fix_and_rule(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs7"
         readme = _write(
             doc_root,
@@ -241,9 +226,7 @@ class TestFossilGrepsSuiteRemedy:
         assert "Rule:" in result.stdout
         assert f"sed -n '3p' \"{readme}\"" in result.stdout
 
-    def test_remedy_commands_clear_the_gate_when_executed_verbatim(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_remedy_commands_clear_the_gate_when_executed_verbatim(self, tmp_path: pathlib.Path) -> None:
         """Executing step 1 (locate) then removing the offending line — the
         prescribed shape of step 2 — clears the gate on re-run."""
         doc_root = tmp_path / "docs8"
@@ -286,9 +269,7 @@ class TestFossilGrepsSuiteRemedy:
 
 
 class TestFeatureGrepsSuiteRemedy:
-    def test_missing_token_prints_cause_to_fix_and_rule(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_missing_token_prints_cause_to_fix_and_rule(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs10"
         _write(doc_root, "README.md", "# Test doc\n\nNothing feature-related here.\n")
 
@@ -298,7 +279,7 @@ class TestFeatureGrepsSuiteRemedy:
         assert "Cause:" in result.stdout
         assert "To fix:" in result.stdout
         assert "Rule:" in result.stdout
-        assert f'grep -rniE \'debian\' "{doc_root}"' in result.stdout
+        assert f"grep -rniE 'debian' \"{doc_root}\"" in result.stdout
 
     def test_locate_command_confirms_true_absence(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs11"
@@ -314,9 +295,7 @@ class TestFeatureGrepsSuiteRemedy:
         """Following the prescribed shape (document the token) clears that
         specific pattern's failure, demonstrating the fix direction works."""
         doc_root = tmp_path / "docs12"
-        readme = _write(
-            doc_root, "README.md", "# Test doc\n\nNothing feature-related here.\n"
-        )
+        readme = _write(doc_root, "README.md", "# Test doc\n\nNothing feature-related here.\n")
 
         first = _run_doc_lint(doc_root, "feature-greps", verbose=True)
         assert "FEATURE MISSING: pattern=debian" in first.stdout, _diagnostic(first)
@@ -329,9 +308,7 @@ class TestFeatureGrepsSuiteRemedy:
         assert "FEATURE MISSING: pattern=debian" not in second.stdout, _diagnostic(second)
         assert "FEATURE MISSING: pattern=rocky9" not in second.stdout, _diagnostic(second)
 
-    def test_all_tokens_present_passes_with_no_remedy(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_all_tokens_present_passes_with_no_remedy(self, tmp_path: pathlib.Path) -> None:
         doc_root = tmp_path / "docs13"
         _write(
             doc_root,
@@ -425,9 +402,7 @@ class TestFindingsExitContract:
         [([], "doc_lint.suite_required"), (["--suite", "nonesuch"], "doc_lint.suite_unknown")],
         ids=["suite-missing", "suite-unknown"],
     )
-    def test_malformed_command_line_still_exits_two(
-        self, args: list[str], error_key: str
-    ) -> None:
+    def test_malformed_command_line_still_exits_two(self, args: list[str], error_key: str) -> None:
         result = _run(["bash", str(_DOC_LINT_SH), *args])
 
         assert result.returncode == 2, _diagnostic(result)

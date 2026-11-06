@@ -46,7 +46,7 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 # Run by file path or loaded from a file outside its package, this module
 # has no parent package and the interpreter puts only its own directory on
@@ -97,12 +97,12 @@ class UnknownFlavorError(ValueError):
         super().__init__(f"unknown flavor {flavor!r}; buildable flavors: {listed}")
 
 
-def docker_dir(repo_root: Optional[pathlib.Path | str] = None) -> pathlib.Path:
+def docker_dir(repo_root: pathlib.Path | str | None = None) -> pathlib.Path:
     """Return the repository's ``docker/`` directory."""
     return pathlib.Path(repo_root if repo_root is not None else REPO_ROOT).resolve() / "docker"
 
 
-def dockerfile_flavors(repo_root: Optional[pathlib.Path | str] = None) -> list[str]:
+def dockerfile_flavors(repo_root: pathlib.Path | str | None = None) -> list[str]:
     """Return every buildable flavor, sorted by name.
 
     A flavor is a direct subdirectory of ``<repo_root>/docker/`` that holds a
@@ -112,11 +112,7 @@ def dockerfile_flavors(repo_root: Optional[pathlib.Path | str] = None) -> list[s
     base = docker_dir(repo_root)
     if not base.is_dir():
         return []
-    return sorted(
-        entry.name
-        for entry in base.iterdir()
-        if entry.is_dir() and (entry / "Dockerfile").is_file()
-    )
+    return sorted(entry.name for entry in base.iterdir() if entry.is_dir() and (entry / "Dockerfile").is_file())
 
 
 def image_tags(flavor: str, tag: str = DEFAULT_EXTRA_TAG) -> list[str]:
@@ -129,7 +125,7 @@ def valid_tag(tag: str) -> bool:
     return bool(_TAG_RE.match(tag))
 
 
-def pinned_build_args(repo_root: Optional[pathlib.Path | str] = None) -> list[str]:
+def pinned_build_args(repo_root: pathlib.Path | str | None = None) -> list[str]:
     """Return ``--build-arg KEY=value`` pairs from ``docker/cli-versions.env``.
 
     Raises FileNotFoundError (file absent) or ValueError (a required key
@@ -141,7 +137,7 @@ def pinned_build_args(repo_root: Optional[pathlib.Path | str] = None) -> list[st
 def build_arguments(
     flavor: str,
     *,
-    repo_root: Optional[pathlib.Path | str] = None,
+    repo_root: pathlib.Path | str | None = None,
     tag: str = DEFAULT_EXTRA_TAG,
     no_cache: bool = False,
 ) -> list[str]:
@@ -182,26 +178,36 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="VERB")
 
     p = sub.add_parser(
-        "flavors", help="list the buildable flavors",
+        "flavors",
+        help="list the buildable flavors",
         description="Print every docker/<flavor>/ directory that holds a Dockerfile, one per line, sorted.",
     )
-    p.add_argument("--repo-root", metavar="DIR", default=None, help="repository root (default: the tree this module is in)")
+    p.add_argument(
+        "--repo-root", metavar="DIR", default=None, help="repository root (default: the tree this module is in)"
+    )
 
     p = sub.add_parser(
-        "build-args", help="print the build argv for one flavor",
+        "build-args",
+        help="print the build argv for one flavor",
         description=(
             "Print the engine argv after the engine name, one argument per line: the Dockerfile, "
             "the pinned --build-arg pairs from docker/cli-versions.env, both tags and the repository root as context."
         ),
     )
     p.add_argument("flavor", help="a docker/<flavor>/ directory name, e.g. rocky9")
-    p.add_argument("--repo-root", metavar="DIR", default=None, help="repository root (default: the tree this module is in)")
-    p.add_argument("--tag", default=DEFAULT_EXTRA_TAG, help=f"second tag, replacing '{DEFAULT_EXTRA_TAG}' (default: {DEFAULT_EXTRA_TAG})")
+    p.add_argument(
+        "--repo-root", metavar="DIR", default=None, help="repository root (default: the tree this module is in)"
+    )
+    p.add_argument(
+        "--tag",
+        default=DEFAULT_EXTRA_TAG,
+        help=f"second tag, replacing '{DEFAULT_EXTRA_TAG}' (default: {DEFAULT_EXTRA_TAG})",
+    )
     p.add_argument("--no-cache", action="store_true", help="add --no-cache to the build")
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the exit code (see the module docstring)."""
     parser = _parser()
     args = parser.parse_args(argv)
@@ -213,9 +219,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.command == "build-args":
         try:
-            built = build_arguments(
-                args.flavor, repo_root=args.repo_root, tag=args.tag, no_cache=args.no_cache
-            )
+            built = build_arguments(args.flavor, repo_root=args.repo_root, tag=args.tag, no_cache=args.no_cache)
         except UnknownFlavorError as exc:
             print(f"image_build: {exc}", file=sys.stderr)
             return EXIT_UNKNOWN_FLAVOR

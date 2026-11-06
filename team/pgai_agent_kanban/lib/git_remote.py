@@ -58,7 +58,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-from typing import Optional
 
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key, strip_one_quote_each_side
@@ -88,10 +87,7 @@ def is_valid_remote_name(value: str) -> bool:
     no ``..``; no trailing ``.`` or ``.lock``.
     """
     return bool(
-        _REMOTE_NAME_RE.match(value)
-        and ".." not in value
-        and not value.endswith(".")
-        and not value.endswith(".lock")
+        _REMOTE_NAME_RE.match(value) and ".." not in value and not value.endswith(".") and not value.endswith(".lock")
     )
 
 
@@ -139,7 +135,7 @@ def invalid_remote_remedy(cfg_file: str, dev_tree: str) -> str:
     )
 
 
-def remote_name_from_cfg(cfg_file: Optional[pathlib.Path], project: str = "") -> str:
+def remote_name_from_cfg(cfg_file: pathlib.Path | None, project: str = "") -> str:
     """The remote *cfg_file* configures, by the rule in the module docstring.
 
     Args:
@@ -169,7 +165,7 @@ def remote_name_from_cfg(cfg_file: Optional[pathlib.Path], project: str = "") ->
     raise InvalidRemoteName(raw, cfg_file, project, dev_tree)
 
 
-def resolve_git_remote_name(project_root: "pathlib.Path | str", project: str) -> str:
+def resolve_git_remote_name(project_root: pathlib.Path | str, project: str) -> str:
     """The remote *project* (rooted at *project_root*) configures.
 
     Locates ``project.cfg`` (else ``PROJECT.cfg``) under *project_root* and

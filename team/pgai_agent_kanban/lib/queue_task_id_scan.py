@@ -44,7 +44,7 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 __all__ = [
     "main",
@@ -54,7 +54,7 @@ __all__ = [
 ]
 
 
-def queue_entry_pattern(marker_class: str) -> "re.Pattern[str]":
+def queue_entry_pattern(marker_class: str) -> re.Pattern[str]:
     """Compile the queue-entry pattern for the markers in *marker_class*.
 
     Group 1 is the id after the bracket; group 2 the optional description.
@@ -63,13 +63,11 @@ def queue_entry_pattern(marker_class: str) -> "re.Pattern[str]":
     hold one of the class's characters.
     """
     if " " in marker_class:
-        return re.compile(r'^\s*-?\s*\[\s*(?:[' + marker_class + r'])?\s*\]\s+(\S+)(\s+.*)?$')
-    return re.compile(r'^\s*-?\s*\[\s*[' + marker_class + r']\s*\]\s+(\S+)(\s+.*)?$')
+        return re.compile(r"^\s*-?\s*\[\s*(?:[" + marker_class + r"])?\s*\]\s+(\S+)(\s+.*)?$")
+    return re.compile(r"^\s*-?\s*\[\s*[" + marker_class + r"]\s*\]\s+(\S+)(\s+.*)?$")
 
 
-def malformed_queue_entries(
-    lines: Iterable[str], marker_class: str, canonical_pattern: str
-) -> list:
+def malformed_queue_entries(lines: Iterable[str], marker_class: str, canonical_pattern: str) -> list:
     """Return ``(line_number, stripped_line)`` for every entry in
     *marker_class* whose id *canonical_pattern* does not match.
 
@@ -86,9 +84,7 @@ def malformed_queue_entries(
     return found
 
 
-def scan_queue_file(
-    queue_file: "pathlib.Path | str", marker_class: str, canonical_pattern: str
-) -> list:
+def scan_queue_file(queue_file: pathlib.Path | str, marker_class: str, canonical_pattern: str) -> list:
     """Read *queue_file* and return :func:`malformed_queue_entries` over its lines.
 
     The file is read as text in the interpreter's default encoding. A file
@@ -119,7 +115,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = _build_parser().parse_args(argv)
     for number, line in scan_queue_file(args.queue_file, args.marker_class, args.canonical_pattern):

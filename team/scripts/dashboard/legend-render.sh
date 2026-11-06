@@ -13,6 +13,11 @@
 # "carried" is shown as the marker carried rows carry ("↻" in colour,
 # "[carried]" in NO_COLOR / TERM=dumb mode).
 #
+# Run in a board window's legend pane while that window's columns are too
+# narrow to keep their floor width, it prints the window's recorded NOTICE
+# line (@pgai_board_notice) instead, cut to the pane's width, until a
+# reflow at a wide-enough size clears it.
+#
 # Usage:
 #   legend-render.sh [--kanban-root <path>]
 #
@@ -20,14 +25,21 @@
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root override
 #   NO_COLOR                            — set non-empty to disable ANSI colors
 #   TERM=dumb                           — also disables ANSI colors
+#   TMUX_PANE                           — set by tmux in a pane; names the
+#                                         window whose board notice is shown
 #
 # Exit 0 always.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
@@ -61,12 +73,6 @@ while [[ $# -gt 0 ]]; do
             KANBAN_ROOT="${2:-$KANBAN_ROOT}"
             shift 2
             ;;
-        -h|--help)
-            # shellcheck source=../lib/header_help.sh
-            source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-            header_help_print "${BASH_SOURCE[0]}"
-            exit 0
-            ;;
         *)
             echo "ERROR: Unknown argument: $1" >&2
             exit 1
@@ -83,7 +89,7 @@ config_startup_prelude "$KANBAN_ROOT"
 # read_ini available via project_paths.sh (sourced above).
 # ---------------------------------------------------------------------------
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "${KANBAN_ROOT}/kanban.cfg")"
     export DASHBOARD_ROWS_PER_COLUMN
 fi
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
@@ -94,6 +100,26 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 USE_COLOR=true
 if [[ "${TERM:-}" == "dumb" ]] || [[ -n "${NO_COLOR:-}" ]]; then
     USE_COLOR=false
+fi
+
+# ---------------------------------------------------------------------------
+# Board notice: a board window whose columns cannot keep their floor width
+# records one NOTICE line in its @pgai_board_notice option, and every build
+# and reflow resets it (lib/board_window.sh). While this pane's window holds
+# one, the bar shows it in place of the legend, cut to the pane's width so
+# the one-row bar shows its start rather than wrapping to its end.
+# ---------------------------------------------------------------------------
+if [[ -n "${TMUX_PANE:-}" ]]; then
+    _board_state="$(tmux display-message -p -t "$TMUX_PANE" '#{pane_width} #{@pgai_board_notice}' 2>/dev/null || true)"
+    _pane_width="${_board_state%% *}"
+    _board_notice="${_board_state#* }"
+    if [[ "$_board_state" == *" "* && -n "$_board_notice" ]]; then
+        if [[ "$_pane_width" =~ ^[0-9]+$ ]] && (( _pane_width > 0 && ${#_board_notice} > _pane_width )); then
+            _board_notice="${_board_notice:0:_pane_width}"
+        fi
+        printf '%s\n' "$_board_notice"
+        exit 0
+    fi
 fi
 
 # ---------------------------------------------------------------------------

@@ -261,12 +261,8 @@ def test_populated_non_last_target_gets_the_same_record_and_keeps_its_separator(
     assert write(tmp_path, after) == after
 
 
-@pytest.mark.parametrize(
-    ("write", "target", "record"), _WRITERS[:2], ids=_WRITER_IDS[:2]
-)
-def test_absent_record_section_is_appended_as_before(
-    tmp_path: pathlib.Path, write, target: str, record: str
-) -> None:
+@pytest.mark.parametrize(("write", "target", "record"), _WRITERS[:2], ids=_WRITER_IDS[:2])
+def test_absent_record_section_is_appended_as_before(tmp_path: pathlib.Path, write, target: str, record: str) -> None:
     assert write(tmp_path, "## State\nWORKING\n") == f"## State\nWORKING\n\n{target}\n{record}\n"
     assert write(tmp_path, "## State\nWORKING") == f"## State\nWORKING\n\n{target}\n{record}\n"
 
@@ -282,9 +278,7 @@ def test_feature_branch_update_is_a_no_op_when_the_field_is_absent(tmp_path: pat
 def test_harness_stub_fills_empty_state_and_summary_without_dropping_sections(tmp_path: pathlib.Path) -> None:
     before = "## State\n\n## Summary\n\n## Needs Human\nno\n\n## Blockers\nnone\n"
     after = _harness_invoke(tmp_path, before)
-    assert after == (
-        f"## State\nDONE\n\n## Summary\n{_HARNESS_SUMMARY}\n\n## Needs Human\nno\n\n## Blockers\nnone\n"
-    )
+    assert after == (f"## State\nDONE\n\n## Summary\n{_HARNESS_SUMMARY}\n\n## Needs Human\nno\n\n## Blockers\nnone\n")
 
 
 def test_harness_stub_rewrites_populated_state_and_summary_as_before(tmp_path: pathlib.Path) -> None:

@@ -31,27 +31,17 @@
 #                      unset or empty means 'crontab'
 
 # shellcheck source=../lib/header_help.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
 
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # The header block up to its first non-comment line, however long it
-      # grows; awk writes it straight to stdout, so no pipe stage can race.
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve script dir and source dashboard-data ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
@@ -86,7 +76,7 @@ source "${SCRIPT_DIR}/../lib/script_common.sh"
 source "${SCRIPT_DIR}/lib/next_fire_viewport.sh"
 # Source the shared roster band renderer — the single "one renderer, two
 # call sites" home for packing the roster into a columnar band or falling
-# back to the vertical list. next-cron-firings.sh's schedule-window band
+# back to the vertical list. next-cron-firings.sh's drill-window CRON pane
 # renders through the same functions, so window 0's tile can never
 # disagree with it entry-for-entry.
 # shellcheck source=lib/roster_band.sh
@@ -165,15 +155,8 @@ DONE_COUNT="$(get_val DONE_COUNT 0)"
 # Tier order: KANBAN_ROOT/VERSION > REPO_ROOT/VERSION > git tag --merged > Last Released > 'unknown'
 # Single decision point: get_kanban_version in lib/version.sh (do not add tier-order logic here).
 # Git tier uses tag --merged origin/main (reachability-independent), not git describe.
-# Walk up from SCRIPT_DIR to find the dev-tree repo root (depth-independent .git-marker walk).
-REPO_ROOT="$SCRIPT_DIR"
-while [[ "$REPO_ROOT" != "/" ]] && [[ ! -d "$REPO_ROOT/.git" ]]; do
-  REPO_ROOT="$(dirname "$REPO_ROOT")"
-done
-if [[ "$REPO_ROOT" == "/" ]]; then
-  # Fallback if .git not found (e.g. shallow export or unusual layout)
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-fi
+# The checkout this script runs from (resolve_script_repo_root, lib/dev_tree.sh).
+REPO_ROOT="$(resolve_script_repo_root "$SCRIPT_DIR" "$SCRIPT_DIR/../../..")"
 KANBAN_VERSION="$(get_kanban_version "$KANBAN_ROOT_VAL" "$REPO_ROOT" "${LAST_RELEASED:-}")"
 
 # --- Project name resolution (from data layer) ---
@@ -239,10 +222,10 @@ for (( i=0; i<EMPTY; i++ ));  do BAR="${BAR}${EMPTY_CHAR}"; done
 NOW_TS="${SHOW_HEADER_NOW:-$(date +%s)}"
 
 # ROSTER_BAND_DISPLAY (populated below via roster_band_fetch_entries) is the
-# same entry-text array next-cron-firings.sh's schedule-window band renders
+# same entry-text array next-cron-firings.sh's drill-window CRON pane renders
 # from — the "one renderer, two call sites" requirement: window 0's tile
-# and the schedule window agree entry-for-entry because both read the SAME
-# roster_entries.py output through the SAME lib/roster_band.sh functions,
+# and the drill-window CRON pane agree entry-for-entry because both read the
+# SAME roster_entries.py output through the SAME lib/roster_band.sh functions,
 # never a second copy of this parsing.
 CRON_FIRINGS_AVAILABLE=false
 CRON_ERROR=false

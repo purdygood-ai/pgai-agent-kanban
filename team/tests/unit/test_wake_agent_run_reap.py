@@ -45,7 +45,6 @@ import re
 import signal
 import subprocess
 import sys
-import time
 import uuid
 
 import pytest
@@ -82,9 +81,7 @@ setsid bash -c 'exec -a {marker}-sleeper sleep 600' </dev/null >/dev/null 2>&1 &
 
 
 def _pgrep(marker: str) -> list[str]:
-    out = subprocess.run(
-        ["pgrep", "-af", f"{marker}-"], capture_output=True, text=True, timeout=10, check=False
-    ).stdout
+    out = subprocess.run(["pgrep", "-af", f"{marker}-"], capture_output=True, text=True, timeout=10, check=False).stdout
     return [line for line in out.splitlines() if line.strip()]
 
 
@@ -129,8 +126,13 @@ class _Scenario:
     def run(self, script: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
         proc = subprocess.Popen(
             ["bash", "-c", script],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, env=self.env(extra_env), cwd=str(self.dir), start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=self.env(extra_env),
+            cwd=str(self.dir),
+            start_new_session=True,
         )
         try:
             stdout, stderr = proc.communicate(timeout=_HARNESS_TIMEOUT)
@@ -279,8 +281,12 @@ def test_a_process_without_the_run_id_is_never_signalled(scenario) -> None:
     box.stub.write_text(_stub_provider(box.marker, block=False), encoding="utf-8")
     bystander = subprocess.Popen(
         ["bash", "-c", f"exec -a {box.marker}-bystander sleep 600"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        cwd=str(box.scratch), env=box.env(), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        cwd=str(box.scratch),
+        env=box.env(),
+        start_new_session=True,
     )
     try:
         result = box.run(_agent_step_harness(box, max_task_seconds=60, grace=5))

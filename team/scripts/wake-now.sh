@@ -18,12 +18,17 @@
 #
 # Valid agent names: pm, coder, cm, writer, tester, overwatch
 # --all fires: pm, coder, cm, writer, tester  (overwatch excluded from burst)
+#
+# Backgrounded firings (--bg, --all) are detached into a session of their own
+# with setsid, and each one's pid is printed and is its process-group id:
+# `kill -- -PID` stops that agent's whole wake cycle. Without setsid on PATH
+# the script cannot detach them, so it waits for every fired pid instead.
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/shell-env" ]] && source "$KANBAN_ROOT/shell-env"
@@ -54,8 +59,8 @@ OPERATOR_VALID_FLAGS=(agent all bg help)
 # names this verb's own roles and what overwatch runs.
 declare -A OPERATOR_FLAG_HELP=(
     [agent]="  --agent ROLE       Agent to fire: pm|coder|cm|writer|tester, or overwatch (runs overwatch-sweep.sh)"
-    [all]="  --all              Fire all pipeline agents backgrounded (pm coder cm writer tester)"
-    [bg]="  --bg               Background the agent process instead of running in foreground"
+    [all]="  --all              Fire all pipeline agents backgrounded (pm coder cm writer tester), each detached into its own session"
+    [bg]="  --bg               Background the agent process, detached into its own session, instead of running in foreground"
 )
 
 # ---------------------------------------------------------------------------
@@ -176,12 +181,59 @@ fire_command() {
     fi
 }
 
+# Every backgrounded firing is detached explicitly into a session of its own
+# (setsid), so it is no part of this script's process group or terminal and
+# its pid is also its session and process-group id: `kill -- -PID` stops
+# that agent's whole wake cycle. Its stdin is /dev/null; stdout and stderr
+# stay this script's. Without setsid on PATH a firing cannot be detached, so
+# this script stays in the foreground and waits for every recorded pid.
+_WAKE_NOW_SETSID=true
+if ! command -v setsid >/dev/null 2>&1; then
+    _WAKE_NOW_SETSID=false
+fi
+
+# Pids of every agent fired in the background, in firing order.
+FIRED_PIDS=()
+
+# fire_one_bg <agent> -- start one agent's firing in the background and
+# record its pid in FIRED_PIDS. Started from this non-interactive shell (no
+# job control) the child is not a process-group leader, so setsid makes it
+# the leader of a new session without forking: $! is the agent's own pid.
 fire_one_bg() {
     local agent="$1"
+    local pid
     fire_command "$agent"
-    "${FIRE_CMD[@]}" &
-    local pid=$!
-    echo "  [${agent}] PID ${pid}"
+    if [[ "$_WAKE_NOW_SETSID" == "true" ]]; then
+        setsid "${FIRE_CMD[@]}" < /dev/null &
+        pid=$!
+        echo "  [${agent}] PID ${pid} (detached into its own session; stop it with: kill -- -${pid})"
+    else
+        "${FIRE_CMD[@]}" < /dev/null &
+        pid=$!
+        echo "  [${agent}] PID ${pid} (not detached: setsid is not on PATH)"
+    fi
+    FIRED_PIDS+=("$pid")
+}
+
+# finish_bg -- the end of every backgrounded run: report the recorded pids,
+# and when the firings could not be detached, wait for each of them so none
+# outlives this script unrecorded. Exits with the first non-zero status a
+# waited firing returned, else 0.
+finish_bg() {
+    local pid rc status=0
+    if [[ "$_WAKE_NOW_SETSID" == "true" ]]; then
+        echo "Fired pids: ${FIRED_PIDS[*]} (each detached into its own session)."
+        return 0
+    fi
+    echo "setsid is not on PATH, so the fired agents cannot be detached; waiting for pids ${FIRED_PIDS[*]} to finish (install util-linux to get setsid)." >&2
+    for pid in "${FIRED_PIDS[@]}"; do
+        rc=0
+        wait "$pid" || rc=$?
+        if (( rc != 0 && status == 0 )); then
+            status=$rc
+        fi
+    done
+    return "$status"
 }
 
 # ---------------------------------------------------------------------------
@@ -193,6 +245,7 @@ if [[ "$FIRE_ALL" == "true" ]]; then
         fire_one_bg "$a"
     done
     echo "Done. ${#PIPELINE_AGENTS[@]} agents started."
+    finish_bg
 else
     if ! is_valid_agent "$AGENT"; then
         # BLOCK-WORTHY (docs/blocking-site-census.md): an agent name outside
@@ -208,6 +261,7 @@ else
     fi
     if [[ "$BG" == "true" ]]; then
         fire_one_bg "$AGENT"
+        finish_bg
     else
         fire_command "$AGENT"
         exec "${FIRE_CMD[@]}"

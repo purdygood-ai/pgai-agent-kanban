@@ -196,9 +196,7 @@ class TestChangelogFreshnessGateCliRecovery:
     next.
     """
 
-    def test_cli_failure_output_carries_a_complete_verbatim_remedy_block(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_cli_failure_output_carries_a_complete_verbatim_remedy_block(self, tmp_path: pathlib.Path) -> None:
         """The gate's real CLI stderr contains cause(s), a numbered fix block
         ending in a re-check command, the enforced rule, and zero unresolved
         angle-bracket placeholders — everything a stranger needs, with nothing
@@ -226,16 +224,11 @@ class TestChangelogFreshnessGateCliRecovery:
         assert all(f["lint"] == "changelog_freshness" for f in findings), findings
 
         err = result.stderr
-        assert "Cause(s):" in err, (
-            f"Gate CLI stderr is missing the 'Cause(s):' section.\nstderr: {err!r}"
-        )
+        assert "Cause(s):" in err, f"Gate CLI stderr is missing the 'Cause(s):' section.\nstderr: {err!r}"
         assert str(scratch) in err, (
-            "Gate CLI stderr does not name the actual scratch changelog path.\n"
-            f"stderr: {err!r}"
+            "Gate CLI stderr does not name the actual scratch changelog path.\n" f"stderr: {err!r}"
         )
-        assert "To fix:" in err, (
-            f"Gate CLI stderr is missing the 'To fix:' numbered fix block.\nstderr: {err!r}"
-        )
+        assert "To fix:" in err, f"Gate CLI stderr is missing the 'To fix:' numbered fix block.\nstderr: {err!r}"
 
         commands = _NUMBERED_COMMAND_RE.findall(err)
         assert len(commands) >= 2, (
@@ -245,12 +238,10 @@ class TestChangelogFreshnessGateCliRecovery:
         )
         last_command_text = commands[-1][1]
         assert "lint_changelog_freshness.py" in last_command_text, (
-            "Last numbered command is not the re-lint verification command.\n"
-            f"Last command: {last_command_text!r}"
+            "Last numbered command is not the re-lint verification command.\n" f"Last command: {last_command_text!r}"
         )
         assert str(scratch) in last_command_text, (
-            "Re-lint command does not carry the actual scratch changelog path.\n"
-            f"Last command: {last_command_text!r}"
+            "Re-lint command does not carry the actual scratch changelog path.\n" f"Last command: {last_command_text!r}"
         )
 
         assert (
@@ -264,9 +255,7 @@ class TestChangelogFreshnessGateCliRecovery:
             f"Placeholders found: {placeholder_hits!r}\nstderr: {err!r}"
         )
 
-    def test_running_only_the_printed_commands_clears_the_gate(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_running_only_the_printed_commands_clears_the_gate(self, tmp_path: pathlib.Path) -> None:
         """Executing ONLY the commands parsed from the gate's real CLI stderr,
         verbatim and in printed order, recovers the forced-stale CHANGELOG and
         the gate subsequently reports success on re-invocation.
@@ -292,8 +281,7 @@ class TestChangelogFreshnessGateCliRecovery:
 
         commands = _NUMBERED_COMMAND_RE.findall(failing_result.stderr)
         assert len(commands) >= 2, (
-            "Expected at least 2 numbered commands in the gate's CLI stderr.\n"
-            f"stderr: {failing_result.stderr!r}"
+            "Expected at least 2 numbered commands in the gate's CLI stderr.\n" f"stderr: {failing_result.stderr!r}"
         )
 
         # Run every parsed command, in order, through a real shell (the
@@ -315,19 +303,15 @@ class TestChangelogFreshnessGateCliRecovery:
         # the initial call) to prove the artifact is genuinely fresh: the
         # re-run records no finding at all.
         recovered_result = _run_gate_cli(scratch, bugs_dir, env, findings_file)
-        assert recovered_result.returncode == 0, (
-            f"stdout: {recovered_result.stdout!r}\nstderr: {recovered_result.stderr!r}"
-        )
+        assert (
+            recovered_result.returncode == 0
+        ), f"stdout: {recovered_result.stdout!r}\nstderr: {recovered_result.stderr!r}"
         assert json.loads(findings_file.read_text(encoding="utf-8")) == [], (
             "Gate CLI still records a finding against the scratch changelog path "
             "after running every printed remedy command verbatim.\n"
             f"Commands run: {[c[1] for c in commands]!r}\n"
             f"stdout: {recovered_result.stdout!r}\nstderr: {recovered_result.stderr!r}"
         )
-        assert (
-            "ok" in recovered_result.stdout.lower()
-            or "fresh" in recovered_result.stdout.lower()
-        ), (
-            "Gate CLI did not print a positive confirmation after recovery.\n"
-            f"stdout: {recovered_result.stdout!r}"
+        assert "ok" in recovered_result.stdout.lower() or "fresh" in recovered_result.stdout.lower(), (
+            "Gate CLI did not print a positive confirmation after recovery.\n" f"stdout: {recovered_result.stdout!r}"
         )

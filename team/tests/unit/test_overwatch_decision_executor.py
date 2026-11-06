@@ -62,7 +62,6 @@ import json
 import os
 import pathlib
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -103,7 +102,7 @@ from tests.unit.shell_harness import run_bash
 
 _PROJECT = "exec-proj"
 _TASK = "CODER-20260101-005-example-task"
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _PAST = "2026-01-01T11:00:00+00:00"
 _FIRING = "2026-01-01T12:00:00Z"
 
@@ -116,12 +115,19 @@ _FIRST = {
     "transient_api_error": ("WRITER", ["batch_log=none"], {}),
     "gate_merge_not_found": ("WRITER", [_BRANCH], {"branch_ancestor_of_source": True}),
     "gate_empty_commit": ("CODER", [_BRANCH], {"shas": "abc1234"}),
-    "worktree_create_failed": ("CODER", [_BRANCH], {
-        "worktree_residue_in_base": True, "residue_holds_no_unique_commits": True, "source_branch_exists": True,
-    }),
+    "worktree_create_failed": (
+        "CODER",
+        [_BRANCH],
+        {
+            "worktree_residue_in_base": True,
+            "residue_holds_no_unique_commits": True,
+            "source_branch_exists": True,
+        },
+    ),
     "ship_policy_halt": ("CM", [], {}),
     "agent_operator_data_action": (
-        "CM", ["verb=restamp-fixed-in", f"project={_PROJECT}", "version=v9.9.9", "bugs=BUG-0412,BUG-0413"],
+        "CM",
+        ["verb=restamp-fixed-in", f"project={_PROJECT}", "version=v9.9.9", "bugs=BUG-0412,BUG-0413"],
         {"action_targets_verified": True},
     ),
 }
@@ -146,8 +152,16 @@ class Sandbox:
         self.queue = self.project_root / "tasks" / "queues" / "coder_backlog.md"
         self.bugs = self.project_root / "bugs"
         self.repo = tmp_path / "repo"
-        for d in (self.project_root / "overwatch" / "backups", self.task_dir / "artifacts", self.task_dir / "logs",
-                  self.queue.parent, self.bugs, self.root / "locks", self.root / "tmp", self.root / "logs"):
+        for d in (
+            self.project_root / "overwatch" / "backups",
+            self.task_dir / "artifacts",
+            self.task_dir / "logs",
+            self.queue.parent,
+            self.bugs,
+            self.root / "locks",
+            self.root / "tmp",
+            self.root / "logs",
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project_root / "overwatch" / "actions.log").write_text("", encoding="utf-8")
         (self.project_root / "project.cfg").write_text(
@@ -224,8 +238,14 @@ class Sandbox:
 
     def inputs(self, **overrides) -> dc.DecisionInput:
         values = dict(
-            subject=dc.SUBJECT_BLOCK, project=_PROJECT, task_id=_TASK, record=load_block_record(self.status),
-            task_state=self.field("State"), active_rc="v9.9.9", now=_NOW, kanban_root=str(self.root),
+            subject=dc.SUBJECT_BLOCK,
+            project=_PROJECT,
+            task_id=_TASK,
+            record=load_block_record(self.status),
+            task_state=self.field("State"),
+            active_rc="v9.9.9",
+            now=_NOW,
+            kanban_root=str(self.root),
             history=dx.task_history(self.release_state, _TASK),
         )
         values.update(overrides)
@@ -255,8 +275,14 @@ class Sandbox:
 @pytest.fixture()
 def box(tmp_path, monkeypatch) -> Sandbox:
     sandbox = Sandbox(tmp_path)
-    for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME", "HALT_OVERWATCH",
-                 "OVERWATCH_FIRING_TIMESTAMP", "OVERWATCH_LOCK_WAIT_SECONDS"):
+    for name in (
+        "PGAI_TASKS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_PROJECT_NAME",
+        "HALT_OVERWATCH",
+        "OVERWATCH_FIRING_TIMESTAMP",
+        "OVERWATCH_LOCK_WAIT_SECONDS",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KANBAN_ROOT", str(sandbox.root))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(sandbox.root))
@@ -333,7 +359,9 @@ def test_a_verb_backs_up_what_it_changes_and_appends_one_decision_event(box):
 
     assert result.status == dx.STATUS_EXECUTED and result.verb == dc.VERB_RESET_TO_BACKLOG
     status_copy = box.project_root / "overwatch" / "backups" / _FIRING / "project-root" / "tasks" / _TASK / "status.md"
-    queue_copy = box.project_root / "overwatch" / "backups" / _FIRING / "project-root" / "tasks" / "queues" / box.queue.name
+    queue_copy = (
+        box.project_root / "overwatch" / "backups" / _FIRING / "project-root" / "tasks" / "queues" / box.queue.name
+    )
     assert status_copy.read_bytes() == before_status
     assert queue_copy.read_bytes() == before_queue
     assert str(status_copy) in result.backups and str(queue_copy) in result.backups
@@ -451,7 +479,7 @@ def test_the_bash_protocol_defers_the_same_operator_halt_the_same_way(box, tmp_p
     box.halt.write_text("", encoding="utf-8")
     script = (
         "set -uo pipefail\nsource scripts/lib/overwatch_protocol.sh\n"
-        "fixture_fix() { echo RAN; }\noverwatch_halt_first_fix fixture_fix\necho \"RC=$?\"\n"
+        'fixture_fix() { echo RAN; }\noverwatch_halt_first_fix fixture_fix\necho "RC=$?"\n'
     )
     bash = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(box.root), "OVERWATCH_PROJECT": _PROJECT})
     assert "RC=5" in bash.stdout and "RAN" not in bash.stdout
@@ -527,8 +555,15 @@ def test_a_runaway_stops_the_project_and_writes_one_pair_class_human(box):
     inputs = _block_first(box, "agent_unclassified")
     ctx = OpsContext(kanban_root=box.root)
     for hour in range(4):
-        runaway.record_event(ctx, _PROJECT, runaway.COUNTER_REASON_REPEATS, key="", subject=_TASK,
-                             detail="agent_unclassified", at=f"2026-01-01T0{hour + 1}:00:00+00:00")
+        runaway.record_event(
+            ctx,
+            _PROJECT,
+            runaway.COUNTER_REASON_REPEATS,
+            key="",
+            subject=_TASK,
+            detail="agent_unclassified",
+            at=f"2026-01-01T0{hour + 1}:00:00+00:00",
+        )
     trips = runaway.evaluate(ctx, _PROJECT, now=_NOW)
     assert trips
 
@@ -550,13 +585,17 @@ def test_a_runaway_stops_the_project_and_writes_one_pair_class_human(box):
 def test_a_chain_halt_clear_closes_the_halt_block_class_any(box):
     box.halt.write_text(
         "# HALT created by the zero-progress cap\n"
-        + "\n".join(provenance_lines(WRITER_ZERO_PROGRESS_CAP, f"{_TASK} reached the zero-progress cap")) + "\n",
+        + "\n".join(provenance_lines(WRITER_ZERO_PROGRESS_CAP, f"{_TASK} reached the zero-progress cap"))
+        + "\n",
         encoding="utf-8",
     )
     halt_bytes = box.halt.read_bytes()
     inputs = dc.DecisionInput(
-        subject=dc.SUBJECT_HALT, project=_PROJECT, halt=classify_halt(box.halt, kanban_root=box.root),
-        cause_checks=(CauseCheck("task-reset", True, f"{_TASK} reads BACKLOG"),), now=_NOW,
+        subject=dc.SUBJECT_HALT,
+        project=_PROJECT,
+        halt=classify_halt(box.halt, kanban_root=box.root),
+        cause_checks=(CauseCheck("task-reset", True, f"{_TASK} reads BACKLOG"),),
+        now=_NOW,
         kanban_root=str(box.root),
     )
     outcome, result = _decide_and_execute(box, inputs)
@@ -574,19 +613,26 @@ def test_a_chain_halt_clear_closes_the_halt_block_class_any(box):
 def test_a_resolution_stage_that_clears_a_chain_halt_closes_the_halt_block_once_class_any(box):
     box.halt.write_text(
         "# HALT created by the CM ship policy\n"
-        + "\n".join(provenance_lines(WRITER_CM_RELEASE, "ship policy stopped the release", trigger="5")) + "\n",
+        + "\n".join(provenance_lines(WRITER_CM_RELEASE, "ship policy stopped the release", trigger="5"))
+        + "\n",
         encoding="utf-8",
     )
     stamp_ledger_block_start(box.root, _PROJECT, "halt:project", reason_code="halt_project", timestamp=_PAST)
     inputs = dc.DecisionInput(
-        subject=dc.SUBJECT_HALT, project=_PROJECT, halt=classify_halt(box.halt, kanban_root=box.root), now=_NOW,
+        subject=dc.SUBJECT_HALT,
+        project=_PROJECT,
+        halt=classify_halt(box.halt, kanban_root=box.root),
+        now=_NOW,
         kanban_root=str(box.root),
     )
 
     def stage(project: str, kanban_root: str) -> ResolutionStageOutcome:
         # The stage's own HALT clear: re-check, back up, ops.write.unhalt.
         clear = clear_chain_halt(
-            OpsContext(kanban_root=kanban_root), kanban_root, project, step="ship-policy drill cleared the HALT",
+            OpsContext(kanban_root=kanban_root),
+            kanban_root,
+            project,
+            step="ship-policy drill cleared the HALT",
             writer=WRITER_CM_RELEASE,
         )
         assert clear.cleared, clear.error
@@ -599,7 +645,8 @@ def test_a_resolution_stage_that_clears_a_chain_halt_closes_the_halt_block_once_
     assert not box.halt.exists()
     ledger = pathlib.Path(ledger_path_for_project(str(box.root), _PROJECT))
     ends = [
-        record for record in map(json.loads, ledger.read_text(encoding="utf-8").splitlines())
+        record
+        for record in map(json.loads, ledger.read_text(encoding="utf-8").splitlines())
         if record["kind"] == "block-end" and record["source"] == "halt:project"
     ]
     assert len(ends) == 1, ends
@@ -634,7 +681,10 @@ def test_an_inbox_reask_on_a_still_blocked_task_opens_its_pair_no_later_than_it_
 def test_an_operator_halt_beside_decides_none_and_none_writes_nothing(box):
     box.halt.write_text("", encoding="utf-8")
     inputs = dc.DecisionInput(
-        subject=dc.SUBJECT_HALT, project=_PROJECT, halt=classify_halt(box.halt, kanban_root=box.root), now=_NOW,
+        subject=dc.SUBJECT_HALT,
+        project=_PROJECT,
+        halt=classify_halt(box.halt, kanban_root=box.root),
+        now=_NOW,
     )
     before = box.tree()
     outcome, result = _decide_and_execute(box, inputs)
@@ -666,12 +716,22 @@ def test_running_the_same_inbox_outcome_again_writes_nothing_more(box):
 
 def test_earlier_decision_events_still_parse_after_the_executor_appends(box):
     write_decision_event(
-        str(box.release_state), timestamp="2025-12-31T00:00:00Z", version="v9.9.8", lane="B",
-        evidence_refs=["projects/exec-proj/HALT"], verbs_run=["cancel-rc.sh --yes"], outcome="older event",
+        str(box.release_state),
+        timestamp="2025-12-31T00:00:00Z",
+        version="v9.9.8",
+        lane="B",
+        evidence_refs=["projects/exec-proj/HALT"],
+        verbs_run=["cancel-rc.sh --yes"],
+        outcome="older event",
     )
     write_decision_event(
-        str(box.release_state), timestamp="2025-12-31T01:00:00Z", version="v9.9.9", lane="chain-halt",
-        evidence_refs=[], verbs_run=[], outcome="another older event",
+        str(box.release_state),
+        timestamp="2025-12-31T01:00:00Z",
+        version="v9.9.9",
+        lane="chain-halt",
+        evidence_refs=[],
+        verbs_run=[],
+        outcome="another older event",
     )
     assert count_decision_events(box.release_state) == 2
 
@@ -819,7 +879,10 @@ def test_a_verification_block_is_requeued_once_with_its_cause_then_closed(box):
 def test_close_unverified_on_a_task_no_longer_blocked_writes_nothing(box):
     inputs = _verification_block(box, "runner crashed")
     outcome = dc.Outcome(
-        kind=dc.OUTCOME_VERB, why=dc.WHY_VERIFICATION_UNVERIFIED, detail="test", name=dc.VERB_CLOSE_UNVERIFIED,
+        kind=dc.OUTCOME_VERB,
+        why=dc.WHY_VERIFICATION_UNVERIFIED,
+        detail="test",
+        name=dc.VERB_CLOSE_UNVERIFIED,
         args={"project": _PROJECT, "task_id": _TASK, "version": "v9.9.9", "cause": "runner crashed"},
     )
     box.status.write_text(box.text().replace("## State\nBLOCKED", "## State\nBACKLOG"), encoding="utf-8")
@@ -847,7 +910,7 @@ def _release_task(box: Sandbox, version: str = "v9.9.9") -> None:
     )
 
 
-def _sibling(box: Sandbox, task_id: str, version: str, state: Optional[str]) -> None:
+def _sibling(box: Sandbox, task_id: str, version: str, state: str | None) -> None:
     """Another task folder of the project: README naming *version*, and a
     status.md reading *state* (none written when *state* is None)."""
     folder = box.task_dir.parent / task_id

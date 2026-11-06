@@ -152,7 +152,7 @@ reports a row whose Decision is missing or outside this set as
 | 10 | Matrix HALT — serious + large fix | `team/roles/CM.md` matrix · `lib/cm/release_ship_policy.sh` `trigger-3.serious-concerns-large-fix` | SHIP-WITH-SERIOUS-CONCERNS with any large-fix finding. Under `ship_posture = always` it ships `SHIP-NON-FUNCTIONAL` and records an Auto-Ship Event instead of halting | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 11 | Matrix HALT — missing ordered report | `team/scripts/lib/cm/release_verification_retry.sh` · `release-verification-retry-02` | Verification ordered (a TESTER task exists for the RC) but its report is missing (the task reads DONE with no `artifacts/report.md`). Never a HALT: the TESTER task is returned to BACKLOG once per RC with the cause in its `## Triage Note`; after that one requeue the release ships `SHIP-NON-FUNCTIONAL` with "Verification did not run" under `## Known Issues` and one operator inbox entry | CONVERT | none | yes |
 | 12 | Matrix HALT — unrecognized inputs | `team/scripts/lib/cm/release_verification_retry.sh` · `release-verification-retry-03` / `release-verification-retry-04` | A TESTER state the matrix does not recognize (WORKING, WONT-DO, a typo), or TESTER values no matrix row matches. Never a HALT: the release takes the SHIP-WITH-CONCERNS row (Notes Status `KNOWN-BUGS`) and files one bug quoting the state or the values, as an unreadable recommendation or systemic-risk value already does | CONVERT | none | yes |
-| 13 | Pre-squash hook gate | `team/scripts/cm/release.sh` · `trigger-4.pre-squash-hook-not-executable` / `-failed` | Project pre-squash hook non-executable or exits non-zero. The HALT also writes one operator inbox entry carrying its error key, reason and remedy, after the HALT file and HALT Event; a failed inbox write is narrated and never changes the HALT, the HALT Event or the exit status | BLOCK-WORTHY | verb(resolution-stage) | n/a |
+| 13 | Pre-squash hook gate | `team/scripts/cm/release.sh` · `trigger-4.pre-squash-hook-not-executable` / `-failed` / `-runner-failed` | Project pre-squash hook non-executable or exits non-zero, or the hook runner cannot start it (`-runner-failed`: the hook does not run and the stop names the runner, not the hook). The HALT also writes one operator inbox entry carrying its error key, reason and remedy, after the HALT file and HALT Event; a failed inbox write is narrated and never changes the HALT, the HALT Event or the exit status | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 14 | Squash conflict | `team/scripts/lib/cm/release_resolve.sh` · `release-resolve-squash-conflict-01` | Squash into main left a conflict the UD/DU auto-resolver cannot clear. It is never merged by hand: the squash is backed out, and when the resolution matrix's squash-conflict rows match (nothing tagged, no approval gate, attempts below the retry ceiling) the RC is cancelled and its cargo returned for rebundling through the resolution stage's CANCEL-AND-REBUNDLE drill, with one operator inbox entry naming every conflicting path and the RC's tip commit; no HALT, exit 5. When no row matches, the trigger 5 HALT is written with the cancel as its remedy, and the inbox entry says why | AGENT-RESOLVABLE | verb(resolution-stage) | n/a |
 | 15 | Tag-points-at-wrong-commit | `team/scripts/lib/cm/release_finalize.sh` · `trigger-5b.tag-points-at-wrong-commit` | Existing tag does not point at the squash commit | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 16 | Push refused after the tag | `team/scripts/lib/cm/release_resolve.sh` · `release-resolve-push-lag-01` / `team/scripts/cm/finalize-release.sh` · `cm-finalize-release-push-lag-01` | The remote refuses the RC-branch delete or the main and tag push once the release is tagged locally. Never a HALT: the release and finalize-release.sh exit 0 with a dual-channel notice, the release appends a `## Push Lag Event` to release-state.md, and the commits and tag stay ahead of the remote in git, where the push-lag check (push-watchdog.sh, check-push-lag.sh) pushes them once the remote accepts | CONVERT | none | yes |
@@ -161,7 +161,7 @@ reports a row whose Decision is missing or outside this set as
 | 19 | Release-notes status-stamp guard | `team/scripts/lib/cm/release_ship_policy.sh` · `trigger-9.*` (4 sub-sites) | Placeholder survived / stamp failed / no `## Status` heading | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 20 | Squash-pollution guard (strict) | `team/scripts/lib/cm/release_ship_policy.sh` · `trigger-10.pollution-guard-strict` | Unexpected paths polluted the squash (strict mode). The HALT also writes one operator inbox entry carrying its error key, reason and remedy, after the HALT file and HALT Event; a failed inbox write is narrated and never changes the HALT, the HALT Event or the exit status | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 21 | Fidelity-gate divergence | `team/scripts/lib/cm/release_squash.sh` · `trigger-11.fidelity-gate-divergence` | RC tree diverges from main after squash. The HALT also writes one operator inbox entry carrying its error key, reason and remedy, after the HALT file and HALT Event; a failed inbox write is narrated and never changes the HALT, the HALT Event or the exit status | BLOCK-WORTHY | verb(resolution-stage) | n/a |
-| 22 | Pre-tag hook gate | `team/scripts/cm/release.sh` · `pre-tag-hook-not-executable` + pre-tag hook failure | Project pre-tag hook non-executable (a HALT) or exits non-zero (`cm-release.hook-failure.cm-release-pre-tag`: exit 1 before the tag, no HALT file). Either stop also writes one operator inbox entry carrying its error key, reason and remedy, after every other write of the stop; a failed inbox write is narrated and never changes the stop or its exit status | BLOCK-WORTHY | verb(resolution-stage) | n/a |
+| 22 | Pre-tag hook gate | `team/scripts/cm/release.sh` · `pre-tag-hook-not-executable` + pre-tag hook failure | Project pre-tag hook non-executable (a HALT) or exits non-zero (`cm-release.hook-failure.cm-release-pre-tag`: exit 1 before the tag, no HALT file), or the hook runner cannot start it (`cm-release.hook-runner-failure.cm-release-pre-tag`, the same exit; the hook does not run and the stop names the runner). Either stop also writes one operator inbox entry carrying its error key, reason and remedy, after every other write of the stop; a failed inbox write is narrated and never changes the stop or its exit status | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 23 | Pre-tag VERSION gate | `team/scripts/lib/cm/release_finalize.sh` · on-disk `VERSION` vs tag | On-disk `VERSION` ≠ the tag about to be cut. Exit 1 before the tag, no HALT file, with the dual-channel `cm-release.pre-tag-version-mismatch` error and one operator inbox entry carrying its reason and remedy; a failed inbox write is narrated and never changes the stop or its exit status | BLOCK-WORTHY | inbox | n/a |
 | 24 | Declared-required hook absent | `team/pgai_agent_kanban/cm/ship.py` (ship-rc) / `cm/release.sh` · `cm_release_<phase>_hook_required` | A hook declared `_hook_required=true` is missing | BLOCK-WORTHY | verb(resolution-stage) | n/a |
 | 25 | Breakage-class pre-flight gate | `team/scripts/check_breakage_class.py` (via `run-unit-tests.sh`, `run-integration-tests.sh`) | Syntax error, compile failure, or unresolved first-party import | BLOCK-WORTHY | none | n/a |
@@ -210,7 +210,7 @@ reports a row whose Decision is missing or outside this set as
 | 68 | Provider CLI too old for the configured model (pre-dispatch) | `team/scripts/lib/provider_claude.sh` · `provider_model_preflight` (`provider-claude-02`) | The memo row 67 left names this wake's model and `claude --version` is still below the required version -- the preflight refuses before any task moves to WORKING, leaving the queue untouched; it clears the memo and passes once the installed CLI satisfies the requirement | BLOCK-WORTHY | none | n/a |
 | 69 | Malformed task id in a queue line or prerequisite token | `team/scripts/lib/wake_task_id_gate.sh` · `_narrate_malformed_queue_task_ids` (`wake-task-id-gate-malformed-queue-id-01`, serving `wake_task_state.sh`'s pending, WAITING and BLOCKED scans and `wake_reconcile_sweeps.sh`'s stale-active scan) and `_narrate_malformed_prerequisite_ids` (`wake-task-id-gate-malformed-prerequisite-id-01`, serving `check_prerequisites` in the same file) | A queue line the scan would act on, or a `## Prerequisites` token, names an id outside the canonical shape `task_ids.sh`'s `kanban_task_id_pattern` prints (`..`, `../x`, `a.b`, anything with a separator or a dot). The line is narrated naming the file and line and skipped -- a prerequisite token is held as `<token>:MALFORMED`, unsatisfied -- so the id is never joined onto `TASKS_ROOT`; every well-formed entry is still served and the wake continues | CONVERT | none | yes |
 | 70 | Worktree residue outside the canonical base | `team/scripts/lib/worktree.sh` · `_wt_clear_task_worktree_path`, the pre-clean `create_task_worktree` and `create_detached_worktree` share (`worktree-residue-outside-base-01`) | Something sits at a task's worktree path -- a registered worktree or not -- and `pgai_worktree_path_strictly_inside` -- both paths canonicalised with `realpath` (symlinks resolved, `..` collapsed) -- finds it is not a strict descendant of the worktree base: the base itself, its parent (`<base>/..`), or a symlink leading out of it. The check runs before any removal, by git or by `rm`. The only alternative is a delete outside the directory the function owns, so the create is refused and nothing is removed | BLOCK-WORTHY | inbox | n/a |
-| 71 | Targeted-run `--files` argument refusals | `team/scripts/run-unit-tests.sh` (`run-unit-tests-targeted-files-01` .. `-04`), `team/scripts/run-integration-tests.sh` (`run-integration-tests-targeted-files-01` .. `-04`) | A `--files` targeted run is given no path, is combined with `--coverage`, names a path that resolves (after `..` and symlinks) outside the runner's own test roots, or names a path under them that is not an existing file. Refused before any gate or pytest runs; the findings file is never touched | AGENT-RESOLVABLE | none | n/a |
+| 71 | Targeted-run `--files` argument refusals | `team/scripts/lib/gated_runner_args.sh` (`gated-runner-args-targeted-files-01` .. `-04`), called by `team/scripts/run-unit-tests.sh` and `team/scripts/run-integration-tests.sh` | A `--files` targeted run is given no path, is combined with `--coverage`, names a path that resolves (after `..` and symlinks) outside the runner's own test roots, or names a path under them that is not an existing file. Refused before any gate or pytest runs; the findings file is never touched | AGENT-RESOLVABLE | none | n/a |
 | 72 | Targeted-run per-file test-authoring lint finding | `team/scripts/run-unit-tests.sh` (`run-unit-tests-targeted-files-05`), `team/scripts/run-integration-tests.sh` (`run-integration-tests-targeted-files-05`), via `lib/gated_runner_lint.sh`'s `gated_runner_targeted_file_lints` | Every test a `--files` targeted run named passed, but the test anti-pattern lint or the skip-cites-a-real-bug gate, run over exactly the named files, wrote a finding for one of them to its scratch findings file -- the verdict is read from those findings, both lints exiting 0 on findings -- or exited non-zero, so the named files were not checked. The run exits 1 after pytest; the aggregate findings file and the green ledger are never touched | AGENT-RESOLVABLE | none | n/a |
 | 73 | Inline-Python ratchet lint | `team/scripts/lint_inline_python.py` (via `run-unit-tests.sh` and `run-integration-tests.sh` · `inline-python-01`), findings merged per-instance via `gated_runner_merge_findings_file` -- the lint itself always exits 0 | A non-test `team/scripts/*.sh` file carries more inline Python (python3 heredocs and `python3 -c` programs, counted as blocks and python lines) than its entry in `team/config/inline-python-allowlist.txt`, an unlisted file carries any, an entry sits above the measured counts and should be tightened, or a Python heredoc opens with an unquoted delimiter | CONVERT | none | yes |
 | 74 | Duplicated-Python ratchet lint | `team/scripts/lint_python_duplicates.py` (via `run-unit-tests.sh` and `run-integration-tests.sh` · `python-duplicates-01`), findings merged per-instance via `gated_runner_merge_findings_file` -- the lint itself always exits 0 | A function under `team/pgai_agent_kanban`, `team/scripts` or `team/pm-agent` has the same AST-normalised body as another, a deny-listed helper (`_atomic_write`, `_has_traversal`, `_parse_version`, `_parse_iso`, `read_section`, a `configparser.*Parser(` instantiation, a `## State` regex) appears outside its owning module, and the finding is not recorded in `team/config/python-duplicates-allowlist.txt` -- or an allowlist entry no longer matches and should be tightened | CONVERT | none | yes |
@@ -220,9 +220,11 @@ reports a row whose Decision is missing or outside this set as
 | 78 | echo/printf-into-quiet-grep ratchet lint | `team/scripts/lint_echo_pipe_grep_q.py` (via `run-unit-tests.sh` and `run-integration-tests.sh` · `echo-pipe-grep-q-01`), findings merged per-instance via `gated_runner_merge_findings_file` -- the lint itself always exits 0 | A non-test bash file under `team/` or `install.sh` pipes `echo` or `printf` output into `grep -q` (or `--quiet` / `--silent`), a pipeline that can report no match for matching text under `set -o pipefail`, and the file has more such sites than its entry in `team/config/echo-pipe-grep-q-allowlist.txt` (an unlisted file may carry none), or an entry sits above the measured count and should be tightened | CONVERT | none | yes |
 | 79 | Unreadable version ceiling | `team/scripts/lib/discovery.sh` · `discovery_run_pipeline` (`discovery-ceiling-unreadable-01`), `team/scripts/lib/discovery_step_requirements.sh` · `discovery_step_requirements` (`discovery-step-requirements-ceiling-unreadable-01`), both emitting `discovery.ceiling-unreadable`; `team/scripts/pm-agent.sh` · manual-mode ceiling check (`pm-agent-ceiling-unreadable-01`) | A `[versioning]` ceiling in the project config is malformed, so its accessor fails naming the file, key and value: discovery queues nothing for that project this run, and a manual `pm-agent.sh` run refuses the requirement unless `--override-ceiling` is passed | BLOCK-WORTHY | none | n/a |
 | 80 | Section-parser ratchet lint | `team/scripts/lint_section_parsers.py` (via `run-unit-tests.sh` and `run-integration-tests.sh` · `section-parsers-01`), findings merged per-instance via `gated_runner_merge_findings_file` -- the lint itself always exits 0 | A non-test Python file under `team/pgai_agent_kanban`, `team/pm-agent` or `team/scripts`, or a non-test bash file under `team/scripts`, finds a `## ` section by detecting its heading itself (`startswith("## ")`, a `== "## ..."` comparison, a pattern anchored on `^##`, `re.match("##...")`) outside `task_status.read_section` and `read_md_field`, and `team/config/section-parser-allowlist.txt` does not name the site as one that reads no value, or an entry there names no site | CONVERT | none | yes |
+| 81 | Board builder: unknown column set | `team/scripts/dashboard/lib/board_window.sh` · `dashboard_build_board_window` (`dashboard-board-window-column-set-01`) | The shared board builder is asked for a column set other than `split` (3 + 5 columns) or `merged` (3 + 1 columns); it emits `dashboard-board-window.unknown-column-set` and returns 1 before any split, leaving the window single-pane and its pane-index variables empty | BLOCK-WORTHY | none | n/a |
+| 82 | Board reflow: no window named | `team/scripts/dashboard/board-reflow.sh` (`dashboard-board-reflow-usage-01`) | The board-window reflow script is run with an unknown argument or without `--window`; it emits `dashboard-board-reflow.usage` and exits 2 before any tmux call, moving and resizing no pane | BLOCK-WORTHY | none | n/a |
 
-**Rollup: 80 sites, 0 unclassified.**
-36 BLOCK-WORTHY, 39 CONVERT, 5 AGENT-RESOLVABLE.
+**Rollup: 82 sites, 0 unclassified.**
+38 BLOCK-WORTHY, 39 CONVERT, 5 AGENT-RESOLVABLE.
 
 Rows 13, 19, and 22 each fold more than one `cm_halt` call site of the same
 family into a single row (pre-squash executable/failed; the four `trigger-9`
@@ -339,6 +341,14 @@ reason and remedy.
     refusal, which an exceeded ceiling also reaches. Correcting the value
     (`set-version-ceiling.sh --project <name> --show` names it) clears the
     block on the next run.
+
+82. **Board reflow: no window named** — Approval/invariant-by-design:
+    the reflow moves the workbench pane between windows and resizes
+    every pane of the window it is given, so a run that names no
+    window, or carries an argument it does not know, is refused
+    before any tmux call rather than guessing which window to
+    rearrange. Re-running it with `--window <session>:<window>`
+    (create.sh's hook passes the operator window's id) clears it.
 
 ## CONVERT notes
 
@@ -584,7 +594,7 @@ cause and remedy beside each finding, so nothing here ever stops a runner.
 
 | Finding | What it means | The fix |
 |---|---|---|
-| `missing_signal` | A refusal site on the lint's default scan surface is missing one or both of the two inline signals the new-gate rule requires: a census classification comment above it (`BLOCK-WORTHY`, `CONVERT`, or `AGENT-RESOLVABLE`), and a call to the dual-channel error-contract emitter. The likeliest finding for a newly authored gate — it is exactly the omission the gate-authoring contract exists to prevent. | Add whichever signal the finding names: the one-line class comment (`# CONVERT: <one-sentence reason>`), the emitter call carrying the `error`/`message`/`remedy` triple, or both. A resolved anchor also exempts the site from this scan, but see "What the anchor does not excuse" in `team/SOP.md` — that exemption carries the pre-retrofit inventory; it is not permission to skip the signals in new code. |
+| `missing_signal` | A refusal site on the lint's default scan surface is missing one or both of the two inline signals the new-gate rule requires: a census classification comment above it (`BLOCK-WORTHY`, `CONVERT`, or `AGENT-RESOLVABLE`), and a call to the dual-channel error-contract emitter. The likeliest finding for a newly authored gate — it is exactly the omission the gate-authoring contract exists to prevent. | Add whichever signal the finding names: the one-line class comment (`# CONVERT: <one-sentence reason>`), the emitter call carrying the `error`/`message`/`remedy` triple, or both. A resolved anchor also exempts the site from this scan, but see "What an anchor does not excuse" under "Gate and refusal authoring" in the kanban's project README (`projects/pgai-agent-kanban/README.md` in the install) — that exemption carries the pre-retrofit inventory; it is not permission to skip the signals in new code. |
 | `unindexed_anchor` | A `# CENSUS-ANCHOR: <token>` marker sits in a scanned file, but no line in the `CENSUS-LOCATOR-INDEX` block names that token. Half an anchor: the site looks inventoried while this document makes no claim about it. | Add `<path-from-repo-root>:<token> <CLASS>` to the fenced Locator Index block, using the class the site's own inline comment declares. |
 | `anchor_class_mismatch` | Both halves of an anchor exist but disagree: the Locator Index entry files the token under one class, and the site's own inline comment declares another. Fixing it means understanding the two-sided anchor contract, not just the two strings. | Decide which side is wrong and correct that one, so the entry and the comment name the same class. The site's doctrine — what its refusal actually catches under The Loop — settles which is right. |
 | `unresolved_locator` | A Locator Index entry names `path:key`, but nothing in that file resolves the key: no `CENSUS-ANCHOR` marker carrying that token, and no dual-channel emitter call carrying it as a literal `error` key. The site was deleted, moved to another file, or had its key renamed. This is the one check that walks **every** entry, inventory files included. | Open the file, find the refusal the entry meant, and either add `# CENSUS-ANCHOR: <token>` directly above it — skip that when the token is already the emitter call's literal first argument — or correct the entry to the key that does resolve there. Never delete an entry to silence a real gate. |
@@ -818,7 +828,7 @@ project.cfg is read and before any git command runs -- the name chooses the
 repository whose branches the cancel deletes. Declared `BLOCK-WORTHY`
 inline, an invariant by design.
 
-`team/pgai_agent_kanban/cm/unwind.py` carries twelve markers in
+`team/pgai_agent_kanban/cm/unwind.py` carries fourteen markers in
 `unwind_rc` and its configuration readers (plus `unwind-git-remote-name-01`,
 described with the other `git_remote_name` refusals below), the one implementation
 `unwind-rc.sh` (through `pp_run_ops`) and `POST /operations/unwind-rc` both
@@ -826,10 +836,16 @@ call; each declares `BLOCK-WORTHY` inline and raises `UnwindRcError` before
 anything is changed. `unwind-confirmation-required-01`
 (`unwind_rc.confirmation_required`, exit 1) refuses a live call that carries
 neither a confirmation nor a prompt to ask, before anything is read -- an
-approval by design, and the only one of the twelve that prints a
-dual-channel block of its own: the CLI always passes its stdin prompt and
+approval by design, and one of the three that print a
+dual-channel block of their own: the CLI always passes its stdin prompt and
 the route refuses 422 first (`operations-unwind-rc-confirm-02`), so it
-guards direct callers. `unwind-project-unresolved-01` prints the project
+guards direct callers. The other two are verification unable to run:
+`unwind-release-state-empty-01` (`unwind_rc.state_empty`, an empty
+release-state.md) and `unwind-state-unreadable-01`
+(`unwind_rc.state_unreadable`, a release-state.md, task README, queue,
+requirements file, plan marker or tasks directory that exists but cannot
+be read), each refused before anything is changed rather than read as
+empty. `unwind-project-unresolved-01` prints the project
 resolver's own `project_resolve.not_found` / `.ambiguous` block (no single
 registered project to unwind). The other ten print the plain `ERROR:` lines
 the CLI has always printed (exit 1), which the REST twin lifts under its
@@ -2424,7 +2440,18 @@ once carried an inline comment would either abort a batch mid-run with an
 arithmetic error or bound it by a number nobody chose — refusing before any
 task is selected is the earlier and louder of the two failures. The remedy
 is the `sed` edit (or the `export`, for an environment override) that
-restores the digits the value started with, else the key's default. The
+restores the digits the value started with, else the key's default; when
+that default cannot be read either, the remedy removes the setting (the
+`sed` that deletes the line, or the `unset`) and never writes an empty
+value. Beside it, `# CENSUS-ANCHOR: config-loader-wake-default-01` sits
+above the `return 1` that refuses a `[wake]` key whose default is read
+through an accessor (`max_runtime_seconds`, `max_task_seconds`) when
+neither the environment nor the cfg sets it and the accessor cannot run.
+Declared `BLOCK-WORTHY` inline for the same reason — there is no number
+to bound the wake with — it emits under
+`config_loader.wake.default_unreadable`, naming the key, the accessor and
+its `pp_run_ops.sh`, and its remedy is the `bash -c` that runs the
+accessor as a check. The
 loader's companion unknown-key and unknown-section check in the same file
 is deliberately a WARNING that returns 0 — `CONVERT` by nature, a
 misspelled key must not stop a wake — so it carries no anchor and no
@@ -2523,29 +2550,32 @@ findings file reads as an aborted run rather than a clean pass.
 
 Both runners accept `--workers N`, which lowers one run's budget below
 `[testing] workers` and never raises it. A value that is not decimal digits
-is refused in the parse loop, before any gate, lint or pytest runs, under
-`# CENSUS-ANCHOR: run-unit-tests-workers-flag-01` /
-`run-integration-tests-workers-flag-01` (keys
+is refused by the shared parser both runners call
+(`gated_runner_parse_args`, `team/scripts/lib/gated_runner_args.sh`), before
+any gate, lint or pytest runs, under
+`# CENSUS-ANCHOR: gated-runner-args-workers-flag-01` (keys
 `run-unit-tests.workers-flag-invalid` /
-`run-integration-tests.workers-flag-invalid`; remedy `--workers 1`). Both
-are `AGENT-RESOLVABLE`: the caller corrects its own argv and re-runs.
+`run-integration-tests.workers-flag-invalid`; remedy `--workers 1`). It is
+`AGENT-RESOLVABLE`: the caller corrects its own argv and re-runs.
 
 Both runners accept `--pre-merge [--base REF]`, which hands the run to the
 pre-merge engine and writes its own exit file (`pre-merge.exit` for the unit
 runner, `pre-merge-integration.exit` for the integration runner) instead of
-anything a certification run writes. Each runner carries four anchors for it,
-named the same in both files with the runner's slug in front.
-`<runner>-pre-merge-01` (keys `run-unit-tests.pre-merge-base-missing` /
+anything a certification run writes. Its three flag refusals live once, in
+`team/scripts/lib/gated_runner_args.sh`, with the runner's slug in front of
+each error key. `gated-runner-args-pre-merge-01` (keys
+`run-unit-tests.pre-merge-base-missing` /
 `run-integration-tests.pre-merge-base-missing`) refuses `--base` with no git
-ref after it, or one starting with `-`, in the parse loop; the remedy is the
+ref after it, or one starting with `-`, in the parser; the remedy is the
 same run with `--pre-merge` and no `--base`, which uses the default base.
-`<runner>-pre-merge-02` (`...pre-merge-incompatible-flags`) refuses
+`gated-runner-args-pre-merge-02` (`...pre-merge-incompatible-flags`) refuses
 `--pre-merge` beside `--files`, `--coverage`, `--quarantined` or
 `--reuse-if-green`, naming each, and its remedy drops them.
-`<runner>-pre-merge-03` (`...base-without-pre-merge`) refuses `--base`
-without `--pre-merge`, and its remedy adds `--pre-merge` with the ref given.
-All three are `AGENT-RESOLVABLE` and refuse before any gate, lint or pytest
-runs. `<runner>-testing-config-03` (`BLOCK-WORTHY`) follows a refused
+`gated-runner-args-pre-merge-03` (`...base-without-pre-merge`) refuses
+`--base` without `--pre-merge`, and its remedy adds `--pre-merge` with the
+ref given. All three are `AGENT-RESOLVABLE` and refuse before any gate, lint
+or pytest runs. Each runner carries `<runner>-testing-config-03`
+(`BLOCK-WORTHY`), which follows a refused
 `[testing] pre_merge_affected_cap` value, read only by a pre-merge run, on the
 ground the resolver anchor `config-loader-testing-pre-merge-cap-01` gives; the
 resolver has already printed the error. An unknown base, or no RC or main
@@ -2635,6 +2665,7 @@ docker/build.sh:docker-build-usage-01 BLOCK-WORTHY
 docker/build.sh:docker-build-unknown-flavor-01 BLOCK-WORTHY
 docker/build.sh:docker-build-cli-pins-unreadable-01 BLOCK-WORTHY
 docker/build.sh:docker-build-engine-not-found-01 BLOCK-WORTHY
+install.sh:install-skill-staging-unwritable-01 BLOCK-WORTHY
 install.sh:install-stamp-helper-missing-01 BLOCK-WORTHY
 team/pgai_agent_kanban/api/adapter.py:api-adapter-shell-out-timeout-01 AGENT-RESOLVABLE
 team/pgai_agent_kanban/api/routers/operations.py:operations-cancel-rc-confirm-01 BLOCK-WORTHY
@@ -2722,6 +2753,8 @@ team/pgai_agent_kanban/cm/unwind.py:unwind-shipped-tag-01 BLOCK-WORTHY
 team/pgai_agent_kanban/cm/unwind.py:unwind-release-state-missing-01 BLOCK-WORTHY
 team/pgai_agent_kanban/cm/unwind.py:unwind-active-rc-none-01 BLOCK-WORTHY
 team/pgai_agent_kanban/cm/unwind.py:unwind-active-rc-mismatch-01 BLOCK-WORTHY
+team/pgai_agent_kanban/cm/unwind.py:unwind-release-state-empty-01 BLOCK-WORTHY
+team/pgai_agent_kanban/cm/unwind.py:unwind-state-unreadable-01 BLOCK-WORTHY
 team/pgai_agent_kanban/cm/ship.py:ship-rc-version-format-invalid-01 BLOCK-WORTHY
 team/pgai_agent_kanban/cm/ship.py:ship-rc-project-required-01 BLOCK-WORTHY
 team/pgai_agent_kanban/cm/ship.py:ship-rc-branch-prefix-01 BLOCK-WORTHY
@@ -2820,10 +2853,11 @@ team/scripts/container-status.sh:container-status-kanban-root-missing-01 BLOCK-W
 team/scripts/container-status.sh:container-status-engine-not-found-01 BLOCK-WORTHY
 team/scripts/container-status.sh:container-status-engine-failed-01 BLOCK-WORTHY
 team/scripts/container-status.sh:container-status-report-failed-01 BLOCK-WORTHY
-team/scripts/cm/finalize-release.sh:cm-finalize-release-config-unloadable-01 BLOCK-WORTHY
-team/scripts/cm/finalize-release.sh:cm-finalize-release-dev-tree-path-unset-01 BLOCK-WORTHY
+team/scripts/cm/finalize-release.sh:cm-finalize-release-repo-root-01 BLOCK-WORTHY
+team/scripts/dashboard/board-reflow.sh:dashboard-board-reflow-usage-01 BLOCK-WORTHY
 team/scripts/dashboard/create.sh:dashboard-create-pane-arm-timeout-01 BLOCK-WORTHY
 team/scripts/dashboard/generate_window_docs.py:generate-window-docs-check-drift-01 CONVERT
+team/scripts/dashboard/lib/board_window.sh:dashboard-board-window-column-set-01 BLOCK-WORTHY
 team/scripts/dashboard/lint_pane_refresh_cadence.py:lint-pane-refresh-cadence-violation-01 CONVERT
 team/scripts/dashboard/lint_tmux_format_jobs.py:lint-tmux-format-jobs-01 CONVERT
 team/scripts/generate_measured_pace_docs.py:generate-measured-pace-docs-check-drift-01 CONVERT
@@ -2881,9 +2915,10 @@ team/scripts/lib/cm/release_decide_only.sh:release-decide-only-halt-01 BLOCK-WOR
 team/scripts/lib/cm/release_decide_only.sh:release-decide-only-requeue-01 AGENT-RESOLVABLE
 team/scripts/lib/cm/release_finalize.sh:release-finalize-git-remote-name-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_finalize.sh:release-finalize-git-tag-failure-01 BLOCK-WORTHY
-team/scripts/lib/cm/release_finalize.sh:release-finalize-hook-failure-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_finalize.sh:release-finalize-pretag-version-mismatch-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_finalize.sh:release-finalize-release-state-write-failure-01 BLOCK-WORTHY
+team/scripts/lib/cm/release_hook_runner.sh:release-hook-runner-hook-failure-01 BLOCK-WORTHY
+team/scripts/lib/cm/release_hook_runner.sh:release-hook-runner-start-failure-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_notes.sh:release-notes-changelog-bug-token-leak-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_notes.sh:release-notes-changelog-commit-failure-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_notes.sh:release-notes-commit-failure-01 BLOCK-WORTHY
@@ -2893,8 +2928,7 @@ team/scripts/lib/cm/release_preflight.sh:release-preflight-active-rc-mismatch-01
 team/scripts/lib/cm/release_preflight.sh:release-preflight-active-rc-none-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_preflight.sh:release-preflight-branch-missing-local-pushed-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_preflight.sh:release-preflight-branch-missing-local-unpushed-01 BLOCK-WORTHY
-team/scripts/lib/cm/release_preflight.sh:release-preflight-config-unloadable-01 BLOCK-WORTHY
-team/scripts/lib/cm/release_preflight.sh:release-preflight-dev-tree-path-unset-01 BLOCK-WORTHY
+team/scripts/lib/cm/release_preflight.sh:release-preflight-repo-root-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_preflight.sh:release-preflight-git-remote-name-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_preflight.sh:release-preflight-halt-01 BLOCK-WORTHY
 team/scripts/lib/cm/release_preflight.sh:release-preflight-multiple-rc-branches-01 BLOCK-WORTHY
@@ -2924,6 +2958,7 @@ team/scripts/lib/config_loader.sh:config-loader-runaway-threshold-01 BLOCK-WORTH
 team/scripts/lib/config_loader.sh:config-loader-testing-coverage-01 BLOCK-WORTHY
 team/scripts/lib/config_loader.sh:config-loader-testing-pre-merge-cap-01 BLOCK-WORTHY
 team/scripts/lib/config_loader.sh:config-loader-testing-workers-01 BLOCK-WORTHY
+team/scripts/lib/config_loader.sh:config-loader-wake-default-01 BLOCK-WORTHY
 team/scripts/lib/config_loader.sh:config-loader-wake-integer-01 BLOCK-WORTHY
 team/scripts/lib/container_tier.sh:container-tier-unknown-image-01 BLOCK-WORTHY
 team/scripts/lib/defer_posture.sh:defer-posture-campaign-malformed-until-01 BLOCK-WORTHY
@@ -2961,6 +2996,14 @@ team/pm-agent/pm_materialize.py:pm-materialize-03 BLOCK-WORTHY
 team/pm-agent/pm_materialize.py:pm-materialize-04 BLOCK-WORTHY
 team/pm-agent/pm_materialize.py:pm-materialize-05 BLOCK-WORTHY
 team/scripts/lib/env_bootstrap.sh:env-bootstrap-claude-env-01 BLOCK-WORTHY
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-workers-flag-01 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-pre-merge-01 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-pre-merge-02 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-pre-merge-03 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-targeted-files-01 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-targeted-files-02 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-targeted-files-03 AGENT-RESOLVABLE
+team/scripts/lib/gated_runner_args.sh:gated-runner-args-targeted-files-04 AGENT-RESOLVABLE
 team/scripts/lib/gated_runner_lint.sh:gated-runner-stale-findings-claim-01 BLOCK-WORTHY
 team/scripts/lib/gated_runner_lint.sh:gated-runner-run-evidence-01 CONVERT
 team/scripts/lib/git_boundary_guard.sh:git-boundary-guard-01 BLOCK-WORTHY
@@ -3047,20 +3090,12 @@ team/scripts/run-gated-tests.sh:run-gated-tests-pytest-missing-01 BLOCK-WORTHY
 team/scripts/run-integration-tests.sh:container-engine-free-lint-01 BLOCK-WORTHY
 team/scripts/run-integration-tests.sh:run-integration-tests-env-bootstrap-01 BLOCK-WORTHY
 team/scripts/run-integration-tests.sh:run-integration-tests.container-engine-free-lint BLOCK-WORTHY
-team/scripts/run-integration-tests.sh:run-integration-tests-pre-merge-01 AGENT-RESOLVABLE
-team/scripts/run-integration-tests.sh:run-integration-tests-pre-merge-02 AGENT-RESOLVABLE
-team/scripts/run-integration-tests.sh:run-integration-tests-pre-merge-03 AGENT-RESOLVABLE
 team/scripts/run-integration-tests.sh:run-integration-tests-pytest-missing-01 BLOCK-WORTHY
 team/scripts/run-integration-tests.sh:run-integration-tests-scratch-sweep-01 CONVERT
-team/scripts/run-integration-tests.sh:run-integration-tests-targeted-files-01 AGENT-RESOLVABLE
-team/scripts/run-integration-tests.sh:run-integration-tests-targeted-files-02 AGENT-RESOLVABLE
-team/scripts/run-integration-tests.sh:run-integration-tests-targeted-files-03 AGENT-RESOLVABLE
-team/scripts/run-integration-tests.sh:run-integration-tests-targeted-files-04 AGENT-RESOLVABLE
 team/scripts/run-integration-tests.sh:run-integration-tests-targeted-files-05 AGENT-RESOLVABLE
 team/scripts/run-integration-tests.sh:run-integration-tests-testing-config-01 BLOCK-WORTHY
 team/scripts/run-integration-tests.sh:run-integration-tests-testing-config-02 BLOCK-WORTHY
 team/scripts/run-integration-tests.sh:run-integration-tests-testing-config-03 BLOCK-WORTHY
-team/scripts/run-integration-tests.sh:run-integration-tests-workers-flag-01 AGENT-RESOLVABLE
 team/scripts/run-three-host-matrix.sh:run-three-host-matrix-env-bootstrap-01 BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:api-parity-census-gate-01 BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests.api-parity-census-gate BLOCK-WORTHY
@@ -3071,20 +3106,12 @@ team/scripts/run-unit-tests.sh:run-unit-tests.breakage-class-gate BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests.dockerfile-static-lint BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests-env-bootstrap-01 BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests-pytest-failure-01 BLOCK-WORTHY
-team/scripts/run-unit-tests.sh:run-unit-tests-pre-merge-01 AGENT-RESOLVABLE
-team/scripts/run-unit-tests.sh:run-unit-tests-pre-merge-02 AGENT-RESOLVABLE
-team/scripts/run-unit-tests.sh:run-unit-tests-pre-merge-03 AGENT-RESOLVABLE
 team/scripts/run-unit-tests.sh:run-unit-tests-pytest-missing-01 BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests-scratch-sweep-01 CONVERT
-team/scripts/run-unit-tests.sh:run-unit-tests-targeted-files-01 AGENT-RESOLVABLE
-team/scripts/run-unit-tests.sh:run-unit-tests-targeted-files-02 AGENT-RESOLVABLE
-team/scripts/run-unit-tests.sh:run-unit-tests-targeted-files-03 AGENT-RESOLVABLE
-team/scripts/run-unit-tests.sh:run-unit-tests-targeted-files-04 AGENT-RESOLVABLE
 team/scripts/run-unit-tests.sh:run-unit-tests-targeted-files-05 AGENT-RESOLVABLE
 team/scripts/run-unit-tests.sh:run-unit-tests-testing-config-01 BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests-testing-config-02 BLOCK-WORTHY
 team/scripts/run-unit-tests.sh:run-unit-tests-testing-config-03 BLOCK-WORTHY
-team/scripts/run-unit-tests.sh:run-unit-tests-workers-flag-01 AGENT-RESOLVABLE
 team/scripts/ship-rc.sh:ship-rc-env-bootstrap-01 BLOCK-WORTHY
 team/scripts/undefer.sh:undefer-project-required-01 BLOCK-WORTHY
 team/scripts/unhalt-global.sh:unhalt-global-kanban-root-missing-01 BLOCK-WORTHY
@@ -3133,6 +3160,10 @@ team/scripts/migrations/migrate_v2.53.1_to_v2.53.2.sh:migrate-runner-cfg-project
 team/scripts/migrations/migrate_v2.53.1_to_v2.53.2.sh:migrate-runner-cfg-positional-01 BLOCK-WORTHY
 team/pgai_agent_kanban/lib/cfg_key_seed.py:cfg-key-seed-not-a-file-01 BLOCK-WORTHY
 team/pgai_agent_kanban/lib/cfg_key_seed.py:cfg-key-seed-write-01 BLOCK-WORTHY
+team/pgai_agent_kanban/lib/skills_install.py:skills-install-usage-01 BLOCK-WORTHY
+team/pgai_agent_kanban/lib/skills_install.py:skills-install-write-01 BLOCK-WORTHY
+team/pgai_agent_kanban/lib/skills_install.py:skills-install-changed-left-01 BLOCK-WORTHY
+team/scripts/install-skills.sh:install-skills-usage-01 BLOCK-WORTHY
 <!-- CENSUS-LOCATOR-INDEX-END -->
 
 ## Coverage statement

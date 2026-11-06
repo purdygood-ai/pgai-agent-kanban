@@ -71,7 +71,7 @@ def _contract(stderr: str) -> dict:
         for key in ("error", "message", "remedy"):
             prefix = f"{key}:"
             if line.startswith(prefix) and key not in fields:
-                fields[key] = line[len(prefix):].strip()
+                fields[key] = line[len(prefix) :].strip()
     return fields
 
 
@@ -134,8 +134,7 @@ class _Sandbox:
         log = self.root / "logs" / "pseudocron.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(
-            "pseudocron starting\n"
-            f"{_FIRED_AT} fired (minute=5): scripts/wake-batch.sh --agent=pm\n",
+            "pseudocron starting\n" f"{_FIRED_AT} fired (minute=5): scripts/wake-batch.sh --agent=pm\n",
             encoding="utf-8",
         )
 
@@ -144,7 +143,7 @@ class _Sandbox:
         # An inline assignment before the command: a wake line all the same.
         fields = line.split(None, 5)
         line = " ".join(fields[:5] + [f"{_CRON_SECRET} {fields[5]}"])
-        install_fake_crontab(self.cron_bin, "MAILTO=\"\"\n" + line + "\n")
+        install_fake_crontab(self.cron_bin, 'MAILTO=""\n' + line + "\n")
         return line
 
     def write_cfg(self, text: str) -> None:
@@ -327,7 +326,11 @@ def test_plain_block_for_an_absent_container(sandbox):
 @pytest.mark.parametrize("fmt", [(), ("--json",)], ids=["text", "json"])
 def test_failed_state_query_exits_one_dual_channel(sandbox, fmt):
     sandbox.running()
-    sandbox.scenario(failures={"inspect": {"exit": 1, "stderr": "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"}})
+    sandbox.scenario(
+        failures={
+            "inspect": {"exit": 1, "stderr": "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"}
+        }
+    )
     result = sandbox.status(*fmt)
 
     assert result.returncode == 1, _diagnostic(result)

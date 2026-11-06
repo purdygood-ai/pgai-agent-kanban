@@ -2,9 +2,9 @@
 # team/scripts/lib/dashboard/column_render_board_serve.sh
 #
 # Board column fast path for column-render.sh: an --all-projects board
-# column (one of the eight types, with the subcommand that type takes) is
-# served from the current tick before column-render.sh loads its full
-# library set.
+# column (one of the eight types, or agents, with the subcommand that type
+# takes) is served from the current tick before column-render.sh loads its
+# full library set.
 #
 # WHY
 # ----
@@ -224,7 +224,7 @@ column_render_board_serve() {
     [[ "${ALL_PROJECTS:-}" == "true" && "${COLUMN_RENDER_SHOW_HELP:-}" != "true" \
         && -z "${COLUMN_RENDER_ARG_ERROR:-}" ]] || return 1
     case "${COLUMN_TYPE}:${SUBCOMMAND}" in
-        bugs:input|priorities:input|requirements:input|pm:queue|coder:queue|writer:queue|tester:queue|cm:queue) ;;
+        bugs:input|priorities:input|requirements:input|pm:queue|coder:queue|writer:queue|tester:queue|cm:queue|agents:queue) ;;
         *) return 1 ;;
     esac
     _column_render_board_serve_load || return 1

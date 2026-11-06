@@ -109,7 +109,7 @@ if [[ -z "$PROJECT_NAME" || -z "$VERSION_ARG" ]]; then
 fi
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve kanban root ---
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
@@ -119,11 +119,11 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT"
 
 # --- Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load) ---
-_FINALIZE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_FINALIZE_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/temp.sh
 source "${_FINALIZE_SCRIPT_DIR}/../lib/temp.sh"
 # PROJECTS_CFG_NAME_RE, the project-name rule the name check below applies,
@@ -139,12 +139,12 @@ set -euo pipefail
 
 # --- Clean exit handling ---
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 # lib/cm/common.sh brings pp_run_ops, which reaches cm/write_rc_state.py
 # (the release-state.md writer), and read_md_field (lib/md_field.sh), which
 # reads the requirement doc's sections.
 # shellcheck source=../lib/cm/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Validate project name ---
@@ -663,7 +663,7 @@ echo ""
 echo "Promoting document requirement ## Status from running to done..."
 
 _finalize_kanban_project="${PGAI_PROJECT_NAME:-}"
-_finalize_promote_script="$(dirname "${BASH_SOURCE[0]}")/promote_bundled_items.py"
+_finalize_promote_script="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/promote_bundled_items.py"
 
 if [[ -z "$_finalize_kanban_project" ]]; then
   echo "  WARNING: PGAI_PROJECT_NAME is not set; cannot locate requirements directory." >&2

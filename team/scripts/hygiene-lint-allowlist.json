@@ -50,41 +50,6 @@
   },
   {
     "class": "provenance",
-    "content_hash": "81bd160d03d4",
-    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
-    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
-    "line_hint": 268
-  },
-  {
-    "class": "provenance",
-    "content_hash": "cb7b36973d71",
-    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
-    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
-    "line_hint": 327
-  },
-  {
-    "class": "provenance",
-    "content_hash": "edc72ab3458e",
-    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
-    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
-    "line_hint": 394
-  },
-  {
-    "class": "provenance",
-    "content_hash": "d9d3b47c1011",
-    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
-    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
-    "line_hint": 439
-  },
-  {
-    "class": "provenance",
-    "content_hash": "57841d7aff6d",
-    "file": "team/scripts/lib/overwatch-checks/tests/test-check-stale-worktrees.sh",
-    "justification": "deliberate fixture literal: task-ID-shaped VALUE for a synthetic worktree fixture; the test-tree VALUE exemption's tokenizer-based comment/docstring/assert-message discrimination only parses Python, so it cannot classify a plain assignment in this .sh test file as ordinary-value position -- sanctioned per SOP-core.md's usage-EXAMPLE exception (a task-ID-shaped VALUE illustrating fixture data, not shipped process history)",
-    "line_hint": 482
-  },
-  {
-    "class": "provenance",
     "content_hash": "560ea878c23e",
     "file": "docs/OPERATIONS.md",
     "justification": "worked usage example in the operator guide: a bug-ID or version value illustrating a documented format (the BUGS-column sort order, the deferred-bug glyph suffix, a first-release requirements-file name), not a citation of a real bug or release",
@@ -215,13 +180,6 @@
     "file": "docs/creating-a-workflow.md",
     "justification": "usage-example requirements-file path illustrating the version-slug naming convention a project's requirements documents follow, not a citation of a real release",
     "line_hint": 616
-  },
-  {
-    "class": "provenance",
-    "content_hash": "500874f9ac5e",
-    "file": "docs/disk-hygiene.md",
-    "justification": "worked usage example illustrating which task-ID shape the active-RC guard looks for in a requirements bundle before it skips a task folder, not a citation of a real task",
-    "line_hint": 227
   },
   {
     "class": "provenance",
@@ -642,5 +600,19 @@
     "file": "team/pgai_agent_kanban/lib/bug_filing.py",
     "justification": "placeholder ID an unclaimed draft is named with for the same-defect match; a value, not a citation of any bug",
     "line_hint": 324
+  },
+  {
+    "class": "provenance",
+    "content_hash": "d4a211267282",
+    "file": "docs/operator-commands.md",
+    "justification": "operator command reference: an example --key value, intake filename or task ID illustrating a CLI invocation's shape, not a citation of a real bug, priority or task",
+    "line_hint": 150
+  },
+  {
+    "class": "provenance",
+    "content_hash": "d88fd4494983",
+    "file": "docs/disk-hygiene.md",
+    "justification": "worked usage example illustrating which task-ID shape the active-RC guard looks for in a requirements bundle before it skips a task folder, not a citation of a real task",
+    "line_hint": 227
   }
 ]

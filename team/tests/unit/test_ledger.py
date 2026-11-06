@@ -162,9 +162,7 @@ def test_evidence_field_carries_paths_not_content(tmp_path: Path) -> None:
     """format_entry() never inlines file content — only the path strings the
     caller supplied travel into the rendered entry.
     """
-    entry = _make_entry(
-        evidence_paths=["/kanban/projects/p/tasks/TESTER-X/artifacts/report.md"]
-    )
+    entry = _make_entry(evidence_paths=["/kanban/projects/p/tasks/TESTER-X/artifacts/report.md"])
     rendered = format_entry(entry)
     assert "/kanban/projects/p/tasks/TESTER-X/artifacts/report.md" in rendered
     # The rendered block is short and structural — it cannot contain a

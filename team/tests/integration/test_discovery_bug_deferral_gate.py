@@ -43,7 +43,6 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import textwrap
-from typing import Optional
 
 from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
 
@@ -63,7 +62,7 @@ def _run_discovery(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -108,7 +107,7 @@ def _add_bug_file(
     bug_id: str = "BUG-0001",
     slug: str = "test-fix",
     status: str = "open",
-    severity: Optional[str] = "low",
+    severity: str | None = "low",
 ) -> pathlib.Path:
     """Create a bug file. severity=None omits the **Severity:** field entirely."""
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
@@ -116,10 +115,7 @@ def _add_bug_file(
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     severity_line = f"**Severity:** {severity}\n\n" if severity is not None else ""
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"{severity_line}"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"{severity_line}" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -156,9 +152,9 @@ def _set_defer_posture(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    deferred_bugs: Optional[bool] = None,
-    deferred_bug_level: Optional[str] = None,
-    defer_piggyback: Optional[bool] = None,
+    deferred_bugs: bool | None = None,
+    deferred_bug_level: str | None = None,
+    defer_piggyback: bool | None = None,
 ) -> None:
     """Append a [release] section to project.cfg setting the deferral posture.
 
@@ -243,9 +239,9 @@ class TestDeferralOff:
         assert any("BUG-0001" in i for i in item_ids)
         assert any("BUG-0002" in i for i in item_ids)
         stderr_lower = result.stderr.lower()
-        assert "deferring" not in stderr_lower and "hygiene sweep" not in stderr_lower, (
-            f"Expected no deferral narration when deferred_bugs=false.\nstderr:\n{result.stderr}"
-        )
+        assert (
+            "deferring" not in stderr_lower and "hygiene sweep" not in stderr_lower
+        ), f"Expected no deferral narration when deferred_bugs=false.\nstderr:\n{result.stderr}"
 
 
 class TestLevelLowDefersLowSeverityBugs:
@@ -283,22 +279,20 @@ class TestLevelLowDefersLowSeverityBugs:
         backlog_text = bug_backlog.read_text(encoding="utf-8")
         assert "[x]" not in backlog_text, f"bug_backlog.md should be unchanged:\n{backlog_text}"
 
-        assert "deferring 2 bug(s) at or below level=low" in result.stderr, (
-            f"Expected the run to narrate the deferred count and level.\nstderr:\n{result.stderr}"
-        )
+        assert (
+            "deferring 2 bug(s) at or below level=low" in result.stderr
+        ), f"Expected the run to narrate the deferred count and level.\nstderr:\n{result.stderr}"
 
         # AC5: the requirements step still processes the pending file in the
         # same run, untouched by the deferral gate.
         req_file = _requirements_dir(root, "project-a") / "v0.0.5-unrelated.md"
-        assert "running" in req_file.read_text(encoding="utf-8").lower(), (
-            "Requirements step should still queue PM while bugs are deferred"
-        )
+        assert (
+            "running" in req_file.read_text(encoding="utf-8").lower()
+        ), "Requirements step should still queue PM while bugs are deferred"
 
 
 class TestLevelLowStillBundlesAboveLevelSeverity:
-    def test_medium_bug_bundles_while_low_bugs_alongside_it_stay_deferred(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_medium_bug_bundles_while_low_bugs_alongside_it_stay_deferred(self, two_project_root: pathlib.Path) -> None:
         """level=low with one medium-severity bug open alongside low ones: a
         bundle is written and only the medium bug is in it.
 
@@ -309,9 +303,7 @@ class TestLevelLowStillBundlesAboveLevelSeverity:
         covered by test_discovery_bug_deferral_piggyback.py.
         """
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low", defer_piggyback=False)
         low1 = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="one", severity="low")
         low2 = _add_bug_file(root, "project-a", bug_id="BUG-0002", slug="two", severity="low")
         _add_bug_file(root, "project-a", bug_id="BUG-0003", slug="three", severity="medium")
@@ -331,9 +323,7 @@ class TestLevelLowStillBundlesAboveLevelSeverity:
 
 
 class TestLevelMediumAndHighDeferAtTheirOwnRung:
-    def test_medium_severity_bug_deferred_at_level_medium(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_medium_severity_bug_deferred_at_level_medium(self, two_project_root: pathlib.Path) -> None:
         """level=medium with a medium-severity bug open: the bug is deferred
         and no bundle is written; an unprocessed requirements file is still
         queued for PM (AC5).
@@ -353,9 +343,7 @@ class TestLevelMediumAndHighDeferAtTheirOwnRung:
         req_file = _requirements_dir(root, "project-a") / "v0.0.5-unrelated.md"
         assert "running" in req_file.read_text(encoding="utf-8").lower()
 
-    def test_high_severity_bug_deferred_at_level_high(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_high_severity_bug_deferred_at_level_high(self, two_project_root: pathlib.Path) -> None:
         """level=high with a high-severity bug open: the bug is deferred and
         no bundle is written; an unprocessed requirements file is still
         queued for PM (AC5). level=high is the operator-knows-best case: it
@@ -394,9 +382,9 @@ class TestHygieneSweep:
         result = _run_discovery(root, "project-a")
 
         assert result.returncode == 0, result.stderr
-        assert "hygiene sweep" in result.stderr.lower(), (
-            f"Expected the hygiene sweep to fire and narrate.\nstderr:\n{result.stderr}"
-        )
+        assert (
+            "hygiene sweep" in result.stderr.lower()
+        ), f"Expected the hygiene sweep to fire and narrate.\nstderr:\n{result.stderr}"
         bundles = _bundle_files(root, "project-a")
         assert bundles, f"Expected the hygiene sweep to bundle the deferred bugs.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
@@ -424,21 +412,19 @@ class TestHygieneSweep:
         # The withheld narration itself says "hygiene sweep withheld" -- assert
         # on the firing phrasing specifically ("hygiene sweep --") so this
         # assertion cannot be satisfied by the withheld line's own wording.
-        assert "hygiene sweep --" not in result.stderr.lower(), (
-            f"Hygiene sweep should be withheld while a requirement is pending.\nstderr:\n{result.stderr}"
-        )
-        assert "hygiene sweep withheld" in result.stderr.lower(), (
-            f"Expected the run to narrate why the sweep did not fire.\nstderr:\n{result.stderr}"
-        )
+        assert (
+            "hygiene sweep --" not in result.stderr.lower()
+        ), f"Hygiene sweep should be withheld while a requirement is pending.\nstderr:\n{result.stderr}"
+        assert (
+            "hygiene sweep withheld" in result.stderr.lower()
+        ), f"Expected the run to narrate why the sweep did not fire.\nstderr:\n{result.stderr}"
         assert not _bundle_files(root, "project-a"), result.stderr
         assert _bug_status(bug1) == "open"
         assert _bug_status(bug2) == "open"
 
 
 class TestUnparseableSeverityIsNeverDeferred:
-    def test_missing_severity_field_is_kept_and_the_run_names_the_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_missing_severity_field_is_kept_and_the_run_names_the_file(self, two_project_root: pathlib.Path) -> None:
         """A bug file whose severity field is missing is not deferred -- it
         remains a candidate that can trigger an RC -- and the run narrates
         the unparseable field, naming the file.
@@ -454,9 +440,9 @@ class TestUnparseableSeverityIsNeverDeferred:
         assert bundles, f"Expected the unparseable-severity bug to be bundled, not deferred.\nstderr:\n{result.stderr}"
         item_ids = parse_bundled_item_basenames(str(bundles[0]))
         assert any("BUG-0001" in i for i in item_ids), item_ids
-        assert bug.name.replace(".md", "") in result.stderr or "BUG-0001" in result.stderr, (
-            f"Expected the run to narrate the file by name.\nstderr:\n{result.stderr}"
-        )
+        assert (
+            bug.name.replace(".md", "") in result.stderr or "BUG-0001" in result.stderr
+        ), f"Expected the run to narrate the file by name.\nstderr:\n{result.stderr}"
         assert "unparseable" in result.stderr.lower()
 
     def test_unrecognised_severity_value_is_kept_and_the_run_names_the_file(
@@ -468,9 +454,7 @@ class TestUnparseableSeverityIsNeverDeferred:
         """
         root = two_project_root
         _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
-        bug = _add_bug_file(
-            root, "project-a", bug_id="BUG-0001", slug="urgent-bug", severity="urgent"
-        )
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="urgent-bug", severity="urgent")
 
         result = _run_discovery(root, "project-a")
 
@@ -495,9 +479,7 @@ class TestCriticalSeverityIsRankedNotUnparseable:
         """
         root = two_project_root
         _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="high")
-        bug = _add_bug_file(
-            root, "project-a", bug_id="BUG-0001", slug="critical-bug", severity="critical"
-        )
+        bug = _add_bug_file(root, "project-a", bug_id="BUG-0001", slug="critical-bug", severity="critical")
 
         result = _run_discovery(root, "project-a")
 

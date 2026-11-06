@@ -74,6 +74,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="changelog-writer-real-data")
 
+
 # ---------------------------------------------------------------------------
 # Module-level path resolution — captured before conftest monkeypatching
 # ---------------------------------------------------------------------------
@@ -161,16 +162,17 @@ class TestRealDataChangelog:
         # Regenerate into scratch — never write to the live repo root.
         scratch_changelog = scratch_dir / "CHANGELOG.md"
         content = regenerate(
-            _REPO_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            _REPO_ROOT,
+            versions,
+            published,
+            _FIXTURE_BUGS_DIR,
             published_changelog=None,  # the fixture ledger is rendered without the
             # live artifact: its published IDs belong to the live ledger, not the fixture
         )
         scratch_changelog.write_text(content, encoding="utf-8")
         return content, scratch_changelog
 
-    def test_release_entry_count_matches_release_notes_file_count(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_entry_count_matches_release_notes_file_count(self, tmp_path: pathlib.Path) -> None:
         """Criterion 9: entry count in regenerated CHANGELOG equals release-notes file count.
 
         The writer must produce exactly one ## vX.Y.Z heading for every
@@ -183,9 +185,7 @@ class TestRealDataChangelog:
         release_note_files = list(notes_dir.glob("v*.md"))
         expected_count = len(release_note_files)
 
-        assert expected_count > 0, (
-            f"No release-notes/v*.md files found under {notes_dir}"
-        )
+        assert expected_count > 0, f"No release-notes/v*.md files found under {notes_dir}"
 
         content, _ = self._regenerate_into_scratch(tmp_path)
         headings = re.findall(r"^## (v\d+\.\d+\.\d+)", content, re.MULTILINE)
@@ -197,9 +197,7 @@ class TestRealDataChangelog:
             f"{set(headings).symmetric_difference({p.stem for p in release_note_files})}"
         )
 
-    def test_v1_0_0_entry_carries_ki_1_0_0_1_with_tmux_symptom(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_v1_0_0_entry_carries_ki_1_0_0_1_with_tmux_symptom(self, tmp_path: pathlib.Path) -> None:
         """Criterion 5a: v1.0.0 entry carries KI-1.0.0.1 with the tmux symptom.
 
         The Known Issues section under v1.0.0 must disclose the tmux 3.4
@@ -211,25 +209,17 @@ class TestRealDataChangelog:
         content, _ = self._regenerate_into_scratch(tmp_path)
 
         # Extract the v1.0.0 entry
-        entry_match = re.search(
-            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
-        )
+        entry_match = re.search(r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE)
         assert entry_match is not None, "v1.0.0 entry not found in regenerated CHANGELOG"
         entry_text = entry_match.group(0)
 
         # KI-1.0.0.1 must appear in the v1.0.0 entry
-        assert "KI-1.0.0.1" in entry_text, (
-            "KI-1.0.0.1 not found in v1.0.0 entry of regenerated CHANGELOG"
-        )
+        assert "KI-1.0.0.1" in entry_text, "KI-1.0.0.1 not found in v1.0.0 entry of regenerated CHANGELOG"
 
         # The tmux symptom must appear (the bug is about 'size missing' error)
-        assert "size missing" in entry_text, (
-            "tmux 'size missing' symptom not found in v1.0.0 Known Issues"
-        )
+        assert "size missing" in entry_text, "tmux 'size missing' symptom not found in v1.0.0 Known Issues"
 
-    def test_v1_0_0_entry_carries_correct_affects_fixed_in_disclosure(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_v1_0_0_entry_carries_correct_affects_fixed_in_disclosure(self, tmp_path: pathlib.Path) -> None:
         """Criterion 5a: v1.0.0 entry shows correct affects/fixed-in per PUBLISHED state.
 
         The underlying defect (KI-1.0.0.1) was fixed internally in v1.16.2.
@@ -245,9 +235,7 @@ class TestRealDataChangelog:
         content, _ = self._regenerate_into_scratch(tmp_path)
 
         # Extract the v1.0.0 entry
-        entry_match = re.search(
-            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
-        )
+        entry_match = re.search(r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE)
         assert entry_match is not None, "v1.0.0 entry not found in regenerated CHANGELOG"
         entry_text = entry_match.group(0)
 
@@ -257,9 +245,7 @@ class TestRealDataChangelog:
         ki_line = ki_line_match.group(0)
 
         # The line must contain 'affects v1.0.0'
-        assert "affects v1.0.0" in ki_line, (
-            f"Expected 'affects v1.0.0' in KI line but got: {ki_line!r}"
-        )
+        assert "affects v1.0.0" in ki_line, f"Expected 'affects v1.0.0' in KI line but got: {ki_line!r}"
 
         # Rendering depends on PUBLISHED state — mirrors the writer's
         # _earliest_published_gte rule anchored to the internal fix version v1.16.2:
@@ -293,16 +279,10 @@ class TestRealDataChangelog:
 
         rec = parse_bug_file(bug_file_candidates[0])
 
-        assert rec.public_id == "KI-1.0.0.1", (
-            f"## Public ID expected 'KI-1.0.0.1', got '{rec.public_id}'"
-        )
-        assert rec.affects == "v1.0.0", (
-            f"## Affects expected 'v1.0.0', got '{rec.affects}'"
-        )
+        assert rec.public_id == "KI-1.0.0.1", f"## Public ID expected 'KI-1.0.0.1', got '{rec.public_id}'"
+        assert rec.affects == "v1.0.0", f"## Affects expected 'v1.0.0', got '{rec.affects}'"
 
-    def test_no_internal_bug_identifiers_in_generated_changelog(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_no_internal_bug_identifiers_in_generated_changelog(self, tmp_path: pathlib.Path) -> None:
         """Criterion 5d / 8: grep -E 'BUG-[0-9]' returns zero hits on generated output.
 
         Internal BUG-NNNN identifiers must never appear in the generated
@@ -314,13 +294,9 @@ class TestRealDataChangelog:
         content, _ = self._regenerate_into_scratch(tmp_path)
 
         matches = re.findall(r"BUG-[0-9]", content)
-        assert matches == [], (
-            f"Internal BUG-NNNN identifiers found in real-data CHANGELOG output: {matches}"
-        )
+        assert matches == [], f"Internal BUG-NNNN identifiers found in real-data CHANGELOG output: {matches}"
 
-    def test_regeneration_is_idempotent_on_real_data(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_regeneration_is_idempotent_on_real_data(self, tmp_path: pathlib.Path) -> None:
         """Two consecutive regenerations against real data produce byte-identical output.
 
         Idempotence is a hard requirement because cm-release.sh regenerates
@@ -344,12 +320,18 @@ class TestRealDataChangelog:
         published = load_published_manifest(_REPO_ROOT)
 
         content1 = regenerate(
-            _REPO_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            _REPO_ROOT,
+            versions,
+            published,
+            _FIXTURE_BUGS_DIR,
             published_changelog=None,  # the fixture ledger is rendered without the
             # live artifact: its published IDs belong to the live ledger, not the fixture
         )
         content2 = regenerate(
-            _REPO_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            _REPO_ROOT,
+            versions,
+            published,
+            _FIXTURE_BUGS_DIR,
             published_changelog=None,  # the fixture ledger is rendered without the
             # live artifact: its published IDs belong to the live ledger, not the fixture
         )
@@ -360,9 +342,7 @@ class TestRealDataChangelog:
             "or file-order sensitivity."
         )
 
-    def test_real_ledger_ki_known_issues_contains_no_prose_affects_entries(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_real_ledger_ki_known_issues_contains_no_prose_affects_entries(self, tmp_path: pathlib.Path) -> None:
         """Criterion an earlier defect: the Known Issues section for v1.0.0 contains no
         entries that came from prose-affects internal bugs.
 
@@ -384,15 +364,11 @@ class TestRealDataChangelog:
         content, _ = self._regenerate_into_scratch(tmp_path)
 
         # Extract the v1.0.0 entry's Known Issues section.
-        entry_match = re.search(
-            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
-        )
+        entry_match = re.search(r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE)
         assert entry_match is not None, "v1.0.0 entry not found in regenerated CHANGELOG"
         entry_text = entry_match.group(0)
 
-        ki_section_match = re.search(
-            r"### Known Issues\n(.*?)(?=###|\Z)", entry_text, re.DOTALL
-        )
+        ki_section_match = re.search(r"### Known Issues\n(.*?)(?=###|\Z)", entry_text, re.DOTALL)
         assert ki_section_match is not None, "Known Issues section not found in v1.0.0 entry"
         ki_body = ki_section_match.group(1).strip()
 
@@ -461,8 +437,7 @@ class TestFixtureDisclosureProvenance:
             cwd=str(_REPO_ROOT),
         )
         assert result.returncode == 0, (
-            f"git show {_DISCLOSURE_SOURCE_COMMIT}:CHANGELOG.md failed: "
-            f"{result.stderr!r}"
+            f"git show {_DISCLOSURE_SOURCE_COMMIT}:CHANGELOG.md failed: " f"{result.stderr!r}"
         )
 
         published_symptoms: dict[str, set[str]] = {}
@@ -471,9 +446,7 @@ class TestFixtureDisclosureProvenance:
                 continue
             public_id, _, rest = line.partition(" — ")
             idx = rest.rfind("; affects ")
-            assert idx != -1, (
-                f"Published KI line has no '; affects' clause to split on: {line!r}"
-            )
+            assert idx != -1, f"Published KI line has no '; affects' clause to split on: {line!r}"
             published_symptoms.setdefault(public_id, set()).add(rest[:idx])
 
         assert len(published_symptoms) == 5, (
@@ -641,13 +614,14 @@ def _regenerate_fixture_ledger_changelog(tmp_path: pathlib.Path) -> str:
     writes to the live repo root, always scratch under tmp_path.
     """
     notes_dir = _REPO_ROOT / "release-notes"
-    found = sorted(
-        notes_dir.glob("v*.md"), key=lambda p: _parse_version(p.stem), reverse=True
-    )
+    found = sorted(notes_dir.glob("v*.md"), key=lambda p: _parse_version(p.stem), reverse=True)
     versions = [p.stem for p in found]
     published = load_published_manifest(_REPO_ROOT)
     content = regenerate(
-        _REPO_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+        _REPO_ROOT,
+        versions,
+        published,
+        _FIXTURE_BUGS_DIR,
         published_changelog=None,  # the fixture ledger is rendered without the
         # live artifact: its published IDs belong to the live ledger, not the fixture
     )
@@ -673,9 +647,7 @@ class TestWriterRenderReproducesPublishedDisclosures:
         if not ok:
             pytest.skip(reason)
 
-    def test_render_reproduces_published_ki_1_0_0_disclosures(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_render_reproduces_published_ki_1_0_0_disclosures(self, tmp_path: pathlib.Path) -> None:
         """changelog_writer's render of the fixture ledger byte-matches c2d8056.
 
         Regenerates CHANGELOG content from the committed fixture ledger into
@@ -702,9 +674,7 @@ class TestWriterRenderReproducesPublishedDisclosures:
 
         _assert_render_matches_published(content, published)
 
-    def test_guard_fails_and_names_the_mutated_line_when_a_disclosure_diverges(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_guard_fails_and_names_the_mutated_line_when_a_disclosure_diverges(self, tmp_path: pathlib.Path) -> None:
         """Mutating one KI line in a scratch fixture render fails the guard, naming it.
 
         Proves the guard actually fires (a gate that cannot fail is not a
@@ -727,12 +697,9 @@ class TestWriterRenderReproducesPublishedDisclosures:
         # excluded from the comparison, so a mutation after it would not
         # exercise the guard at all.
         assert "; affects " in original_line, (
-            f"Rendered line has no '; affects' clause to mutate around: "
-            f"{original_line!r}"
+            f"Rendered line has no '; affects' clause to mutate around: " f"{original_line!r}"
         )
-        mutated_line = original_line.replace(
-            "; affects ", " MUTATED-FOR-TEST; affects ", 1
-        )
+        mutated_line = original_line.replace("; affects ", " MUTATED-FOR-TEST; affects ", 1)
 
         # Rebuild content line-by-line rather than str.replace() on the whole
         # document: the SAME disclosure sentence also appears verbatim as a
@@ -748,8 +715,7 @@ class TestWriterRenderReproducesPublishedDisclosures:
                 content_lines[i] = raw_line.replace(original_line, mutated_line, 1)
                 mutated_count += 1
         assert mutated_count == 1, (
-            f"Expected exactly one exact-match line for {target_id!r} to "
-            f"mutate, found {mutated_count}."
+            f"Expected exactly one exact-match line for {target_id!r} to " f"mutate, found {mutated_count}."
         )
         mutated_content = "".join(content_lines)
         assert mutated_content != content, "Mutation did not change the rendered content."
@@ -758,6 +724,5 @@ class TestWriterRenderReproducesPublishedDisclosures:
             _assert_render_matches_published(mutated_content, published)
 
         assert target_id in str(exc_info.value), (
-            f"Guard failure message does not name the mutated identifier "
-            f"{target_id!r}.\nMessage: {exc_info.value}"
+            f"Guard failure message does not name the mutated identifier " f"{target_id!r}.\nMessage: {exc_info.value}"
         )

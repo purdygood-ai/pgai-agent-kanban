@@ -121,8 +121,7 @@ def test_composer_prints_per_role_byte_budget_table_for_every_role(
     completeness, not a byte-threshold assertion -- so an over-budget role
     is visible in the printed output without failing this test."""
     assert _REAL_KANBAN_CFG_EXAMPLE.is_file(), (
-        f"kanban.cfg_example not found at {_REAL_KANBAN_CFG_EXAMPLE} -- "
-        "test fixture path is stale."
+        f"kanban.cfg_example not found at {_REAL_KANBAN_CFG_EXAMPLE} -- " "test fixture path is stale."
     )
     result = run_bash(
         tmp_path,
@@ -140,8 +139,7 @@ def test_composer_prints_per_role_byte_budget_table_for_every_role(
 
     rows = _parse_rows(result.stdout)
     assert set(rows) == set(_ROLES), (
-        f"Expected rows for {sorted(_ROLES)}, got {sorted(rows)}. "
-        f"Raw output:\n{result.stdout}"
+        f"Expected rows for {sorted(_ROLES)}, got {sorted(rows)}. " f"Raw output:\n{result.stdout}"
     )
 
     with capsys.disabled():
@@ -166,20 +164,16 @@ def test_role_over_a_lowered_budget_reports_over_without_failing(
     than always reading 'under' -- while confirming that an OVER verdict
     is reported, not failed."""
     tiny_budget_cfg = tmp_path / "kanban.cfg"
-    tiny_budget_cfg.write_text(
-        "[governance]\nbudget_bytes_coder = 1\n", encoding="utf-8"
-    )
-    result = run_bash(
-        tmp_path, f"bash {_LINT_SCRIPT} --kanban-cfg {tiny_budget_cfg}"
-    )
+    tiny_budget_cfg.write_text("[governance]\nbudget_bytes_coder = 1\n", encoding="utf-8")
+    result = run_bash(tmp_path, f"bash {_LINT_SCRIPT} --kanban-cfg {tiny_budget_cfg}")
     # The lint script itself narrates only and always exits 0 -- see its own
     # "WHY IT NEVER BLOCKS" header.
     assert result.returncode == 0, result.stderr
 
     rows = _parse_rows(result.stdout)
-    assert rows["coder"]["verdict"] == "OVER", (
-        f"Expected 'coder' to report OVER against a 1-byte budget. Got:\n{result.stdout}"
-    )
+    assert (
+        rows["coder"]["verdict"] == "OVER"
+    ), f"Expected 'coder' to report OVER against a 1-byte budget. Got:\n{result.stdout}"
 
     # No assertion below is entitled to fail on this OVER verdict -- see
     # this module's docstring and team/SOP-core.md "Blocking Severity:

@@ -181,9 +181,7 @@ def _run_model_selection(
         _run_selection
     """)
 
-    result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, timeout=15
-    )
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, (
         f"Model Selection block exited non-zero for provider={provider!r}.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -196,8 +194,7 @@ def _run_model_selection(
         elif line.startswith("MODEL_SOURCE=[") and line.endswith("]"):
             parsed["model_source"] = line[len("MODEL_SOURCE=[") : -1]
     assert "selected_model" in parsed and "model_source" in parsed, (
-        f"Could not parse block output for provider={provider!r}.\n"
-        f"stdout: {result.stdout}"
+        f"Could not parse block output for provider={provider!r}.\n" f"stdout: {result.stdout}"
     )
     return parsed
 
@@ -214,23 +211,38 @@ def _run_model_selection(
     "override, env_model, expected_selected, expected_source",
     [
         pytest.param(
-            "claude-opus-4-7", "claude-haiku-4-0", "claude-opus-4-7", "task force override",
+            "claude-opus-4-7",
+            "claude-haiku-4-0",
+            "claude-opus-4-7",
+            "task force override",
             id="task_override_wins_when_env_var_also_present",
         ),
         pytest.param(
-            "opus", None, "opus", "task force override",
+            "opus",
+            None,
+            "opus",
+            "task force override",
             id="task_override_wins_when_env_var_absent",
         ),
         pytest.param(
-            None, "claude-sonnet-4-6", "claude-sonnet-4-6", "PGAI_CODER_MODEL env",
+            None,
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-6",
+            "PGAI_CODER_MODEL env",
             id="env_var_wins_when_task_override_absent",
         ),
         pytest.param(
-            None, None, "", "provider CLI default for coder",
+            None,
+            None,
+            "",
+            "provider CLI default for coder",
             id="provider_default_wins_when_no_override_or_env",
         ),
         pytest.param(
-            "none", "claude-sonnet-4-6", "claude-sonnet-4-6", "PGAI_CODER_MODEL env",
+            "none",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-6",
+            "PGAI_CODER_MODEL env",
             id="task_override_none_value_falls_through_to_env",
         ),
     ],
@@ -246,9 +258,7 @@ def test_model_selection_tier_precedence(
     """Model resolution honors the 3-tier precedence (task override > env var
     > provider default), with an explicit 'none' override value treated as
     absent rather than as a literal model name."""
-    result = _run_model_selection(
-        tmp_path, provider, override=override, env_model=env_model
-    )
+    result = _run_model_selection(tmp_path, provider, override=override, env_model=env_model)
     assert result["selected_model"] == expected_selected, result
     assert result["model_source"] == expected_source, result
 

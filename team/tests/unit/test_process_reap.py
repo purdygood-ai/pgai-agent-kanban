@@ -24,7 +24,6 @@ argv and is killed in teardown, pass or fail.
 
 from __future__ import annotations
 
-import os
 import pathlib
 import subprocess
 import sys
@@ -49,14 +48,19 @@ def spawn(tmp_path: pathlib.Path):
         extra = dict([env_entry.split("=", 1)]) if env_entry else {}
         proc = subprocess.Popen(
             ["bash", "-c", f"{trap}exec -a {marker}-{label} sleep 600"],
-            cwd=str(cwd), env=build_scrubbed_env(home_dir=tmp_path, extra_env=extra),
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=str(cwd),
+            env=build_scrubbed_env(home_dir=tmp_path, extra_env=extra),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         procs.append(proc)
         for _ in range(50):
             try:
-                if f"{marker}-{label}" in pathlib.Path(f"/proc/{proc.pid}/cmdline").read_bytes().decode(errors="replace"):
+                if f"{marker}-{label}" in pathlib.Path(f"/proc/{proc.pid}/cmdline").read_bytes().decode(
+                    errors="replace"
+                ):
                     return proc
             except OSError:
                 pass
@@ -102,8 +106,13 @@ def test_the_scanner_and_its_ancestors_are_never_named(tmp_path) -> None:
         extra_env={"PGAI_AGENT_RUN_ID": entry_value, "PYTHONPATH": str(_TEAM_DIR)},
     )
     result = subprocess.run(
-        ["bash", "-c", f'"{sys.executable}" -c "$SCRIPT"; exit $?'], env={**env, "SCRIPT": script},
-        capture_output=True, text=True, timeout=60, cwd=str(tmp_path), check=False,
+        ["bash", "-c", f'"{sys.executable}" -c "$SCRIPT"; exit $?'],
+        env={**env, "SCRIPT": script},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.split()[0] == "0", result.stdout + result.stderr
@@ -111,9 +120,15 @@ def test_the_scanner_and_its_ancestors_are_never_named(tmp_path) -> None:
 
 def test_a_recycled_pid_is_never_signalled(spawn) -> None:
     proc = spawn("recycled")
-    (record,) = [r for r in process_reap.find_by_cwd(pathlib.Path(f"/proc/{proc.pid}/cwd").resolve()) if r.pid == proc.pid]
+    (record,) = [
+        r for r in process_reap.find_by_cwd(pathlib.Path(f"/proc/{proc.pid}/cwd").resolve()) if r.pid == proc.pid
+    ]
     stale = process_reap.ProcessRecord(
-        pid=record.pid, start_time="1", command=record.command, cwd=record.cwd, has_terminal=False,
+        pid=record.pid,
+        start_time="1",
+        command=record.command,
+        cwd=record.cwd,
+        has_terminal=False,
     )
 
     outcomes = process_reap.stop([stale], grace_seconds=1)
@@ -150,7 +165,12 @@ def test_the_command_line_refuses_a_scope_that_could_match_too_much(tmp_path, ar
     env = build_scrubbed_env(home_dir=tmp_path, extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     result = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.process_reap", *args],
-        env=env, capture_output=True, text=True, timeout=60, cwd=str(tmp_path), check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        check=False,
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert named in result.stderr, result.stdout + result.stderr
@@ -179,7 +199,12 @@ def test_a_scope_refusal_remedy_runs_as_printed_under_the_configured_temp_root(
     )
     refused = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.process_reap", *args],
-        env=env, capture_output=True, text=True, timeout=60, cwd=str(tmp_path), check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        check=False,
     )
     assert refused.returncode == 2, refused.stdout + refused.stderr
     assert f"error:   {error_key}" in refused.stderr, refused.stderr
@@ -187,7 +212,13 @@ def test_a_scope_refusal_remedy_runs_as_printed_under_the_configured_temp_root(
     assert f"--cwd-under '{temp_root}'" in remedy and remedy.endswith("--dry-run"), remedy
 
     ran = subprocess.run(
-        ["bash", "-c", remedy], env=env, capture_output=True, text=True, timeout=60, cwd=str(tmp_path), check=False,
+        ["bash", "-c", remedy],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        check=False,
     )
 
     assert ran.returncode == 0, f"remedy {remedy!r} exited {ran.returncode}: {ran.stdout}{ran.stderr}"

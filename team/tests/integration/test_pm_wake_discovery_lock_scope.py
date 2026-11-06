@@ -64,11 +64,26 @@ _CHAIN_BUSY_EXIT = f"discovery_run_pipeline [{_PROJECT}]: chain busy, idle exit 
 _WAKE_TIMEOUT_SECONDS = 120
 
 _LEAK_PREFIXES = (
-    "PGAI_", "PP_", "KANBAN_ROOT", "TEAM_ROOT", "CLAUDE_", "AI_AGENT", "STOP_FILE",
-    "TMPDIR", "MAX_TASK_SECONDS", "MAX_RUNTIME_SECONDS", "MAX_TASKS_PER_WAKE",
-    "MAX_PROJECT_SECONDS", "KILL_GRACE_SECONDS", "PAUSE_BETWEEN_TASKS",
-    "STOP_ON_BLOCKED", "AI_AUTH_MODE", "BASH_MAX_TIMEOUT_MS", "DASHBOARD_",
-    "PM_MAX_TASKS", "FX_",
+    "PGAI_",
+    "PP_",
+    "KANBAN_ROOT",
+    "TEAM_ROOT",
+    "CLAUDE_",
+    "AI_AGENT",
+    "STOP_FILE",
+    "TMPDIR",
+    "MAX_TASK_SECONDS",
+    "MAX_RUNTIME_SECONDS",
+    "MAX_TASKS_PER_WAKE",
+    "MAX_PROJECT_SECONDS",
+    "KILL_GRACE_SECONDS",
+    "PAUSE_BETWEEN_TASKS",
+    "STOP_ON_BLOCKED",
+    "AI_AUTH_MODE",
+    "BASH_MAX_TIMEOUT_MS",
+    "DASHBOARD_",
+    "PM_MAX_TASKS",
+    "FX_",
 )
 
 # Appended to the fixture copy of scripts/lib/wake_driver.sh.
@@ -138,11 +153,7 @@ unset _fx_fn
 
 
 def _clean_base_env() -> dict[str, str]:
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)
-    }
+    return {k: v for k, v in os.environ.items() if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)}
 
 
 def _git(repo: pathlib.Path, *args: str) -> None:
@@ -151,9 +162,7 @@ def _git(repo: pathlib.Path, *args: str) -> None:
 
 def _init_dev_tree(repo: pathlib.Path) -> None:
     repo.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "init", "--initial-branch=ai_main", str(repo)], capture_output=True, check=True
-    )
+    subprocess.run(["git", "init", "--initial-branch=ai_main", str(repo)], capture_output=True, check=True)
     _git(repo, "config", "--local", "user.email", "test@pgai.local")
     _git(repo, "config", "--local", "user.name", "PGAI Test")
     (repo / "README.md").write_text("# fixture dev tree\n", encoding="utf-8")
@@ -193,9 +202,7 @@ def _build_root(tmp_path: pathlib.Path, *, busy: bool) -> pathlib.Path:
         "[wake]\nmax_tasks_per_wake = 1\n",
         encoding="utf-8",
     )
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     (proj / "project.cfg").write_text(
         "[project]\n"
         f"project_name = {_PROJECT}\n"
@@ -220,23 +227,17 @@ def _build_root(tmp_path: pathlib.Path, *, busy: bool) -> pathlib.Path:
     queues = proj / "tasks" / "queues"
     queues.mkdir(parents=True)
     for agent in ("pm", "coder", "writer", "tester", "cm"):
-        (queues / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n\n", encoding="utf-8"
-        )
+        (queues / f"{agent}_backlog.md").write_text(f"# {agent.upper()} Backlog\n\n", encoding="utf-8")
     for cache in ("bug", "priority"):
         (queues / f"{cache}_backlog.md").write_text(f"# {cache} backlog\n\n", encoding="utf-8")
     if busy:
         _write_task(proj / "tasks", _CM_TASK, "CM", "BACKLOG")
-        (queues / "cm_backlog.md").write_text(
-            f"# CM Backlog\n\n- [ ] {_CM_TASK} — open the RC\n", encoding="utf-8"
-        )
+        (queues / "cm_backlog.md").write_text(f"# CM Backlog\n\n- [ ] {_CM_TASK} — open the RC\n", encoding="utf-8")
 
     (root / "logs").mkdir()
     (root / "locks").mkdir()
     for tree in ("scripts", "pgai_agent_kanban", "workflows", "pm-agent", "config"):
-        shutil.copytree(
-            _TEAM_DIR / tree, root / tree, ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(_TEAM_DIR / tree, root / tree, ignore=shutil.ignore_patterns("__pycache__"))
     probe_target = root / "scripts" / "lib" / "wake_driver.sh"
     with probe_target.open("a", encoding="utf-8") as handle:
         handle.write(_PROBE_BLOCK)
@@ -270,7 +271,7 @@ def _bundles(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_keeps_the_chain_lock(tmp_path):
-    """"Fast" is proved by the work done, not by a stopwatch: once discovery
+    """ "Fast" is proved by the work done, not by a stopwatch: once discovery
     is entered, the chain-busy check is the only thing that runs before it
     returns idle -- no scan step, no lock acquisition, no write, no
     dispatch. A wall-clock budget would track host load instead."""
@@ -281,9 +282,9 @@ def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_keeps_the_chain_
     output = result.stdout + result.stderr
 
     assert result.returncode == 0, output
-    assert [line for line in record if line.startswith("probe_missing")] == [], (
-        f"the fixture probe could not wrap a function it relies on; record: {record}"
-    )
+    assert [
+        line for line in record if line.startswith("probe_missing")
+    ] == [], f"the fixture probe could not wrap a function it relies on; record: {record}"
     assert _CHAIN_BUSY_EXIT in output, output
     ahead = output[: output.index(_CHAIN_BUSY_EXIT)]
     assert f"cm_backlog task {_CM_TASK} is BACKLOG" in ahead, output
@@ -299,7 +300,7 @@ def test_busy_chain_pm_wake_exits_fast_logs_busy_exit_first_and_keeps_the_chain_
     assert not any(line.startswith("_disc_") for line in record), record
 
     assert "discovery_enter" in record, f"the PM wake never entered discovery; record: {record}"
-    from_discovery = record[record.index("discovery_enter"):]
+    from_discovery = record[record.index("discovery_enter") :]
     assert from_discovery == [
         "discovery_enter",
         "chain_check wake=HELD probe=CONTENDED",
@@ -319,9 +320,9 @@ def test_idle_chain_pm_wake_bundles_under_the_lock_and_dispatches_under_it(tmp_p
     output = result.stdout + result.stderr
 
     assert result.returncode == 0, output
-    assert [line for line in record if line.startswith("probe_missing")] == [], (
-        f"the fixture probe could not wrap a function it relies on; record: {record}"
-    )
+    assert [
+        line for line in record if line.startswith("probe_missing")
+    ] == [], f"the fixture probe could not wrap a function it relies on; record: {record}"
     assert len(_bundles(root)) == 1, output
     bug_text = (root / "projects" / _PROJECT / "bugs" / _BUG_NAME).read_text(encoding="utf-8")
     assert "## Status\nrunning" in bug_text
@@ -332,14 +333,16 @@ def test_idle_chain_pm_wake_bundles_under_the_lock_and_dispatches_under_it(tmp_p
         f"under the PM wake's chain lock; record: {record}"
     )
     assert "lock_path wd_discovery_confirm_repo_lock wake=HELD" in record, record
-    assert not any(line.startswith("lock_path _disc_take_own_write_lock") for line in record), (
-        f"the PM wake's discovery must not take a lock of its own; record: {record}"
-    )
+    assert not any(
+        line.startswith("lock_path _disc_take_own_write_lock") for line in record
+    ), f"the PM wake's discovery must not take a lock of its own; record: {record}"
     assert "repo lock kept through discovery" in output, output
 
     writes = [line for line in record if line.startswith("_disc_")]
     assert {line.split()[0] for line in writes} == {
-        "_disc_write_bundle", "_disc_set_status_field", "_disc_mark_cache_bundled",
+        "_disc_write_bundle",
+        "_disc_set_status_field",
+        "_disc_mark_cache_bundled",
     }, record
     assert all(line.endswith("wake=HELD") for line in writes), record
 

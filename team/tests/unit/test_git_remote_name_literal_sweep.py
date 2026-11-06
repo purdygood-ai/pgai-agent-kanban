@@ -65,7 +65,10 @@ _FILES = (
 )
 
 _RULES = (
-    ("git network command or its narration names origin", re.compile(r"\b(push|fetch|ls-remote)\b.*\borigin\b|\borigin\b.*\b(push|fetch|ls-remote)\b")),
+    (
+        "git network command or its narration names origin",
+        re.compile(r"\b(push|fetch|ls-remote)\b.*\borigin\b|\borigin\b.*\b(push|fetch|ls-remote)\b"),
+    ),
     ("ref built from a literal origin/", re.compile(r"\borigin/")),
     ("push_to_remote=false narration names origin", re.compile(r"push_to_remote=false.*\borigin\b")),
 )
@@ -143,7 +146,7 @@ def test_resolvers_keep_origin_as_their_one_fallback() -> None:
         (".sh", 'echo "[Step 1] Fetching origin and tags..."'),
         (".sh", 'echo "  - Tag $RELEASE_TAG created locally and pushed to origin"'),
         (".sh", 'echo "  - $RC_BRANCH deleted from origin; ${_local_part}"'),
-        (".sh", 'printf \'%s\\n\' "Confirmed: $RC_BRANCH exists locally and on origin."'),
+        (".sh", "printf '%s\\n' \"Confirmed: $RC_BRANCH exists locally and on origin.\""),
         (".py", 'git.step("fetch", "origin")'),
         (".py", 'ref = f"origin/{main_branch}"'),
     ],
@@ -162,7 +165,7 @@ def test_scan_fires_on_a_planted_literal(tmp_path: pathlib.Path, suffix: str, pl
     [
         'echo "    $([[ "$_fin_remote" == origin ]] || echo "GIT_REMOTE_NAME=${_fin_remote} ")bash finalize-release.sh"',
         '        echo "origin "',
-        '    echo origin',
+        "    echo origin",
     ],
 )
 def test_the_fallback_written_as_a_value_is_not_narration(tmp_path: pathlib.Path, fallback: str) -> None:

@@ -89,12 +89,12 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script location and lib dir
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
 
 # Source project_paths.sh and projects.sh for projects_cfg_list (project name resolution).

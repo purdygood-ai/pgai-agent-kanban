@@ -53,10 +53,7 @@ from pgai_agent_kanban.task_status import (
     upsert_section,
 )
 
-_TEXT = (
-    "# Status\n\n## Role\nCODER\n\n## State\nWORKING\n\n\n## Summary\nold summary\n\n"
-    "## Blockers\nnone\n"
-)
+_TEXT = "# Status\n\n## Role\nCODER\n\n## State\nWORKING\n\n\n## Summary\nold summary\n\n" "## Blockers\nnone\n"
 
 
 @pytest.fixture(autouse=True)
@@ -78,10 +75,7 @@ def _file(tmp_path: Path, text: str = _TEXT) -> Path:
 
 def test_replace_sections_rewrites_each_named_body_and_keeps_separators() -> None:
     result = replace_sections(_TEXT, {"State": "BACKLOG", "Summary": "  new  "})
-    assert result == (
-        "# Status\n\n## Role\nCODER\n\n## State\nBACKLOG\n\n\n## Summary\nnew\n\n"
-        "## Blockers\nnone\n"
-    )
+    assert result == ("# Status\n\n## Role\nCODER\n\n## State\nBACKLOG\n\n\n## Summary\nnew\n\n" "## Blockers\nnone\n")
 
 
 def test_replace_sections_refuses_an_absent_section() -> None:
@@ -183,9 +177,7 @@ def test_read_raw_unreadable_file_is_one_plain_line_and_records_no_refusal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recorded: list[tuple] = []
-    monkeypatch.setattr(
-        "pgai_agent_kanban.task_status.emit_error_contract", lambda *a, **k: recorded.append(a)
-    )
+    monkeypatch.setattr("pgai_agent_kanban.task_status.emit_error_contract", lambda *a, **k: recorded.append(a))
     missing = tmp_path / "absent.md"
     assert main(["read", str(missing), "--raw"]) == 1
     captured = capsys.readouterr()
@@ -216,8 +208,16 @@ def test_render_absent_section_fails_naming_it(tmp_path: Path, capsys: pytest.Ca
 
 def test_render_skip_missing_and_collapse(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _file(tmp_path)
-    argv = ["render", str(path), "--section=Needs Human", "--body=no", "--section=State", "--body=BACKLOG",
-            "--skip-missing", "--collapse-blank-lines"]
+    argv = [
+        "render",
+        str(path),
+        "--section=Needs Human",
+        "--body=no",
+        "--section=State",
+        "--body=BACKLOG",
+        "--skip-missing",
+        "--collapse-blank-lines",
+    ]
     assert main(argv) == 0
     assert capsys.readouterr().out == collapse_blank_lines(_TEXT.replace("## State\nWORKING", "## State\nBACKLOG"))
 
@@ -329,8 +329,15 @@ def test_render_append_refuses_insert_after(tmp_path: Path, capsys: pytest.Captu
         ("## A\nx\n\n\n", "## A\nx\n\n\n\n## R\nk: v \n"),
         ("", "\n\n## R\nk: v \n"),
     ],
-    ids=["present-separator-kept", "empty-body", "last-no-newline", "absent", "absent-no-newline",
-         "absent-trailing-blank-lines", "empty-text"],
+    ids=[
+        "present-separator-kept",
+        "empty-body",
+        "last-no-newline",
+        "absent",
+        "absent-no-newline",
+        "absent-trailing-blank-lines",
+        "empty-text",
+    ],
 )
 def test_set_or_append_section_writes_the_body_verbatim(before: str, after: str) -> None:
     assert set_or_append_section(before, "R", "k: v ") == after
@@ -341,11 +348,24 @@ def test_render_append_missing_mixes_with_replaced_and_skipped_sections(
 ) -> None:
     path = _file(tmp_path)
     argv = [
-        "render", str(path),
-        "--section", "State", "--body", " BACKLOG ",
-        "--section", "Labels", "--body", "TRANSIENT",
-        "--section", "Needs Human", "--body", "no",
-        "--append-missing", "Labels", "--skip-missing", "--collapse-blank-lines",
+        "render",
+        str(path),
+        "--section",
+        "State",
+        "--body",
+        " BACKLOG ",
+        "--section",
+        "Labels",
+        "--body",
+        "TRANSIENT",
+        "--section",
+        "Needs Human",
+        "--body",
+        "no",
+        "--append-missing",
+        "Labels",
+        "--skip-missing",
+        "--collapse-blank-lines",
     ]
     assert main(argv) == 0
     assert capsys.readouterr().out == (
@@ -359,8 +379,20 @@ def test_render_append_missing_without_skip_missing_still_refuses_other_absent_s
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = _file(tmp_path)
-    argv = ["render", str(path), "--section", "Labels", "--body", "T", "--section", "Needs Human",
-            "--body", "no", "--append-missing", "Labels"]
+    argv = [
+        "render",
+        str(path),
+        "--section",
+        "Labels",
+        "--body",
+        "T",
+        "--section",
+        "Needs Human",
+        "--body",
+        "no",
+        "--append-missing",
+        "Labels",
+    ]
     assert main(argv) == 1
     assert capsys.readouterr().err == "Could not update ## Needs Human block\n"
 
@@ -407,8 +439,18 @@ _RECORD_TEXT = (
         ("## zero progress\ncount: 4\n", "count", "4"),
         ("## Zero Progress\r\ncount: 5\r\n", "count", "5"),
     ],
-    ids=["value", "trailing-space-stripped", "absent-field", "none", "none-any-case", "empty-body",
-         "absent-section", "empty-value-runs-on", "lowercase-heading", "crlf"],
+    ids=[
+        "value",
+        "trailing-space-stripped",
+        "absent-field",
+        "none",
+        "none-any-case",
+        "empty-body",
+        "absent-section",
+        "empty-value-runs-on",
+        "lowercase-heading",
+        "crlf",
+    ],
 )
 def test_record_field_reads_one_value_or_the_default(text: str, field: str, expected: str) -> None:
     assert record_field(text, "Zero Progress", field, "d") == expected

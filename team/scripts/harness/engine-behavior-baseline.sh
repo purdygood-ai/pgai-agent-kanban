@@ -131,7 +131,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Self-locate — each tree finds itself; never import from a sibling tree.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 TEAM_DIR="${REPO_ROOT}/team"
 

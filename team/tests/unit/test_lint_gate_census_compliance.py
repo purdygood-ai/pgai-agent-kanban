@@ -157,10 +157,14 @@ def test_main_detects_missing_classification_and_returns_zero(tmp_path: Path) ->
         "exit 1\n",
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     assert result == 0, "quality-class lint must never return non-zero"
 
@@ -222,10 +226,14 @@ def test_main_detects_missing_dual_channel_and_returns_zero(tmp_path: Path) -> N
         "    sys.exit(1)\n",
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(_empty_bash_dir(tmp_path)),
-        "--python-dir", str(python_dir),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(_empty_bash_dir(tmp_path)),
+            "--python-dir",
+            str(python_dir),
+        ]
+    )
 
     assert result == 0, "quality-class lint must never return non-zero"
 
@@ -238,9 +246,7 @@ def test_gate_missing_both_signals_reports_both(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_bare.sh",
-        "#!/usr/bin/env bash\n"
-        'echo "nope" >&2\n'
-        "exit 1\n",
+        "#!/usr/bin/env bash\n" 'echo "nope" >&2\n' "exit 1\n",
     )
 
     findings = _lint._scan_bash_file(bash_dir / "fixture_bare.sh")
@@ -350,10 +356,14 @@ def test_emitter_definition_file_is_excluded_from_bash_scan(tmp_path: Path) -> N
         "#!/usr/bin/env bash\necho done\nexit 1\n",
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
     assert result == 0
 
     files = _lint._iter_bash_files([bash_dir])
@@ -374,10 +384,14 @@ def test_main_returns_zero_on_clean_tree(tmp_path: Path) -> None:
         "#!/usr/bin/env bash\necho ok\nexit 0\n",
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
     assert result == 0
 
 
@@ -394,10 +408,14 @@ def test_main_returns_zero_even_with_multiple_findings(tmp_path: Path) -> None:
         "import sys\n\ndef fail():\n    sys.exit(1)\n",
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(python_dir),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(python_dir),
+        ]
+    )
 
     assert result == 0, (
         "lint_gate_census_compliance.main() must return 0 regardless of "
@@ -415,11 +433,16 @@ def test_findings_file_contains_machine_readable_json(tmp_path: Path) -> None:
     )
     findings_file = tmp_path / "findings" / "gate_census_compliance.json"
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     assert result == 0
     assert findings_file.is_file(), "findings file must be written when --findings-file is given"
@@ -442,11 +465,16 @@ def test_findings_file_is_empty_array_on_clean_tree(tmp_path: Path) -> None:
     _write_bash_file(bash_dir, "fixture_ok.sh", "#!/usr/bin/env bash\nexit 0\n")
     findings_file = tmp_path / "findings.json"
 
-    _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     data = json.loads(findings_file.read_text(encoding="utf-8"))
     assert data == []
@@ -458,10 +486,14 @@ def test_findings_json_printed_to_stdout(tmp_path: Path, capsys) -> None:
     bash_dir.mkdir()
     _write_bash_file(bash_dir, "fixture_missing_both.sh", "#!/usr/bin/env bash\nexit 1\n")
 
-    _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     captured = capsys.readouterr()
     assert "FINDINGS_JSON:" in captured.out
@@ -481,10 +513,14 @@ def test_remedy_block_names_location_and_rule(tmp_path: Path, capsys) -> None:
     bash_dir.mkdir()
     _write_bash_file(bash_dir, "fixture_missing_both.sh", "#!/usr/bin/env bash\nexit 1\n")
 
-    _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     captured = capsys.readouterr()
     assert "fixture_missing_both.sh:2" in captured.out
@@ -601,9 +637,7 @@ def test_real_tree_default_scan_reports_zero_findings_for_operator_clis(capsys) 
 
     out_of_scope_basenames = {"wontdo.sh", "show.sh", "close.sh", "delete.sh"}
     offending = [f for f in data if Path(f["file"]).name in out_of_scope_basenames]
-    assert offending == [], (
-        f"default scan produced findings for out-of-scope operator-CLI file(s): {offending}"
-    )
+    assert offending == [], f"default scan produced findings for out-of-scope operator-CLI file(s): {offending}"
 
 
 def test_bash_dirs_override_still_scans_a_directory(tmp_path: Path) -> None:
@@ -674,7 +708,7 @@ def test_bash_exit_inside_positional_case_dispatch_without_while_loop_is_exclude
         bash_dir,
         "fixture_embedded_shim.sh",
         "#!/usr/bin/env bash\n"
-        'cat > "$FAKE_CLI" <<\'__SEAM_EOF__\'\n'
+        "cat > \"$FAKE_CLI\" <<'__SEAM_EOF__'\n"
         "#!/usr/bin/env bash\n"
         'case "${1:-}" in\n'
         "    -l)\n"
@@ -733,6 +767,32 @@ def test_bash_prose_in_help_heredoc_does_not_corrupt_case_scan(tmp_path: Path) -
     )
     assert findings[0].line == 20, "the surviving finding must be the trailing exit, not one inside the case block"
     assert findings[0].missing_signals == ["census_classification", "dual_channel_contract"]
+
+
+def test_bash_exit_word_in_printed_help_heredoc_is_not_a_site(tmp_path: Path) -> None:
+    """A --help function's heredoc printed outside any case block (the
+    shape of a runner whose flag parser lives in a library) holds prose
+    such as "make the run exit 1"; those words are not a refusal site. A
+    heredoc written to a file is an embedded script and is still scanned."""
+    bash_dir = tmp_path / "scripts"
+    bash_dir.mkdir()
+    _write_bash_file(
+        bash_dir,
+        "fixture_help_function.sh",
+        "#!/usr/bin/env bash\n"
+        "_fixture_help() {\n"
+        "  cat <<EOF\n"
+        "Options:\n"
+        "  --files PATH   findings make the run exit 1.\n"
+        "EOF\n"
+        "}\n"
+        "cat > \"$STUB\" <<'STUB_EOF'\n"
+        "exit 1\n"
+        "STUB_EOF\n",
+    )
+
+    findings = _lint._scan_bash_file(bash_dir / "fixture_help_function.sh")
+    assert [f.line for f in findings] == [9], "only the exit inside the file-written heredoc is a candidate site"
 
 
 def test_bash_exit_guarded_by_usage_function_call_is_excluded(tmp_path: Path) -> None:
@@ -798,8 +858,7 @@ def test_bash_usage_function_definition_line_is_not_itself_a_guard(tmp_path: Pat
 
     findings = _lint._scan_bash_file(bash_dir / "fixture_usage_definition_only.sh")
     assert len(findings) == 1, (
-        "a *_usage() DEFINITION line must not itself count as a usage "
-        "guard for an unrelated exit in its window"
+        "a *_usage() DEFINITION line must not itself count as a usage " "guard for an unrelated exit in its window"
     )
 
 
@@ -921,9 +980,7 @@ def test_census_locator_anchor_exempts_documented_site(tmp_path: Path) -> None:
     scripts_dir.mkdir(parents=True)
     gate_file = scripts_dir / "some_gate.sh"
     gate_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "echo 'ERROR: unrecoverable state' >&2\n"
-        "exit 1\n",
+        "#!/usr/bin/env bash\n" "echo 'ERROR: unrecoverable state' >&2\n" "exit 1\n",
         encoding="utf-8",
     )
 
@@ -1016,9 +1073,7 @@ def test_census_locator_token_anchor_exempts_by_name_not_position(tmp_path: Path
 
     def _write_gate(leading_blank_lines: int) -> None:
         gate_file.write_text(
-            "#!/usr/bin/env bash\n"
-            + ("\n" * leading_blank_lines)
-            + "# CENSUS-ANCHOR: some-gate-01\n"
+            "#!/usr/bin/env bash\n" + ("\n" * leading_blank_lines) + "# CENSUS-ANCHOR: some-gate-01\n"
             "echo 'ERROR: unrecoverable state' >&2\n"
             "exit 1\n",
             encoding="utf-8",
@@ -1063,9 +1118,7 @@ def test_census_locator_token_anchor_requires_marker_in_file(tmp_path: Path) -> 
     scripts_dir.mkdir(parents=True)
     gate_file = scripts_dir / "some_gate.sh"
     gate_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "echo 'ERROR: unrecoverable state' >&2\n"
-        "exit 1\n",
+        "#!/usr/bin/env bash\n" "echo 'ERROR: unrecoverable state' >&2\n" "exit 1\n",
         encoding="utf-8",
     )
 
@@ -1081,10 +1134,7 @@ def test_census_locator_token_anchor_requires_marker_in_file(tmp_path: Path) -> 
 
     locators = _lint._load_census_locators(repo_root)
     findings = _lint._scan_bash_file(gate_file, locators)
-    assert len(findings) == 1, (
-        "an index entry with no matching in-file marker must not exempt the "
-        "site"
-    )
+    assert len(findings) == 1, "an index entry with no matching in-file marker must not exempt the " "site"
 
 
 # ---------------------------------------------------------------------------
@@ -1182,8 +1232,7 @@ def test_census_anchor_class_mismatch_is_reported(tmp_path: Path) -> None:
     (docs_dir / "blocking-site-census.md").write_text(
         "<!-- CENSUS-LOCATOR-INDEX-BEGIN -->\n"
         # The index disagrees with the site's own BLOCK-WORTHY comment above.
-        "team/scripts/fixture_mismatched_anchor.sh:fixture-mismatch-01 CONVERT\n"
-        "<!-- CENSUS-LOCATOR-INDEX-END -->\n",
+        "team/scripts/fixture_mismatched_anchor.sh:fixture-mismatch-01 CONVERT\n" "<!-- CENSUS-LOCATOR-INDEX-END -->\n",
         encoding="utf-8",
     )
 
@@ -1213,10 +1262,14 @@ def test_anchor_reconciliation_findings_still_return_zero_from_main(tmp_path: Pa
         "exit 1\n",
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     assert result == 0, "quality-class lint must never return non-zero"
 
@@ -1241,16 +1294,14 @@ def test_resolve_error_key_lines_exempts_call_with_matching_literal_key() -> Non
         "#!/usr/bin/env bash\n"
         "if ! some_check; then\n"
         "  pgai_emit_error_contract \\\n"
-        "    \"some.stable.key\" \\\n"
-        "    \"something stopped\" \\\n"
-        "    \"run the fix\"\n"
+        '    "some.stable.key" \\\n'
+        '    "something stopped" \\\n'
+        '    "run the fix"\n'
         "  exit 1\n"
         "fi\n"
     ).splitlines()
 
-    exempted = _lint._resolve_error_key_lines(
-        lines, {"some.stable.key"}, _lint._BASH_EMITTER_RE, is_python=False
-    )
+    exempted = _lint._resolve_error_key_lines(lines, {"some.stable.key"}, _lint._BASH_EMITTER_RE, is_python=False)
 
     # Line 7 (1-indexed) is the `exit 1` -- several lines below the call
     # (line 3) whose own line does not carry the literal key (it sits on
@@ -1265,14 +1316,10 @@ def test_resolve_error_key_lines_ignores_a_different_key() -> None:
     direction this enables (an entry naming a key nothing emits is a stale
     pin, not a free pass)."""
     lines = (
-        "#!/usr/bin/env bash\n"
-        "pgai_emit_error_contract \"some.other.key\" \"msg\" \"remedy\"\n"
-        "exit 1\n"
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "some.other.key" "msg" "remedy"\n' "exit 1\n"
     ).splitlines()
 
-    exempted = _lint._resolve_error_key_lines(
-        lines, {"some.stable.key"}, _lint._BASH_EMITTER_RE, is_python=False
-    )
+    exempted = _lint._resolve_error_key_lines(lines, {"some.stable.key"}, _lint._BASH_EMITTER_RE, is_python=False)
 
     assert exempted == set()
 
@@ -1290,9 +1337,9 @@ def test_scan_bash_file_exempts_site_via_dual_channel_key(tmp_path: Path) -> Non
         "#!/usr/bin/env bash\n"
         "if ! some_check; then\n"
         "  pgai_emit_error_contract \\\n"
-        "    \"some-gate.check-failed\" \\\n"
-        "    \"the check failed\" \\\n"
-        "    \"run the fix\"\n"
+        '    "some-gate.check-failed" \\\n'
+        '    "the check failed" \\\n'
+        '    "run the fix"\n'
         "  exit 1\n"
         "fi\n",
         encoding="utf-8",
@@ -1311,8 +1358,7 @@ def test_scan_bash_file_exempts_site_via_dual_channel_key(tmp_path: Path) -> Non
     findings = _lint._scan_bash_file(gate_file, locators)
 
     assert findings == [], (
-        "a site named by its own literal dual-channel error key must "
-        "resolve without a CENSUS-ANCHOR marker"
+        "a site named by its own literal dual-channel error key must " "resolve without a CENSUS-ANCHOR marker"
     )
 
 
@@ -1324,9 +1370,7 @@ def test_scan_locator_resolution_silent_when_key_resolves(tmp_path: Path) -> Non
     scripts_dir.mkdir(parents=True)
     gate_file = scripts_dir / "some_gate.sh"
     gate_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "pgai_emit_error_contract \"some-gate.check-failed\" \"msg\" \"remedy\"\n"
-        "exit 1\n",
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "some-gate.check-failed" "msg" "remedy"\n' "exit 1\n",
         encoding="utf-8",
     )
     docs_dir = repo_root / "docs"
@@ -1352,10 +1396,7 @@ def test_scan_locator_resolution_silent_when_token_resolves(tmp_path: Path) -> N
     scripts_dir.mkdir(parents=True)
     gate_file = scripts_dir / "some_gate.sh"
     gate_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "# CENSUS-ANCHOR: some-gate-01\n"
-        "echo 'ERROR: unrecoverable state' >&2\n"
-        "exit 1\n",
+        "#!/usr/bin/env bash\n" "# CENSUS-ANCHOR: some-gate-01\n" "echo 'ERROR: unrecoverable state' >&2\n" "exit 1\n",
         encoding="utf-8",
     )
     docs_dir = repo_root / "docs"
@@ -1382,9 +1423,7 @@ def test_scan_locator_resolution_reports_unresolvable_key(tmp_path: Path) -> Non
     scripts_dir.mkdir(parents=True)
     gate_file = scripts_dir / "some_gate.sh"
     gate_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "echo 'ERROR: unrelated failure' >&2\n"
-        "exit 1\n",
+        "#!/usr/bin/env bash\n" "echo 'ERROR: unrelated failure' >&2\n" "exit 1\n",
         encoding="utf-8",
     )
     docs_dir = repo_root / "docs"
@@ -1415,9 +1454,7 @@ def test_scan_locator_resolution_reports_unresolvable_line(tmp_path: Path) -> No
     scripts_dir.mkdir(parents=True)
     gate_file = scripts_dir / "some_gate.sh"
     gate_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "echo 'this line is not a fatal exit'\n"
-        "exit 0\n",
+        "#!/usr/bin/env bash\n" "echo 'this line is not a fatal exit'\n" "exit 0\n",
         encoding="utf-8",
     )
     docs_dir = repo_root / "docs"
@@ -1473,10 +1510,14 @@ def test_main_bash_dirs_override_skips_locator_resolution(tmp_path: Path, capsys
     bash_dir.mkdir()
     _write_bash_file(bash_dir, "fixture_clean.sh", "#!/usr/bin/env bash\necho hi\nexit 0\n")
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     assert result == 0
     captured = capsys.readouterr()
@@ -1582,12 +1623,8 @@ def test_scan_census_rollup_site_count_mismatch_is_reported(tmp_path: Path) -> N
     assert len(findings) == 1
     finding = findings[0]
     assert finding.kind == _lint._FINDING_KIND_ROLLUP_MISMATCH
-    assert finding.table_summary == (
-        "3 sites, 0 unclassified -- 2 BLOCK-WORTHY, 1 CONVERT, 0 AGENT-RESOLVABLE"
-    )
-    assert finding.rollup_summary == (
-        "2 sites, 0 unclassified -- 1 BLOCK-WORTHY, 1 CONVERT, 0 AGENT-RESOLVABLE"
-    )
+    assert finding.table_summary == ("3 sites, 0 unclassified -- 2 BLOCK-WORTHY, 1 CONVERT, 0 AGENT-RESOLVABLE")
+    assert finding.rollup_summary == ("2 sites, 0 unclassified -- 1 BLOCK-WORTHY, 1 CONVERT, 0 AGENT-RESOLVABLE")
 
 
 def test_scan_census_rollup_per_class_mismatch_with_correct_total_is_reported(
@@ -1621,9 +1658,7 @@ def test_scan_census_rollup_no_table_rows_fails_soft(tmp_path: Path) -> None:
     reconcile a rollup line against."""
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
-    (docs_dir / "blocking-site-census.md").write_text(
-        "# Blocking-Site Census\n\nNo table here.\n", encoding="utf-8"
-    )
+    (docs_dir / "blocking-site-census.md").write_text("# Blocking-Site Census\n\nNo table here.\n", encoding="utf-8")
 
     assert _lint._scan_census_rollup(tmp_path) == []
 
@@ -1811,9 +1846,7 @@ def test_scan_census_decisions_closed_set_produces_no_finding(tmp_path: Path) ->
 
 
 def test_scan_census_decisions_reports_an_empty_decision_cell(tmp_path: Path) -> None:
-    findings = _decision_findings(
-        tmp_path, [(1, "BLOCK-WORTHY", "none"), (2, "CONVERT", " ")]
-    )
+    findings = _decision_findings(tmp_path, [(1, "BLOCK-WORTHY", "none"), (2, "CONVERT", " ")])
     assert len(findings) == 1
     finding = findings[0]
     assert finding.kind == _lint._FINDING_KIND_DECISION_INVALID
@@ -1849,9 +1882,7 @@ def test_scan_census_decisions_reports_a_verb_the_decision_wake_lacks(tmp_path: 
     assert "requeue" in findings[0].decision_problem
 
 
-def test_scan_census_decisions_checks_verb_shape_only_without_the_vocabulary(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_scan_census_decisions_checks_verb_shape_only_without_the_vocabulary(monkeypatch, tmp_path: Path) -> None:
     """When ``decide.VERBS`` cannot be loaded the verb name is checked by
     shape alone: a well-formed unknown name passes, a malformed one does not."""
     monkeypatch.setattr(_lint, "_decision_wake_verbs", lambda: None)
@@ -1897,9 +1928,9 @@ def test_real_census_every_row_carries_a_decision_from_the_closed_set() -> None:
         # The Decision cell is second to last: the Converted cell follows it.
         decision = line.rstrip().rstrip("|").rsplit("|", 2)[1].strip()
         verb = re.fullmatch(r"verb\(([a-z][a-z0-9-]*)\)", decision)
-        assert decision in ("inbox", "runaway", "none") or (verb and verb.group(1) in VERBS), (
-            f"census row has Decision {decision!r}: {line[:80]}"
-        )
+        assert decision in ("inbox", "runaway", "none") or (
+            verb and verb.group(1) in VERBS
+        ), f"census row has Decision {decision!r}: {line[:80]}"
     assert _lint._scan_census_decisions(repo_root, known_verbs=VERBS) == []
     assert _lint._scan_census_rollup(repo_root) == []
 
@@ -1916,15 +1947,16 @@ def test_default_run_reports_a_seeded_empty_decision_and_exits_zero(tmp_path: Pa
     shutil.copy(_LINT_SCRIPT, repo / "team" / "scripts" / _LINT_SCRIPT.name)
     (repo / "docs").mkdir()
     real_text = (_TEAM_DIR.parent / "docs" / "blocking-site-census.md").read_text(encoding="utf-8")
-    seeded, n = re.subn(
-        r"^(\|\s*1\s*\|.*\|)[^|]*(\|[^|]*\|\s*)$", r"\1  \2", real_text, count=1, flags=re.MULTILINE
-    )
+    seeded, n = re.subn(r"^(\|\s*1\s*\|.*\|)[^|]*(\|[^|]*\|\s*)$", r"\1  \2", real_text, count=1, flags=re.MULTILINE)
     assert n == 1, "fixture setup must find row 1 to seed"
     (repo / "docs" / "blocking-site-census.md").write_text(seeded, encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(repo / "team" / "scripts" / _LINT_SCRIPT.name)],
-        capture_output=True, text=True, timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     findings = json.loads(result.stdout.split("FINDINGS_JSON:", 1)[1].strip())
@@ -1955,7 +1987,10 @@ def _verification_copy_tree(tmp_path: Path) -> Path:
 def _default_run_findings(repo: Path) -> list[dict]:
     result = subprocess.run(
         [sys.executable, str(repo / "team" / "scripts" / _LINT_SCRIPT.name)],
-        capture_output=True, text=True, timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.split("FINDINGS_JSON:", 1)[1].strip())
@@ -1976,11 +2011,14 @@ def test_default_run_reports_a_verification_site_that_lost_its_anchor(tmp_path: 
     default run (no --bash-dirs) reports the now-uninventoried site."""
     repo = _verification_copy_tree(tmp_path)
     verifier = repo / "team" / "verification" / "verify_script_exec_bits.sh"
-    assert [f for f in _default_run_findings(repo) if "team/verification" in str(f.get("path", f.get("file", "")))] == []
+    assert [
+        f for f in _default_run_findings(repo) if "team/verification" in str(f.get("path", f.get("file", "")))
+    ] == []
 
     lines = verifier.read_text(encoding="utf-8").splitlines(keepends=True)
     stripped = [
-        line for line in lines
+        line
+        for line in lines
         if "CENSUS-ANCHOR: verify-script-exec-bits-03" not in line
         and not line.lstrip().startswith("# BLOCK-WORTHY: a script committed without its exec bit")
     ]
@@ -1988,14 +2026,13 @@ def test_default_run_reports_a_verification_site_that_lost_its_anchor(tmp_path: 
     verifier.write_text("".join(stripped), encoding="utf-8")
 
     findings = [
-        f for f in _default_run_findings(repo)
-        if "verify_script_exec_bits.sh" in str(f.get("path", f.get("file", "")))
+        f for f in _default_run_findings(repo) if "verify_script_exec_bits.sh" in str(f.get("path", f.get("file", "")))
     ]
     kinds = {f.get("kind") for f in findings}
     assert findings, "the default run did not report the verification site"
-    assert kinds - {"unresolved_locator"}, (
-        f"only the census-wide locator check saw it ({kinds}); the inline scan did not cover team/verification"
-    )
+    assert kinds - {
+        "unresolved_locator"
+    }, f"only the census-wide locator check saw it ({kinds}); the inline scan did not cover team/verification"
 
 
 # ---------------------------------------------------------------------------
@@ -2025,9 +2062,7 @@ def _write_converted_census(repo: Path, rows: list[tuple], index_lines: tuple = 
         source = row[3] if len(row) > 3 else "`no/such/site.sh` · `exit 1`"
         classes.append(cls)
         converted_cell = "" if converted is None else f" {converted} |"
-        lines.append(
-            f"| {num} | Fixture site {num} | {source} | Some trigger | {cls} | none |{converted_cell}\n"
-        )
+        lines.append(f"| {num} | Fixture site {num} | {source} | Some trigger | {cls} | none |{converted_cell}\n")
     lines.append(f"\n**Rollup: {len(rows)} sites, 0 unclassified.**\n")
     lines.append(
         f"{classes.count('BLOCK-WORTHY')} BLOCK-WORTHY, {classes.count('CONVERT')} CONVERT, "
@@ -2087,7 +2122,10 @@ def test_scan_census_decisions_reads_the_cell_after_class_when_converted_follows
     assert _lint._scan_census_decisions(tmp_path, known_verbs=_DECISION_VERBS) == []
 
     census = tmp_path / "docs" / "blocking-site-census.md"
-    census.write_text(census.read_text(encoding="utf-8").replace("| CONVERT | none | yes |", "| CONVERT | bogus | yes |"), encoding="utf-8")
+    census.write_text(
+        census.read_text(encoding="utf-8").replace("| CONVERT | none | yes |", "| CONVERT | bogus | yes |"),
+        encoding="utf-8",
+    )
     findings = _lint._scan_census_decisions(tmp_path, known_verbs=_DECISION_VERBS)
     assert [(f.row_number, f.decision) for f in findings] == [(2, "bogus")]
 
@@ -2112,9 +2150,7 @@ def test_scan_census_converted_reports_a_row_with_no_converted_cell(tmp_path: Pa
     finding naming its row number; its Decision and class still count."""
     _write_converted_census(tmp_path, [(1, "BLOCK-WORTHY", "n/a"), (2, "CONVERT", None)])
     findings = _lint._scan_census_converted(tmp_path)
-    assert [(f.kind, f.row_number, f.converted) for f in findings] == [
-        (_lint._FINDING_KIND_CONVERTED_INVALID, 2, None)
-    ]
+    assert [(f.kind, f.row_number, f.converted) for f in findings] == [(_lint._FINDING_KIND_CONVERTED_INVALID, 2, None)]
     assert findings[0].converted_problem == "has no Converted cell after its Decision cell"
     assert _lint._scan_census_decisions(tmp_path, known_verbs=_DECISION_VERBS) == []
     assert _lint._scan_census_rollup(tmp_path) == []
@@ -2261,7 +2297,7 @@ def test_convert_site_check_skips_exits_that_belong_elsewhere(tmp_path: Path) ->
         tmp_path,
         "team/scripts/runner.sh",
         "#!/usr/bin/env bash\n"
-        "case \"$1\" in\n"
+        'case "$1" in\n'
         "  --bad) exit 2 ;;\n"
         "esac\n"
         "# BLOCK-WORTHY: the suite failed.\n"
@@ -2334,9 +2370,7 @@ def test_convert_site_check_reports_one_finding_per_row_and_file(tmp_path: Path)
     naming two fatal files is one finding each."""
     _write_site(tmp_path, "team/scripts/one.sh", "#!/usr/bin/env bash\nexit 1\nexit 3\n")
     _write_site(tmp_path, "team/scripts/two.sh", "#!/usr/bin/env bash\nexit 1\n")
-    _write_converted_census(
-        tmp_path, [(6, "CONVERT", "no", "`team/scripts/one.sh`, `team/scripts/two.sh`")]
-    )
+    _write_converted_census(tmp_path, [(6, "CONVERT", "no", "`team/scripts/one.sh`, `team/scripts/two.sh`")])
     findings = _converted_findings(tmp_path, _lint._FINDING_KIND_CONVERT_SITE_FATAL)
     assert sorted((f.row_number, f.path.name, f.line) for f in findings) == [
         (6, "one.sh", 2),

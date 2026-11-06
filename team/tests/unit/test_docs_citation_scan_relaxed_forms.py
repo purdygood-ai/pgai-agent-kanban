@@ -56,9 +56,7 @@ _TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _REPO_ROOT = _TEAM_DIR.parent
 _DOCS_DIR = _REPO_ROOT / "docs"
 
-_SOURCE_COPY_IGNORE = shutil.ignore_patterns(
-    ".git", "__pycache__", "*.pyc", ".pytest_cache", "tests"
-)
+_SOURCE_COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".pytest_cache", "tests")
 
 _FIXTURE_SIBLING_NAME = "citation-scan-fixture-sibling.md"
 _FIXTURE_SIBLING_CITED = f"docs/{_FIXTURE_SIBLING_NAME}"
@@ -68,9 +66,7 @@ def _import_check_docs_citations_module():
     import importlib.util
 
     check_script = _TEAM_DIR / "scripts" / "check_docs_citations.py"
-    spec = importlib.util.spec_from_file_location(
-        "check_docs_citations_relaxed_forms", check_script
-    )
+    spec = importlib.util.spec_from_file_location("check_docs_citations_relaxed_forms", check_script)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {check_script}")
     mod = importlib.util.module_from_spec(spec)
@@ -110,8 +106,7 @@ def _line_number_of(path: Path, needle: str) -> int:
     lines = path.read_text(encoding="utf-8").splitlines()
     matches = [i + 1 for i, line in enumerate(lines) if needle in line]
     assert len(matches) == 1, (
-        f"Expected exactly one line in {path} containing {needle!r}; "
-        f"found {len(matches)}: {matches}"
+        f"Expected exactly one line in {path} containing {needle!r}; " f"found {len(matches)}: {matches}"
     )
     return matches[0]
 
@@ -124,9 +119,7 @@ def _line_number_of(path: Path, needle: str) -> int:
 def test_bare_sibling_filename_citation_to_omitted_document_is_reported(
     tmp_path: Path,
 ) -> None:
-    repo_root, team_dir, manifest_path = _copy_team_and_docs(
-        tmp_path, "bare_filename_fixture"
-    )
+    repo_root, team_dir, manifest_path = _copy_team_and_docs(tmp_path, "bare_filename_fixture")
 
     # The omitted sibling: a real file under the fixture's docs/, never
     # named in the manifest — a document the checkout carries but
@@ -142,25 +135,17 @@ def test_bare_sibling_filename_citation_to_omitted_document_is_reported(
         f"See `{_FIXTURE_SIBLING_NAME}` for the fixture this test injects.",
     )
 
-    exit_code, report, setup_error = _check.run_check(
-        repo_root, team_dir, manifest_path
-    )
+    exit_code, report, setup_error = _check.run_check(repo_root, team_dir, manifest_path)
 
     assert setup_error is None, f"Unexpected setup error: {setup_error}"
     assert report is not None
-    assert exit_code == 1, (
-        "Expected the bare-filename citation to be reported; findings: "
-        f"{report.findings}"
-    )
+    assert exit_code == 1, "Expected the bare-filename citation to be reported; findings: " f"{report.findings}"
     matching = [f for f in report.findings if f.cited == _FIXTURE_SIBLING_CITED]
     assert len(matching) == 1, (
-        f"Expected exactly one finding for {_FIXTURE_SIBLING_CITED!r}; got "
-        f"{len(matching)}: {report.findings}"
+        f"Expected exactly one finding for {_FIXTURE_SIBLING_CITED!r}; got " f"{len(matching)}: {report.findings}"
     )
     assert matching[0].source == "docs/coding-standards.md", matching[0].source
-    assert matching[0].line == citing_line, (
-        f"Expected the finding on line {citing_line}; got {matching[0].line}"
-    )
+    assert matching[0].line == citing_line, f"Expected the finding on line {citing_line}; got {matching[0].line}"
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +156,7 @@ def test_bare_sibling_filename_citation_to_omitted_document_is_reported(
 def test_relative_markdown_link_citation_to_omitted_document_is_reported_once(
     tmp_path: Path,
 ) -> None:
-    repo_root, team_dir, manifest_path = _copy_team_and_docs(
-        tmp_path, "relative_link_fixture"
-    )
+    repo_root, team_dir, manifest_path = _copy_team_and_docs(tmp_path, "relative_link_fixture")
 
     (repo_root / "docs" / _FIXTURE_SIBLING_NAME).write_text(
         "# Fixture sibling\n\nOmitted from the manifest on purpose.\n",
@@ -186,20 +169,14 @@ def test_relative_markdown_link_citation_to_omitted_document_is_reported_once(
     citing_doc = repo_root / "docs" / "promotion-playbook.md"
     citing_line = _append_line(
         citing_doc,
-        f"See [{_FIXTURE_SIBLING_NAME}]({_FIXTURE_SIBLING_NAME}) for the "
-        "fixture this test injects.",
+        f"See [{_FIXTURE_SIBLING_NAME}]({_FIXTURE_SIBLING_NAME}) for the " "fixture this test injects.",
     )
 
-    exit_code, report, setup_error = _check.run_check(
-        repo_root, team_dir, manifest_path
-    )
+    exit_code, report, setup_error = _check.run_check(repo_root, team_dir, manifest_path)
 
     assert setup_error is None, f"Unexpected setup error: {setup_error}"
     assert report is not None
-    assert exit_code == 1, (
-        "Expected the relative-link citation to be reported; findings: "
-        f"{report.findings}"
-    )
+    assert exit_code == 1, "Expected the relative-link citation to be reported; findings: " f"{report.findings}"
     matching = [f for f in report.findings if f.cited == _FIXTURE_SIBLING_CITED]
     # The link's text and href repeat the same fixture name on one line —
     # this is the exact "count it once" case. Asserting length 1 here is
@@ -211,9 +188,7 @@ def test_relative_markdown_link_citation_to_omitted_document_is_reported_once(
         f"once, not twice); got {len(matching)}: {report.findings}"
     )
     assert matching[0].source == "docs/promotion-playbook.md", matching[0].source
-    assert matching[0].line == citing_line, (
-        f"Expected the finding on line {citing_line}; got {matching[0].line}"
-    )
+    assert matching[0].line == citing_line, f"Expected the finding on line {citing_line}; got {matching[0].line}"
 
 
 # ---------------------------------------------------------------------------
@@ -268,9 +243,7 @@ def test_reverting_the_documentation_fix_reveals_the_two_real_dangling_citations
     delivers — with no "docs/" prefix. The widened check must report
     both, by file and line; the narrow, prefix-only pattern reported
     neither."""
-    repo_root, team_dir, manifest_path = _copy_team_and_docs(
-        tmp_path, "revert_fixture"
-    )
+    repo_root, team_dir, manifest_path = _copy_team_and_docs(tmp_path, "revert_fixture")
 
     operations_doc = repo_root / "docs" / "OPERATIONS.md"
     operator_commands_doc = repo_root / "docs" / "operator-commands.md"
@@ -292,13 +265,10 @@ def test_reverting_the_documentation_fix_reveals_the_two_real_dangling_citations
         "the script's `--help` carries the authoritative eligibility rule."
     )
     assert fixed_operations_sentence in current_operations_text, (
-        "Fixture assumption stale: the fixed OPERATIONS.md sentence this "
-        "test reverts is no longer present verbatim."
+        "Fixture assumption stale: the fixed OPERATIONS.md sentence this " "test reverts is no longer present verbatim."
     )
     operations_doc.write_text(
-        current_operations_text.replace(
-            fixed_operations_sentence, pre_fix_operations_sentence
-        ),
+        current_operations_text.replace(fixed_operations_sentence, pre_fix_operations_sentence),
         encoding="utf-8",
     )
 
@@ -306,7 +276,7 @@ def test_reverting_the_documentation_fix_reveals_the_two_real_dangling_citations
     fixed_commands_block = (
         "- [OPERATIONS.md](OPERATIONS.md) — diagnosing and recovering from stuck\n"
         '  states: "Why is this lane not moving?" for a lane that has stopped\n'
-        "  advancing, \"When the chain halts\" for CM's nine autonomous halt\n"
+        '  advancing, "When the chain halts" for CM\'s nine autonomous halt\n'
         "  triggers and what clears each one.\n"
     )
     pre_fix_commands_block = (
@@ -322,30 +292,22 @@ def test_reverting_the_documentation_fix_reveals_the_two_real_dangling_citations
         encoding="utf-8",
     )
 
-    expected_operations_line = _line_number_of(
-        operations_doc, "operator-troubleshooting.md"
-    )
-    expected_commands_line = _line_number_of(
-        operator_commands_doc, "operator-troubleshooting.md"
-    )
+    expected_operations_line = _line_number_of(operations_doc, "operator-troubleshooting.md")
+    expected_commands_line = _line_number_of(operator_commands_doc, "operator-troubleshooting.md")
 
-    exit_code, report, setup_error = _check.run_check(
-        repo_root, team_dir, manifest_path
-    )
+    exit_code, report, setup_error = _check.run_check(repo_root, team_dir, manifest_path)
 
     assert setup_error is None, f"Unexpected setup error: {setup_error}"
     assert report is not None
     assert exit_code == 1, (
-        "Expected the reverted tree to report the two real dangling "
-        f"citations; findings: {report.findings}"
+        "Expected the reverted tree to report the two real dangling " f"citations; findings: {report.findings}"
     )
     findings_by_source = {f.source: f for f in report.findings}
     assert set(findings_by_source) == {
         "docs/OPERATIONS.md",
         "docs/operator-commands.md",
     }, (
-        "Expected exactly the two real dangling citations, one per file; "
-        f"got: {report.findings}"
+        "Expected exactly the two real dangling citations, one per file; " f"got: {report.findings}"
     )
     for source, expected_line in (
         ("docs/OPERATIONS.md", expected_operations_line),
@@ -353,10 +315,8 @@ def test_reverting_the_documentation_fix_reveals_the_two_real_dangling_citations
     ):
         finding = findings_by_source[source]
         assert finding.cited == "docs/operator-troubleshooting.md", (
-            f"{source}: expected citation of operator-troubleshooting.md, "
-            f"got {finding.cited!r}"
+            f"{source}: expected citation of operator-troubleshooting.md, " f"got {finding.cited!r}"
         )
         assert finding.line == expected_line, (
-            f"{source}: expected the finding on line {expected_line}, got "
-            f"{finding.line}"
+            f"{source}: expected the finding on line {expected_line}, got " f"{finding.line}"
         )

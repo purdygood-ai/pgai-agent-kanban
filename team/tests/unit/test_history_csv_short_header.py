@@ -64,11 +64,20 @@ _TABLE_ROW_RE = re.compile(r"^(v\S+)\s+(\S+)\s+(\S+)\s+\S+\s+\S+\s+\S+\s+\S+\s+\
 
 def _line(rc: str, blocked: str | None) -> str:
     values = {c: "" for c in _SHORT_HEADER}
-    values.update({
-        "rc": rc, "project": PROJECT, "workflow_type": "release", "wall_time_minutes": "60",
-        "outcome": "SHIPPED", "tasks_total": "2", "input_tokens": "1000", "output_tokens": "500",
-        "cache_read_tokens": "0", "cache_write_tokens": "0",
-    })
+    values.update(
+        {
+            "rc": rc,
+            "project": PROJECT,
+            "workflow_type": "release",
+            "wall_time_minutes": "60",
+            "outcome": "SHIPPED",
+            "tasks_total": "2",
+            "input_tokens": "1000",
+            "output_tokens": "500",
+            "cache_read_tokens": "0",
+            "cache_write_tokens": "0",
+        }
+    )
     fields = [values[c] for c in _SHORT_HEADER]
     if blocked is not None:
         fields.append(blocked)
@@ -96,8 +105,12 @@ def _history(root: pathlib.Path) -> pathlib.Path:
 
 def _append_new_rc(root: pathlib.Path, blocked: float) -> None:
     rollup = {
-        "rc": "v1.5.0", "project": PROJECT, "workflow_type": "release", "outcome": "SHIPPED",
-        "wall_time_minutes": 60, "blocked_minutes": blocked,
+        "rc": "v1.5.0",
+        "project": PROJECT,
+        "workflow_type": "release",
+        "outcome": "SHIPPED",
+        "wall_time_minutes": 60,
+        "blocked_minutes": blocked,
         "tasks": {"total": 2, "by_agent": {}},
         "tokens": {"total": {"input": 1000, "output": 500, "cache_read": 0, "cache_write": 0}},
     }
@@ -161,7 +174,11 @@ def test_rendered_table_shows_recorded_minutes_and_dash_for_older_rows(kanban_ro
 
     assert result.exit_code == 0, result.stderr
     assert _blocked_column(result.stdout) == {
-        "v1.0.0": "-", "v1.1.0": "-", "v1.2.0": "-", "v1.3.0": "836", "v1.4.0": "0",
+        "v1.0.0": "-",
+        "v1.1.0": "-",
+        "v1.2.0": "-",
+        "v1.3.0": "836",
+        "v1.4.0": "0",
     }
 
 
@@ -204,10 +221,20 @@ def test_after_one_append_every_surface_reads_the_same_values(kanban_root, clien
         as_json = client.get("/metrics", params={"project": PROJECT, "format": "json"})
         as_text = client.get("/metrics", params={"project": PROJECT})
     assert [r.get("blocked_seconds") for r in as_json.json()] == [
-        None, None, None, round(836.1 * 60, 1), 0.0, round(26.1 * 60, 1),
+        None,
+        None,
+        None,
+        round(836.1 * 60, 1),
+        0.0,
+        round(26.1 * 60, 1),
     ]
     assert _blocked_column(as_text.json()["stdout"]) == {
-        "v1.0.0": "-", "v1.1.0": "-", "v1.2.0": "-", "v1.3.0": "836", "v1.4.0": "0", "v1.5.0": "26",
+        "v1.0.0": "-",
+        "v1.1.0": "-",
+        "v1.2.0": "-",
+        "v1.3.0": "836",
+        "v1.4.0": "0",
+        "v1.5.0": "26",
     }
 
 
@@ -228,9 +255,7 @@ def test_unrecognised_header_is_read_exactly_as_written(tmp_path):
 
 def test_fields_beyond_the_last_known_column_stay_surplus(tmp_path):
     csv_path = tmp_path / "history.csv"
-    csv_path.write_text(
-        ",".join(_SHORT_HEADER) + "\n" + _line("v1.0.0", "5") + ",unexpected\n", encoding="utf-8"
-    )
+    csv_path.write_text(",".join(_SHORT_HEADER) + "\n" + _line("v1.0.0", "5") + ",unexpected\n", encoding="utf-8")
 
     fieldnames, rows = read_history_csv(csv_path)
 

@@ -45,7 +45,6 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Load lint_dashboard_hardcode_colors.py as a module (mirrors sibling
@@ -59,9 +58,7 @@ _LINT_SCRIPT = _SCRIPTS_DIR / "lint_dashboard_hardcode_colors.py"
 
 
 def _import_lint_module():
-    spec = importlib.util.spec_from_file_location(
-        "lint_dashboard_hardcode_colors", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_dashboard_hardcode_colors", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -107,9 +104,8 @@ def test_real_dashboard_trees_have_zero_violations() -> None:
     # Deliberately exercises the real tree (not a fixture): this is a live
     # regression guard, not an isolated behavior a fixture could stand in for.
     violations = _lint.scan_dashboard_dirs(_TEAM_DIR, verbose=False)
-    assert violations == [], (
-        "Unexpected violations on the real dashboard trees:\n"
-        + "\n".join(f"  {v.path}:{v.line} ({v.kind}) {v.snippet}" for v in violations)
+    assert violations == [], "Unexpected violations on the real dashboard trees:\n" + "\n".join(
+        f"  {v.path}:{v.line} ({v.kind}) {v.snippet}" for v in violations
     )
 
 

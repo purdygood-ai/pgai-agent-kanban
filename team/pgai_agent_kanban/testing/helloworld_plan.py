@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Optional
 
 __all__ = ["build_plan", "main", "write_plan"]
 
@@ -71,8 +70,7 @@ def build_plan(project_name: str, version: str, repo_path: str, requirements_pat
                 "context_paths": [],
                 "required_output": "hello.py and test_hello.py in the repo root.",
                 "constraints": [
-                    "No argparse, logging, config files, or dependencies beyond "
-                    "the standard library.",
+                    "No argparse, logging, config files, or dependencies beyond " "the standard library.",
                 ],
                 "acceptance_criteria": [
                     "python3 hello.py outputs exactly 'Hello, World!'",
@@ -119,7 +117,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = _build_parser().parse_args(argv)
     try:

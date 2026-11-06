@@ -17,11 +17,13 @@
 # SOURCE THIS FILE; do not execute it directly:
 #   source "$(dirname "${BASH_SOURCE[0]}")/lock_provenance.sh"
 #
-# This file self-sources its one dependency (error_contract.sh) at source
-# time -- a cheap, side-effect-free function redefinition, mirroring the
-# idiom wake_task_transition.sh already uses -- so pgai_lock_acquire works
+# This file self-sources its dependencies at source time -- error_contract.sh,
+# and, when the caller has not already loaded them, ini_parser.sh (read_ini)
+# and config_loader.sh (the [wake] budget registry defaults) -- cheap,
+# side-effect-free function definitions, mirroring the idiom
+# wake_task_transition.sh already uses -- so pgai_lock_acquire works
 # whether this file is sourced through the full wake/OVERWATCH pipeline
-# (which already sources error_contract.sh) or on its own, as unit tests do.
+# (which already sources them) or on its own, as unit tests do.
 #
 # Functions defined here:
 #   pgai_lock_acquire <lock_file> <holder> <pid> <op> <task> <out_fd_var>
@@ -359,6 +361,15 @@ source "${_PGAI_LOCK_PROVENANCE_LIB_DIR}/error_contract.sh"
 if ! declare -F read_ini >/dev/null 2>&1; then
     source "${_PGAI_LOCK_PROVENANCE_LIB_DIR}/ini_parser.sh"
 fi
+# shellcheck source=config_loader.sh
+# The [wake] budget defaults _pgai_lock_resolve_chain_budget falls back to
+# come from config_loader.sh's registry accessors, the one place they are
+# written. Guarded so a caller that already loaded the config keeps the cfg
+# path its load_config recorded: sourcing config_loader.sh again resets it.
+if ! declare -F config_wake_max_runtime_seconds_default >/dev/null 2>&1 \
+    || ! declare -F config_wake_max_task_seconds_default >/dev/null 2>&1; then
+    source "${_PGAI_LOCK_PROVENANCE_LIB_DIR}/config_loader.sh"
+fi
 
 # ---------------------------------------------------------------------------
 # _PGAI_LOCK_HELD_FDS -- lock_file -> open fd, for every lock THIS process
@@ -487,8 +498,8 @@ pgai_boot_id() {
 #   held        -- the recorded pid answers `kill -0` (still running, or at
 #                  least a live pid this user can signal-probe), and it is
 #                  the same process the record names (see below).
-#   stale       -- the recorded pid does not answer `kill -0`, or it answers
-#                  but is a different process: the record's boot_id differs
+#   stale       -- the recorded pid is not a positive number, does not
+#                  answer `kill -0`, or answers but is a different process: the record's boot_id differs
 #                  from this boot's, or its pid_start differs from that
 #                  pid's start time now (the pid was reused after the
 #                  recorded process ended -- after a container restart pids
@@ -502,7 +513,9 @@ pgai_boot_id() {
 # pgai_lock_acquire's contention-path reaper (below) and
 # team/scripts/release-locks.sh's operator-facing lock listing, which
 # used to run this same kill -0 check inline -- one liveness classifier
-# for the whole framework, not two copies that could drift apart.
+# for the whole framework, not two copies that could drift apart. Its
+# Python form is pgai_agent_kanban.ops.locks.pid_liveness_verdict;
+# tests/unit/test_lock_provenance.py gives both the same records.
 # ---------------------------------------------------------------------------
 pgai_lock_pid_liveness_verdict() {
     local content="$1"
@@ -517,7 +530,11 @@ pgai_lock_pid_liveness_verdict() {
         echo "unparseable"
         return 0
     fi
-    if ! kill -0 "$pid" 2>/dev/null; then
+    # Only a positive decimal pid names one process: `kill -0 0` and
+    # `kill -0 -1` probe a process group or every process and succeed. The
+    # leading zeros are dropped so "010" probes pid 10, as ops/locks.py reads it.
+    local number="${pid#"${pid%%[!0]*}"}"
+    if [[ ! "$pid" =~ ^[0-9]+$ || -z "$number" ]] || ! kill -0 "$number" 2>/dev/null; then
         echo "stale"
         return 0
     fi
@@ -864,8 +881,10 @@ _PGAI_LOCK_BUDGET_FLOOR=""
 # in this file's header).
 # ---------------------------------------------------------------------------
 _pgai_lock_resolve_chain_budget() {
-    _PGAI_LOCK_BUDGET_MAX_RUNTIME="$(_pgai_lock_wake_cfg_seconds MAX_RUNTIME_SECONDS max_runtime_seconds 14400)"
-    _PGAI_LOCK_BUDGET_MAX_TASK="$(_pgai_lock_wake_cfg_seconds MAX_TASK_SECONDS max_task_seconds 5400)"
+    _PGAI_LOCK_BUDGET_MAX_RUNTIME="$(_pgai_lock_wake_cfg_seconds MAX_RUNTIME_SECONDS max_runtime_seconds \
+        "$(config_wake_max_runtime_seconds_default)")"
+    _PGAI_LOCK_BUDGET_MAX_TASK="$(_pgai_lock_wake_cfg_seconds MAX_TASK_SECONDS max_task_seconds \
+        "$(config_wake_max_task_seconds_default)")"
     _PGAI_LOCK_BUDGET_KILL_GRACE="$(_pgai_lock_wake_cfg_seconds KILL_GRACE_SECONDS kill_grace_seconds 30)"
     _PGAI_LOCK_BUDGET_FLOOR=$(( _PGAI_LOCK_BUDGET_MAX_RUNTIME + _PGAI_LOCK_BUDGET_MAX_TASK \
         + _PGAI_LOCK_BUDGET_KILL_GRACE + _PGAI_LOCK_CHAIN_BUDGET_MARGIN_SECONDS ))
@@ -2161,8 +2180,10 @@ pgai_lock_set_task() {
 #     chaining preserves whatever hook a caller already registered rather
 #     than displacing it.
 #   - No EXIT trap is active yet -- a standalone caller (release-locks.sh,
-#     a unit test sourcing this file directly). This file installs its own
-#     bare EXIT/SIGTERM/SIGINT trap so the guarantee holds outside the
+#     a unit test sourcing this file directly). This file registers its
+#     release on EXIT through lib/exit_trap.sh (chained, so a trap the
+#     caller sets later through the same helper keeps it) and installs its
+#     own SIGTERM/SIGINT traps, so the guarantee holds outside the
 #     wake chain too, without depending on any other file's cooperation --
 #     "the fix belongs in one place: the lock library's own trap/finally."
 # ---------------------------------------------------------------------------
@@ -2180,7 +2201,9 @@ if [[ -z "${_PGAI_LOCK_PROVENANCE_EXIT_HOOK_INSTALLED:-}" ]]; then
         }
         CLEANUP_ON_EXIT_PRE_HOOK=_pgai_lock_provenance_exit_hook
     else
-        trap 'pgai_lock_release_all_held' EXIT
+        # shellcheck source=scripts/lib/exit_trap.sh
+        source "$(dirname "${BASH_SOURCE[0]}")/exit_trap.sh"
+        exit_trap_add pgai_lock_release_all_held
         trap 'pgai_lock_release_all_held; exit 143' SIGTERM
         trap 'pgai_lock_release_all_held; exit 130' SIGINT
     fi

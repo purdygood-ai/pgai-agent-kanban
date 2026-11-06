@@ -103,12 +103,9 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-import sys
 import textwrap
-from typing import Optional
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Bash fragment builder
@@ -207,7 +204,7 @@ class LogStubCapture:
         self.returncode = -1
         self.log_content = ""
 
-    def __enter__(self) -> "LogStubCapture":
+    def __enter__(self) -> LogStubCapture:
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self.log_file.touch()
         return self
@@ -217,7 +214,7 @@ class LogStubCapture:
         if self.log_file.exists():
             self.log_content = self.log_file.read_text(encoding="utf-8")
 
-    def run_script(self, script: str) -> "LogStubCapture":
+    def run_script(self, script: str) -> LogStubCapture:
         """Run *script* under bash with the faithful log() stub prepended.
 
         The stub writes to both stdout and self.log_file.  stdout from the
@@ -256,7 +253,7 @@ class LogStubCapture:
 
 
 @pytest.fixture
-def log_stub_fragment() -> "LogStubFragmentFactory":
+def log_stub_fragment() -> LogStubFragmentFactory:
     """Pytest fixture: return a factory for the faithful log() stub fragment.
 
     The factory is a callable that takes a log_file path and returns the
@@ -288,7 +285,7 @@ class LogStubFragmentFactory:
 
 
 @pytest.fixture
-def log_stub_capture(tmp_path: pathlib.Path) -> "LogStubCapture":
+def log_stub_capture(tmp_path: pathlib.Path) -> LogStubCapture:
     """Pytest fixture: return a LogStubCapture context manager.
 
     Yields a LogStubCapture that writes its log file under tmp_path.

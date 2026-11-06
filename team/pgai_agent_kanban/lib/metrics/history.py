@@ -63,7 +63,7 @@ import io
 import json
 import pathlib
 import re
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 from ..number_format import format_int
 from .common import Colors, TextOutput, TextResult, colors_for, load_json_object, registered_projects
@@ -128,9 +128,7 @@ def is_short_history_header(fieldnames: Sequence[str]) -> bool:
     return 0 < len(names) < len(HISTORY_COLUMNS) and names == HISTORY_COLUMNS[: len(names)]
 
 
-def _widen_short_header(
-    fieldnames: list[str], rows: list[dict]
-) -> tuple[list[str], list[dict]]:
+def _widen_short_header(fieldnames: list[str], rows: list[dict]) -> tuple[list[str], list[dict]]:
     """Key each row's fields past a short header by their ``HISTORY_COLUMNS`` names.
 
     ``csv.DictReader`` collects a row's surplus fields as a list under the
@@ -148,7 +146,7 @@ def _widen_short_header(
         named = list(zip(HISTORY_COLUMNS[width:], extras))
         for name, value in named:
             row[name] = value
-        leftover = extras[len(named):]
+        leftover = extras[len(named) :]
         if leftover:
             row[None] = leftover
         else:
@@ -194,7 +192,7 @@ def _fmt_wall(raw: object) -> str:
     return s if s else "--"
 
 
-def _fmt_blocked(raw: Optional[str]) -> str:
+def _fmt_blocked(raw: str | None) -> str:
     """Blocked minutes: a single ``-`` when the row carries no value (the
     column predates the row, or the RC's ledger could not be read) -- not
     Wall's ``--``, because a present value, a real 0 included, is a
@@ -216,9 +214,7 @@ def blocked_untracked_footer(blocked_cells: Sequence[str]) -> str:
     return f"Blocked untracked for {untracked} RC{'' if untracked == 1 else 's'}"
 
 
-def render_history_table(
-    rows: Sequence[dict[str, str]], project: str, last_n: int, colors: Colors
-) -> list[str]:
+def render_history_table(rows: Sequence[dict[str, str]], project: str, last_n: int, colors: Colors) -> list[str]:
     """The history table's lines for *rows* (already read), last *last_n* of them."""
     if not rows:
         return ["No data"]
@@ -274,12 +270,10 @@ _VERSION_RUN_RE = re.compile(r"(\d+)")
 
 def _version_sort_key(name: str) -> tuple:
     """Order file names the way ``sort -V`` does for ``vX.Y.Z.json``: digit runs numerically."""
-    return tuple(
-        (0, int(part)) if part.isdigit() else (1, part) for part in _VERSION_RUN_RE.split(name) if part
-    )
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in _VERSION_RUN_RE.split(name) if part)
 
 
-def latest_rc_rollup(rc_dir: pathlib.Path) -> Optional[pathlib.Path]:
+def latest_rc_rollup(rc_dir: pathlib.Path) -> pathlib.Path | None:
     """The ``v*.json`` roll-up in *rc_dir* that sorts last by version, or None."""
     if not rc_dir.is_dir():
         return None

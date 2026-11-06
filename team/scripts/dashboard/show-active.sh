@@ -21,27 +21,17 @@
 #   NO_COLOR=1 — disables all ANSI codes
 
 # shellcheck source=../lib/header_help.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
 
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # The header block up to its first non-comment line, however long it
-      # grows; awk writes it straight to stdout, so no pipe stage can race.
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve script dir ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh

@@ -97,6 +97,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="install-version-targeting")
 
+
 # ---------------------------------------------------------------------------
 # Paths to the real scripts under test
 # ---------------------------------------------------------------------------
@@ -118,9 +119,7 @@ _ASCENDING_TAGS = [_TAG_A, _TAG_B, _TAG_C]
 
 # Directories excluded when copying this dev tree into a fixture repo — the
 # fixture builds its OWN .git history from scratch (see _build_tagged_source_repo).
-_FIXTURE_COPY_IGNORE = shutil.ignore_patterns(
-    ".git", "__pycache__", "*.pyc", ".pytest_cache"
-)
+_FIXTURE_COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".pytest_cache")
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +222,7 @@ def _run_install(
     # Full sandbox: both roots and the temp dir repointed, and the two
     # pre-resolved live-install paths removed rather than repointed (see
     # docs/test-authoring-guidelines.md, "Live-install safety").
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT")
-    }
+    env = {key: value for key, value in os.environ.items() if key not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT")}
     env.update(
         {
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
@@ -273,9 +268,7 @@ def test_install_with_version_argument_lands_requested_tag_while_newer_tags_exis
     kanban_root = tmp_path / "kanban_root"
     home = tmp_path / "home"
 
-    result = _run_install(
-        repo, kanban_root=kanban_root, home=home, version_arg=_TAG_A
-    )
+    result = _run_install(repo, kanban_root=kanban_root, home=home, version_arg=_TAG_A)
     output = _combined_output(result)
 
     assert result.returncode == 0, f"install.sh {_TAG_A} failed:\n{output}"
@@ -316,19 +309,13 @@ def test_fresh_install_targeting_older_version_on_separate_root_succeeds_after_n
 
     newer_root = tmp_path / "kanban_root_newer"
     newer_home = tmp_path / "home_newer"
-    newer_result = _run_install(
-        repo, kanban_root=newer_root, home=newer_home, version_arg=_TAG_C
-    )
-    assert newer_result.returncode == 0, (
-        f"install.sh {_TAG_C} failed:\n{_combined_output(newer_result)}"
-    )
+    newer_result = _run_install(repo, kanban_root=newer_root, home=newer_home, version_arg=_TAG_C)
+    assert newer_result.returncode == 0, f"install.sh {_TAG_C} failed:\n{_combined_output(newer_result)}"
     assert _installed_version(newer_root) == _TAG_C
 
     older_root = tmp_path / "kanban_root_older"
     older_home = tmp_path / "home_older"
-    older_result = _run_install(
-        repo, kanban_root=older_root, home=older_home, version_arg=_TAG_A
-    )
+    older_result = _run_install(repo, kanban_root=older_root, home=older_home, version_arg=_TAG_A)
     assert older_result.returncode == 0, (
         f"A fresh install targeting an OLDER version than a prior install "
         f"elsewhere must still succeed (fresh installs carry no global "
@@ -343,8 +330,7 @@ def test_fresh_install_targeting_older_version_on_separate_root_succeeds_after_n
 
     # Both roots retain their own independently-requested version.
     assert _installed_version(newer_root) == _TAG_C, (
-        "The first (newer) install's root must be unaffected by the "
-        "second (older) install on a different root."
+        "The first (newer) install's root must be unaffected by the " "second (older) install on a different root."
     )
 
 
@@ -370,17 +356,11 @@ def test_nonexistent_tag_request_fails_loud_lists_available_tags_and_leaves_no_p
     home = tmp_path / "home"
     bogus_version = "v999.999.999"
 
-    result = _run_install(
-        repo, kanban_root=kanban_root, home=home, version_arg=bogus_version
-    )
+    result = _run_install(repo, kanban_root=kanban_root, home=home, version_arg=bogus_version)
     output = _combined_output(result)
 
-    assert result.returncode != 0, (
-        f"install.sh must exit non-zero for a nonexistent tag request.\n{output}"
-    )
-    assert bogus_version in output, (
-        f"Failure output must name the requested version {bogus_version!r}.\n{output}"
-    )
+    assert result.returncode != 0, f"install.sh must exit non-zero for a nonexistent tag request.\n{output}"
+    assert bogus_version in output, f"Failure output must name the requested version {bogus_version!r}.\n{output}"
     for real_tag in _ASCENDING_TAGS:
         assert real_tag in output, (
             f"Failure output must list tags that DO exist in the source "
@@ -423,8 +403,7 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_failu
         version_arg=_TAG_A,
     )
     assert success_result.returncode == 0, (
-        f"Setup: the success-path install must itself succeed.\n"
-        f"{_combined_output(success_result)}"
+        f"Setup: the success-path install must itself succeed.\n" f"{_combined_output(success_result)}"
     )
     after_success = _git_state_snapshot(repo)
     assert after_success == baseline, (
@@ -440,8 +419,7 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_failu
         version_arg="v999.999.999",
     )
     assert failure_result.returncode != 0, (
-        f"Setup: the failure-path install must itself fail.\n"
-        f"{_combined_output(failure_result)}"
+        f"Setup: the failure-path install must itself fail.\n" f"{_combined_output(failure_result)}"
     )
     after_failure = _git_state_snapshot(repo)
     assert after_failure == baseline, (
@@ -479,9 +457,7 @@ def test_fresh_version_targeted_install_stamps_resolved_prefixed_tag_in_version_
     VERSION_DETAIL must instead start with the tag the install resolved and
     laid down, followed by that tag's commit as the deposit SHA.
     """
-    source_repo = _build_tagged_source_repo(
-        tmp_path, "src_bare_then_prefixed", tags=["v1.0.0", "ai_v1.1.0"]
-    )
+    source_repo = _build_tagged_source_repo(tmp_path, "src_bare_then_prefixed", tags=["v1.0.0", "ai_v1.1.0"])
     tag_sha = _run_git(source_repo, "rev-parse", "ai_v1.1.0^{commit}").stdout.strip()
     kanban_root = tmp_path / "root_prefixed_tag"
 
@@ -495,19 +471,17 @@ def test_fresh_version_targeted_install_stamps_resolved_prefixed_tag_in_version_
 
     assert result.returncode == 0, f"install.sh v1.1.0 failed:\n{output}"
     assert "resolved to tag 'ai_v1.1.0'" in output, output
-    assert not (kanban_root / "projects.cfg").exists(), (
-        "fixture precondition: a fresh install registers no project"
-    )
+    assert not (kanban_root / "projects.cfg").exists(), "fixture precondition: a fresh install registers no project"
 
     detail_file = kanban_root / "VERSION_DETAIL"
     assert detail_file.exists(), f"VERSION_DETAIL was not written:\n{output}"
     detail = detail_file.read_text(encoding="utf-8")
-    assert detail.startswith("ai_v1.1.0 "), (
-        f"VERSION_DETAIL must start with the installed tag ai_v1.1.0; got: {detail!r}"
-    )
-    assert detail.strip().endswith(f"deposit-sha={tag_sha}"), (
-        f"VERSION_DETAIL must carry the installed tag's commit {tag_sha}; got: {detail!r}"
-    )
+    assert detail.startswith(
+        "ai_v1.1.0 "
+    ), f"VERSION_DETAIL must start with the installed tag ai_v1.1.0; got: {detail!r}"
+    assert detail.strip().endswith(
+        f"deposit-sha={tag_sha}"
+    ), f"VERSION_DETAIL must carry the installed tag's commit {tag_sha}; got: {detail!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -529,9 +503,7 @@ def test_plain_install_from_checkout_stamps_prefixed_tag_in_version_detail(
     no branch prefix is known and no tag was resolved; VERSION_DETAIL must
     still start with ``ai_v1.1.0`` and carry HEAD as the deposit SHA.
     """
-    source_repo = _build_tagged_source_repo(
-        tmp_path, "src_plain_bare_then_prefixed", tags=["v1.0.0", "ai_v1.1.0"]
-    )
+    source_repo = _build_tagged_source_repo(tmp_path, "src_plain_bare_then_prefixed", tags=["v1.0.0", "ai_v1.1.0"])
     head_sha = _run_git(source_repo, "rev-parse", "HEAD").stdout.strip()
     kanban_root = tmp_path / "root_plain_install"
 
@@ -543,16 +515,14 @@ def test_plain_install_from_checkout_stamps_prefixed_tag_in_version_detail(
     output = _combined_output(result)
 
     assert result.returncode == 0, f"plain install.sh failed:\n{output}"
-    assert not (kanban_root / "projects.cfg").exists(), (
-        "fixture precondition: a fresh install registers no project"
-    )
+    assert not (kanban_root / "projects.cfg").exists(), "fixture precondition: a fresh install registers no project"
 
     detail_file = kanban_root / "VERSION_DETAIL"
     assert detail_file.exists(), f"VERSION_DETAIL was not written:\n{output}"
     detail = detail_file.read_text(encoding="utf-8")
-    assert detail == f"ai_v1.1.0  deposit-sha={head_sha}\n", (
-        f"VERSION_DETAIL must name the prefixed tag at HEAD; got: {detail!r}"
-    )
+    assert (
+        detail == f"ai_v1.1.0  deposit-sha={head_sha}\n"
+    ), f"VERSION_DETAIL must name the prefixed tag at HEAD; got: {detail!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -578,9 +548,7 @@ def test_version_targeted_install_from_linked_worktree_lands_requested_tag(
     worktree = tmp_path / "linked_worktree"
     _run_git(repo, "worktree", "add", "--detach", str(worktree), _TAG_C)
     try:
-        assert (worktree / ".git").is_file(), (
-            "fixture precondition: a linked worktree's .git is a pointer file"
-        )
+        assert (worktree / ".git").is_file(), "fixture precondition: a linked worktree's .git is a pointer file"
         worktrees_before = _run_git(repo, "worktree", "list", "--porcelain").stdout
         tag_sha = _run_git(repo, "rev-parse", f"{_TAG_A}^{{commit}}").stdout.strip()
         kanban_root = tmp_path / "kanban_root_from_worktree"
@@ -593,9 +561,7 @@ def test_version_targeted_install_from_linked_worktree_lands_requested_tag(
         )
         output = _combined_output(result)
 
-        assert result.returncode == 0, (
-            f"install.sh {_TAG_A} from a linked worktree failed:\n{output}"
-        )
+        assert result.returncode == 0, f"install.sh {_TAG_A} from a linked worktree failed:\n{output}"
         assert f"resolved to tag '{_TAG_A}'" in output, output
         assert _installed_version(kanban_root) == _TAG_A, (
             f"Installed VERSION must equal the requested tag {_TAG_A!r}, not "
@@ -606,12 +572,12 @@ def test_version_targeted_install_from_linked_worktree_lands_requested_tag(
         detail_file = kanban_root / "VERSION_DETAIL"
         assert detail_file.exists(), f"VERSION_DETAIL was not written:\n{output}"
         detail = detail_file.read_text(encoding="utf-8")
-        assert detail.startswith(f"{_TAG_A} "), (
-            f"VERSION_DETAIL must start with the installed tag {_TAG_A}; got: {detail!r}"
-        )
-        assert detail.strip().endswith(f"deposit-sha={tag_sha}"), (
-            f"VERSION_DETAIL must carry the installed tag's commit {tag_sha}; got: {detail!r}"
-        )
+        assert detail.startswith(
+            f"{_TAG_A} "
+        ), f"VERSION_DETAIL must start with the installed tag {_TAG_A}; got: {detail!r}"
+        assert detail.strip().endswith(
+            f"deposit-sha={tag_sha}"
+        ), f"VERSION_DETAIL must carry the installed tag's commit {tag_sha}; got: {detail!r}"
 
         worktrees_after = _run_git(repo, "worktree", "list", "--porcelain").stdout
         assert worktrees_after == worktrees_before, (
@@ -647,9 +613,7 @@ def test_version_targeted_install_from_tree_without_git_is_refused_with_remedy(
     """
     plain_tree = tmp_path / "plain_tree"
     shutil.copytree(_REPO_ROOT, plain_tree, ignore=_FIXTURE_COPY_IGNORE)
-    assert not (plain_tree / ".git").exists(), (
-        "fixture precondition: the copied tree carries no .git"
-    )
+    assert not (plain_tree / ".git").exists(), "fixture precondition: the copied tree carries no .git"
     kanban_root = tmp_path / "kanban_root_no_git"
 
     result = _run_install(
@@ -660,12 +624,9 @@ def test_version_targeted_install_from_tree_without_git_is_refused_with_remedy(
     )
     output = _combined_output(result)
 
-    assert result.returncode == 1, (
-        f"install.sh {_TAG_A} from a tree with no .git must exit 1.\n{output}"
-    )
+    assert result.returncode == 1, f"install.sh {_TAG_A} from a tree with no .git must exit 1.\n{output}"
     assert (
-        f"a version argument was given ('{_TAG_A}') but '{plain_tree}' "
-        f"is not a git checkout (no .git found)."
+        f"a version argument was given ('{_TAG_A}') but '{plain_tree}' " f"is not a git checkout (no .git found)."
     ) in output, output
     assert (
         "Fix: run install.sh from a git clone of the repo, or omit the "

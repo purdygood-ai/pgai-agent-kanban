@@ -33,7 +33,8 @@
 #     Only a first pass with no project left after this one (a
 #     single-project batch included) waits in place;
 #   - never waits past the batch's remaining runtime budget
-#     (MAX_RUNTIME_SECONDS from WAKE_START_EPOCH), and stops waiting the
+#     (wd_batch_budget_left, wake_task_budget.sh: MAX_RUNTIME_SECONDS from
+#     WAKE_START_EPOCH, 0 = no batch bound), and stops waiting the
 #     moment the operator stop file (STOP_FILE, wake_stop_file_present)
 #     appears;
 #   - counts the seconds waited per project in this firing
@@ -79,8 +80,9 @@
 #   wlw_lock_wait_budget <project>
 #       Set WLW_WAIT_BUDGET to the seconds this project may still wait in
 #       this firing: lock_wait_seconds less what it already waited, capped
-#       at the batch's remaining runtime budget (WLW_BATCH_LEFT), never
-#       below 0. Call directly, not through $(...).
+#       at the batch's remaining runtime budget (WLW_BATCH_LEFT; empty when
+#       the batch has no bound or no clock), never below 0. Call directly,
+#       not through $(...).
 #   wlw_role_ready_task <project> <role>
 #       Echo the first task in <role>'s queue whose own status.md reads
 #       BACKLOG; return 1 when there is none.
@@ -110,6 +112,12 @@
 #   project_paths.sh    — pp_queue_path
 #   wake_common.sh      — wake_stop_file_present
 #   wake_bootstrap.sh   — log(), KANBAN_ROOT, AGENT, WAKE_START_EPOCH
+#   wake_task_budget.sh — wd_batch_budget_left; sourced below from this
+#                         file's own directory when the caller has not
+#                         already sourced it
+
+declare -F wd_batch_budget_left >/dev/null \
+  || source "$(dirname "${BASH_SOURCE[0]}")/wake_task_budget.sh"
 
 # Seconds each project has spent waiting for its repo lock in this firing.
 declare -gA _WLW_WAITED_SECONDS 2>/dev/null || true
@@ -154,18 +162,17 @@ wlw_lock_wait_budget() {
   _spent="${_WLW_WAITED_SECONDS[$_project]:-0}"
   _left=$(( _cfg - _spent ))
   WLW_BATCH_LEFT=""
-  if [[ "${MAX_RUNTIME_SECONDS:-}" =~ ^[0-9]+$ && "${WAKE_START_EPOCH:-}" =~ ^[0-9]+$ ]]; then
+  if [[ "${WAKE_START_EPOCH:-}" =~ ^[0-9]+$ ]]; then
     _now="$(pgai_lock_wait_now)"
-    WLW_BATCH_LEFT=$(( MAX_RUNTIME_SECONDS - (_now - WAKE_START_EPOCH) ))
-    (( WLW_BATCH_LEFT >= 0 )) || WLW_BATCH_LEFT=0
-    (( WLW_BATCH_LEFT < _left )) && _left="$WLW_BATCH_LEFT"
+    WLW_BATCH_LEFT="$(wd_batch_budget_left "$(( _now - WAKE_START_EPOCH ))")"
+    if [[ -n "$WLW_BATCH_LEFT" ]] && (( WLW_BATCH_LEFT < _left )); then _left="$WLW_BATCH_LEFT"; fi
   fi
   (( _left >= 0 )) || _left=0
   WLW_WAIT_BUDGET="$_left"
 }
 
 # The remaining batch budget for a log line: "<N>s", or "unbounded" when
-# the wake has no batch clock (a caller that never loaded the config).
+# the batch budget is 0 (no batch bound) or the wake has no batch clock.
 _wlw_batch_left_text() {
   if [[ -n "$WLW_BATCH_LEFT" ]]; then printf '%ss\n' "$WLW_BATCH_LEFT"; else printf 'unbounded\n'; fi
 }

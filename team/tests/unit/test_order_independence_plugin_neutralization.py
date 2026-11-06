@@ -120,12 +120,10 @@ def _run_fixture_pass(fixture_dir: pathlib.Path, workdir: pathlib.Path, label: s
             f"stderr:\n{result.stderr}"
         )
     tree = ET.parse(junit_path)
-    return [
-        f'{tc.get("classname")}::{tc.get("name")}' for tc in tree.getroot().iter("testcase")
-    ]
+    return [f'{tc.get("classname")}::{tc.get("name")}' for tc in tree.getroot().iter("testcase")]
 
 
-_FIXTURE_TEST_MODULE = '''
+_FIXTURE_TEST_MODULE = """
 def test_a():
     assert True
 
@@ -144,7 +142,7 @@ def test_d():
 
 def test_e():
     assert True
-'''
+"""
 
 
 @pytest.mark.skipif(

@@ -18,10 +18,7 @@ import pathlib
 
 from tests.fixtures.upgrade_sandbox import INSTALL_CRONTAB_SCRIPT, UpgradeSandbox, diagnostic
 
-_FOREIGN = (
-    "MAILTO=ops@example.com\n"
-    "15 3 * * * /usr/local/bin/nightly-backup.sh\n"
-)
+_FOREIGN = "MAILTO=ops@example.com\n" "15 3 * * * /usr/local/bin/nightly-backup.sh\n"
 _BEGIN = "# BEGIN pgai-agent-kanban managed block"
 _END = "# END pgai-agent-kanban managed block"
 
@@ -38,15 +35,14 @@ def _crontab_text(sandbox: UpgradeSandbox) -> str:
 
 def _wake_lines(text: str, root: pathlib.Path) -> list[str]:
     return [
-        line for line in text.splitlines()
+        line
+        for line in text.splitlines()
         if not line.lstrip().startswith("#") and f"{root}/scripts/wake-batch.sh" in line
     ]
 
 
 class TestExplicitTierKeepsForeignLines:
-    def test_non_kanban_job_is_kept_and_kanban_lines_are_written(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_non_kanban_job_is_kept_and_kanban_lines_are_written(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         sandbox.write_crontab(_FOREIGN)
 
@@ -87,9 +83,7 @@ class TestExplicitTierKeepsForeignLines:
         assert text.count(_BEGIN) == 1, f"expected exactly one kanban block\n{text}"
         assert "# Tier: large" in text and "# Tier: small" not in text, text
 
-    def test_unmarked_lines_of_an_earlier_install_are_replaced_not_duplicated(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unmarked_lines_of_an_earlier_install_are_replaced_not_duplicated(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         root = sandbox.root
         sandbox.write_crontab(
@@ -104,9 +98,9 @@ class TestExplicitTierKeepsForeignLines:
         assert result.returncode == 0, diagnostic(result)
         text = _crontab_text(sandbox)
         outside_block = text.split(_BEGIN, 1)[0]
-        assert outside_block == _FOREIGN + "\n", (
-            f"only the operator's lines may remain outside the kanban block\n{text}"
-        )
+        assert (
+            outside_block == _FOREIGN + "\n"
+        ), f"only the operator's lines may remain outside the kanban block\n{text}"
 
     def test_another_install_roots_block_is_kept(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
@@ -125,9 +119,7 @@ class TestExplicitTierKeepsForeignLines:
         assert text.startswith(_FOREIGN + other_block), text
         assert f"{_BEGIN}: {sandbox.root}" in text, text
 
-    def test_unterminated_kanban_block_is_refused_and_crontab_unchanged(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unterminated_kanban_block_is_refused_and_crontab_unchanged(self, tmp_path: pathlib.Path) -> None:
         sandbox = UpgradeSandbox(tmp_path)
         sandbox.write_crontab(
             _FOREIGN
@@ -139,9 +131,8 @@ class TestExplicitTierKeepsForeignLines:
 
         result = _install(sandbox, "small")
 
-        assert result.returncode != 0, (
-            "a BEGIN marker with no END cannot be merged safely; the run must refuse\n"
-            + diagnostic(result)
-        )
+        assert (
+            result.returncode != 0
+        ), "a BEGIN marker with no END cannot be merged safely; the run must refuse\n" + diagnostic(result)
         assert sandbox.crontab_bytes() == before, diagnostic(result)
         assert f"{_END}: {sandbox.root}" in result.stderr, diagnostic(result)

@@ -56,9 +56,7 @@ def _add_bug_file(
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -77,8 +75,7 @@ def _run_discovery(
     """Run discovery_run_pipeline against a temporary kanban tree (standalone
     subprocess — used for the operator-HALT companion test, which does not
     need to run inside an overwatch_halt_first_fix mutation window)."""
-    script = textwrap.dedent(
-        f"""\
+    script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
         source "{_SCRIPTS_LIB}/ini_parser.sh"
@@ -88,8 +85,7 @@ def _run_discovery(
         source "{_SCRIPTS_LIB}/discovery.sh"
         discovery_run_pipeline "{project_name}"
         echo "DISCOVERY_STATUS=${{DISCOVERY_LAST_STATUS}}"
-        """
-    )
+        """)
     base_env = dict(os.environ)
     base_env["KANBAN_ROOT"] = str(kanban_root)
     base_env["TEAM_ROOT"] = str(kanban_root)
@@ -131,8 +127,7 @@ def test_project_scoped_repair_leaves_sibling_project_running(
     root = two_project_root
     _add_bug_file(root, "project-b", bug_id="BUG-0201", slug="sibling-runs-during-repair")
 
-    script = textwrap.dedent(
-        f"""\
+    script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
         source "{_SCRIPTS_LIB}/ini_parser.sh"
@@ -180,8 +175,7 @@ def test_project_scoped_repair_leaves_sibling_project_running(
         else
             echo "PROJECT_A_HALT_AFTER=no"
         fi
-        """
-    )
+        """)
 
     base_env = dict(os.environ)
     base_env["KANBAN_ROOT"] = str(root)
@@ -199,16 +193,13 @@ def test_project_scoped_repair_leaves_sibling_project_running(
         timeout=60,
     )
 
-    assert result.returncode == 0, (
-        f"Repair script exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Repair script exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     out = result.stdout
 
     assert "PROJECT_A_HALTED=yes" in out, out
     assert "PROJECT_B_HALTED=no" in out, out
     assert "ROOT_HALT_DURING=no" in out, (
-        f"The fleet-wide root HALT must never exist during a single-project "
-        f"repair.\nstdout: {out}"
+        f"The fleet-wide root HALT must never exist during a single-project " f"repair.\nstdout: {out}"
     )
     assert "PROJECT_B_DISCOVERY_STATUS=produced_work" in out, (
         f"project-b's discovery pipeline must run to completion and bundle "
@@ -219,12 +210,10 @@ def test_project_scoped_repair_leaves_sibling_project_running(
 
     assert "WRAPPER_EXIT=0" in out, out
     assert "ROOT_HALT_AFTER=no" in out, (
-        f"The fleet-wide root HALT must not exist after the repair completes "
-        f"either.\nstdout: {out}"
+        f"The fleet-wide root HALT must not exist after the repair completes " f"either.\nstdout: {out}"
     )
     assert "PROJECT_A_HALT_AFTER=no" in out, (
-        f"The repair must remove the project-scoped HALT it created once "
-        f"done.\nstdout: {out}"
+        f"The repair must remove the project-scoped HALT it created once " f"done.\nstdout: {out}"
     )
 
 
@@ -246,21 +235,19 @@ def test_operator_root_halt_still_blocks_every_project(
     _add_bug_file(root, "project-a", bug_id="BUG-0301", slug="root-halt-blocks-a")
     _add_bug_file(root, "project-b", bug_id="BUG-0302", slug="root-halt-blocks-b")
 
-    (root / "HALT").write_text(
-        "operator-placed fleet-wide halt for end-to-end test\n", encoding="utf-8"
-    )
+    (root / "HALT").write_text("operator-placed fleet-wide halt for end-to-end test\n", encoding="utf-8")
 
     result_a = _run_discovery(root, "project-a")
     result_b = _run_discovery(root, "project-b")
 
     assert result_a.returncode == 0, result_a.stderr
     assert result_b.returncode == 0, result_b.stderr
-    assert "DISCOVERY_STATUS=blocked" in result_a.stdout, (
-        f"Expected project-a blocked by the root HALT.\nstdout: {result_a.stdout}"
-    )
-    assert "DISCOVERY_STATUS=blocked" in result_b.stdout, (
-        f"Expected project-b blocked by the root HALT too.\nstdout: {result_b.stdout}"
-    )
+    assert (
+        "DISCOVERY_STATUS=blocked" in result_a.stdout
+    ), f"Expected project-a blocked by the root HALT.\nstdout: {result_a.stdout}"
+    assert (
+        "DISCOVERY_STATUS=blocked" in result_b.stdout
+    ), f"Expected project-b blocked by the root HALT too.\nstdout: {result_b.stdout}"
     assert not list(_requirements_dir(root, "project-a").glob("*-bugfix-bundle-*.md"))
     req_b = _requirements_dir(root, "project-b")
     assert not (req_b.exists() and list(req_b.glob("*-bugfix-bundle-*.md")))

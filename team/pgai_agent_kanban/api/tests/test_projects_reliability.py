@@ -163,9 +163,7 @@ def test_unregistered_project_returns_404_echoing_the_name(client) -> None:
     assert body["warnings"] == []
 
 
-def test_registered_project_without_file_is_reliability_not_computed(
-    client, kanban_root: pathlib.Path
-) -> None:
+def test_registered_project_without_file_is_reliability_not_computed(client, kanban_root: pathlib.Path) -> None:
     path = _reliability_file(kanban_root, _WITHOUT_FILE)
 
     resp = client.get(f"/projects/{_WITHOUT_FILE}/reliability")

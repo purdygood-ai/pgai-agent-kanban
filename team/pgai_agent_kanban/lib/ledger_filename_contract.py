@@ -66,7 +66,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional, Union
 
 # ---------------------------------------------------------------------------
 # Canonical shape components
@@ -95,7 +94,7 @@ def _normalize_prefix(prefix: str) -> str:
     return prefix.rstrip("-").upper()
 
 
-def ledger_filename_re(prefix: str, *, ignore_case: bool = True) -> "re.Pattern[str]":
+def ledger_filename_re(prefix: str, *, ignore_case: bool = True) -> re.Pattern[str]:
     """Return the compiled canonical filename regex for a ledger prefix.
 
     Args:
@@ -118,7 +117,7 @@ def ledger_filename_re(prefix: str, *, ignore_case: bool = True) -> "re.Pattern[
     )
 
 
-def ledger_taken_re(prefix: str) -> "re.Pattern[str]":
+def ledger_taken_re(prefix: str) -> re.Pattern[str]:
     """Return the compiled "number taken" regex for a ledger prefix.
 
     A name takes a ledger number when it starts with the prefix, a hyphen,
@@ -145,7 +144,7 @@ def ledger_taken_re(prefix: str) -> "re.Pattern[str]":
     )
 
 
-def ledger_taken_dirs(dir_path: Union[str, Path], prefix: str) -> "list[Path]":
+def ledger_taken_dirs(dir_path: str | Path, prefix: str) -> list[Path]:
     """Return the directories whose entries hold numbers for the ledger at *dir_path*.
 
     The first entry is always *dir_path* itself.  For the BUG ledger, when
@@ -184,7 +183,7 @@ def ledger_taken_dirs(dir_path: Union[str, Path], prefix: str) -> "list[Path]":
     return [live, layout.bugs]
 
 
-def classify_defect(name: str, prefix: str) -> Optional[str]:
+def classify_defect(name: str, prefix: str) -> str | None:
     """Return the defect class for a filename that fails the ledger gate.
 
     Args:
@@ -219,7 +218,7 @@ def classify_defect(name: str, prefix: str) -> Optional[str]:
     return DEFECT_MALFORMED
 
 
-def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
+def next_free_number(dir_path: str | Path, prefix: str) -> int:
     """Scan the ledger at *dir_path* for taken ``<prefix>-NNNN`` numbers and
     return the next free sequence number.
 
@@ -266,7 +265,7 @@ def next_free_number(dir_path: Union[str, Path], prefix: str) -> int:
     return highest + 1
 
 
-def build_remedy(name: str, prefix: str, dir_path: Union[str, Path]) -> str:
+def build_remedy(name: str, prefix: str, dir_path: str | Path) -> str:
     """Build the prescriptive refusal message for a rejected ledger filename.
 
     Names the specific defect (date-first vs under-padded vs other) and the
@@ -301,18 +300,13 @@ def build_remedy(name: str, prefix: str, dir_path: Union[str, Path]) -> str:
         )
 
     if defect == DEFECT_UNDER_PADDED:
-        m = re.match(
-            rf"^{re.escape(prefix_u)}-([0-9]{{1,3}})-.+\.md$", name, re.IGNORECASE
-        )
+        m = re.match(rf"^{re.escape(prefix_u)}-([0-9]{{1,3}})-.+\.md$", name, re.IGNORECASE)
         raw_num = m.group(1) if m else "?"
         try:
             padded_guess = f"{prefix_u}-{int(raw_num):04d}"
         except ValueError:
             padded_guess = f"{prefix_u}-????"
-        return (
-            f"'{raw_num}' is under-padded; did you mean {padded_guess}? "
-            f"Next free number is {next_id}."
-        )
+        return f"'{raw_num}' is under-padded; did you mean {padded_guess}? " f"Next free number is {next_id}."
 
     if defect == DEFECT_OVER_PADDED:
         return (

@@ -122,8 +122,7 @@ def test_discovery_sh_exists() -> None:
     grep test from silently passing due to a missing file.
     """
     assert _DISCOVERY_SH.exists(), (
-        f"Expected discovery.sh at {_DISCOVERY_SH}. "
-        "If the file was moved, update _DISCOVERY_SH in this test file."
+        f"Expected discovery.sh at {_DISCOVERY_SH}. " "If the file was moved, update _DISCOVERY_SH in this test file."
     )
 
 
@@ -136,12 +135,8 @@ def test_eligibility_region_locatable_in_discovery_sh() -> None:
     """
     source = _DISCOVERY_SH.read_text(encoding="utf-8")
     region = _extract_eligibility_region(source)
-    assert region, (
-        "Expected to extract a non-empty region for _disc_list_all_eligible_requirements."
-    )
-    assert "_disc_list_all_eligible_requirements" in region, (
-        "Extracted region must contain the function name."
-    )
+    assert region, "Expected to extract a non-empty region for _disc_list_all_eligible_requirements."
+    assert "_disc_list_all_eligible_requirements" in region, "Extracted region must contain the function name."
 
 
 @pytest.mark.parametrize("literal", _WORKFLOW_TYPE_LITERALS)
@@ -168,17 +163,12 @@ def test_eligibility_code_contains_no_workflow_type_string_literal(
     # Search for the literal as a quoted string (single or double quotes).
     # We allow the literal to appear as a comment (# line) since comments are
     # documentation and cannot cause a type-switch regression.
-    non_comment_lines = [
-        line for line in region.splitlines()
-        if not line.strip().startswith("#")
-    ]
+    non_comment_lines = [line for line in region.splitlines() if not line.strip().startswith("#")]
     non_comment_text = "\n".join(non_comment_lines)
 
     # Pattern: the literal appears as a quoted string value in non-comment code.
     # Match: 'testing-only', "testing-only", 'release', "release", etc.
-    quoted_pattern = re.compile(
-        r"""(['"])""" + re.escape(literal) + r"""(['"])"""
-    )
+    quoted_pattern = re.compile(r"""(['"])""" + re.escape(literal) + r"""(['"])""")
 
     matches = quoted_pattern.findall(non_comment_text)
     assert not matches, (

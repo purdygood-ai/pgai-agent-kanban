@@ -12,7 +12,7 @@ Behavioral unit tests for the census-derived reference generator:
 Covers the acceptance criteria:
 
   1. A render writes a block covering every active verb the census
-     declares (32 as of this suite's tree), and --check exits 0 against a
+     declares (35 as of this suite's tree), and --check exits 0 against a
      freshly rendered copy of both docs.
   2. The generated API reference lists every census row's route, method,
      parameters, schema reference and read/action class.
@@ -65,9 +65,7 @@ _SECTION_END = "<!-- OPERATOR-VERBS-GENERATED:END section={name} -->"
 
 # White-box import of the generator module itself (a script, not a package
 # member) for the function-level tests below.
-_spec = importlib.util.spec_from_file_location(
-    "generate_operator_verb_docs_under_test", _GENERATOR
-)
+_spec = importlib.util.spec_from_file_location("generate_operator_verb_docs_under_test", _GENERATOR)
 _gen = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None
 sys.modules[_spec.name] = _gen  # dataclass() needs the module registered to resolve types
@@ -84,13 +82,15 @@ def docs(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     return {"doc": doc, "api_doc": api_doc}
 
 
-def _run(
-    docs: dict[str, pathlib.Path], *extra: str, timeout: float = 120
-) -> subprocess.CompletedProcess:
+def _run(docs: dict[str, pathlib.Path], *extra: str, timeout: float = 120) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            sys.executable, str(_GENERATOR),
-            "--doc", str(docs["doc"]), "--api-doc", str(docs["api_doc"]),
+            sys.executable,
+            str(_GENERATOR),
+            "--doc",
+            str(docs["doc"]),
+            "--api-doc",
+            str(docs["api_doc"]),
             *extra,
         ],
         cwd=str(_TEAM_DIR),
@@ -128,7 +128,7 @@ def _outside_section(content: str, name: str) -> tuple[str, str]:
 
 def test_render_covers_every_active_verb(docs: dict[str, pathlib.Path]) -> None:
     active_names = [v.name for v in _active_verbs()]
-    assert len(active_names) == 34, (
+    assert len(active_names) == 35, (
         "this suite's expected count has drifted from the census's actual "
         f"active-verb count ({len(active_names)}); update the assertion to match"
     )
@@ -138,10 +138,7 @@ def test_render_covers_every_active_verb(docs: dict[str, pathlib.Path]) -> None:
     # The checked-in docs may already be up to date (this test copies them
     # verbatim before rendering), so either the "wrote" or the "already up
     # to date" branch is acceptable -- both name the full verb count.
-    assert (
-        f"{len(active_names)} verb(s) rendered" in result.stdout
-        or f"{len(active_names)} verb(s):" in result.stdout
-    )
+    assert f"{len(active_names)} verb(s) rendered" in result.stdout or f"{len(active_names)} verb(s):" in result.stdout
 
     content = docs["doc"].read_text(encoding="utf-8")
     section = _section(content, "verb-reference")
@@ -164,7 +161,10 @@ def test_checked_in_docs_are_fresh() -> None:
     regeneration is byte-identical to what is checked in."""
     result = subprocess.run(
         [sys.executable, str(_GENERATOR), "--check"],
-        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=120,
+        cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -180,11 +180,7 @@ def test_api_reference_lists_every_census_row(docs: dict[str, pathlib.Path]) -> 
     assert render.returncode == 0, render.stdout + render.stderr
 
     section = _section(docs["api_doc"].read_text(encoding="utf-8"), "api-reference")
-    rows = {
-        line.split("|")[1].strip().strip("`"): line
-        for line in section.splitlines()
-        if line.startswith("| `")
-    }
+    rows = {line.split("|")[1].strip().strip("`"): line for line in section.splitlines() if line.startswith("| `")}
     for verb in _active_verbs():
         if verb.rest_route == "ABSENT":
             assert f"- `{verb.name}`" in section, f"{verb.name} (no twin) missing"
@@ -195,9 +191,7 @@ def test_api_reference_lists_every_census_row(docs: dict[str, pathlib.Path]) -> 
         assert f"`{verb.rest_method}`" in row, row
         assert f"`{verb.rest_route}`" in row, row
         assert f"`{verb.schema_ref}`" in row, row
-        assert "not in `docs/api/icd.json`" not in row, (
-            f"{verb.name}'s route is missing from the checked-in ICD: {row}"
-        )
+        assert "not in `docs/api/icd.json`" not in row, f"{verb.name}'s route is missing from the checked-in ICD: {row}"
 
 
 def test_api_row_parameters_come_from_the_icd() -> None:
@@ -234,11 +228,22 @@ def test_api_row_parameters_come_from_the_icd() -> None:
 def _manifest_with_extra_row(tmp_path: pathlib.Path) -> pathlib.Path:
     manifest = tmp_path / "operator_verbs.manifest"
     text = _REAL_MANIFEST.read_text(encoding="utf-8")
-    row = "\t".join([
-        "V", "zz-synthetic-verb", "active", "scripts/halt.sh", "project|help",
-        "yes", "idempotent", "POST", "/operations/zz-synthetic", "ZzSyntheticBody",
-        "action", "ShellEnvelope",
-    ])
+    row = "\t".join(
+        [
+            "V",
+            "zz-synthetic-verb",
+            "active",
+            "scripts/halt.sh",
+            "project|help",
+            "yes",
+            "idempotent",
+            "POST",
+            "/operations/zz-synthetic",
+            "ZzSyntheticBody",
+            "action",
+            "ShellEnvelope",
+        ]
+    )
     manifest.write_text(text.rstrip("\n") + "\n" + row + "\n", encoding="utf-8")
     return manifest
 
@@ -277,9 +282,7 @@ def test_new_census_row_appears_in_both_references_with_no_other_edit(
 # ---------------------------------------------------------------------------
 
 
-def test_prose_outside_the_markers_survives_regeneration(
-    docs: dict[str, pathlib.Path]
-) -> None:
+def test_prose_outside_the_markers_survives_regeneration(docs: dict[str, pathlib.Path]) -> None:
     sentinel_before = "\nHAND-WRITTEN SENTINEL BEFORE THE GENERATED SECTION\n\n"
     sentinel_after = "\n\nHAND-WRITTEN SENTINEL AFTER THE GENERATED SECTION\n"
     for path, name in ((docs["doc"], "verb-reference"), (docs["api_doc"], "api-reference")):
@@ -435,10 +438,7 @@ def test_rendered_block_contains_verbs_own_help_output_verbatim(
     start_idx = content.index(begin)
     stop_idx = content.index(end, start_idx)
     block = content[start_idx:stop_idx]
-    assert help_text in block, (
-        f"{verb_name}'s rendered block does not contain {script}'s own "
-        "--help output verbatim"
-    )
+    assert help_text in block, f"{verb_name}'s rendered block does not contain {script}'s own " "--help output verbatim"
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +446,7 @@ def test_rendered_block_contains_verbs_own_help_output_verbatim(
 # ---------------------------------------------------------------------------
 
 
-def test_render_reports_missing_section_markers_as_usage_error(
-    docs: dict[str, pathlib.Path]
-) -> None:
+def test_render_reports_missing_section_markers_as_usage_error(docs: dict[str, pathlib.Path]) -> None:
     docs["doc"].write_text("# empty doc, no markers\n", encoding="utf-8")
 
     result = _run(docs)
@@ -460,9 +458,7 @@ def test_render_reports_missing_section_markers_as_usage_error(
     assert docs["api_doc"].read_text(encoding="utf-8") == _REAL_API_DOC.read_text(encoding="utf-8")
 
 
-def test_check_reports_missing_section_markers_as_usage_error(
-    docs: dict[str, pathlib.Path]
-) -> None:
+def test_check_reports_missing_section_markers_as_usage_error(docs: dict[str, pathlib.Path]) -> None:
     docs["api_doc"].write_text("# empty doc, no markers\n", encoding="utf-8")
 
     result = _run(docs, "--check")
@@ -471,9 +467,7 @@ def test_check_reports_missing_section_markers_as_usage_error(
     assert "section=api-reference" in result.stderr
 
 
-def test_missing_icd_is_a_usage_error(
-    tmp_path: pathlib.Path, docs: dict[str, pathlib.Path]
-) -> None:
+def test_missing_icd_is_a_usage_error(tmp_path: pathlib.Path, docs: dict[str, pathlib.Path]) -> None:
     result = _run(docs, "--icd", str(tmp_path / "absent.json"))
     assert result.returncode == 2
     assert "ICD" in result.stderr
@@ -489,8 +483,7 @@ def test_missing_icd_is_a_usage_error(
 def test_gated_runner_carries_the_freshness_gate(runner: str) -> None:
     text = (_TEAM_DIR / "scripts" / runner).read_text(encoding="utf-8")
     assert 'gated_runner_run_quality_lint "operator_verb_docs_freshness"' in text, (
-        f"{runner} must run generate_operator_verb_docs.py --check through "
-        "gated_runner_run_quality_lint"
+        f"{runner} must run generate_operator_verb_docs.py --check through " "gated_runner_run_quality_lint"
     )
     assert "generate_operator_verb_docs.py --check" in text
 
@@ -536,16 +529,22 @@ def test_render_verb_block_on_failed_capture_does_not_leak_manifest_flags() -> N
     assert "could not be captured" in block
     assert "- **REST twin:** none" in block
     assert "some-secret-flag-name" not in block, (
-        "a failed --help capture must not fall back to printing the "
-        "census's flags column as a substitute"
+        "a failed --help capture must not fall back to printing the " "census's flags column as a substitute"
     )
 
 
 def test_api_reference_lists_a_verb_without_a_twin() -> None:
     no_twin = ovm.Verb(
-        name="twinless", status="active", script="scripts/twinless.sh", flags=(),
-        mutates=False, idempotence="read-only", rest_method="ABSENT",
-        rest_route="ABSENT", rest_body_model="ABSENT", verb_class="read",
+        name="twinless",
+        status="active",
+        script="scripts/twinless.sh",
+        flags=(),
+        mutates=False,
+        idempotence="read-only",
+        rest_method="ABSENT",
+        rest_route="ABSENT",
+        rest_body_model="ABSENT",
+        verb_class="read",
         schema_ref="ABSENT",
     )
     section = _gen.render_api_reference_section([no_twin], {"paths": {}})
@@ -555,10 +554,18 @@ def test_api_reference_lists_a_verb_without_a_twin() -> None:
 
 def test_rendered_references_carry_the_census_impl_value() -> None:
     module_verb = ovm.Verb(
-        name="moduled", status="active", script="scripts/moduled.sh", flags=(),
-        mutates=False, idempotence="read-only", rest_method="GET",
-        rest_route="/moduled", rest_body_model="NONE", verb_class="read",
-        schema_ref="ShellEnvelope", impl="module:pkg.mod.fn",
+        name="moduled",
+        status="active",
+        script="scripts/moduled.sh",
+        flags=(),
+        mutates=False,
+        idempotence="read-only",
+        rest_method="GET",
+        rest_route="/moduled",
+        rest_body_model="NONE",
+        verb_class="read",
+        schema_ref="ShellEnvelope",
+        impl="module:pkg.mod.fn",
     )
     capture = _gen.HelpCapture(True, "Usage: moduled.sh", None)
     block = _gen.render_verb_block(module_verb, capture)
@@ -593,15 +600,21 @@ def _env_without_root(**extra: str) -> dict[str, str]:
     return env
 
 
-def test_check_without_root_path_refuses_once_with_no_drift_lines(
-    docs: dict[str, pathlib.Path]
-) -> None:
+def test_check_without_root_path_refuses_once_with_no_drift_lines(docs: dict[str, pathlib.Path]) -> None:
     result = subprocess.run(
         [
-            sys.executable, str(_GENERATOR), "--check",
-            "--doc", str(docs["doc"]), "--api-doc", str(docs["api_doc"]),
+            sys.executable,
+            str(_GENERATOR),
+            "--check",
+            "--doc",
+            str(docs["doc"]),
+            "--api-doc",
+            str(docs["api_doc"]),
         ],
-        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=120,
+        cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=120,
         env=_env_without_root(),
     )
     output = result.stdout + result.stderr
@@ -631,7 +644,8 @@ def test_first_shell_capture_refusing_for_root_path_stops_the_run(
         )
     manifest = tmp_path / "operator_verbs.manifest"
     rows = [
-        line for line in _REAL_MANIFEST.read_text(encoding="utf-8").splitlines()
+        line
+        for line in _REAL_MANIFEST.read_text(encoding="utf-8").splitlines()
         if line.startswith(("V\thalt\t", "V\tunhalt\t"))
     ]
     assert len(rows) == 2, rows
@@ -659,10 +673,18 @@ def test_root_path_naming_a_missing_directory_refuses_once_and_writes_nothing(
 
     result = subprocess.run(
         [
-            sys.executable, str(_GENERATOR), *mode,
-            "--doc", str(docs["doc"]), "--api-doc", str(docs["api_doc"]),
+            sys.executable,
+            str(_GENERATOR),
+            *mode,
+            "--doc",
+            str(docs["doc"]),
+            "--api-doc",
+            str(docs["api_doc"]),
         ],
-        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=120,
+        cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=120,
         env=_env_without_root(PGAI_AGENT_KANBAN_ROOT_PATH=str(missing_root)),
     )
     output = result.stdout + result.stderr

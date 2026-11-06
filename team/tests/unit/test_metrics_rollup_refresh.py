@@ -33,6 +33,13 @@ Coverage:
   - A refresh whose aggregator run fails returns 0 under strict mode, says
     so with a WARNING that names the rollup, and leaves the rollup's bytes
     exactly as finalize wrote them.
+  - That failure also leaves exactly one operator inbox entry naming the
+    rollup and the command that re-runs the refresh, sourced as the task
+    whose tokens.json landed; a refresh that succeeds leaves none.
+  - An install whose aggregator is missing returns 0, keeps its stderr
+    WARNING, and leaves exactly one operator inbox entry naming the missing
+    aggregator path, the rollup and the by-hand command; a second run that
+    meets the same missing aggregator adds no second entry.
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -111,9 +119,7 @@ def _write_tokens(
             }
         },
     }
-    (task_dir / "artifacts" / "tokens.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+    (task_dir / "artifacts" / "tokens.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def _aggregate_as_finalize_does(
@@ -123,15 +129,16 @@ def _aggregate_as_finalize_does(
     argv = [
         sys.executable,
         _AGGREGATOR,
-        "--project", _PROJECT,
-        "--rc", version,
-        "--kanban-root", str(root),
+        "--project",
+        _PROJECT,
+        "--rc",
+        version,
+        "--kanban-root",
+        str(root),
     ]
     if workflow_type is not None:
         argv += ["--workflow-type", workflow_type]
-    return subprocess.run(
-        argv, cwd=str(_team_dir()), capture_output=True, text=True, timeout=60
-    )
+    return subprocess.run(argv, cwd=str(_team_dir()), capture_output=True, text=True, timeout=60)
 
 
 def _rollup_path(root: pathlib.Path, version: str = _VERSION) -> pathlib.Path:
@@ -151,9 +158,7 @@ def _refresh(
 ):
     """Invoke metrics_rollup_refresh_for_task through bash under strict mode."""
     script = (
-        "set -euo pipefail\n"
-        f"source {_LIB}\n"
-        f"metrics_rollup_refresh_for_task '{task_dir}' '{root}' '{_PROJECT}'\n"
+        "set -euo pipefail\n" f"source {_LIB}\n" f"metrics_rollup_refresh_for_task '{task_dir}' '{root}' '{_PROJECT}'\n"
     )
     return run_bash(tmp_path, script, extra_env=extra_env, timeout=60)
 
@@ -174,9 +179,9 @@ def rc_with_release_task_pending(tmp_path: pathlib.Path):
     first = _aggregate_as_finalize_does(root)
     assert first.returncode == 0, first.stderr
     before = _read_rollup(root)
-    assert before["tasks"]["by_agent"] == {"cm": 1}, (
-        "precondition: the finalize-time rollup counts only the open-rc task"
-    )
+    assert before["tasks"]["by_agent"] == {
+        "cm": 1
+    }, "precondition: the finalize-time rollup counts only the open-rc task"
     return root, release
 
 
@@ -197,23 +202,18 @@ def test_release_task_tokens_landing_after_rollup_reach_that_rollup(
 
     assert result.returncode == 0, result.stderr
     assert "rollup refresh" in result.stderr, (
-        "the refresh should narrate that it recomputed the rollup; stderr was:\n"
-        + result.stderr
+        "the refresh should narrate that it recomputed the rollup; stderr was:\n" + result.stderr
     )
     after = _read_rollup(root)
     assert after["tasks"]["total"] == 2
-    assert after["tasks"]["by_agent"] == {"cm": 2}, (
-        "the rollup must count both the open-rc task and the release task"
-    )
+    assert after["tasks"]["by_agent"] == {"cm": 2}, "the rollup must count both the open-rc task and the release task"
     assert after["tokens"]["by_agent"]["cm"]["input"] == 1000 + 5000
     assert after["tokens"]["by_agent"]["cm"]["output"] == 200 + 800
     assert after["tokens"]["by_agent"]["cm"]["invocations"] == 2
     assert after["wall"]["by_agent"]["cm"] == {"seconds": 90 + 300, "task_count": 2}
 
 
-def test_refresh_is_byte_identical_when_run_twice(
-    tmp_path: pathlib.Path, rc_with_release_task_pending
-) -> None:
+def test_refresh_is_byte_identical_when_run_twice(tmp_path: pathlib.Path, rc_with_release_task_pending) -> None:
     """Two refreshes over the same inputs produce the same bytes."""
     root, release = rc_with_release_task_pending
     _write_tokens(release, input_tokens=5000, output_tokens=800, elapsed_seconds=300)
@@ -242,9 +242,7 @@ def test_task_whose_rc_has_no_rollup_yet_writes_nothing(tmp_path: pathlib.Path) 
     result = _refresh(tmp_path, task, root)
 
     assert result.returncode == 0, result.stderr
-    assert result.stderr.strip() == "", (
-        "no rollup exists, so nothing should be narrated; stderr was:\n" + result.stderr
-    )
+    assert result.stderr.strip() == "", "no rollup exists, so nothing should be narrated; stderr was:\n" + result.stderr
     assert not _rollup_path(root).exists()
     assert not (root / "projects" / _PROJECT / "metrics").exists()
 
@@ -255,9 +253,7 @@ def test_task_without_release_version_leaves_other_rollups_untouched(
     """A task that names no Release Version cannot be attributed to any RC,
     so an existing rollup is left byte-for-byte as it was."""
     root, _release = rc_with_release_task_pending
-    unattributed = _make_task(
-        root, "WRITER-20260517-003-unversioned", role="writer", release_version=None
-    )
+    unattributed = _make_task(root, "WRITER-20260517-003-unversioned", role="writer", release_version=None)
     _write_tokens(unattributed, input_tokens=10, output_tokens=5, elapsed_seconds=1)
     bytes_before = _rollup_path(root).read_bytes()
 
@@ -322,6 +318,32 @@ def test_document_workflow_rollup_keeps_its_workflow_type(tmp_path: pathlib.Path
 # ---------------------------------------------------------------------------
 
 
+def _failing_aggregator_path(tmp_path: pathlib.Path) -> str:
+    """A PATH whose python3 fails only the aggregator run (exit 3): the
+    script argument is the aggregator. Every other python3 call -- the
+    Release Version read, the inbox write whose text names the aggregator
+    -- runs the real interpreter."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir(exist_ok=True)
+    shim = shim_dir / "python3"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"${1:-}\" in *metrics_aggregator.py) echo 'aggregator unavailable' >&2; exit 3 ;; esac\n"
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    shim.chmod(0o755)
+    return f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
+def _open_inbox_entries(root: pathlib.Path) -> list[str]:
+    inbox = root / "projects" / _PROJECT / "operator-inbox.md"
+    if not inbox.exists():
+        return []
+    open_body = inbox.read_text(encoding="utf-8").split("## Open", 1)[1].split("\n## ", 1)[0]
+    return open_body.split("### INBOX-")[1:]
+
+
+
 def test_failed_aggregator_run_is_a_warning_and_rollup_is_unchanged(
     tmp_path: pathlib.Path, rc_with_release_task_pending
 ) -> None:
@@ -334,25 +356,92 @@ def test_failed_aggregator_run_is_a_warning_and_rollup_is_unchanged(
     _write_tokens(release, input_tokens=5000, output_tokens=800, elapsed_seconds=300)
     bytes_before = _rollup_path(root).read_bytes()
 
-    shim_dir = tmp_path / "shim"
-    shim_dir.mkdir()
-    shim = shim_dir / "python3"
-    shim.write_text(
-        "#!/usr/bin/env bash\n"
-        'case " $* " in *metrics_aggregator.py*) echo \'aggregator unavailable\' >&2; exit 3 ;; esac\n'
-        f'exec "{sys.executable}" "$@"\n'
-    )
-    shim.chmod(0o755)
-    shimmed_path = f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+    result = _refresh(tmp_path, release, root, extra_env={"PATH": _failing_aggregator_path(tmp_path)})
 
-    result = _refresh(tmp_path, release, root, extra_env={"PATH": shimmed_path})
-
-    assert result.returncode == 0, (
-        "a failed refresh must not fail the caller; stderr was:\n" + result.stderr
-    )
+    assert result.returncode == 0, "a failed refresh must not fail the caller; stderr was:\n" + result.stderr
     assert "WARNING" in result.stderr
     assert "exited with code 3" in result.stderr
-    assert str(_rollup_path(root)) in result.stderr, (
-        "the warning should name the rollup that kept its finalize-time contents"
+    assert (
+        str(_rollup_path(root)) in result.stderr
+    ), "the warning should name the rollup that kept its finalize-time contents"
+    assert _rollup_path(root).read_bytes() == bytes_before
+
+
+def test_failed_refresh_leaves_one_inbox_entry_naming_the_rollup_and_the_rerun(
+    tmp_path: pathlib.Path, rc_with_release_task_pending
+) -> None:
+    """A failed refresh writes one operator inbox entry, sourced as the task,
+    naming the rollup and the aggregator command; stdout stays empty."""
+    root, release = rc_with_release_task_pending
+    _write_tokens(release, input_tokens=5000, output_tokens=800, elapsed_seconds=300)
+
+    result = _refresh(tmp_path, release, root, extra_env={"PATH": _failing_aggregator_path(tmp_path)})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "", "all narration goes to stderr"
+    assert "Operator inbox: INBOX-0001" in result.stderr, result.stderr
+    entries = _open_inbox_entries(root)
+    assert len(entries) == 1, entries
+    assert f"**Source:** {release.name}" in entries[0], entries[0]
+    assert str(_rollup_path(root)) in entries[0], entries[0]
+    assert f"metrics_aggregator.py --project {_PROJECT} --rc {_VERSION}" in entries[0], entries[0]
+
+
+def test_successful_refresh_leaves_no_inbox_entry(tmp_path: pathlib.Path, rc_with_release_task_pending) -> None:
+    root, release = rc_with_release_task_pending
+    _write_tokens(release, input_tokens=5000, output_tokens=800, elapsed_seconds=300)
+
+    result = _refresh(tmp_path, release, root)
+
+    assert result.returncode == 0, result.stderr
+    assert _read_rollup(root)["tasks"]["by_agent"] == {"cm": 2}
+    assert not (root / "projects" / _PROJECT / "operator-inbox.md").exists(), result.stderr
+
+
+def _lib_without_aggregator(tmp_path: pathlib.Path) -> pathlib.Path:
+    """An installed-shape tree whose scripts/lib/ lacks metrics_aggregator.py.
+
+    Returns the copied metrics_rollup_refresh.sh. The package is linked in
+    beside scripts/ so pp_run_ops finds it from the copy's own location.
+    """
+    install = tmp_path / "broken_install"
+    lib = install / "scripts" / "lib"
+    shutil.copytree(
+        _team_dir() / "scripts" / "lib",
+        lib,
+        ignore=shutil.ignore_patterns("metrics_aggregator.py", "__pycache__"),
     )
+    (install / "pgai_agent_kanban").symlink_to(_team_dir() / "pgai_agent_kanban", target_is_directory=True)
+    return lib / "metrics_rollup_refresh.sh"
+
+
+def test_missing_aggregator_leaves_one_inbox_entry_naming_its_path_across_reruns(
+    tmp_path: pathlib.Path, rc_with_release_task_pending
+) -> None:
+    """With the aggregator absent from beside the lib, the refresh returns 0
+    under strict mode, keeps its WARNING, leaves the rollup untouched, and
+    writes one inbox entry naming the missing path; a re-run adds none."""
+    root, release = rc_with_release_task_pending
+    _write_tokens(release, input_tokens=5000, output_tokens=800, elapsed_seconds=300)
+    bytes_before = _rollup_path(root).read_bytes()
+    lib = _lib_without_aggregator(tmp_path)
+    missing = lib.parent / "metrics_aggregator.py"
+    script = f"set -euo pipefail\nsource '{lib}'\nmetrics_rollup_refresh_for_task '{release}' '{root}' '{_PROJECT}'\n"
+
+    first = run_bash(tmp_path, script, timeout=60)
+    second = run_bash(tmp_path, script, timeout=60)
+
+    for result in (first, second):
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "", "all narration goes to stderr"
+        assert f"aggregator not found at {missing}" in result.stderr, result.stderr
+        assert "Operator inbox: INBOX-0001" in result.stderr, result.stderr
+    entries = _open_inbox_entries(root)
+    assert len(entries) == 1, entries
+    entry = entries[0]
+    assert f"**Source:** {release.name}" in entry, entry
+    assert f"the aggregator {missing} is missing" in entry, entry
+    assert str(_rollup_path(root)) in entry, entry
+    assert f"python3 {missing} --project {_PROJECT} --rc {_VERSION} --kanban-root {root}" in entry, entry
+    assert "<" not in entry.split("**How to answer:**", 1)[-1], "the by-hand command carries no placeholder"
     assert _rollup_path(root).read_bytes() == bytes_before

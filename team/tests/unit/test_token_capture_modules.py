@@ -109,20 +109,38 @@ def _env(tmp_path: pathlib.Path, **extra: str) -> dict:
 def _run_cli(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        capture_output=True, text=True, env=_env(tmp_path, PYTHONPATH=str(_TEAM_DIR)),
-        cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, PYTHONPATH=str(_TEAM_DIR)),
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
 def _write(tmp_path: pathlib.Path, usage: object, **kwargs) -> dict:
     """Write *usage* into tmp_path/tokens.json and return the file, parsed."""
     tokens = tmp_path / "tokens.json"
-    args = {"model": "mod", "provider": "claude", "agent": "coder", "elapsed_seconds": 30,
-            "rc_version": "v1.2.3", "effort": "", "now": _NOW}
+    args = {
+        "model": "mod",
+        "provider": "claude",
+        "agent": "coder",
+        "elapsed_seconds": 30,
+        "rc_version": "v1.2.3",
+        "effort": "",
+        "now": _NOW,
+    }
     args.update(kwargs)
     token_capture.write_tokens_record(
-        usage, tokens, args["model"], args["provider"], args["agent"], args["elapsed_seconds"],
-        args["rc_version"], args["effort"], now=args["now"],
+        usage,
+        tokens,
+        args["model"],
+        args["provider"],
+        args["agent"],
+        args["elapsed_seconds"],
+        args["rc_version"],
+        args["effort"],
+        now=args["now"],
     )
     return json.loads(tokens.read_text(encoding="utf-8"))
 
@@ -140,8 +158,13 @@ def test_claude_parse_writes_agent_text_and_returns_the_usage_record(tmp_path: p
 
     assert result.read_text(encoding="utf-8") == "the agent's answer"
     assert list(record) == [
-        "input_tokens", "output_tokens", "cache_creation_input_tokens",
-        "cache_read_input_tokens", "canonical_model_id", "total_cost_usd", "model_usage",
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "canonical_model_id",
+        "total_cost_usd",
+        "model_usage",
     ]
     assert record["input_tokens"] == 10
     assert record["output_tokens"] == 20
@@ -181,8 +204,10 @@ def test_claude_parse_without_model_usage_leaves_cost_and_breakdown_null(tmp_pat
 
 
 def test_claude_parse_joins_text_content_blocks_from_the_last_json_line(tmp_path: pathlib.Path) -> None:
-    blocks = {"result": [{"type": "text", "text": "a"}, {"type": "tool_use", "text": "x"},
-                         {"type": "text", "text": "b"}], "usage": {}}
+    blocks = {
+        "result": [{"type": "text", "text": "a"}, {"type": "tool_use", "text": "x"}, {"type": "text", "text": "b"}],
+        "usage": {},
+    }
     response = tmp_path / "raw.json"
     response.write_text("not json\n" + json.dumps(blocks) + "\n", encoding="utf-8")
     result = tmp_path / "result.txt"
@@ -262,10 +287,13 @@ def test_write_creates_a_new_per_model_record(tmp_path: pathlib.Path) -> None:
 
 def test_write_merges_into_an_existing_record(tmp_path: pathlib.Path) -> None:
     _write(tmp_path, _PER_MODEL_USAGE, effort="high")
-    second = {"total_cost_usd": 0.5, "model_usage": {
-        "m1": {"input_tokens": 3, "output_tokens": 4, "cost_usd": 0.5},
-        "m2": {"output_tokens": 9},
-    }}
+    second = {
+        "total_cost_usd": 0.5,
+        "model_usage": {
+            "m1": {"input_tokens": 3, "output_tokens": 4, "cost_usd": 0.5},
+            "m2": {"output_tokens": 9},
+        },
+    }
 
     written = _write(tmp_path, second, elapsed_seconds=5, rc_version="none")
 
@@ -277,8 +305,11 @@ def test_write_merges_into_an_existing_record(tmp_path: pathlib.Path) -> None:
     assert written["model_usage"]["m1"]["input_tokens"] == 4
     assert written["model_usage"]["m1"]["output_tokens"] == 6
     assert written["model_usage"]["m2"] == {
-        "input_tokens": 0, "output_tokens": 9, "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0, "cost_usd": 0,
+        "input_tokens": 0,
+        "output_tokens": 9,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cost_usd": 0,
     }
 
 
@@ -311,9 +342,17 @@ def test_write_failure_record_replaces_the_file(tmp_path: pathlib.Path) -> None:
     written = _write(tmp_path, {"captured": False, "reason": "boom"}, effort="low", elapsed_seconds="7")
 
     assert written == {
-        "captured": False, "reason": "boom", "provider": "claude", "agent": "coder",
-        "rc_version": "v1.2.3", "invocations": 1, "elapsed_seconds": 7, "timestamp": _NOW,
-        "total_cost_usd": 0, "model_usage": {}, "effort": "low",
+        "captured": False,
+        "reason": "boom",
+        "provider": "claude",
+        "agent": "coder",
+        "rc_version": "v1.2.3",
+        "invocations": 1,
+        "elapsed_seconds": 7,
+        "timestamp": _NOW,
+        "total_cost_usd": 0,
+        "model_usage": {},
+        "effort": "low",
     }
 
 
@@ -327,8 +366,9 @@ def test_load_usage_record_reads_empty_and_invalid_text_as_no_usage() -> None:
 def test_write_tokens_cli(tmp_path: pathlib.Path) -> None:
     tokens = tmp_path / "tokens.json"
 
-    ok = _run_cli(tmp_path, "write-tokens", "--", json.dumps(_FLAT_USAGE), str(tokens),
-                  "mod", "claude", "coder", "-5", "", "")
+    ok = _run_cli(
+        tmp_path, "write-tokens", "--", json.dumps(_FLAT_USAGE), str(tokens), "mod", "claude", "coder", "-5", "", ""
+    )
     refused = _run_cli(tmp_path, "write-tokens", "[1]", str(tokens), "mod", "claude", "coder", "1")
     unwritable = _run_cli(tmp_path, "write-tokens", "{}", str(tmp_path), "mod", "claude", "coder", "1")
 
@@ -352,26 +392,34 @@ def test_dominant_model_with_one_model(tmp_path: pathlib.Path) -> None:
 
 
 def test_dominant_model_ranks_several_by_output_tokens_with_alphabetical_ties(tmp_path: pathlib.Path) -> None:
-    tokens = _write_json(tmp_path / "tokens.json", {"model_usage": {
-        "busy-input": {"input_tokens": 10_000, "output_tokens": 2},
-        "zeta": {"output_tokens": 50},
-        "alpha": {"output_tokens": 50},
-        "not-an-entry": "text",
-        "bad-count": {"output_tokens": "many"},
-    }})
+    tokens = _write_json(
+        tmp_path / "tokens.json",
+        {
+            "model_usage": {
+                "busy-input": {"input_tokens": 10_000, "output_tokens": 2},
+                "zeta": {"output_tokens": 50},
+                "alpha": {"output_tokens": 50},
+                "not-an-entry": "text",
+                "bad-count": {"output_tokens": "many"},
+            }
+        },
+    )
 
     assert token_capture.dominant_output_token_model(tokens) == "alpha"
 
 
-@pytest.mark.parametrize("content", [
-    None,  # no file at all
-    "not json",
-    "[1, 2]",
-    '{"model": "m", "input_tokens": 5}',
-    '{"model_usage": null}',
-    '{"model_usage": {}}',
-    '{"model_usage": {"m": {"output_tokens": 0}}}',
-])
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,  # no file at all
+        "not json",
+        "[1, 2]",
+        '{"model": "m", "input_tokens": 5}',
+        '{"model_usage": null}',
+        '{"model_usage": {}}',
+        '{"model_usage": {"m": {"output_tokens": 0}}}',
+    ],
+)
 def test_dominant_model_undeterminable_returns_none(tmp_path: pathlib.Path, content) -> None:
     tokens = tmp_path / "tokens.json"
     if content is not None:
@@ -400,8 +448,7 @@ def test_token_capture_sh_parses_and_writes_through_the_module(tmp_path: pathlib
     artifacts = tmp_path / "artifacts"
     script = tmp_path / "capture.sh"
     script.write_text(
-        "set -euo pipefail\n"
-        f'source "{_TOKEN_CAPTURE_SH}"\n'
+        "set -euo pipefail\n" f'source "{_TOKEN_CAPTURE_SH}"\n'
         # Hide jq so the merge takes the module path whatever the host has.
         'command() { if [[ "$1" == "-v" && "$2" == "jq" ]]; then return 1; fi; builtin command "$@"; }\n'
         f'usage="$(token_capture_parse_result "{response}" "{tmp_path / "result.txt"}" claude-opus-4-8)"\n'
@@ -411,9 +458,13 @@ def test_token_capture_sh_parses_and_writes_through_the_module(tmp_path: pathlib
     )
 
     result = subprocess.run(
-        ["bash", str(script)], capture_output=True, text=True,
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
         env=_env(tmp_path, PGAI_AGENT_KANBAN_TEMP_DIR=str(tmp_path / "temp")),
-        cwd=str(tmp_path), timeout=60, check=False,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

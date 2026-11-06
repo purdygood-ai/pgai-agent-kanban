@@ -167,11 +167,7 @@ def _cold_build_function_source(name: str) -> str:
 def _narration_source() -> str:
     """The real _narrate_skip() helper and the real engine-free test that
     exercises it, as one block of module text."""
-    return (
-        _cold_build_function_source("_narrate_skip")
-        + "\n\n"
-        + _cold_build_function_source(_IN_TEST_NARRATION_TEST)
-    )
+    return _cold_build_function_source("_narrate_skip") + "\n\n" + _cold_build_function_source(_IN_TEST_NARRATION_TEST)
 
 
 def _write_cold_tree(root: pathlib.Path, *, engine_free_test_fails: bool, builds: bool) -> None:
@@ -188,11 +184,7 @@ def _write_cold_tree(root: pathlib.Path, *, engine_free_test_fails: bool, builds
     (root / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
 
     if builds:
-        build_module = (
-            "import pytest\n\n\n"
-            + _narration_source()
-            + textwrap.dedent(
-                f"""\
+        build_module = "import pytest\n\n\n" + _narration_source() + textwrap.dedent(f"""\
 
 
                 _PAIRS = {_PAIRS!r}
@@ -214,15 +206,9 @@ def _write_cold_tree(root: pathlib.Path, *, engine_free_test_fails: bool, builds
                         f"successfully: pgai-cold-build-{{engine}}-{{flavor}}:probe",
                         flush=True,
                     )
-                """
-            )
-        )
+                """)
     else:
-        build_module = (
-            "import pytest\n\n\n"
-            + _narration_source()
-            + textwrap.dedent(
-                f"""\
+        build_module = "import pytest\n\n\n" + _narration_source() + textwrap.dedent(f"""\
 
 
                 _PAIRS = [
@@ -256,9 +242,7 @@ def _write_cold_tree(root: pathlib.Path, *, engine_free_test_fails: bool, builds
 
                 def test_base_image_probe_failure_skips_the_pair():
                     _narrate_skip({_BODY_SKIP_REASON!r})
-                """
-            )
-        )
+                """)
     (cold / "test_docker_cold_build.py").write_text(build_module, encoding="utf-8")
 
     first_assertion = (
@@ -295,9 +279,7 @@ class _LaneRun:
         return _diagnostic(self.result)
 
 
-def _run_lane_pytest(
-    work_dir: pathlib.Path, *, engine_free_test_fails: bool, builds: bool = False
-) -> _LaneRun:
+def _run_lane_pytest(work_dir: pathlib.Path, *, engine_free_test_fails: bool, builds: bool = False) -> _LaneRun:
     """Run pytest with the lane's arguments on a tree generated under
     *work_dir*, as the lane does: from the tree's root, with a basetemp of
     its own in PYTEST_ADDOPTS."""
@@ -318,17 +300,13 @@ def _run_lane_pytest(
 @pytest.fixture(scope="module")
 def engine_less_failing_run(tmp_path_factory: pytest.TempPathFactory) -> _LaneRun:
     """Every pair narrate-skipped, nothing built, one engine-free test failing."""
-    return _run_lane_pytest(
-        tmp_path_factory.mktemp("engine-less-failing"), engine_free_test_fails=True
-    )
+    return _run_lane_pytest(tmp_path_factory.mktemp("engine-less-failing"), engine_free_test_fails=True)
 
 
 @pytest.fixture(scope="module")
 def engine_less_passing_run(tmp_path_factory: pytest.TempPathFactory) -> _LaneRun:
     """Every pair narrate-skipped, nothing built, every engine-free test passing."""
-    return _run_lane_pytest(
-        tmp_path_factory.mktemp("engine-less-passing"), engine_free_test_fails=False
-    )
+    return _run_lane_pytest(tmp_path_factory.mktemp("engine-less-passing"), engine_free_test_fails=False)
 
 
 def _classifier_read_lines(output: str) -> dict:
@@ -354,9 +332,7 @@ def test_engine_less_run_with_a_failing_engine_free_test_classifies_could_not_at
 
     classification = classify_cold_build_result(run.exit_code, run.output)
 
-    assert classification.verdict == VERDICT_COULD_NOT_ATTEMPT, (
-        f"{classification}\n{run.diagnostic}"
-    )
+    assert classification.verdict == VERDICT_COULD_NOT_ATTEMPT, f"{classification}\n{run.diagnostic}"
     assert ENGINE_UNAVAILABLE_FAILING_TEST_NODEID in classification.detail
     assert ENGINE_UNAVAILABLE_SKIP_REASON in classification.detail
     assert _BODY_SKIP_REASON in classification.detail
@@ -370,9 +346,7 @@ def test_engine_less_run_with_passing_engine_free_tests_classifies_could_not_att
 
     classification = classify_cold_build_result(run.exit_code, run.output)
 
-    assert classification.verdict == VERDICT_COULD_NOT_ATTEMPT, (
-        f"{classification}\n{run.diagnostic}"
-    )
+    assert classification.verdict == VERDICT_COULD_NOT_ATTEMPT, f"{classification}\n{run.diagnostic}"
     assert ENGINE_UNAVAILABLE_SKIP_REASON in classification.detail
     assert _BODY_SKIP_REASON in classification.detail
 
@@ -385,9 +359,7 @@ def test_engine_less_run_with_passing_engine_free_tests_classifies_could_not_att
 @pytest.fixture(scope="module")
 def every_pair_built_run(tmp_path_factory: pytest.TempPathFactory) -> _LaneRun:
     """Every pair built, every engine-free test passing."""
-    return _run_lane_pytest(
-        tmp_path_factory.mktemp("every-pair-built"), engine_free_test_fails=False, builds=True
-    )
+    return _run_lane_pytest(tmp_path_factory.mktemp("every-pair-built"), engine_free_test_fails=False, builds=True)
 
 
 def test_passing_build_tests_print_built_pairs_the_classifier_reads(
@@ -417,9 +389,7 @@ def test_run_with_every_pair_built_classifies_built_with_no_narrate_skipped_note
     classification = classify_cold_build_result(run.exit_code, run.output)
 
     assert classification.verdict == VERDICT_BUILT, f"{classification}\n{run.diagnostic}"
-    assert "narrate-skipped" not in classification.detail, (
-        f"{classification}\n{run.diagnostic}"
-    )
+    assert "narrate-skipped" not in classification.detail, f"{classification}\n{run.diagnostic}"
     assert not _SKIP_REASON_RE.search(run.output), run.diagnostic
 
 

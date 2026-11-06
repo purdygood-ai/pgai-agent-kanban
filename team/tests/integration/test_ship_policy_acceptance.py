@@ -73,7 +73,6 @@ from __future__ import annotations
 import pathlib
 import shutil
 import subprocess
-from typing import Optional
 
 from tests.integration.test_cm_release_synthetic import (
     _commit_on_branch,
@@ -101,6 +100,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="ship-policy-acceptance")
+
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _CM_SCRIPTS_DIR = _TEAM_DIR / "scripts" / "cm"
@@ -181,9 +181,7 @@ def _build_kanban_root(parent: pathlib.Path) -> pathlib.Path:
     cm_py_dir = root / "pgai_agent_kanban" / "cm"
     cm_py_dir.mkdir(parents=True, exist_ok=True)
     for py_file in (_KANBAN_PY_DIR / "cm").glob("*.py"):
-        (cm_py_dir / py_file.name).write_text(
-            py_file.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
     copy_section_reader_modules(cm_py_dir.parent)
     return root
 
@@ -279,7 +277,7 @@ def _write_tester_report(
     *,
     recommendation: str = "pass",
     systemic_risk: str = "none",
-    findings: Optional[list] = None,
+    findings: list | None = None,
 ) -> None:
     blocks = "".join(
         _FINDING_BLOCK.format(
@@ -318,7 +316,7 @@ def _add_tester_task(
     state: str = "DONE",
     recommendation: str = "pass",
     systemic_risk: str = "none",
-    findings: Optional[list] = None,
+    findings: list | None = None,
 ) -> pathlib.Path:
     """Create a TESTER task (README + status + artifacts/report.md) for
     *version* — the shape team/scripts/lib/cm/release_ship_policy.sh scans
@@ -327,11 +325,7 @@ def _add_tester_task(
     task_dir = kanban_root / "projects" / project_name / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
     (task_dir / "README.md").write_text(
-        f"# Task: {task_id}\n\n"
-        "## Role\n"
-        "TESTER\n\n"
-        "## Release Version\n"
-        f"{version}\n",
+        f"# Task: {task_id}\n\n" "## Role\n" "TESTER\n\n" "## Release Version\n" f"{version}\n",
         encoding="utf-8",
     )
     (task_dir / "status.md").write_text(
@@ -412,18 +406,15 @@ def _read_known_issue_carry_forward(bug_path: pathlib.Path) -> str:
 def _release_notes_text(repo_path: pathlib.Path, version: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo_path), "show", f"main:release-notes/{version}.md"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert result.returncode == 0, (
-        f"release-notes/{version}.md not found on main.\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"release-notes/{version}.md not found on main.\nstderr: {result.stderr}"
     return result.stdout
 
 
 def _release_state_text(kanban_root: pathlib.Path, project_name: str) -> str:
-    return (kanban_root / "projects" / project_name / "release-state.md").read_text(
-        encoding="utf-8"
-    )
+    return (kanban_root / "projects" / project_name / "release-state.md").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -437,9 +428,7 @@ class TestRegressionHighStopsOnlyItsOwnProject:
     the same run — proving the stop is scoped to the project it belongs to,
     not to the fleet."""
 
-    def test_regression_high_halts_project_scope_while_sibling_project_ships(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_regression_high_halts_project_scope_while_sibling_project_ships(self, tmp_path: pathlib.Path) -> None:
         """Two registered projects, one release run each.
 
         project-a carries a TESTER report with systemic_risk=high and
@@ -462,31 +451,46 @@ class TestRegressionHighStopsOnlyItsOwnProject:
         _build_release_project(kanban_root, "project-a", repo_a, priority=1)
 
         result_open_a = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, "project-a", repo_root=repo_a,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            "project-a",
+            repo_root=repo_a,
         )
         assert result_open_a.returncode == 0, (
-            f"cm-open-rc.sh failed for project-a.\nstdout: {result_open_a.stdout}\n"
-            f"stderr: {result_open_a.stderr}"
+            f"cm-open-rc.sh failed for project-a.\nstdout: {result_open_a.stdout}\n" f"stderr: {result_open_a.stderr}"
         )
         _commit_on_branch(
-            repo_a, f"rc/{version}", "feature_a.txt", "project-a work\n",
-            "feat: project-a RC work", return_branch="main",
+            repo_a,
+            f"rc/{version}",
+            "feature_a.txt",
+            "project-a work\n",
+            "feat: project-a RC work",
+            return_branch="main",
         )
         _add_tester_task(
-            kanban_root, "project-a", version,
+            kanban_root,
+            "project-a",
+            version,
             systemic_risk="high",
-            findings=[{
-                "title": "a live regression introduced by this RC",
-                "risk": "high",
-                "risk_note": "breaks the dashboard on every render",
-                "regression": "yes",
-                "integrity": "none",
-                "fix_effort": "small",
-            }],
+            findings=[
+                {
+                    "title": "a live regression introduced by this RC",
+                    "risk": "high",
+                    "risk_note": "breaks the dashboard on every render",
+                    "regression": "yes",
+                    "integrity": "none",
+                    "fix_effort": "small",
+                }
+            ],
         )
 
         result_release_a = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, "project-a", repo_root=repo_a,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            "project-a",
+            repo_root=repo_a,
         )
 
         assert result_release_a.returncode != 0, (
@@ -494,9 +498,7 @@ class TestRegressionHighStopsOnlyItsOwnProject:
             f"stdout: {result_release_a.stdout}\nstderr: {result_release_a.stderr}"
         )
         combined_a = result_release_a.stdout + result_release_a.stderr
-        assert "Trigger 2" in combined_a, (
-            f"Expected the Trigger 2 (systemic_risk=high) HALT.\noutput: {combined_a}"
-        )
+        assert "Trigger 2" in combined_a, f"Expected the Trigger 2 (systemic_risk=high) HALT.\noutput: {combined_a}"
 
         project_a_halt = kanban_root / "projects" / "project-a" / "HALT"
         root_halt = kanban_root / "HALT"
@@ -510,8 +512,7 @@ class TestRegressionHighStopsOnlyItsOwnProject:
             "project-a's, and this fixture must fail if that ever happens."
         )
         assert not _git_tag_exists(repo_a, version), (
-            f"No tag may exist for project-a's {version} after a HALT.\n"
-            f"stdout: {result_release_a.stdout}"
+            f"No tag may exist for project-a's {version} after a HALT.\n" f"stdout: {result_release_a.stdout}"
         )
 
         # --- project-b: no TESTER task for this version — ships normally ---
@@ -520,19 +521,30 @@ class TestRegressionHighStopsOnlyItsOwnProject:
         _build_release_project(kanban_root, "project-b", repo_b, priority=2)
 
         result_open_b = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, "project-b", repo_root=repo_b,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            "project-b",
+            repo_root=repo_b,
         )
         assert result_open_b.returncode == 0, (
-            f"cm-open-rc.sh failed for project-b.\nstdout: {result_open_b.stdout}\n"
-            f"stderr: {result_open_b.stderr}"
+            f"cm-open-rc.sh failed for project-b.\nstdout: {result_open_b.stdout}\n" f"stderr: {result_open_b.stderr}"
         )
         _commit_on_branch(
-            repo_b, f"rc/{version}", "feature_b.txt", "project-b work\n",
-            "feat: project-b RC work", return_branch="main",
+            repo_b,
+            f"rc/{version}",
+            "feature_b.txt",
+            "project-b work\n",
+            "feat: project-b RC work",
+            return_branch="main",
         )
 
         result_release_b = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, "project-b", repo_root=repo_b,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            "project-b",
+            repo_root=repo_b,
         )
 
         assert result_release_b.returncode == 0, (
@@ -544,9 +556,9 @@ class TestRegressionHighStopsOnlyItsOwnProject:
             f"Expected project-b's release tag {version} after a successful ship.\n"
             f"stdout: {result_release_b.stdout}"
         )
-        assert not (kanban_root / "projects" / "project-b" / "HALT").exists(), (
-            "project-b must carry no HALT file of its own."
-        )
+        assert not (
+            kanban_root / "projects" / "project-b" / "HALT"
+        ).exists(), "project-b must carry no HALT file of its own."
 
 
 # ---------------------------------------------------------------------------
@@ -600,39 +612,57 @@ class TestPreExistingHighSmallShipsAsKnownIssue:
         # provenance-allowlist: synthetic fixture bug ID (test DATA the
         # bundle-ordering assertion below sorts against), not a real bug.
         causing_bug = _add_bug(
-            kanban_root, project_name, "BUG-0500", "legacy-rendering-defect",
+            kanban_root,
+            project_name,
+            "BUG-0500",
+            "legacy-rendering-defect",
             "A pre-existing crash triggered by a code path nobody exercises in CI.",
         )
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         _commit_on_branch(
-            repo_path, f"rc/{version}", "feature_known_issue.txt",
+            repo_path,
+            f"rc/{version}",
+            "feature_known_issue.txt",
             "coder work for the known-issue release\n",
-            "feat: add feature for known-issue release", return_branch="main",
+            "feat: add feature for known-issue release",
+            return_branch="main",
         )
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             systemic_risk="high",
-            findings=[{
-                "title": "legacy rendering defect",
-                "risk": "high",
-                "risk_note": "pre-existing, unrelated to this RC",
-                "regression": "no",
-                "integrity": "none",
-                "fix_effort": "small",
-                # provenance-allowlist: synthetic fixture bug ID (test DATA
-                # this Filed As field must resolve against), not a real bug.
-                "filed_as": "BUG-0500",
-            }],
+            findings=[
+                {
+                    "title": "legacy rendering defect",
+                    "risk": "high",
+                    "risk_note": "pre-existing, unrelated to this RC",
+                    "regression": "no",
+                    "integrity": "none",
+                    "fix_effort": "small",
+                    # provenance-allowlist: synthetic fixture bug ID (test DATA
+                    # this Filed As field must resolve against), not a real bug.
+                    "filed_as": "BUG-0500",
+                }
+            ],
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             "A pre-existing, non-integrity-damaging, small-effort high finding must "
@@ -641,12 +671,10 @@ class TestPreExistingHighSmallShipsAsKnownIssue:
         )
 
         notes_text = _release_notes_text(repo_path, version)
-        assert "## Status" in notes_text and "KNOWN-ISSUE" in notes_text, (
-            f"Expected release-notes ## Status: KNOWN-ISSUE.\nnotes:\n{notes_text}"
-        )
-        assert "legacy rendering defect" in notes_text.lower() or (
-            "pre-existing crash" in notes_text.lower()
-        ), (
+        assert (
+            "## Status" in notes_text and "KNOWN-ISSUE" in notes_text
+        ), f"Expected release-notes ## Status: KNOWN-ISSUE.\nnotes:\n{notes_text}"
+        assert "legacy rendering defect" in notes_text.lower() or ("pre-existing crash" in notes_text.lower()), (
             "The '## Known Issues' section must name the finding's own substance, "
             f"not just its category.\nnotes:\n{notes_text}"
         )
@@ -662,7 +690,10 @@ class TestPreExistingHighSmallShipsAsKnownIssue:
         # provenance-allowlist: synthetic fixture bug ID (test DATA, chosen
         # to sort before the causing bug's ID above), not a real bug.
         later_bug = _add_bug(
-            kanban_root, project_name, "BUG-0100", "unrelated-later-bug",
+            kanban_root,
+            project_name,
+            "BUG-0100",
+            "unrelated-later-bug",
             "An unrelated defect filed after the known-issue release shipped.",
         )
         assert causing_bug.name > later_bug.name, (
@@ -679,16 +710,11 @@ class TestPreExistingHighSmallShipsAsKnownIssue:
 
         result_discovery = _run_discovery(kanban_root, project_name)
         assert result_discovery.returncode == 0, (
-            f"discovery_run_pipeline failed.\nstdout: {result_discovery.stdout}\n"
-            f"stderr: {result_discovery.stderr}"
+            f"discovery_run_pipeline failed.\nstdout: {result_discovery.stdout}\n" f"stderr: {result_discovery.stderr}"
         )
 
-        bundle_files = list(
-            _requirements_dir(kanban_root, project_name).glob("*-bugfix-bundle-*.md")
-        )
-        assert bundle_files, (
-            f"No bug bundle was produced.\nstdout: {result_discovery.stdout}"
-        )
+        bundle_files = list(_requirements_dir(kanban_root, project_name).glob("*-bugfix-bundle-*.md"))
+        assert bundle_files, f"No bug bundle was produced.\nstdout: {result_discovery.stdout}"
         order = _bundled_item_order(bundle_files[0])
         assert order and order[0] == causing_bug.name, (
             f"Expected the marked bug ({causing_bug.name}) to lead the rendered "
@@ -709,9 +735,7 @@ class TestFindingHeadingShapeReachesTheShipDecision:
     an operator can tell a report-shape problem from a finding that really
     reads unknown."""
 
-    def test_level_4_finding_heading_ships_the_same_known_issue_as_level_3(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_level_4_finding_heading_ships_the_same_known_issue_as_level_3(self, tmp_path: pathlib.Path) -> None:
         """The clear-to-ship shape — Regression: no, Integrity: none, Fix
         Effort: small on the one systemic_risk=high finding — must reach
         SHIP-KNOWN-ISSUE when the report nests that finding under a
@@ -728,45 +752,64 @@ class TestFindingHeadingShapeReachesTheShipDecision:
         # provenance-allowlist: synthetic fixture bug ID (test DATA the
         # finding's Filed As field resolves against), not a real bug.
         _add_bug(
-            kanban_root, project_name, "BUG-0510", "legacy-parser-defect",
+            kanban_root,
+            project_name,
+            "BUG-0510",
+            "legacy-parser-defect",
             "A pre-existing crash on an input shape nobody feeds the parser in CI.",
         )
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         _commit_on_branch(
-            repo_path, f"rc/{version}", "feature_level4.txt",
+            repo_path,
+            f"rc/{version}",
+            "feature_level4.txt",
             "coder work for the level-4 heading release\n",
-            "feat: add feature for the level-4 heading release", return_branch="main",
+            "feat: add feature for the level-4 heading release",
+            return_branch="main",
         )
         report_path = _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             systemic_risk="high",
-            findings=[{
-                "title": "legacy parser defect",
-                "risk": "high",
-                "risk_note": "pre-existing, unrelated to this RC",
-                "regression": "no",
-                "integrity": "none",
-                "fix_effort": "small",
-                # provenance-allowlist: synthetic fixture bug ID (test DATA
-                # this Filed As field must resolve against), not a real bug.
-                "filed_as": "BUG-0510",
-            }],
+            findings=[
+                {
+                    "title": "legacy parser defect",
+                    "risk": "high",
+                    "risk_note": "pre-existing, unrelated to this RC",
+                    "regression": "no",
+                    "integrity": "none",
+                    "fix_effort": "small",
+                    # provenance-allowlist: synthetic fixture bug ID (test DATA
+                    # this Filed As field must resolve against), not a real bug.
+                    "filed_as": "BUG-0510",
+                }
+            ],
         )
         # Demote the one finding heading a level, as a report that groups its
         # findings under intermediate sub-section headings does.
         report_text = report_path.read_text(encoding="utf-8")
         assert "### Finding 1:" in report_text
         report_path.write_text(
-            report_text.replace("### Finding 1:", "#### Finding 1:"), encoding="utf-8",
+            report_text.replace("### Finding 1:", "#### Finding 1:"),
+            encoding="utf-8",
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         combined = result_release.stdout + result_release.stderr
         assert result_release.returncode == 0, (
@@ -776,14 +819,12 @@ class TestFindingHeadingShapeReachesTheShipDecision:
         assert "Regression:           no" in combined, combined
         assert "Integrity damage:     none" in combined, combined
         assert "SHIP-KNOWN-ISSUE" in combined, combined
-        assert "Finding reader:" not in combined, (
-            f"A report with finding blocks must not narrate a shape problem.\noutput: {combined}"
-        )
+        assert (
+            "Finding reader:" not in combined
+        ), f"A report with finding blocks must not narrate a shape problem.\noutput: {combined}"
         assert _git_tag_exists(repo_path, version), combined
 
-    def test_report_without_finding_blocks_halts_and_names_the_shape_problem(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_report_without_finding_blocks_halts_and_names_the_shape_problem(self, tmp_path: pathlib.Path) -> None:
         """A systemic_risk=high report with no finding heading at all still
         refuses to ship (the two dimensions default to unknown, which never
         clears the row), and Step 4d's own output says why: zero finding
@@ -797,18 +838,27 @@ class TestFindingHeadingShapeReachesTheShipDecision:
         _build_release_project(kanban_root, project_name, repo_path)
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         _commit_on_branch(
-            repo_path, f"rc/{version}", "feature_no_blocks.txt",
+            repo_path,
+            f"rc/{version}",
+            "feature_no_blocks.txt",
             "coder work for the no-finding-blocks release\n",
-            "feat: add feature for the no-finding-blocks release", return_branch="main",
+            "feat: add feature for the no-finding-blocks release",
+            return_branch="main",
         )
         report_path = _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             recommendation="ship-with-serious-concerns",
             systemic_risk="high",
             findings=None,
@@ -817,17 +867,19 @@ class TestFindingHeadingShapeReachesTheShipDecision:
         assert "## Findings" in report_text and "Finding 1:" not in report_text
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         combined = result_release.stdout + result_release.stderr
-        assert result_release.returncode != 0, (
-            f"A high-risk report with no finding block must not ship.\noutput: {combined}"
-        )
+        assert (
+            result_release.returncode != 0
+        ), f"A high-risk report with no finding block must not ship.\noutput: {combined}"
         assert "Trigger 2" in combined, combined
         narration = [line for line in combined.splitlines() if "Finding reader:" in line]
-        assert narration, (
-            f"Step 4d must narrate the zero-block report on its own output.\noutput: {combined}"
-        )
+        assert narration, f"Step 4d must narrate the zero-block report on its own output.\noutput: {combined}"
         assert any("zero finding blocks" in line for line in narration), narration
         assert any(str(report_path) in line for line in narration), narration
         assert any("regression/integrity defaulted to unknown" in line for line in narration), narration
@@ -857,48 +909,54 @@ class TestOperatorForceRefusals:
         _build_release_project(kanban_root, project_name, repo_path)
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         _commit_on_branch(
-            repo_path, f"rc/{version}", "feature.txt", "coder work\n",
-            "feat: add feature", return_branch="main",
+            repo_path,
+            f"rc/{version}",
+            "feature.txt",
+            "coder work\n",
+            "feat: add feature",
+            return_branch="main",
         )
         return kanban_root, project_name, repo_path
 
-    def test_force_without_reason_is_refused_and_ships_nothing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_force_without_reason_is_refused_and_ships_nothing(self, tmp_path: pathlib.Path) -> None:
         version = "v0.11.0"
         kanban_root, project_name, repo_path = self._build_project(tmp_path, version)
         rc_branch = f"rc/{version}"
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, ["--force"], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            ["--force"],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         assert result.returncode != 0, (
-            f"--force with no --reason must be refused.\nstdout: {result.stdout}\n"
-            f"stderr: {result.stderr}"
+            f"--force with no --reason must be refused.\nstdout: {result.stdout}\n" f"stderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "cm-release.operator-force.reason-required" in combined, (
-            f"Expected the reason-required error key in the refusal.\noutput: {combined}"
-        )
+        assert (
+            "cm-release.operator-force.reason-required" in combined
+        ), f"Expected the reason-required error key in the refusal.\noutput: {combined}"
         assert not _git_tag_exists(repo_path, version), "No tag may exist after the refusal."
-        assert _git_branch_exists_local(repo_path, rc_branch), (
-            "The RC branch must survive a refused --force invocation untouched."
-        )
+        assert _git_branch_exists_local(
+            repo_path, rc_branch
+        ), "The RC branch must survive a refused --force invocation untouched."
         assert not (kanban_root / "projects" / project_name / "HALT").exists(), (
-            "An argument-validation refusal is not a ship-policy HALT and must not "
-            "write a HALT file."
+            "An argument-validation refusal is not a ship-policy HALT and must not " "write a HALT file."
         )
 
-    def test_force_from_agent_wake_context_is_refused_and_ships_nothing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_force_from_agent_wake_context_is_refused_and_ships_nothing(self, tmp_path: pathlib.Path) -> None:
         version = "v0.12.0"
         kanban_root, project_name, repo_path = self._build_project(tmp_path, version)
         rc_branch = f"rc/{version}"
@@ -906,7 +964,9 @@ class TestOperatorForceRefusals:
         result = _run_cm_script(
             _RELEASE_SCRIPT,
             ["--force", "--reason", "operator says ship it anyway"],
-            kanban_root, project_name, repo_root=repo_path,
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
             extra_env={"PGAI_AGENT_WAKE_ACTIVE": "1"},
         )
 
@@ -915,13 +975,13 @@ class TestOperatorForceRefusals:
             f"valid --reason.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "cm-release.operator-force.agent-wake-refused" in combined, (
-            f"Expected the agent-wake-refused error key in the refusal.\noutput: {combined}"
-        )
+        assert (
+            "cm-release.operator-force.agent-wake-refused" in combined
+        ), f"Expected the agent-wake-refused error key in the refusal.\noutput: {combined}"
         assert not _git_tag_exists(repo_path, version), "No tag may exist after the refusal."
-        assert _git_branch_exists_local(repo_path, rc_branch), (
-            "The RC branch must survive a refused --force invocation untouched."
-        )
+        assert _git_branch_exists_local(
+            repo_path, rc_branch
+        ), "The RC branch must survive a refused --force invocation untouched."
 
 
 # ---------------------------------------------------------------------------
@@ -961,34 +1021,49 @@ class TestOperatorForceShipsOverriddenTrigger:
         _build_release_project(kanban_root, project_name, repo_path)
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         _commit_on_branch(
-            repo_path, f"rc/{version}", "feature_override.txt",
+            repo_path,
+            f"rc/{version}",
+            "feature_override.txt",
             "coder work needing an operator override\n",
-            "feat: add feature requiring operator override", return_branch="main",
+            "feat: add feature requiring operator override",
+            return_branch="main",
         )
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             recommendation="ship-with-serious-concerns",
             systemic_risk="medium",
-            findings=[{
-                "title": "a large-effort concern out of auto-ship scope",
-                "category": "bug",
-                "fix_effort": "large",
-                "risk": "medium",
-                "risk_note": "isolated, but the fix is substantial",
-                "regression": "yes",
-                "integrity": "none",
-            }],
+            findings=[
+                {
+                    "title": "a large-effort concern out of auto-ship scope",
+                    "category": "bug",
+                    "fix_effort": "large",
+                    "risk": "medium",
+                    "risk_note": "isolated, but the fix is substantial",
+                    "regression": "yes",
+                    "integrity": "none",
+                }
+            ],
         )
 
         # --- Step 2 (red case): unforced run HALTs on Trigger 3 ---
         result_unforced = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_unforced.returncode != 0, (
             "An unforced release must HALT on Trigger 3 (serious concerns + large "
@@ -997,36 +1072,33 @@ class TestOperatorForceShipsOverriddenTrigger:
             f"stdout: {result_unforced.stdout}\nstderr: {result_unforced.stderr}"
         )
         combined_unforced = result_unforced.stdout + result_unforced.stderr
-        assert "Trigger 3" in combined_unforced, (
-            f"Expected the Trigger 3 HALT.\noutput: {combined_unforced}"
-        )
-        assert not _git_tag_exists(repo_path, version), (
-            "No tag may exist after the unforced HALT."
-        )
+        assert "Trigger 3" in combined_unforced, f"Expected the Trigger 3 HALT.\noutput: {combined_unforced}"
+        assert not _git_tag_exists(repo_path, version), "No tag may exist after the unforced HALT."
         pre_override_state = _release_state_text(kanban_root, project_name)
-        assert "Operator Override" not in pre_override_state, (
-            "No Operator Override event may exist before --force is ever invoked."
-        )
+        assert (
+            "Operator Override" not in pre_override_state
+        ), "No Operator Override event may exist before --force is ever invoked."
 
         # --- Step 3 (green case): forced run passes the same stop and ships ---
         reason = "operator accepts the large-effort concern for this release"
         result_forced = _run_cm_script(
-            _RELEASE_SCRIPT, ["--force", "--reason", reason],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            ["--force", "--reason", reason],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_forced.returncode == 0, (
             "A properly-reasoned operator --force must pass Trigger 3 and ship.\n"
             f"stdout: {result_forced.stdout}\nstderr: {result_forced.stderr}"
         )
         assert _git_tag_exists(repo_path, version), (
-            f"Expected the release tag {version} after the forced ship.\n"
-            f"stdout: {result_forced.stdout}"
+            f"Expected the release tag {version} after the forced ship.\n" f"stdout: {result_forced.stdout}"
         )
 
         notes_text = _release_notes_text(repo_path, version)
         assert "SHIPPED-BY-OPERATOR-OVERRIDE" in notes_text, (
-            f"Expected release-notes ## Status: SHIPPED-BY-OPERATOR-OVERRIDE.\n"
-            f"notes:\n{notes_text}"
+            f"Expected release-notes ## Status: SHIPPED-BY-OPERATOR-OVERRIDE.\n" f"notes:\n{notes_text}"
         )
 
         post_override_state = _release_state_text(kanban_root, project_name)
@@ -1051,9 +1123,7 @@ class TestOperatorForceShipsOverriddenTrigger:
 # ---------------------------------------------------------------------------
 
 
-def _open_rc_with_one_commit(
-    tmp_path: pathlib.Path, project_name: str, version: str
-) -> tuple:
+def _open_rc_with_one_commit(tmp_path: pathlib.Path, project_name: str, version: str) -> tuple:
     """Build a kanban root + real git repo, open <version>'s RC and put one
     commit on it, returning (kanban_root, repo_path)."""
     kanban_root = _build_kanban_root(tmp_path)
@@ -1061,21 +1131,30 @@ def _open_rc_with_one_commit(
     _init_git_repo_with_remote(repo_path, tmp_path / "bare_remote.git")
     _build_release_project(kanban_root, project_name, repo_path)
     result_open = _run_cm_script(
-        _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+        _OPEN_RC_SCRIPT,
+        [version],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
     )
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     _commit_on_branch(
-        repo_path, f"rc/{version}", "feature.txt", "coder work\n",
-        "feat: add feature", return_branch="main",
+        repo_path,
+        f"rc/{version}",
+        "feature.txt",
+        "coder work\n",
+        "feat: add feature",
+        return_branch="main",
     )
     return kanban_root, repo_path
 
 
 def _filed_ship_policy_bugs(kanban_root: pathlib.Path, project_name: str) -> list:
     return sorted(
-        p for p in (kanban_root / "projects" / project_name / "bugs").glob("BUG-*.md")
+        p
+        for p in (kanban_root / "projects" / project_name / "bugs").glob("BUG-*.md")
         if "**Filed By:** cm-release ship-policy (autonomous)" in p.read_text(encoding="utf-8")
     )
 
@@ -1087,28 +1166,32 @@ class TestUnreadableInputsShipWithConcernsAndFileABug:
     document names (or the SHIP-WITH-CONCERNS floor when no row can be
     named), and leave the bug record behind in the project's bugs/."""
 
-    def test_garbled_recommendation_ships_known_bugs_and_files_a_bug_quoting_it(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_garbled_recommendation_ships_known_bugs_and_files_a_bug_quoting_it(self, tmp_path: pathlib.Path) -> None:
         version = "v0.2.0"
         project_name = "garbled_value_project"
         kanban_root, repo_path = _open_rc_with_one_commit(tmp_path, project_name, version)
         report_path = _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             recommendation="Recommendation: SHIPP-WITH-CONCERNZ",
             systemic_risk="low",
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             "An unparseable Recommendation must ship (with concerns), never HALT.\n"
             f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         )
-        assert "Ship decision:       SHIP-KNOWN-BUGS" in result_release.stdout, (
-            f"Expected the SHIP-WITH-CONCERNS row, never SHIP-FUNCTIONAL.\nstdout: {result_release.stdout}"
-        )
+        assert (
+            "Ship decision:       SHIP-KNOWN-BUGS" in result_release.stdout
+        ), f"Expected the SHIP-WITH-CONCERNS row, never SHIP-FUNCTIONAL.\nstdout: {result_release.stdout}"
         notes_text = _release_notes_text(repo_path, version)
         assert "KNOWN-BUGS" in notes_text and "## Status\nFUNCTIONAL" not in notes_text, notes_text
         assert not (kanban_root / "projects" / project_name / "HALT").exists()
@@ -1120,44 +1203,48 @@ class TestUnreadableInputsShipWithConcernsAndFileABug:
         assert "Recommendation: SHIPP-WITH-CONCERNZ" in content
         assert str(report_path) in content
         assert "## Status\nopen" in content
-        assert filed[0].name in result_release.stdout, (
-            f"Step 4d must name the bug it filed.\nstdout: {result_release.stdout}"
-        )
+        assert (
+            filed[0].name in result_release.stdout
+        ), f"Step 4d must name the bug it filed.\nstdout: {result_release.stdout}"
 
-    def test_bold_serious_concerns_ships_non_functional_not_functional(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bold_serious_concerns_ships_non_functional_not_functional(self, tmp_path: pathlib.Path) -> None:
         version = "v0.2.1"
         project_name = "bold_value_project"
         kanban_root, repo_path = _open_rc_with_one_commit(tmp_path, project_name, version)
         _add_tester_task(
-            kanban_root, project_name, version,
+            kanban_root,
+            project_name,
+            version,
             recommendation="**Recommendation:** **SHIP-WITH-SERIOUS-CONCERNS**",
             systemic_risk="Low — nothing systemic",
             findings=[{"title": "a small one", "risk": "low", "fix_effort": "small"}],
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_release.returncode == 0, (
-            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
-        )
+        assert result_release.returncode == 0, f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         assert "Ship decision:       SHIP-NON-FUNCTIONAL" in result_release.stdout, result_release.stdout
         notes_text = _release_notes_text(repo_path, version)
         assert "NON-FUNCTIONAL" in notes_text, notes_text
-        assert _filed_ship_policy_bugs(kanban_root, project_name) == [], (
-            "a value that normalizes cleanly is not a defect and files nothing"
-        )
+        assert (
+            _filed_ship_policy_bugs(kanban_root, project_name) == []
+        ), "a value that normalizes cleanly is not a defect and files nothing"
 
-    def test_decorated_readme_role_still_finds_the_task_and_files_a_lookup_bug(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_decorated_readme_role_still_finds_the_task_and_files_a_lookup_bug(self, tmp_path: pathlib.Path) -> None:
         version = "v0.2.2"
         project_name = "lookup_mismatch_project"
         kanban_root, repo_path = _open_rc_with_one_commit(tmp_path, project_name, version)
         report_path = _add_tester_task(
-            kanban_root, project_name, version, recommendation="PASS", systemic_risk="low",
+            kanban_root,
+            project_name,
+            version,
+            recommendation="PASS",
+            systemic_risk="low",
         )
         readme = report_path.parent.parent / "README.md"
         readme.write_text(
@@ -1168,11 +1255,13 @@ class TestUnreadableInputsShipWithConcernsAndFileABug:
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_release.returncode == 0, (
-            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
-        )
+        assert result_release.returncode == 0, f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         assert f"TESTER task:         {report_path.parent.parent.name}" in result_release.stdout, (
             "a Role / Release Version that matches only after normalization must still "
             f"locate the task, never the test-not-required row.\nstdout: {result_release.stdout}"
@@ -1204,12 +1293,21 @@ class TestUnrecognisedTesterStateShipsKnownBugsAndFilesABug:
         project_name = "unrecognised_state_project"
         kanban_root, repo_path = _open_rc_with_one_commit(tmp_path, project_name, version)
         report_path = _add_tester_task(
-            kanban_root, project_name, version, state=state, recommendation="PASS", systemic_risk="low",
+            kanban_root,
+            project_name,
+            version,
+            state=state,
+            recommendation="PASS",
+            systemic_risk="low",
         )
         status_path = report_path.parent.parent / "status.md"
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         out = f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         assert result_release.returncode == 0, f"an unrecognised TESTER state ships, never HALTs\n{out}"

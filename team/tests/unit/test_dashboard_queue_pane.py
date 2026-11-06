@@ -85,13 +85,12 @@ def test_colour_names_come_from_environment_then_kanban_cfg_then_default(tmp_pat
     (tmp_path / "kanban.cfg").write_text(
         "[dashboard]\ncolor_done = blue\ncolor_label = magenta\ncolor_working =\n", encoding="utf-8"
     )
-    palette = _palette({**_COLOR, "PGAI_DASHBOARD_COLOR_LABEL": "white", "PGAI_DASHBOARD_COLOR_HALT": "blue"},
-                       tmp_path)
-    assert palette.done == ansi_code("blue", True)        # kanban.cfg
-    assert palette.label == ansi_code("white", True)      # environment wins over kanban.cfg
-    assert palette.working == ansi_code("yellow", True)   # empty kanban.cfg value -> default
-    assert palette.blocked == ansi_code("red", True)      # default
-    assert palette.halt == ansi_code("blue", True)        # environment only
+    palette = _palette({**_COLOR, "PGAI_DASHBOARD_COLOR_LABEL": "white", "PGAI_DASHBOARD_COLOR_HALT": "blue"}, tmp_path)
+    assert palette.done == ansi_code("blue", True)  # kanban.cfg
+    assert palette.label == ansi_code("white", True)  # environment wins over kanban.cfg
+    assert palette.working == ansi_code("yellow", True)  # empty kanban.cfg value -> default
+    assert palette.blocked == ansi_code("red", True)  # default
+    assert palette.halt == ansi_code("blue", True)  # environment only
     assert palette.dim == ansi_code("dim", True)
 
 
@@ -107,8 +106,9 @@ def test_pane_width(value, expected: int) -> None:
 
 
 def test_compact_rows_plain(tmp_path: pathlib.Path) -> None:
-    counts = _counts(PM={"TOTAL": 2, "DONE": 1},
-                     CODER={"TOTAL": 7, "DONE": 4, "WORKING": 1, "BLOCKED": 1, "WAITING": 1})
+    counts = _counts(
+        PM={"TOTAL": 2, "DONE": 1}, CODER={"TOTAL": 7, "DONE": 4, "WORKING": 1, "BLOCKED": 1, "WAITING": 1}
+    )
     text = queue_pane.render_compact_rows(_queues(counts), _palette(_PLAIN, tmp_path), 36, now=0)
     assert text.splitlines() == [
         "pm:     1/2" + " " * 22 + "50%",
@@ -141,8 +141,7 @@ def test_compact_rows_colour_the_label_count_and_each_state_code(tmp_path: pathl
 def test_working_section_shows_slug_start_time_and_elapsed(tmp_path: pathlib.Path, age: int, elapsed: str) -> None:
     mtime = 1767268800
     working = {"task_id": "CODER-20260101-001-fix-the-thing", "mtime": mtime, "role": "CODER"}
-    text = queue_pane.render_compact_rows(_queues(_counts(), working), _palette(_PLAIN, tmp_path), 36,
-                                          now=mtime + age)
+    text = queue_pane.render_compact_rows(_queues(_counts(), working), _palette(_PLAIN, tmp_path), 36, now=mtime + age)
     assert text.splitlines()[5:] == [
         "",
         "— currently working —",
@@ -170,8 +169,10 @@ def test_no_data_renders_all_zero_rows_and_no_working_section(tmp_path: pathlib.
 
 def test_details_listing_plain_text(tmp_path: pathlib.Path) -> None:
     details = empty_queue_details()
-    details["coder"]["WORKING"] = [{"task_id": "CODER-2", "warning": "marker_mismatch"},
-                                   {"task_id": "CODER-1", "warning": None}]
+    details["coder"]["WORKING"] = [
+        {"task_id": "CODER-2", "warning": "marker_mismatch"},
+        {"task_id": "CODER-1", "warning": None},
+    ]
     details["coder"]["BACKLOG"] = [{"task_id": "CODER-3", "warning": "unknown_state:FOO"}]
     details["pm"]["BLOCKED"] = [{"task_id": "PM-1", "warning": "no_queue_entry"}]
     details["unknown"]["WAITING"] = [{"task_id": "X-1", "warning": "folder_missing"}]

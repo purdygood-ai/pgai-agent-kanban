@@ -47,9 +47,7 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     project_root = sandbox / "projects" / _PROJECT
     (project_root / "bugs").mkdir(parents=True)
     (project_root / "tasks" / "queues").mkdir(parents=True)
-    (sandbox / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8"
-    )
+    (sandbox / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8")
     _bug(sandbox, _DUPLICATE, "needs-operator")
     _bug(sandbox, _SURVIVOR, "open")
     (project_root / "tasks" / "queues" / "bug_backlog.md").write_text(
@@ -69,9 +67,7 @@ def _bug_file(root: pathlib.Path, stem: str = _DUPLICATE) -> pathlib.Path:
 
 
 def _section(path: pathlib.Path, heading: str) -> str | None:
-    match = re.search(
-        rf"(?m)^##\s+{re.escape(heading)}\s*\n+(.*?)(?=^##\s|\Z)", path.read_text(encoding="utf-8"), re.S
-    )
+    match = re.search(rf"(?m)^##\s+{re.escape(heading)}\s*\n+(.*?)(?=^##\s|\Z)", path.read_text(encoding="utf-8"), re.S)
     return match.group(1).strip() if match else None
 
 
@@ -114,7 +110,11 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 def test_closed_map_prints_duplicate_beside_done_and_wont_do():
     result = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.terminal_states", "closed-map"],
-        cwd=_TEAM_DIR, capture_output=True, text=True, timeout=30, check=False,
+        cwd=_TEAM_DIR,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

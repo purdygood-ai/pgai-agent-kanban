@@ -89,9 +89,9 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 
 @dataclass(frozen=True)
@@ -125,11 +125,11 @@ def run_bash(
     tmp_path: Path,
     script: str,
     *,
-    extra_env: Optional[dict[str, str]] = None,
-    stdin: Optional[str] = None,
+    extra_env: dict[str, str] | None = None,
+    stdin: str | None = None,
     timeout: int = 30,
-    cwd: Optional[Path] = None,
-    base_env: Optional[Mapping[str, str]] = None,
+    cwd: Path | None = None,
+    base_env: Mapping[str, str] | None = None,
 ) -> BashResult:
     """Run *script* under bash and return captured output.
 

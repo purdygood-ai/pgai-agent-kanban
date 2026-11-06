@@ -29,6 +29,10 @@
 #                      before resetting; required when a prior run left a stale
 #                      worktree that would block the reset.  Without --force,
 #                      a stale worktree causes a warning and non-zero exit.
+#   --discard-branch   Delete the task's feature branch even when it holds
+#                      unmerged commits ("discarding N commits at <hash>").
+#                      Without it such a branch is kept, its tip and commit
+#                      count are printed, and the task resumes from it.
 #
 # Optional flags (all modes):
 #   --help, -h         Show this help and exit 0
@@ -38,6 +42,10 @@
 #   2. Clear artifacts/ and task's logs/ (skip artifacts with --keep-artifacts)
 #   3. Flip queue marker to [ ] in the <agent>_backlog.md queue file
 #   4. Delete feature/<AGENT>-<task-id> branch from the project dev tree (local only)
+#      when every commit on it is on another branch.  A branch holding
+#      unmerged commits is kept instead (tip and commit count printed), with
+#      logs/progress.log and a '## Resume Mode: branch' section in status.md,
+#      so the next dispatch resumes from it; --discard-branch deletes it.
 #   5. Run git worktree prune on the project dev tree
 #   6. (TESTER only) Tear down any retained TESTER worktree
 #   7. Append one line to the operator reset log
@@ -66,9 +74,9 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source shared libraries.
 # shellcheck source=lib/operator_args.sh
@@ -84,14 +92,15 @@ source "${_SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Declared flag vocabulary for this script.
-# reset accepts: --project --key --keep-artifacts --force --help
+# reset accepts: --project --key --keep-artifacts --force --discard-branch --help
 # ---------------------------------------------------------------------------
-OPERATOR_VALID_FLAGS=(project key keep-artifacts force help)
+OPERATOR_VALID_FLAGS=(project key keep-artifacts force discard-branch help)
 
-# --keep-artifacts is outside the canonical vocabulary, so its help line is
-# given here.
+# --keep-artifacts and --discard-branch are outside the canonical vocabulary,
+# so their help lines are given here.
 declare -A OPERATOR_FLAG_HELP=(
     [keep-artifacts]="  --keep-artifacts   Preserve the task's artifacts/ contents (default: clear them; agent-task resets only)"
+    [discard-branch]="  --discard-branch   Delete the task's feature branch even when it holds unmerged commits (default: keep it and resume from it; agent-task resets only)"
 )
 
 # ---------------------------------------------------------------------------
@@ -106,6 +115,12 @@ _USAGE_TEXT="$(operator_args_render_help_for_flags \
     "   worktree registration and on-disk path before resetting the task;" \
     "   without --force a detected stale worktree causes a warning and" \
     "   non-zero exit.  Agent-task resets only.)" \
+    "  (A feature branch holding commits no other branch has is kept by" \
+    "   default: the reset prints its tip and commit count, keeps the" \
+    "   task's logs/progress.log, and the next dispatch resumes from the" \
+    "   branch.  --discard-branch deletes it instead, printing" \
+    "   'discarding N commits at <hash>'.  A fully merged branch is always" \
+    "   deleted.  Agent-task resets only.)" \
     "" \
     "         value: full item key (see formats):" \
     "                 Agent task:   ROLE-YYYYMMDD-NNN[-slug] (role in prefix)" \
@@ -116,6 +131,7 @@ _USAGE_TEXT="$(operator_args_render_help_for_flags \
     "Examples:" \
     "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN-some-slug" \
     "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN" \
+    "  $(basename "$0") --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN --discard-branch" \
     "  $(basename "$0") --project pgai-agent-kanban --key BUG-NNNN" \
     "  $(basename "$0") --project pgai-agent-kanban --key PRIORITY-NNNN" \
     "  $(basename "$0") --project pgai-agent-kanban --key v0.1.2" \
@@ -131,7 +147,7 @@ _USAGE_TEXT="$(operator_args_render_help_for_flags \
 
 # ---------------------------------------------------------------------------
 # Parse arguments manually.
-# We extend the canonical flag set with --keep-artifacts.
+# We extend the canonical flag set with --keep-artifacts and --discard-branch.
 # --agent is REMOVED — passing it is now an unknown-flag error.
 # --bug, --priority, --requirement are REMOVED — they now exit as unknown flags.
 # ---------------------------------------------------------------------------
@@ -139,6 +155,7 @@ _project_value="" # --project VALUE
 _key_value=""     # --key VALUE
 _keep_artifacts=false
 _force=false
+_discard_branch=false
 _show_help=false
 
 while [[ $# -gt 0 ]]; do
@@ -163,6 +180,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             _force=true
+            shift
+            ;;
+        --discard-branch)
+            _discard_branch=true
             shift
             ;;
         *)
@@ -226,12 +247,18 @@ if [[ "${_force}" == "true" ]]; then
     _force_flag="1"
 fi
 
+_discard_branch_flag="0"
+if [[ "${_discard_branch}" == "true" ]]; then
+    _discard_branch_flag="1"
+fi
+
 _py_rc=0
 pp_run_ops pgai_agent_kanban.ops reset_item \
     "${_project_root}" \
     "${_key_value}" \
     "${_keep_artifacts_flag}" \
-    "${_force_flag}" || _py_rc=$?
+    "${_force_flag}" \
+    "${_discard_branch_flag}" || _py_rc=$?
 
 if [[ "${_py_rc}" -ne 0 ]]; then
     exit "${_py_rc}"

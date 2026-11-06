@@ -37,12 +37,12 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script dir and source helpers
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/lib/project_paths.sh"
 # shellcheck source=lib/projects.sh

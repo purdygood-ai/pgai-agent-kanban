@@ -189,13 +189,43 @@ PGAI_ROSTER_BAND_MAX_ROWS=2
 PGAI_ROSTER_BAND_SEPARATOR=" $(printf '\xc2\xb7') "
 
 # ---------------------------------------------------------------------------
+# Typed-line source tag
+# ---------------------------------------------------------------------------
+
+# PGAI_DASHBOARD_TYPED_TAG — the trailing shell comment every command line the
+# dashboard types into a pane (`tmux send-keys ... Enter`) ends with. The pane's
+# shell records a typed line in the operator's shell history exactly as if the
+# operator had typed it; the tag makes each such line recognisably the
+# dashboard's, so one grep on it finds or deletes all of them (a `grep -v` on
+# " <tag>$" over ~/.bash_history drops them all). A comment at the end of a
+# line is inert, so the tagged line runs exactly as the bare one.
+#
+# Defined here once and appended only by dashboard_typed_line below; no caller
+# spells the string out.
+PGAI_DASHBOARD_TYPED_TAG='# pgai-agent-kanban-dashboard'
+
+# ---------------------------------------------------------------------------
+# dashboard_typed_line <command>
+#
+# Echoes <command>, one space, then PGAI_DASHBOARD_TYPED_TAG, with no trailing
+# newline: the exact text to pass `tmux send-keys` ahead of `Enter`. Every
+# command the dashboard types into a pane is composed through this one helper
+# (key-only sends such as C-c carry no command and are not). <command> must be
+# a single line: the tag comments out only the line it ends.
+# ---------------------------------------------------------------------------
+dashboard_typed_line() {
+  local command="${1:?dashboard_typed_line: <command> required}"
+  printf '%s %s' "$command" "$PGAI_DASHBOARD_TYPED_TAG"
+}
+
+# ---------------------------------------------------------------------------
 # dashboard_schedule_roster_count <cron_parser_lib>
 #
 # Echoes the number of agent entries the installed crontab resolves to via
 # team/pm-agent/lib/cron_parser.py's next_firings() — the SAME roster
-# next-cron-firings.sh (window-4 top pane) and show-header.sh (window-0
+# next-cron-firings.sh (drill-window CRON pane) and show-header.sh (window-0
 # HEADER tile, reached through show-multi.sh's header-mode delegation)
-# render at watch-refresh time. create.sh calls this ONCE, at session-build
+# render on every pane refresh. create.sh calls this ONCE, at session-build
 # time, to size each pane's minimum height so the full roster fits without
 # the renderer's own "+N more" truncation marker ever needing to fire on a
 # freshly-created pane.

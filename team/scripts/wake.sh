@@ -38,4 +38,4 @@ EOF
         ;;
 esac
 
-exec "$(dirname "${BASH_SOURCE[0]}")/wake-batch.sh" --max-tasks=1 "$@"
+exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/wake-batch.sh" --max-tasks=1 "$@"

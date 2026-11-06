@@ -148,7 +148,8 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
+from collections.abc import Callable, Mapping
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -274,16 +275,16 @@ class ExecutionResult:
     status: str
     outcome_kind: str
     detail: str
-    verb: Optional[str] = None
-    verb_error: Optional[str] = None
-    inbox_entry: Optional[str] = None
+    verb: str | None = None
+    verb_error: str | None = None
+    inbox_entry: str | None = None
     inbox_created: bool = False
     backups: tuple[str, ...] = ()
     decision_event: bool = False
-    ledger_source: Optional[str] = None
-    ledger_class: Optional[str] = None
-    halt_path: Optional[str] = None
-    halt_first: Optional[str] = None
+    ledger_source: str | None = None
+    ledger_class: str | None = None
+    halt_path: str | None = None
+    halt_first: str | None = None
 
     def as_json_dict(self) -> dict:
         """The result as a JSON-ready dict."""
@@ -317,16 +318,16 @@ class _Run:
         outcome: dc.Outcome,
         inputs: dc.DecisionInput,
         *,
-        kanban_root: "Path | str",
-        now: "datetime.datetime | str | None",
-        queue_file: "Path | str | None",
+        kanban_root: Path | str,
+        now: datetime.datetime | str | None,
+        queue_file: Path | str | None,
         triage_enabled: bool,
-        worktree_base: "Path | str | None",
-        table_path: "Path | str | None",
-        handlers: Optional[Mapping[str, bt.ActionHandler]],
-        stage_runner: Optional[StageRunner],
-        lock_wait_seconds: Optional[float],
-        env: Optional[Mapping[str, str]],
+        worktree_base: Path | str | None,
+        table_path: Path | str | None,
+        handlers: Mapping[str, bt.ActionHandler] | None,
+        stage_runner: StageRunner | None,
+        lock_wait_seconds: float | None,
+        env: Mapping[str, str] | None,
     ) -> None:
         self.outcome = outcome
         self.inputs = inputs
@@ -340,7 +341,7 @@ class _Run:
         self.task_id = inputs.task_id if inputs.subject in (dc.SUBJECT_BLOCK, dc.SUBJECT_NEEDS_HUMAN) else None
         self.status_file = self.ctx.tasks_dir(self.project) / self.task_id / "status.md" if self.task_id else None
         if queue_file is not None:
-            self.queue_file: Optional[Path] = Path(queue_file)
+            self.queue_file: Path | None = Path(queue_file)
         elif self.task_id:
             self.queue_file = find_queue_file(self.project_root, self.task_id)
         else:
@@ -402,7 +403,7 @@ class _Run:
 
     # -- backups, ledger, records ------------------------------------------
 
-    def back_up(self, *paths: Optional[Path]) -> None:
+    def back_up(self, *paths: Path | None) -> None:
         """Back up every existing file in *paths* (first copy in the firing wins)."""
         for path in paths:
             if path is None or not path.is_file():
@@ -419,17 +420,17 @@ class _Run:
     def _began(self) -> str:
         """When the stopped thing began: the Block Record's last_blocked_at, the
         HALT's modification time, else the decision time (never later than it)."""
-        began: Optional[datetime.datetime] = None
+        began: datetime.datetime | None = None
         record = self.inputs.record
         if self.task_id and record is not None and record.last_blocked_at:
             began = try_parse_iso(str(record.last_blocked_at))
         elif self.inputs.subject == dc.SUBJECT_HALT and self.halt_path.is_file():
-            began = datetime.datetime.fromtimestamp(self.halt_path.stat().st_mtime, datetime.timezone.utc)
+            began = datetime.datetime.fromtimestamp(self.halt_path.stat().st_mtime, datetime.UTC)
         if began is None or began > self.moment:
             began = self.moment
         return format_iso(began)
 
-    def _start_reason(self) -> Optional[str]:
+    def _start_reason(self) -> str | None:
         record = self.inputs.record
         if self.task_id and record is not None:
             return record.reason_code
@@ -460,7 +461,11 @@ class _Run:
     def ledger_close(self, block_class: str, reason_code: str) -> int:
         """Close the subject's open block with *block_class*; 0 when none was open."""
         closed = ts.stamp_ledger_block_end(
-            self.root, self.project, self.ledger_source, block_class=block_class, reason_code=reason_code,
+            self.root,
+            self.project,
+            self.ledger_source,
+            block_class=block_class,
+            reason_code=reason_code,
             timestamp=self.stamp,
         )
         self.ledger_closed += closed
@@ -494,7 +499,12 @@ class _Run:
         """One action-log row naming every backup (best-effort)."""
         try:
             log_action(
-                str(self.root), self.project, _LOG_NAME, self.subject_source, action, one_line(detail),
+                str(self.root),
+                self.project,
+                _LOG_NAME,
+                self.subject_source,
+                action,
+                one_line(detail),
                 backup_path=",".join(self.backups) or "none",
             )
         except OSError:
@@ -502,17 +512,26 @@ class _Run:
 
     def result(self, status: str, detail: str, **fields: Any) -> ExecutionResult:
         return ExecutionResult(
-            status=status, outcome_kind=self.outcome.kind, detail=one_line(detail),
+            status=status,
+            outcome_kind=self.outcome.kind,
+            detail=one_line(detail),
             verb=self.outcome.name if self.outcome.kind == dc.OUTCOME_VERB else None,
-            backups=tuple(self.backups), **fields,
+            backups=tuple(self.backups),
+            **fields,
         )
 
     # -- the HALT-first envelope ----------------------------------------------
 
     def under_halt_first(self, fix: Callable[[], ExecutionResult], *, op: str, past_project_halt: bool = False):
         envelope = run_halt_first(
-            self.root, self.project, fix, op=op, task=self.task_id or "none", past_project_halt=past_project_halt,
-            lock_wait_seconds=self.lock_wait_seconds, env=self.env,
+            self.root,
+            self.project,
+            fix,
+            op=op,
+            task=self.task_id or "none",
+            past_project_halt=past_project_halt,
+            lock_wait_seconds=self.lock_wait_seconds,
+            env=self.env,
         )
         if envelope.ran:
             return envelope.value
@@ -521,13 +540,15 @@ class _Run:
             # the repair HALT again: the operator is told.
             where = shlex.quote(str(self.project_root))
             return _report_declined(
-                self, envelope.detail,
+                self,
+                envelope.detail,
                 f"Make {self.project_root} writable for OVERWATCH again (check it with `ls -ld {where}`)",
-                STATUS_DEFERRED, envelope.detail, halt_path=envelope.halt_path, halt_first=envelope.status,
+                STATUS_DEFERRED,
+                envelope.detail,
+                halt_path=envelope.halt_path,
+                halt_first=envelope.status,
             )
-        return self.result(
-            STATUS_DEFERRED, envelope.detail, halt_path=envelope.halt_path, halt_first=envelope.status
-        )
+        return self.result(STATUS_DEFERRED, envelope.detail, halt_path=envelope.halt_path, halt_first=envelope.status)
 
 
 # ---------------------------------------------------------------------------
@@ -541,12 +562,15 @@ def _return_to_backlog(run: _Run, cleared: str) -> None:
     Agent and Blocked Reason reset where present, then the ``[ ]`` marker."""
     assert run.status_file is not None and run.task_id is not None
     return_to_backlog(
-        run.status_file, run.queue_file, project=run.project, task_id=run.task_id,
+        run.status_file,
+        run.queue_file,
+        project=run.project,
+        task_id=run.task_id,
         summary=f"Promoted from BLOCKED to BACKLOG by OVERWATCH: blocker cleared ({one_line(cleared)}).",
     )
 
 
-def _clear_needs_human(run: _Run, entry_id: Optional[str]) -> bool:
+def _clear_needs_human(run: _Run, entry_id: str | None) -> bool:
     """Set the task's Needs Human to no, and name a new inbox entry in its
     Blockers, through the status-writer; True when status.md changed. A task
     whose ## State is not one of the six states is left untouched."""
@@ -582,7 +606,12 @@ def _clear_needs_human(run: _Run, entry_id: Optional[str]) -> bool:
         # stop did, never later than the decision time its end carries.
         run.ledger_open()
     ts.write_task_status(
-        run.status_file, state=state, needs_human="no", blockers=blockers, project=run.project, key=run.task_id,
+        run.status_file,
+        state=state,
+        needs_human="no",
+        blockers=blockers,
+        project=run.project,
+        key=run.task_id,
     )
     return True
 
@@ -596,8 +625,12 @@ def _run_triage_verb(run: _Run, verb: str) -> _VerbRun:
     """A block-triage action: re-plan under the lock, apply it, perform the mutation."""
     assert run.status_file is not None and run.task_id is not None
     common = dict(
-        triage_enabled=run.triage_enabled, now=run.moment, table_path=run.table_path, handlers=run.handlers,
-        worktree_base=run.worktree_base, requeue_budget=run.inputs.requeue_budget,
+        triage_enabled=run.triage_enabled,
+        now=run.moment,
+        table_path=run.table_path,
+        handlers=run.handlers,
+        worktree_base=run.worktree_base,
+        requeue_budget=run.inputs.requeue_budget,
     )
     # Re-planned under the lock with the facts read now, block triage's plan
     # is the authority: its action runs even when the caller's facts chose a
@@ -633,7 +666,7 @@ def _run_triage_verb(run: _Run, verb: str) -> _VerbRun:
         _return_to_backlog(run, result.detail)
         mutation = "returned to BACKLOG"
     elif result.mutation.startswith(bt.MUTATION_TRANSITION_PREFIX):
-        state = result.mutation[len(bt.MUTATION_TRANSITION_PREFIX):]
+        state = result.mutation[len(bt.MUTATION_TRANSITION_PREFIX) :]
         ts.write_task_status(run.status_file, state=state, project=run.project, key=run.task_id)
         mutation = f"moved to {state}"
     else:
@@ -649,8 +682,8 @@ def _run_reset_to_backlog(run: _Run, verb: str) -> _VerbRun:
         # [overwatch] block_triage = false keeps OVERWATCH to records: no
         # state or queue write, as block triage's own verbs skip under it.
         return _VerbRun(
-            skipped=True, detail=f"[overwatch] block_triage is false: {verb} on {run.task_id} not carried out; "
-            "nothing written",
+            skipped=True,
+            detail=f"[overwatch] block_triage is false: {verb} on {run.task_id} not carried out; " "nothing written",
             declined=_TRIAGE_OFF,
         )
     state = run.task_state()
@@ -664,9 +697,15 @@ def _run_reset_to_backlog(run: _Run, verb: str) -> _VerbRun:
         # A TESTER task's verification block: spend the RC's one requeue
         # (record, Triage Note carrying the block cause, return to BACKLOG).
         record = verification_retry.requeue_task(
-            run.root, run.project, str(args["verification_retry"]), run.task_id,
-            case=verification_retry.CASE_TESTER_BLOCKED, cause=str(args.get("cause") or ""),
-            requeued_by=verification_retry.BY_DECISION_WAKE, now=run.moment, project_root=run.project_root,
+            run.root,
+            run.project,
+            str(args["verification_retry"]),
+            run.task_id,
+            case=verification_retry.CASE_TESTER_BLOCKED,
+            cause=str(args.get("cause") or ""),
+            requeued_by=verification_retry.BY_DECISION_WAKE,
+            now=run.moment,
+            project_root=run.project_root,
         )
         if record is None:
             return _VerbRun(
@@ -679,7 +718,9 @@ def _run_reset_to_backlog(run: _Run, verb: str) -> _VerbRun:
         _return_to_backlog(run, f"OVERWATCH decision {why}")
     detail = f"{verb} on {run.task_id}: returned to BACKLOG with Needs Human no ({why})"
     return _VerbRun(
-        done=True, detail=detail, verbs_run=[f"task-status.sh --state BACKLOG --needs-human no: {detail}"],
+        done=True,
+        detail=detail,
+        verbs_run=[f"task-status.sh --state BACKLOG --needs-human no: {detail}"],
         closes_any=True,
     )
 
@@ -691,8 +732,8 @@ def _run_close_unverified(run: _Run, verb: str) -> _VerbRun:
     assert run.task_id is not None and run.status_file is not None
     if not run.triage_enabled:
         return _VerbRun(
-            skipped=True, detail=f"[overwatch] block_triage is false: {verb} on {run.task_id} not carried out; "
-            "nothing written",
+            skipped=True,
+            detail=f"[overwatch] block_triage is false: {verb} on {run.task_id} not carried out; " "nothing written",
             declined=_TRIAGE_OFF,
         )
     state = run.task_state()
@@ -701,7 +742,11 @@ def _run_close_unverified(run: _Run, verb: str) -> _VerbRun:
     args = run.outcome.args
     version, cause = str(args.get("version") or "the RC"), one_line(args.get("cause") or "no block cause recorded")
     ts.write_task_status(
-        run.status_file, state="WONT-DO", needs_human="no", project=run.project, key=run.task_id,
+        run.status_file,
+        state="WONT-DO",
+        needs_human="no",
+        project=run.project,
+        key=run.task_id,
         summary=(
             f"Closed by OVERWATCH: verification of {version} did not run after the RC's one requeue "
             f"(cause: {cause}). The release ships NON-FUNCTIONAL as unverified and records it in the operator inbox."
@@ -709,7 +754,9 @@ def _run_close_unverified(run: _Run, verb: str) -> _VerbRun:
     )
     detail = f"{verb} on {run.task_id}: closed WONT-DO with Needs Human no (verification of {version} did not run)"
     return _VerbRun(
-        done=True, detail=detail, verbs_run=[f"task-status.sh --state WONT-DO --needs-human no: {detail}"],
+        done=True,
+        detail=detail,
+        verbs_run=[f"task-status.sh --state WONT-DO --needs-human no: {detail}"],
         closes_any=True,
     )
 
@@ -736,9 +783,13 @@ def _run_clear_chain_halt(run: _Run, verb: str) -> _VerbRun:
     writer = run.outcome.args.get("writer") or None
     closed: list = []
     clear = clear_chain_halt(
-        run.ctx, str(run.root), run.project,
+        run.ctx,
+        str(run.root),
+        run.project,
         step=f"ops.write unhalt --project {run.project}: cleared the {writer or 'chain'} HALT {run.halt_path}",
-        writer=writer, timestamp=run.firing, before_unhalt=_halt_block_closer(run, verb, closed),
+        writer=writer,
+        timestamp=run.firing,
+        before_unhalt=_halt_block_closer(run, verb, closed),
     )
     if clear.backup_path and clear.backup_path not in run.backups:
         run.backups.append(clear.backup_path)
@@ -754,8 +805,13 @@ def _run_resolution_stage(run: _Run, verb: str) -> _VerbRun:
     """The resolution stage, once; for a task only when its block is ready for it."""
     if run.task_id is not None:
         plan = bt.plan_task(
-            run.status_file, triage_enabled=run.triage_enabled, now=run.moment, table_path=run.table_path,
-            handlers=run.handlers, worktree_base=run.worktree_base, requeue_budget=run.inputs.requeue_budget,
+            run.status_file,
+            triage_enabled=run.triage_enabled,
+            now=run.moment,
+            table_path=run.table_path,
+            handlers=run.handlers,
+            worktree_base=run.worktree_base,
+            requeue_budget=run.inputs.requeue_budget,
         )
         if plan.outcome != bt.OUTCOME_DEFER:
             return _VerbRun(error=f"the block is not one the resolution stage can take ({plan.detail})")
@@ -792,8 +848,16 @@ _VERB_RUNNERS: Mapping[str, Callable[[_Run, str], _VerbRun]] = {
 _HALT_SUBJECT_VERBS = frozenset({dc.VERB_CLEAR_CHAIN_HALT, dc.VERB_RESOLUTION_STAGE})
 
 #: Verbs that need a task folder to act on.
-_TASK_VERBS = frozenset({dc.VERB_REQUEUE, dc.VERB_PRUNE_WORKTREE_THEN_REQUEUE, dc.VERB_RECOMPUTE_GATE,
-                         dc.VERB_RESET_TO_BACKLOG, dc.VERB_CLOSE_UNVERIFIED, *ACTION_VERBS})
+_TASK_VERBS = frozenset(
+    {
+        dc.VERB_REQUEUE,
+        dc.VERB_PRUNE_WORKTREE_THEN_REQUEUE,
+        dc.VERB_RECOMPUTE_GATE,
+        dc.VERB_RESET_TO_BACKLOG,
+        dc.VERB_CLOSE_UNVERIFIED,
+        *ACTION_VERBS,
+    }
+)
 
 
 def _verb_files(run: _Run, verb: str) -> tuple:
@@ -816,7 +880,7 @@ def _verb_files(run: _Run, verb: str) -> tuple:
 # ---------------------------------------------------------------------------
 
 
-def release_waiting_on(task_dir: "Path | str") -> str:
+def release_waiting_on(task_dir: Path | str) -> str:
     """The release version waiting on the task in *task_dir* alone, or ``""``.
 
     That is the task README's ``## Release Version`` (read through
@@ -866,7 +930,7 @@ def _needs_human(run: _Run) -> str:
     return ts.section_value(run.status_text(), "Needs Human").strip().lower()
 
 
-def _open_entry(run: _Run, inbox: dc.Outcome) -> Optional[str]:
+def _open_entry(run: _Run, inbox: dc.Outcome) -> str | None:
     """The open inbox entry already asking *inbox*'s question, matched as
     ``write_inbox_question`` matches it (source and question, spacing folded)."""
     wanted = (one_line(inbox.source or run.subject_source), one_line(inbox.question or inbox.detail))
@@ -877,28 +941,41 @@ def _open_entry(run: _Run, inbox: dc.Outcome) -> Optional[str]:
     return next((e.entry_id for e in entries if (one_line(e.source), one_line(e.question)) == wanted), None)
 
 
-def _park(run: _Run, inbox: dc.Outcome, *, verb_error: Optional[str] = None,
-          verbs_run: Optional[list] = None) -> ExecutionResult:
+def _park(
+    run: _Run, inbox: dc.Outcome, *, verb_error: str | None = None, verbs_run: list | None = None
+) -> ExecutionResult:
     """Write *inbox*'s entry (reusing an open one), clear the task's Needs
     Human, and record it all when anything changed. Runs inside the envelope
     for a task, outside it otherwise."""
     already = _open_entry(run, inbox)
     if already is not None and not (run.has_task() and _needs_human(run) != "no"):
-        return run.result(STATUS_NOTHING, f"inbox entry {already} is still open and nothing else needed changing",
-                          inbox_entry=already, verb_error=verb_error)
+        return run.result(
+            STATUS_NOTHING,
+            f"inbox entry {already} is still open and nothing else needed changing",
+            inbox_entry=already,
+            verb_error=verb_error,
+        )
     run.back_up(*run.task_files(), run.project_root / "operator-inbox.md")
     entry_id, created, error = write_inbox_question(
-        run.ctx, run.project, source=inbox.source or run.subject_source,
-        question=inbox.question or inbox.detail, meanwhile=_meanwhile(run),
+        run.ctx,
+        run.project,
+        source=inbox.source or run.subject_source,
+        question=inbox.question or inbox.detail,
+        meanwhile=_meanwhile(run),
         how_to_answer=inbox.how_to_answer or "read the evidence named in the question and resolve the cause",
     )
     if error is not None:
-        return run.result(STATUS_DEFERRED, f"the inbox refused the question ({error}); nothing else written",
-                          verb_error=verb_error)
+        return run.result(
+            STATUS_DEFERRED, f"the inbox refused the question ({error}); nothing else written", verb_error=verb_error
+        )
     changed = _clear_needs_human(run, entry_id if created else None) if run.has_task() else False
     if not created and not changed:
-        return run.result(STATUS_NOTHING, f"inbox entry {entry_id} is still open and nothing else needed changing",
-                          inbox_entry=entry_id, verb_error=verb_error)
+        return run.result(
+            STATUS_NOTHING,
+            f"inbox entry {entry_id} is still open and nothing else needed changing",
+            inbox_entry=entry_id,
+            verb_error=verb_error,
+        )
     stopped = run.has_task() and run.task_state() == "BLOCKED"
     block_class = _CLASS_HUMAN if stopped else _CLASS_ANY
     run.ledger_open()
@@ -912,8 +989,14 @@ def _park(run: _Run, inbox: dc.Outcome, *, verb_error: Optional[str] = None,
     event = run.record_decision(status=STATUS_INBOX, verbs_run=[*(verbs_run or []), written], detail=detail)
     run.log("inbox", detail)
     return run.result(
-        STATUS_INBOX, detail, verb_error=verb_error, inbox_entry=entry_id, inbox_created=created,
-        decision_event=event, ledger_source=run.ledger_source, ledger_class=block_class,
+        STATUS_INBOX,
+        detail,
+        verb_error=verb_error,
+        inbox_entry=entry_id,
+        inbox_created=created,
+        decision_event=event,
+        ledger_source=run.ledger_source,
+        ledger_class=block_class,
     )
 
 
@@ -940,8 +1023,14 @@ def _execute_runaway(run: _Run) -> ExecutionResult:
     event = run.record_decision(status=STATUS_RUNAWAY, verbs_run=verbs, detail=detail)
     run.log("runaway", detail)
     return run.result(
-        STATUS_RUNAWAY, detail, inbox_entry=stop.inbox_entry or None, inbox_created=bool(stop.inbox_entry),
-        decision_event=event, ledger_source=run.ledger_source, ledger_class=_CLASS_HUMAN, halt_path=stop.halt_path,
+        STATUS_RUNAWAY,
+        detail,
+        inbox_entry=stop.inbox_entry or None,
+        inbox_created=bool(stop.inbox_entry),
+        decision_event=event,
+        ledger_source=run.ledger_source,
+        ledger_class=_CLASS_HUMAN,
+        halt_path=stop.halt_path,
     )
 
 
@@ -954,10 +1043,12 @@ def _carry_out_verb(run: _Run, verb: str, runner: Callable[[_Run, str], _VerbRun
     if done.skipped:
         if done.declined and run._task_is_stopped():
             return _report_declined(
-                run, done.declined,
+                run,
+                done.declined,
                 "To let OVERWATCH run such verbs, set block_triage = true under [overwatch] in "
                 f"{run.project_root / 'project.cfg'} (or kanban.cfg for every project)",
-                STATUS_NOTHING, done.detail,
+                STATUS_NOTHING,
+                done.detail,
             )
         return run.result(STATUS_NOTHING, done.detail)
     if not done.done:
@@ -974,7 +1065,10 @@ def _carry_out_verb(run: _Run, verb: str, runner: Callable[[_Run, str], _VerbRun
     # status-writer's BACKLOG/DONE write (class any).
     pair = bool(run.ledger_closed) or done.closes_any
     return run.result(
-        STATUS_EXECUTED, done.detail, decision_event=event, ledger_source=run.ledger_source if pair else None,
+        STATUS_EXECUTED,
+        done.detail,
+        decision_event=event,
+        ledger_source=run.ledger_source if pair else None,
         ledger_class=_CLASS_ANY if pair else None,
     )
 
@@ -984,7 +1078,8 @@ def _execute_verb(run: _Run) -> ExecutionResult:
     runner = _VERB_RUNNERS.get(verb)
     if runner is None or (verb in _TASK_VERBS and not run.has_task()):
         cause = (
-            f"verb {verb!r} has no executor" if runner is None
+            f"verb {verb!r} has no executor"
+            if runner is None
             else f"{run.status_file or 'the task folder'} does not exist"
         )
         inbox = dc.inbox_after_verb(run.inputs, verb or "the verb", cause)
@@ -992,7 +1087,9 @@ def _execute_verb(run: _Run) -> ExecutionResult:
             return run.under_halt_first(lambda: _park(run, inbox, verb_error=cause), op="operator-inbox")
         return _park(run, inbox, verb_error=cause)
     return run.under_halt_first(
-        lambda: _carry_out_verb(run, verb, runner), op=verb, past_project_halt=verb in _HALT_SUBJECT_VERBS,
+        lambda: _carry_out_verb(run, verb, runner),
+        op=verb,
+        past_project_halt=verb in _HALT_SUBJECT_VERBS,
     )
 
 
@@ -1000,16 +1097,16 @@ def execute(
     outcome: dc.Outcome,
     inputs: dc.DecisionInput,
     *,
-    kanban_root: "Path | str",
-    now: "datetime.datetime | str | None" = None,
-    queue_file: "Path | str | None" = None,
+    kanban_root: Path | str,
+    now: datetime.datetime | str | None = None,
+    queue_file: Path | str | None = None,
     triage_enabled: bool = True,
-    worktree_base: "Path | str | None" = None,
-    table_path: "Path | str | None" = None,
-    handlers: Optional[Mapping[str, bt.ActionHandler]] = None,
-    stage_runner: Optional[StageRunner] = None,
-    lock_wait_seconds: Optional[float] = None,
-    env: Optional[Mapping[str, str]] = None,
+    worktree_base: Path | str | None = None,
+    table_path: Path | str | None = None,
+    handlers: Mapping[str, bt.ActionHandler] | None = None,
+    stage_runner: StageRunner | None = None,
+    lock_wait_seconds: float | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> ExecutionResult:
     """Carry out *outcome*, decided from *inputs* (see the module docstring).
 
@@ -1039,9 +1136,18 @@ def execute(
             (backups first, so a revert can restore it).
     """
     run = _Run(
-        outcome, inputs, kanban_root=kanban_root, now=now, queue_file=queue_file, triage_enabled=triage_enabled,
-        worktree_base=worktree_base, table_path=table_path, handlers=handlers, stage_runner=stage_runner,
-        lock_wait_seconds=lock_wait_seconds, env=env,
+        outcome,
+        inputs,
+        kanban_root=kanban_root,
+        now=now,
+        queue_file=queue_file,
+        triage_enabled=triage_enabled,
+        worktree_base=worktree_base,
+        table_path=table_path,
+        handlers=handlers,
+        stage_runner=stage_runner,
+        lock_wait_seconds=lock_wait_seconds,
+        env=env,
     )
     if outcome.kind == dc.OUTCOME_NONE:
         return run.result(STATUS_NOTHING, f"decision none ({outcome.why}): {outcome.detail}")
@@ -1064,7 +1170,7 @@ def execute(
 
 
 def ask_operator(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     *,
     source: str,
@@ -1097,7 +1203,11 @@ def ask_operator(
         return None, False, str(exc)
     close = installed_script_command(ctx.kanban_root, "inbox.sh", "--project", project, "close", "--id")
     return write_inbox_question(
-        ctx, project, source=source, question=question, meanwhile=meanwhile,
+        ctx,
+        project,
+        source=source,
+        question=question,
+        meanwhile=meanwhile,
         how_to_answer=f"{how_to_answer.rstrip('. ')}. Then close this entry with {close} followed by its INBOX ID.",
     )
 
@@ -1109,7 +1219,7 @@ def _subject_label(inputs: dc.DecisionInput) -> str:
     return f"{inputs.subject}:{inputs.project}"
 
 
-def _decided_phrase(outcome: Optional[dc.Outcome]) -> str:
+def _decided_phrase(outcome: dc.Outcome | None) -> str:
     if outcome is None:
         return ""
     if outcome.kind == dc.OUTCOME_VERB:
@@ -1140,8 +1250,15 @@ def _resolve_yourself(ctx: OpsContext, inputs: dc.DecisionInput) -> str:
             ctx.kanban_root, "task-status.sh", *target, "--state", "BACKLOG", "--needs-human", "no"
         )
         wontdo = installed_script_command(
-            ctx.kanban_root, "task-status.sh", *target, "--state", "WONT-DO", "--needs-human", "yes",
-            "--summary", "Closed after an operator inbox question",
+            ctx.kanban_root,
+            "task-status.sh",
+            *target,
+            "--state",
+            "WONT-DO",
+            "--needs-human",
+            "yes",
+            "--summary",
+            "Closed after an operator inbox question",
         )
         return (
             f"Or resolve it yourself: return {inputs.task_id} to BACKLOG with `{backlog}`, "
@@ -1154,9 +1271,9 @@ def _resolve_yourself(ctx: OpsContext, inputs: dc.DecisionInput) -> str:
 
 
 def report_not_carried_out(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     inputs: dc.DecisionInput,
-    outcome: Optional[dc.Outcome],
+    outcome: dc.Outcome | None,
     *,
     cause: str,
     fix: str,
@@ -1194,7 +1311,12 @@ def report_not_carried_out(
         how = f"{how} {resolve}."
     source = inputs.task_id if subject == inputs.task_id else inputs.project
     return ask_operator(
-        kanban_root, inputs.project, source=source, lead=lead, question=question, meanwhile=meanwhile,
+        kanban_root,
+        inputs.project,
+        source=source,
+        lead=lead,
+        question=question,
+        meanwhile=meanwhile,
         how_to_answer=how,
     )
 
@@ -1204,11 +1326,18 @@ def _report_declined(run: _Run, why: str, fix: str, status: str, detail: str, **
     entry is new, else *status* naming the entry still open (or the refusal)."""
     entry_id, created, error = report_not_carried_out(run.root, run.inputs, run.outcome, cause=why, fix=fix)
     if error is not None:
-        return run.result(status, f"{detail}; the operator inbox refused the report ({one_line(error)})",
-                          verb_error=why, **fields)
+        return run.result(
+            status, f"{detail}; the operator inbox refused the report ({one_line(error)})", verb_error=why, **fields
+        )
     said = f"operator inbox entry {entry_id} {'written' if created else 'still open'}"
-    return run.result(STATUS_INBOX if created else status, f"{detail}; {said}", verb_error=why,
-                      inbox_entry=entry_id, inbox_created=created, **fields)
+    return run.result(
+        STATUS_INBOX if created else status,
+        f"{detail}; {said}",
+        verb_error=why,
+        inbox_entry=entry_id,
+        inbox_created=created,
+        **fields,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1230,7 +1359,7 @@ def _decision_events(text: str) -> list:
     return bodies
 
 
-def task_history(release_state_path: "Path | str", task_id: str) -> dc.TaskHistory:
+def task_history(release_state_path: Path | str, task_id: str) -> dc.TaskHistory:
     """How many times each verb ran on *task_id*, from the executor's Decision
     events in *release_state_path* — the history decide's verb budgets read.
 
@@ -1248,4 +1377,3 @@ def task_history(release_state_path: "Path | str", task_id: str) -> dc.TaskHisto
             if kind == dc.OUTCOME_VERB and source == task_id and result == STATUS_EXECUTED:
                 uses[name] = uses.get(name, 0) + 1
     return dc.TaskHistory(verb_uses=uses)
-

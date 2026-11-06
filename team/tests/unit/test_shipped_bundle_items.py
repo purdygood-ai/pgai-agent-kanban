@@ -133,9 +133,7 @@ def test_items_that_are_not_running_or_missing_are_counted_and_untouched(tmp_pat
     assert "    skip (status=open): BUG-0006.md" in lines
     assert "    skip (status=no-status-field): BUG-0007.md" in lines
     assert f"    WARN: item not found (skipped): {missing}" in lines
-    assert counts == PromotionCounts(
-        bundles_processed=1, bundles_shipped=1, skipped_not_running=2, skipped_missing=1
-    )
+    assert counts == PromotionCounts(bundles_processed=1, bundles_shipped=1, skipped_not_running=2, skipped_missing=1)
 
 
 def test_non_bundle_files_and_a_bundle_without_target_version_are_skipped(tmp_path):

@@ -73,6 +73,7 @@ GENERATED_PATTERNS: tuple[str, ...] = (
     "*.previous-RUN-*",
 )
 
+
 class Finding(NamedTuple):
     """One reported file."""
 
@@ -94,9 +95,7 @@ def _git(root: Path, *args: str) -> list[str]:
         RuntimeError: git is missing or the command failed (its stderr named).
     """
     try:
-        done = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, check=False
-        )
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
     except OSError as exc:
         raise RuntimeError(f"git could not run: {exc}") from exc
     if done.returncode != 0:
@@ -123,24 +122,30 @@ def collect(root: Path, base: str | None = None) -> tuple[int, list[Finding]]:
     tracked = _git(root, "ls-files", "-z")
     findings: list[Finding] = []
     for path in _git(root, "ls-files", "-z", "-ci", "--exclude-standard"):
-        findings.append(Finding(
-            "tracked-ignored", path, 0,
-            f"{path} is tracked but an ignore rule matches it "
-            f"(see: git check-ignore -v --no-index -- {shlex.quote(path)})",
-            f"untrack it, or narrow the ignore rule if the file belongs in the repository: {_untrack(path)}",
-        ))
-    candidates = (
-        _git(root, "diff", "-z", "--name-only", "--diff-filter=A", f"{base}...HEAD") if base else tracked
-    )
+        findings.append(
+            Finding(
+                "tracked-ignored",
+                path,
+                0,
+                f"{path} is tracked but an ignore rule matches it "
+                f"(see: git check-ignore -v --no-index -- {shlex.quote(path)})",
+                f"untrack it, or narrow the ignore rule if the file belongs in the repository: {_untrack(path)}",
+            )
+        )
+    candidates = _git(root, "diff", "-z", "--name-only", "--diff-filter=A", f"{base}...HEAD") if base else tracked
     ignored = {f.file for f in findings}
     for path in candidates:
         if path in ignored or not is_generated(path):
             continue
-        findings.append(Finding(
-            "generated-file", path, 0,
-            f"{path} is a generated file (logs, locks and coverage output are never committed)",
-            f"untrack it and keep it out with an ignore rule: {_untrack(path)}",
-        ))
+        findings.append(
+            Finding(
+                "generated-file",
+                path,
+                0,
+                f"{path} is a generated file (logs, locks and coverage output are never committed)",
+                f"untrack it and keep it out with an ignore rule: {_untrack(path)}",
+            )
+        )
     return len(tracked), findings
 
 
@@ -152,13 +157,21 @@ def _build_parser() -> argparse.ArgumentParser:
             "(logs, locks, coverage output). Quality class: always exits 0."
         ),
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--base", metavar="REF", default=None,
-                        help="Check only files added since REF for generated kinds "
-                             "(default: every tracked file).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write findings as a JSON array to PATH (always written).")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--base",
+        metavar="REF",
+        default=None,
+        help="Check only files added since REF for generated kinds " "(default: every tracked file).",
+    )
+    parser.add_argument(
+        "--findings-file", metavar="PATH", default=None, help="Write findings as a JSON array to PATH (always written)."
+    )
     return parser
 
 

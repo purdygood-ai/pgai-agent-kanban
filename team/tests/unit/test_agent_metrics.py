@@ -166,7 +166,7 @@ class TestRoundOneDecimal:
     @pytest.mark.parametrize(
         "value, expected",
         [
-            (2.25, 2.3),   # half rounds away from zero, not to even
+            (2.25, 2.3),  # half rounds away from zero, not to even
             (2.35, 2.4),
             (-2.25, -2.3),
             (4.66666, 4.7),
@@ -185,7 +185,7 @@ class TestRoundOneDecimal:
     def test_rule_differs_from_builtin_half_to_even_where_it_matters(self):
         # The built-in rounds 2.25 to 2.2; the shared rule prints what a
         # person rounding by hand writes.
-        assert "{:.1f}".format(2.25) == "2.2"
+        assert f"{2.25:.1f}" == "2.2"
         assert nf.format_one_decimal(core.round_one_decimal(2.25)) == "2.3"
 
     def test_cli_renderer_uses_the_shared_rule(self):
@@ -652,25 +652,24 @@ def _clean_env(kanban_root: pathlib.Path) -> dict[str, str]:
 def fixture_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
     """A minimal kanban root with two registered projects:
 
-      demo-project  -- two RC rollups: v0.1.0 carries a "wall"."by_agent"
-                        block (the optional per-agent wall-time field) for both agents,
-                        with DIFFERENT per-task figures for coder and
-                        writer -- proving the two don't coincidentally
-                        share a value the way the RC-level wall_time_minutes
-                        join bug used to produce. v0.2.0 has no "wall" key
-                        at all (a legacy rollup predating that field),
-                        exercising the absent-data placeholder contract,
-                        and also contributes a second invocation RC to
-                        coder's avg_tokens/avg_tasks (but not avg_wall).
-                        "writer" only appears in v0.1.0, exercising the
-                        zero-invocation-elsewhere case.
-      empty-project -- registered, but has no metrics/rc/ directory at all.
+    demo-project  -- two RC rollups: v0.1.0 carries a "wall"."by_agent"
+                      block (the optional per-agent wall-time field) for both agents,
+                      with DIFFERENT per-task figures for coder and
+                      writer -- proving the two don't coincidentally
+                      share a value the way the RC-level wall_time_minutes
+                      join bug used to produce. v0.2.0 has no "wall" key
+                      at all (a legacy rollup predating that field),
+                      exercising the absent-data placeholder contract,
+                      and also contributes a second invocation RC to
+                      coder's avg_tokens/avg_tasks (but not avg_wall).
+                      "writer" only appears in v0.1.0, exercising the
+                      zero-invocation-elsewhere case.
+    empty-project -- registered, but has no metrics/rc/ directory at all.
     """
     root = tmp_path / "kanban"
     root.mkdir()
     (root / "projects.cfg").write_text(
-        "[project:demo-project]\npriority=1\nenabled=true\n\n"
-        "[project:empty-project]\npriority=2\nenabled=true\n",
+        "[project:demo-project]\npriority=1\nenabled=true\n\n" "[project:empty-project]\npriority=2\nenabled=true\n",
         encoding="utf-8",
     )
 
@@ -689,7 +688,7 @@ def fixture_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
             },
             "wall": {
                 "by_agent": {
-                    "coder": {"seconds": 1200, "task_count": 2},   # 10 min/task
+                    "coder": {"seconds": 1200, "task_count": 2},  # 10 min/task
                     "writer": {"seconds": 2700, "task_count": 1},  # 45 min/task
                 }
             },
@@ -756,9 +755,12 @@ class TestAgentMetricsShEndToEnd:
     def test_project_with_no_metrics_files_still_exits_zero_with_placeholder(self, fixture_kanban_root):
         result = subprocess.run(
             [
-                "bash", str(_AGENT_METRICS_SH),
-                "--kanban-root", str(fixture_kanban_root),
-                "--project", "empty-project",
+                "bash",
+                str(_AGENT_METRICS_SH),
+                "--kanban-root",
+                str(fixture_kanban_root),
+                "--project",
+                "empty-project",
                 "--no-color",
             ],
             capture_output=True,
@@ -772,10 +774,14 @@ class TestAgentMetricsShEndToEnd:
     def test_window_flag_narrows_the_averaging_horizon(self, fixture_kanban_root):
         result = subprocess.run(
             [
-                "bash", str(_AGENT_METRICS_SH),
-                "--kanban-root", str(fixture_kanban_root),
-                "--project", "demo-project",
-                "--window", "1",
+                "bash",
+                str(_AGENT_METRICS_SH),
+                "--kanban-root",
+                str(fixture_kanban_root),
+                "--project",
+                "demo-project",
+                "--window",
+                "1",
                 "--no-color",
             ],
             capture_output=True,
@@ -826,9 +832,7 @@ class TestAgentMetricsShEndToEnd:
         assert "Avg Tokens (/RC)" in result.stdout
         assert "Avg Tasks (/RC)" in result.stdout
 
-    def test_agents_sharing_invocation_rcs_no_longer_share_a_coincidental_wall_value(
-        self, fixture_kanban_root
-    ):
+    def test_agents_sharing_invocation_rcs_no_longer_share_a_coincidental_wall_value(self, fixture_kanban_root):
         # coder and writer are both invoked only in v0.1.0. A reader that
         # joins on the RC's own shared wall_time_minutes would print the
         # SAME figure for both instead of either agent's own per-task
@@ -878,9 +882,12 @@ def _span_kanban_root(tmp_path: pathlib.Path, rc_seeder) -> pathlib.Path:
 def _run_agent_metrics(kanban_root: pathlib.Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            "bash", str(_AGENT_METRICS_SH),
-            "--project", "p",
-            "--kanban-root", str(kanban_root),
+            "bash",
+            str(_AGENT_METRICS_SH),
+            "--project",
+            "p",
+            "--kanban-root",
+            str(kanban_root),
             "--no-color",
             *extra,
         ],
@@ -893,9 +900,7 @@ def _run_agent_metrics(kanban_root: pathlib.Path, *extra: str) -> subprocess.Com
 
 # A rendered agent row: name, three one-decimal averages (or '--'), two
 # integer totals -- the row shape render_project_block() documents.
-_ROW_RE = re.compile(
-    r"^(\S+)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+([\d,]+)\s+([\d,]+)\s*$"
-)
+_ROW_RE = re.compile(r"^(\S+)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+([\d,]+)\s+([\d,]+)\s*$")
 _FOOTER_RE = re.compile(r"^(window|all|since \S+): ([\d,]+) shipped RCs \(([\d,]+) cancelled excluded\)$")
 
 
@@ -1090,8 +1095,14 @@ class TestAgentMetricsSpanFlags:
         via_script = _run_agent_metrics(root, "--since", "v0.20.0")
         via_python = subprocess.run(
             [
-                sys.executable, str(_LIB_PATH / "agent_metrics.py"),
-                "--kanban-root", str(root), "--project", "p", "--since", "v0.20.0",
+                sys.executable,
+                str(_LIB_PATH / "agent_metrics.py"),
+                "--kanban-root",
+                str(root),
+                "--project",
+                "p",
+                "--since",
+                "v0.20.0",
             ],
             capture_output=True,
             text=True,
@@ -1111,9 +1122,12 @@ class TestExistingRenderersUnchangedAfterConvergingOnSharedFormatter:
     def test_show_metrics_per_agent_view_unchanged(self, fixture_kanban_root):
         result = subprocess.run(
             [
-                "bash", str(_SHOW_METRICS_SH),
-                "--kanban-root", str(fixture_kanban_root),
-                "--project", "demo-project",
+                "bash",
+                str(_SHOW_METRICS_SH),
+                "--kanban-root",
+                str(fixture_kanban_root),
+                "--project",
+                "demo-project",
                 "--per-agent",
                 "--no-color",
             ],
@@ -1137,9 +1151,12 @@ class TestExistingRenderersUnchangedAfterConvergingOnSharedFormatter:
         )
         result = subprocess.run(
             [
-                "bash", str(_SHOW_METRICS_SH),
-                "--kanban-root", str(fixture_kanban_root),
-                "--project", "demo-project",
+                "bash",
+                str(_SHOW_METRICS_SH),
+                "--kanban-root",
+                str(fixture_kanban_root),
+                "--project",
+                "demo-project",
                 "--no-color",
             ],
             capture_output=True,

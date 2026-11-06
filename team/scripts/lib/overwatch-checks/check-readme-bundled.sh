@@ -18,13 +18,16 @@
 #      a. A path ending in /README.md (or == README.md), OR
 #      b. A path containing /templates/ or starting with templates/
 #   4. If a match is found AND the task's status.md shows State: BACKLOG or WORKING:
-#      a. Allocate the next BUG-NNNN number from bugs/
-#      b. File a bug report describing the mis-queued PM task
-#      c. Mark the offending PM task WONT-DO in its status.md (with a Blocked Reason)
-#      d. Log the action via overwatch_log_action
+#      a. File a bug report describing the mis-queued PM task through intake
+#         (overwatch_deposit_bug), which claims its BUG-NNNN number; a report
+#         intake refuses as the same defect as a live bug names that bug
+#         instead, and no second bug is filed
+#      b. Mark the offending PM task WONT-DO in its status.md (with a Blocked
+#         Reason naming the filed or already-live bug)
+#      c. Log the action via overwatch_log_action
 #
 # This script does NOT delete the offending PM task folder. It only:
-#   - Files a bug report in bugs/
+#   - Files a bug report through intake
 #   - Sets the PM task status to WONT-DO
 #
 # This script is both:
@@ -49,7 +52,14 @@
 #
 # --dry-run: scans and logs findings but does NOT modify task status or file bugs.
 
-# overwatch_registered_projects: the shared projects.cfg reader.
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CRB_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CRB_SELF_DIR=""
+_CRB_LIB_DIR="${_CRB_SELF_DIR%/*}"
+
+# overwatch_registered_projects: the shared projects.cfg reader;
+# overwatch_deposit_bug: filing through intake.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
@@ -59,58 +69,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _crb_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-readme-bundled: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        # Resolve from projects.cfg — never silently fall back to first project.
-        # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
-        # path is only safe for single-project installs.
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-readme-bundled: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-readme-bundled: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-readme-bundled || return 1
     return 0
-}
-
-# ---------------------------------------------------------------------------
-# _crb_next_bug_number <bugs_dir>
-# Determine the next BUG-NNNN sequence number by scanning existing BUG-NNNN
-# files in <bugs_dir>. Echoes a zero-padded 4-digit number.
-# ---------------------------------------------------------------------------
-_crb_next_bug_number() {
-    local bugs_dir="$1"
-    local highest=0
-    local num
-
-    if [[ -d "${bugs_dir}" ]]; then
-        while IFS= read -r f; do
-            num="$(basename "${f}" | grep -oE '^BUG-[0-9]+' | grep -oE '[0-9]+' | head -n1)"
-            if [[ -n "${num}" ]] && (( 10#${num} > highest )); then
-                highest=$(( 10#${num} ))
-            fi
-        done < <(find "${bugs_dir}" -maxdepth 1 -name 'BUG-[0-9]*' -type f 2>/dev/null)
-    fi
-
-    printf '%04d' $(( highest + 1 ))
 }
 
 # ---------------------------------------------------------------------------
@@ -127,7 +87,7 @@ _crb_load_md_field() {
     local runner=""
     runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
     # shellcheck source=../md_field.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    source "${_CRB_LIB_DIR}/md_field.sh" || return 1
     [[ -n "${runner}" ]] && eval "${runner}"
     declare -F read_md_field >/dev/null 2>&1
 }
@@ -216,7 +176,7 @@ _crb_input_is_bad() {
 # ---------------------------------------------------------------------------
 _crb_mark_status_wont_do() (
     # shellcheck source=../pp_run_ops.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../pp_run_ops.sh" || exit 1
+    source "${_CRB_LIB_DIR}/pp_run_ops.sh" || exit 1
     pp_run_ops pgai_agent_kanban.overwatch.pm_task_wont_do -- "$1" "$2" "$3" "$4" "$5"
 )
 
@@ -227,25 +187,24 @@ _crb_mark_status_wont_do() (
 #   _CRB_TASK_ID       — PM task ID
 #   _CRB_TASK_DIR      — absolute path to PM task directory
 #   _CRB_BAD_INPUT     — the offending input path
-#   _CRB_BUGS_DIR      — path to bugs/
-#   _CRB_BUG_NUM       — pre-allocated BUG number (zero-padded 4-digit string)
+#   _CRB_PROJECT       — the project name the bug is filed for
 #
 # Actions:
 #   1. Backup the PM task's status.md via overwatch_backup_file
-#   2. Set PM task status.md State -> WONT-DO with Blocked Reason
-#   3. Create bugs/BUG-NNNN-<slug>.md describing the problem
+#   2. File a bug describing the problem through intake
+#      (overwatch_deposit_bug); a same-defect refusal names the live bug
+#   3. Set PM task status.md State -> WONT-DO with Blocked Reason naming
+#      that bug
 #   4. Log action via overwatch_log_action
 # ---------------------------------------------------------------------------
 _crb_do_remediate() {
     local task_id="${_CRB_TASK_ID}"
     local task_dir="${_CRB_TASK_DIR}"
     local bad_input="${_CRB_BAD_INPUT}"
-    local bugs_dir="${_CRB_BUGS_DIR}"
-    local bug_num="${_CRB_BUG_NUM}"
+    local project="${_CRB_PROJECT}"
 
     local task_status="${task_dir}/status.md"
     local bug_slug="pm-task-readme-or-template-as-requirements-input"
-    local bug_file="${bugs_dir}/BUG-${bug_num}-${bug_slug}.md"
     local detected_at
     detected_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -264,10 +223,10 @@ _crb_do_remediate() {
         input_category="templates/ path (template/placeholder file)"
     fi
 
-    # Create the bug report
-    cat > "${bug_file}" <<EOF
-# BUG-${bug_num}: PM task queued with ${input_category} as requirements input
-
+    # File the bug report through intake
+    local bug_file="" deposit_rc=0 filed_note
+    bug_file="$(overwatch_deposit_bug check-readme-bundled "${project}" "${bug_slug}" \
+        "PM task queued with ${input_category} as requirements input" <<EOF
 **Filed By:** OVERWATCH check-readme-bundled
 **Date:** ${detected_at}
 **Offending Task:** ${task_id}
@@ -329,9 +288,21 @@ Offending task: ${task_id}
 Bad input path: ${bad_input}
 Status backup: ${bpath}
 EOF
+)" || deposit_rc=$?
 
-    if [[ ! -f "${bug_file}" ]]; then
-        echo "check-readme-bundled: failed to write bug file: ${bug_file}" >&2
+    case "${deposit_rc}" in
+        0) filed_note="bug filed: ${bug_file}" ;;
+        2) filed_note="already filed as ${bug_file}" ;;
+        *)
+            echo "check-readme-bundled: bug deposit failed for ${task_id}; status left unchanged" >&2
+            return 1
+            ;;
+    esac
+    # The number the status rewrite names: from the filed or live bug's name.
+    local bug_num=""
+    [[ "${bug_file##*/}" =~ ^BUG-([0-9]+) ]] && bug_num="${BASH_REMATCH[1]}"
+    if [[ -z "${bug_num}" ]]; then
+        echo "check-readme-bundled: intake named no bug file for ${task_id} (${bug_file:-nothing}); status left unchanged" >&2
         return 1
     fi
 
@@ -351,10 +322,10 @@ EOF
         "${task_id}" \
         "pm-task-readme-input-remediated" \
         "${bpath}" \
-        "PM task ${task_id} marked WONT-DO; bad input: ${bad_input}; bug filed: ${bug_file}" \
+        "PM task ${task_id} marked WONT-DO; bad input: ${bad_input}; ${filed_note}" \
     || true
 
-    echo "check-readme-bundled: remediated ${task_id}: marked WONT-DO; filed BUG-${bug_num} at ${bug_file}" >&2
+    echo "check-readme-bundled: remediated ${task_id}: marked WONT-DO; ${filed_note}" >&2
     return 0
 }
 
@@ -387,7 +358,7 @@ overwatch_check_readme_bundled() {
     # The shared task-ID shape picks out PM task folders.
     if ! declare -f kanban_task_id_role >/dev/null 2>&1; then
         local ids_lib
-        ids_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/task_ids.sh"
+        ids_lib="${_CRB_LIB_DIR}/task_ids.sh"
         if [[ ! -f "${ids_lib}" ]]; then
             echo "check-readme-bundled: task_ids.sh not found at ${ids_lib}" >&2
             return 1
@@ -399,7 +370,8 @@ overwatch_check_readme_bundled() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CRB_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-readme-bundled: cannot resolve lib dir" >&2
             return 1
         }
@@ -498,21 +470,16 @@ overwatch_check_readme_bundled() {
             continue
         fi
 
-        # Allocate next bug number (recalculate each iteration for accuracy)
-        local bug_num
-        bug_num="$(_crb_next_bug_number "${bugs_dir}")"
-
         # Live mode: remediate via overwatch_halt_first_fix
         export _CRB_TASK_ID="${task_id}"
         export _CRB_TASK_DIR="${task_dir}"
         export _CRB_BAD_INPUT="${bad_input}"
-        export _CRB_BUGS_DIR="${bugs_dir}"
-        export _CRB_BUG_NUM="${bug_num}"
+        export _CRB_PROJECT="${project_name}"
 
         local fix_exit=0
         overwatch_halt_first_fix _crb_do_remediate || fix_exit=$?
 
-        unset _CRB_TASK_ID _CRB_TASK_DIR _CRB_BAD_INPUT _CRB_BUGS_DIR _CRB_BUG_NUM
+        unset _CRB_TASK_ID _CRB_TASK_DIR _CRB_BAD_INPUT _CRB_PROJECT
 
         if (( fix_exit == 3 )); then
             echo "check-readme-bundled: HALT_OVERWATCH guard tripped; aborting" >&2

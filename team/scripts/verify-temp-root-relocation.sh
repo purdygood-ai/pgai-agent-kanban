@@ -52,12 +52,12 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script and source shared helpers
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 _TEMP_SH="${_SCRIPT_DIR}/lib/temp.sh"
 if [[ ! -f "$_TEMP_SH" ]]; then
@@ -77,30 +77,21 @@ fi
 source "$_INI_SH"
 unset _INI_SH
 
+# resolve_global_dev_tree: the one resolver for the global dev tree.
+# shellcheck source=lib/dev_tree.sh
+source "${_SCRIPT_DIR}/lib/dev_tree.sh"
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 RELOCATED_ROOT="${HOME}/tmp"
 VERBOSE=false
-PASS_COUNT=0
-FAIL_COUNT=0
-
-# ---------------------------------------------------------------------------
-# Color helpers (only when stdout is a tty)
-# ---------------------------------------------------------------------------
-if [[ -t 1 ]]; then
-    C_RED=$'\033[0;31m'
-    C_GREEN=$'\033[0;32m'
-    C_YELLOW=$'\033[0;33m'
-    C_RESET=$'\033[0m'
-else
-    C_RED="" C_GREEN="" C_YELLOW="" C_RESET=""
-fi
-
-pass() { echo "${C_GREEN}PASS${C_RESET}: $*"; (( PASS_COUNT++ )) || true; }
-fail() { echo "${C_RED}FAIL${C_RESET}: $*"; (( FAIL_COUNT++ )) || true; }
-warn() { echo "${C_YELLOW}WARN${C_RESET}: $*"; }
+# PASS_COUNT / FAIL_COUNT, the C_* colours and pass / fail / warn
+# (lib/verify_harness.sh).
+# shellcheck source=lib/verify_harness.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/verify_harness.sh"
+verify_harness_init
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -167,7 +158,6 @@ done
 # Validate environment
 # ---------------------------------------------------------------------------
 KANBAN_CFG="${KANBAN_ROOT}/kanban.cfg"
-DEV_TREE="${PGAI_DEV_TREE_PATH:-}"
 
 if [[ ! -f "$KANBAN_CFG" ]]; then
     echo "ERROR: kanban.cfg not found at: $KANBAN_CFG" >&2
@@ -175,10 +165,8 @@ if [[ ! -f "$KANBAN_CFG" ]]; then
     exit 2
 fi
 
-if [[ -z "$DEV_TREE" ]]; then
-    # Try reading from kanban.cfg
-    DEV_TREE="$(read_ini "$KANBAN_CFG" paths dev_tree_path "")"
-fi
+# $PGAI_DEV_TREE_PATH, else [paths] dev_tree_path in this kanban.cfg.
+DEV_TREE="$(resolve_global_dev_tree "$KANBAN_CFG")"
 
 if [[ -z "$DEV_TREE" ]]; then
     echo "ERROR: dev_tree_path not set in $KANBAN_CFG and \$PGAI_DEV_TREE_PATH is unset." >&2

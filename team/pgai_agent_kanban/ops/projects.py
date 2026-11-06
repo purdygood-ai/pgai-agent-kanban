@@ -113,7 +113,7 @@ import re
 import shlex
 import shutil
 import sys
-from typing import Optional, Union
+from typing import Union
 
 from pgai_agent_kanban.api.validation import (
     ComponentRefused,
@@ -251,7 +251,7 @@ _CFG_SECTION_RE = re.compile(r"^\s*\[\s*([^\]]+?)\s*\]\s*$")
 _CFG_ACTIVE_KEY_RE = re.compile(r"^\s*([A-Za-z0-9_.-]+)\s*=")
 
 PathLike = Union[str, "os.PathLike[str]"]
-Value = Union[int, str, None]
+Value = int | str | None
 
 # Defaults create-project.sh documents for project.cfg.
 DEFAULT_WORKFLOW = "release"
@@ -263,8 +263,7 @@ DEFAULT_MAX_MINOR = str(CEILING_DEFAULTS["max_minor"])
 DEFAULT_MAX_MAJOR = str(CEILING_DEFAULTS["max_major"])
 
 _CREATE_USAGE = (
-    "Usage: create-project.sh --project <name> [--workflow-type <type>] "
-    "[--max-minor <N>] [--max-major <N>]"
+    "Usage: create-project.sh --project <name> [--workflow-type <type>] " "[--max-minor <N>] [--max-major <N>]"
 )
 _ADD_USAGE = "Usage: add-project.sh --project <name> [--priority <int>]"
 _REMOVE_USAGE = "Usage: remove-project.sh --project <name> [--force] [--dry-run]"
@@ -375,7 +374,7 @@ def _warn(*lines: str) -> None:
     sys.stderr.flush()
 
 
-def _text(value: Value) -> Optional[str]:
+def _text(value: Value) -> str | None:
     """None stays None; anything else becomes its text form (an int's digits)."""
     return None if value is None else str(value)
 
@@ -396,7 +395,7 @@ _BLANK_RE = re.compile(r"^[ \t\r\f\v]*$")
 _PROJECT_SECTION_RE = re.compile(r"^[ \t\r\f\v]*\[project:(.*)\][ \t\r\f\v]*$")
 
 
-def _project_header(line: str) -> Optional[str]:
+def _project_header(line: str) -> str | None:
     """NAME when *line* is a ``[project:NAME]`` header the registry accepts, else None.
 
     ``project_header`` in PROJECTS_CFG_AWK_HEADER: a :data:`_PROJECT_SECTION_RE`
@@ -409,6 +408,7 @@ def _project_header(line: str) -> Optional[str]:
     if section is None or not ini.is_project_name(section.group(1)):
         return None
     return section.group(1)
+
 
 # A line projects_cfg_format skips while looking for the first data line: a
 # '#' or ';' comment, or a blank line.
@@ -551,7 +551,7 @@ class _Registry:
         pattern = re.compile(rf"^[ \t\r\f\v]*{re.escape(name)}[ \t\r\f\v]*:")
         return any(pattern.match(line) for line in self.lines())
 
-    def _ini_field(self, name: str, key: str) -> tuple[bool, Optional[str]]:
+    def _ini_field(self, name: str, key: str) -> tuple[bool, str | None]:
         """``(section_found, value)`` for *key* in ``[project:name]``.
 
         A section of another kind ends the project's section. Only
@@ -565,7 +565,7 @@ class _Registry:
         """
         current = ""
         found = False
-        result: Optional[str] = None
+        result: str | None = None
         for line in self.lines():
             if _skippable(line):
                 continue
@@ -583,7 +583,7 @@ class _Registry:
                     result = value
         return found, result
 
-    def _colon_entry(self, name: str) -> Optional[list[str]]:
+    def _colon_entry(self, name: str) -> list[str] | None:
         for line in self.lines():
             if _skippable(line):
                 continue
@@ -592,7 +592,7 @@ class _Registry:
                 return fields
         return None
 
-    def priority(self, name: str) -> Optional[str]:
+    def priority(self, name: str) -> str | None:
         """The registered priority of *name*, or None (``projects_cfg_priority``)."""
         if not name or not self.exists():
             return None
@@ -603,7 +603,7 @@ class _Registry:
             return None
         return _trim(fields[1]) if len(fields) > 1 else ""
 
-    def raw_color(self, name: str) -> Optional[str]:
+    def raw_color(self, name: str) -> str | None:
         """The explicit colour of *name*: ``""`` when it has none, None when unregistered."""
         if not name or not self.exists():
             return None
@@ -624,37 +624,8 @@ class _Registry:
         size = len(palette)
         lines = self.lines()
         if self.format() == "ini":
-            # A [project:...] section with a rejected name ends a project's
-            # section; a section of another kind does not end it here.
-            line_of: dict[str, int] = {}
-            order: list[str] = []
-            prio: dict[str, str] = {}
-            current = ""
-            for number, line in enumerate(lines, start=1):
-                if _skippable(line):
-                    continue
-                header = _project_header(line)
-                if header is not None:
-                    current = header
-                    line_of[current] = number
-                    order.append(current)
-                    continue
-                if _PROJECT_SECTION_RE.match(line):
-                    current = ""
-                    continue
-                if _ANY_SECTION_RE.match(line):
-                    continue
-                if current and _FIELD_RE.match(line):
-                    key, value = _field(line)
-                    if key == "priority":
-                        prio[current] = value
-            rows = sorted(
-                (_awk_int(prio.get(nm, "") or "999"), line_of[nm], nm) for nm in order
-            )
-            for index, (_p, _l, nm) in enumerate(rows):
-                if nm == name:
-                    return index % size
-            return 0
+            order = _ini_registration_order(self)
+            return order.index(name) % size if name in order else 0
         # Colon-legacy: rows are keyed by line number, but only the first
         # len(rows) line numbers are visited, so the bash helper finds a
         # project only when no comment or blank line precedes it.
@@ -673,7 +644,7 @@ class _Registry:
                 return index % size
         return 0
 
-    def color(self, name: str) -> Optional[str]:
+    def color(self, name: str) -> str | None:
         """The display colour of *name*: explicit, else its palette slot (``projects_cfg_color``)."""
         raw = self.raw_color(name)
         if raw is None:
@@ -684,7 +655,15 @@ class _Registry:
         return palette[self._palette_index(name, palette)]
 
     def _used_colors(self, palette: tuple[str, ...]) -> list[str]:
-        """Upper-cased effective colours of every registered project."""
+        """Upper-cased effective colours of every registered project.
+
+        A project without an explicit colour holds the palette slot of its
+        position sorted by priority, then line. In an INI registry an absent
+        priority, or one that is not a plain, optionally signed integer
+        (``abc``, ``7abc``), reads as 999 -- the reading
+        ``_ini_registration_order`` gives the palette slot behind
+        ``color`` -- so these are the colours projects actually show.
+        """
         if not self.exists():
             return []
         size = len(palette)
@@ -702,8 +681,11 @@ class _Registry:
                 header = _project_header(line)
                 if header is not None:
                     current = header
-                    line_of[current] = number
-                    order.append(current)
+                    # A repeated section keeps the first position, as in
+                    # _ini_registration_order: one project, one slot.
+                    if current not in line_of:
+                        line_of[current] = number
+                        order.append(current)
                     continue
                 if _ANY_SECTION_RE.match(line):
                     current = ""
@@ -714,7 +696,9 @@ class _Registry:
                         prio[current] = value
                     if key == "dashboard_color" and value:
                         explicit[current] = value
-            rows = [(_awk_int(prio.get(nm, "") or "999"), line_of[nm], nm) for nm in order]
+            # A priority that is not a plain integer reads as 999, as the
+            # palette slot (_ini_registration_order) reads it.
+            rows = [(_list_priority(prio.get(nm, "")), line_of[nm], nm) for nm in order]
         else:
             for number, line in enumerate(lines, start=1):
                 if _skippable(line):
@@ -736,7 +720,9 @@ class _Registry:
 
         Every project's effective colour counts -- an explicit
         ``dashboard_color`` or, without one, the palette slot it holds by
-        registration order. With all in use, the first entry is reused and
+        registration order (priority, then line; in an INI registry a
+        priority that is absent or not a plain integer reads as 999, as
+        ``color`` reads it). With all in use, the first entry is reused and
         a warning goes to stderr.
         """
         palette = load_default_palette()
@@ -751,24 +737,43 @@ class _Registry:
         return palette[0]
 
     def next_priority(self) -> int:
-        """One more than the largest integer priority registered, or 1 (``projects_cfg_next_priority``)."""
+        """One more than the largest integer priority registered, or 1 (``projects_cfg_next_priority``).
+
+        In an INI registry only projects count: a priority under a section of
+        another kind (``[defaults]``, or a ``[project:...]`` one whose name the
+        registry rejects) is no project's, and a project registered by two
+        sections counts once, with the priority its last section that sets
+        one gives it (:meth:`_ini_field`). A priority that is not a plain
+        unsigned integer is skipped.
+        """
         if not self.exists():
             return 1
         highest = 0
-        ini_format = self.format() == "ini"
-        for line in self.lines():
-            if ini_format:
-                if not _FIELD_RE.match(line):
-                    continue
-                key, value = _field(line)
-                if key == "priority" and re.fullmatch(r"[0-9]+", value):
-                    highest = max(highest, int(value))
-            else:
+        if self.format() == "ini":
+            prio: dict[str, str] = {}
+            current = ""
+            for line in self.lines():
                 if _skippable(line):
                     continue
-                fields = _colon_fields(line)
-                if len(fields) >= 2 and re.fullmatch(r"[0-9]+", _trim(fields[1])):
-                    highest = max(highest, int(_trim(fields[1])))
+                header = _project_header(line)
+                if header is not None:
+                    current = header
+                    continue
+                if _ANY_SECTION_RE.match(line):
+                    current = ""
+                    continue
+                if current and _FIELD_RE.match(line):
+                    key, value = _field(line)
+                    if key == "priority":
+                        prio[current] = value
+            plain = [int(value) for value in prio.values() if re.fullmatch(r"[0-9]+", value)]
+            return max(plain, default=0) + 1
+        for line in self.lines():
+            if _skippable(line):
+                continue
+            fields = _colon_fields(line)
+            if len(fields) >= 2 and re.fullmatch(r"[0-9]+", _trim(fields[1])):
+                highest = max(highest, int(_trim(fields[1])))
         return highest + 1
 
     # -- writing ------------------------------------------------------------
@@ -915,11 +920,12 @@ def _ini_registration_order(registry: _Registry) -> list[str]:
     Every ``[project:<name>]`` header, sorted by its priority (999 when
     absent or not a plain integer, as ``projects_cfg_list`` and
     ``ini.projects_registry`` both read it), then by the header's line
-    number. A ``[project:...]`` section whose name the registry rejects
-    (``[project:bad.name]``) ends a project's section, so a priority under
-    it is no project's; a section of another kind does not end it here, as
-    in the bash helper. A name with more than one section is listed once,
-    at its first header's line, with the last priority set.
+    number. Any other section -- a ``[project:...]`` one whose name the
+    registry rejects (``[project:bad.name]``) or one of another kind
+    (``[defaults]``) -- ends a project's section, so a priority under it is
+    no project's. A name with more than one section is listed once, at its
+    first header's line, with the last priority set. The palette slot
+    (``_projects_cfg_palette_index_for``) is the position in this order.
     """
     line_of: dict[str, int] = {}
     order: list[str] = []
@@ -935,10 +941,8 @@ def _ini_registration_order(registry: _Registry) -> list[str]:
                 line_of[current] = number
                 order.append(current)
             continue
-        if _PROJECT_SECTION_RE.match(line):
-            current = ""
-            continue
         if _ANY_SECTION_RE.match(line):
+            current = ""
             continue
         if current and _FIELD_RE.match(line):
             key, value = _field(line)
@@ -958,7 +962,8 @@ DEFAULT_DASHBOARD_MAX_ROWS = "20"
 
 
 def dashboard_default_max_rows(
-    kanban_root: PathLike, environ: Optional[dict] = None,
+    kanban_root: PathLike,
+    environ: dict | None = None,
 ) -> str:
     """The dashboard row cap for a project that sets no ``dashboard_max_rows``.
 
@@ -995,9 +1000,10 @@ def _dashboard_max_rows(registry: _Registry, name: str, default_rows: str) -> st
 
 
 def dashboard_registry_rows(
-    kanban_root: PathLike, default_max_rows: Optional[str] = None,
-    environ: Optional[dict] = None,
-) -> Optional[list[tuple[str, Optional[str], str]]]:
+    kanban_root: PathLike,
+    default_max_rows: str | None = None,
+    environ: dict | None = None,
+) -> list[tuple[str, str | None, str]] | None:
     """The registered projects as the dashboard's mixed-project board reads them.
 
     One ``(name, colour, max_rows)`` per project, in ``projects_cfg_list``
@@ -1023,7 +1029,7 @@ def dashboard_registry_rows(
     ]
 
 
-def project_color(kanban_root: PathLike, name: str) -> Optional[str]:
+def project_color(kanban_root: PathLike, name: str) -> str | None:
     """The display colour of project *name*, as the dashboard draws it.
 
     ``projects_cfg_color``'s answer, which the dashboard's mixed-project
@@ -1123,7 +1129,7 @@ def _prepare_registry_format(registry: _Registry, fmt: str, no_migrate: bool) ->
 # ---------------------------------------------------------------------------
 
 
-def _workflow_manifest_error(root: str, workflow: str) -> tuple[Optional[str], str]:
+def _workflow_manifest_error(root: str, workflow: str) -> tuple[str | None, str]:
     """Validate the workflow plugin *workflow* under *root* as the bash dispatcher does.
 
     Returns ``(error, agents)``: ``error`` is None for a usable plugin (its
@@ -1238,9 +1244,7 @@ def _check_workflow(kanban_root: str, scripts_dir: str, workflow: str) -> str:
         raise ProjectRefusal(
             f"ERROR: unknown workflow type '{workflow}'; discovered ready types are: {' '.join(ready)}"
         )
-    raise ProjectRefusal(
-        f"ERROR: unknown workflow type '{workflow}'; no ready workflow plugins found under {root}"
-    )
+    raise ProjectRefusal(f"ERROR: unknown workflow type '{workflow}'; no ready workflow plugins found under {root}")
 
 
 # ---------------------------------------------------------------------------
@@ -1255,7 +1259,7 @@ _CFG_VALUE_RULE = (
 _DEV_TREE_RULE = "dev_tree must also be an absolute path with no '..' segment."
 
 
-def _installed_cli(kanban_root: Optional[PathLike], script: str, *args: str) -> str:
+def _installed_cli(kanban_root: PathLike | None, script: str, *args: str) -> str:
     """``<kanban root>/scripts/<script>`` then *args*, every word shell-quoted.
 
     The runnable-as-printed form of an operator command
@@ -1287,8 +1291,7 @@ def check_project_name(verb: str, project: str, kanban_root: PathLike) -> None:
         if not ini.is_project_name(project):
             raise ComponentRefused(
                 "project",
-                "is not a lowercase letter or digit followed only by lowercase letters, "
-                "digits and '-'",
+                "is not a lowercase letter or digit followed only by lowercase letters, " "digits and '-'",
             )
     except ComponentRefused as exc:
         if verb == "remove_project":
@@ -1310,15 +1313,14 @@ def _value_refusal(field: str, reason: str, rule: str, remedy: str) -> ProjectVa
         field,
         format_error_contract(
             f"create_project.{field}_invalid",
-            f"create_project refused the '{field}' field: the value {reason}. {rule} "
-            "Nothing was written.",
+            f"create_project refused the '{field}' field: the value {reason}. {rule} " "Nothing was written.",
             remedy,
         ),
     )
 
 
 def check_priority(
-    verb: str, priority: str, project: Optional[str] = None, *, kanban_root: Optional[PathLike] = None
+    verb: str, priority: str, project: str | None = None, *, kanban_root: PathLike | None = None
 ) -> None:
     """Refuse a registry priority that is not a whole number.
 
@@ -1363,12 +1365,12 @@ def check_priority(
 
 def check_create_values(
     *,
-    project: Optional[str] = None,
-    workflow_type: Optional[str] = None,
-    git_remote: Optional[str] = None,
-    dev_tree: Optional[str] = None,
-    git_repo: Optional[str] = None,
-    kanban_root: Optional[PathLike] = None,
+    project: str | None = None,
+    workflow_type: str | None = None,
+    git_remote: str | None = None,
+    dev_tree: str | None = None,
+    git_repo: str | None = None,
+    kanban_root: PathLike | None = None,
 ) -> None:
     """Refuse a ``create_project`` value that could escape a path or inject project.cfg keys.
 
@@ -1409,8 +1411,7 @@ def check_create_values(
         # CENSUS-ANCHOR: projects-create-name-invalid-01
         raise _value_refusal(
             "project",
-            f"'{project}' is not a lowercase letter or digit followed only by lowercase letters, "
-            "digits and '-'",
+            f"'{project}' is not a lowercase letter or digit followed only by lowercase letters, " "digits and '-'",
             "A project name starts with a lowercase letter or digit and holds only lowercase "
             "letters, digits and '-'.",
             retry("--dry-run"),
@@ -1576,7 +1577,7 @@ def _project_cfg_header(name: str, generated_by: str, paths_supplied: bool) -> l
         "# from the project.cfg template (config/project.cfg_example).",
         "#",
         "# INI format: [section] headers and key = value lines; # starts a comment.",
-        "# A commented \"# key = value\" line is not set here and shows the value in",
+        '# A commented "# key = value" line is not set here and shows the value in',
         "# force while it stays commented; uncomment it to set it for this project.",
         "# Every key is documented where it appears.",
         "#",
@@ -1723,7 +1724,7 @@ def project_readme_template(scripts_dir: PathLike) -> str:
     return f"{scripts_dir}/../templates/project/{_PROJECT_README_TEMPLATE}"
 
 
-def _project_readme_source(project_dir: str, scripts: str) -> Optional[str]:
+def _project_readme_source(project_dir: str, scripts: str) -> str | None:
     """The template to seed ``<project_dir>/README.md`` from, or None to seed nothing.
 
     None when the README already exists -- any directory entry at that
@@ -1744,7 +1745,7 @@ def _project_readme_source(project_dir: str, scripts: str) -> Optional[str]:
     return source
 
 
-def workflow_template_dir(scripts_dir: PathLike, workflow: str) -> tuple[Optional[str], bool]:
+def workflow_template_dir(scripts_dir: PathLike, workflow: str) -> tuple[str | None, bool]:
     """The template directory a project of *workflow* is seeded from.
 
     ``<scripts_dir>/../templates/project/<workflow>`` when it exists, else
@@ -1769,20 +1770,20 @@ def workflow_template_dir(scripts_dir: PathLike, workflow: str) -> tuple[Optiona
 
 def create_project(
     ctx: OpsContext,
-    project: Optional[str],
+    project: str | None,
     *,
-    workflow_type: Optional[str] = None,
+    workflow_type: str | None = None,
     max_patch: Value = None,
     max_minor: Value = None,
     max_major: Value = None,
-    git_remote: Optional[str] = None,
+    git_remote: str | None = None,
     priority: Value = None,
-    color: Optional[str] = None,
-    dev_tree: Optional[str] = None,
-    git_repo: Optional[str] = None,
+    color: str | None = None,
+    dev_tree: str | None = None,
+    git_repo: str | None = None,
     no_migrate: bool = False,
     dry_run: bool = False,
-    scripts_dir: Optional[PathLike] = None,
+    scripts_dir: PathLike | None = None,
 ) -> ProjectOutcome:
     """Bootstrap ``projects/<project>/`` and register it in projects.cfg.
 
@@ -1915,9 +1916,15 @@ def create_project(
     # Rendered before the plan is printed, so an unreadable template refuses
     # before anything is written.
     cfg_text = render_project_cfg(
-        name=name, generated_by="create-project.sh", workflow=workflow, git_remote=remote,
-        dev_tree=dev_tree, git_repo=git_repo, max_patch=ceilings[0][1],
-        max_minor=ceilings[1][1], max_major=ceilings[2][1],
+        name=name,
+        generated_by="create-project.sh",
+        workflow=workflow,
+        git_remote=remote,
+        dev_tree=dev_tree,
+        git_repo=git_repo,
+        max_patch=ceilings[0][1],
+        max_minor=ceilings[1][1],
+        max_major=ceilings[2][1],
     )
 
     registry = _Registry(root)
@@ -2041,8 +2048,12 @@ def create_project(
         f"     To raise or lower a ceiling: set-version-ceiling.sh --project {name} --minor <N>",
     )
     return ProjectOutcome(
-        "create_project", name, pathlib.Path(project_dir),
-        changed=True, priority=final_priority, color=final_color,
+        "create_project",
+        name,
+        pathlib.Path(project_dir),
+        changed=True,
+        priority=final_priority,
+        color=final_color,
     )
 
 
@@ -2053,13 +2064,13 @@ def create_project(
 
 def add_project(
     ctx: OpsContext,
-    project: Optional[str],
+    project: str | None,
     *,
     priority: Value = None,
-    color: Optional[str] = None,
+    color: str | None = None,
     no_migrate: bool = False,
     dry_run: bool = False,
-    scripts_dir: Optional[PathLike] = None,
+    scripts_dir: PathLike | None = None,
 ) -> ProjectOutcome:
     """Register an existing ``projects/<project>/`` directory in projects.cfg.
 
@@ -2137,7 +2148,7 @@ def add_project(
 
     scripts = str(scripts_dir) if scripts_dir is not None else str(_OWN_TREE / "scripts")
     cfg_target = f"{project_dir}/project.cfg"
-    cfg_text: Optional[str] = None
+    cfg_text: str | None = None
     if not any(os.path.lexists(f"{project_dir}/{cfg}") for cfg in _PROJECT_CFG_NAMES):
         cfg_text = render_project_cfg(name=name, generated_by="add-project.sh")
     registry = _Registry(root)
@@ -2167,8 +2178,7 @@ def add_project(
             register = False
     else:
         _say(
-            f"  Will register at priority={prio or '<next available>'}, "
-            f"color={colour or '<next available>'}",
+            f"  Will register at priority={prio or '<next available>'}, " f"color={colour or '<next available>'}",
             _registry_format_line(fmt, no_migrate),
         )
     if readme_source:
@@ -2199,8 +2209,12 @@ def add_project(
     if not register:
         _say("", "Done.")
         return ProjectOutcome(
-            "add_project", name, pathlib.Path(project_dir),
-            changed=True, priority=registry.priority(name) or "", color=registry.color(name) or "",
+            "add_project",
+            name,
+            pathlib.Path(project_dir),
+            changed=True,
+            priority=registry.priority(name) or "",
+            color=registry.color(name) or "",
         )
     _prepare_registry_format(registry, fmt, no_migrate)
     registry.add(name, prio, colour)
@@ -2208,8 +2222,12 @@ def add_project(
     final_color = registry.color(name) or ""
     _say(f"  + registered (priority={final_priority}, color={final_color})", "", "Done.")
     return ProjectOutcome(
-        "add_project", name, pathlib.Path(project_dir),
-        changed=True, priority=final_priority, color=final_color,
+        "add_project",
+        name,
+        pathlib.Path(project_dir),
+        changed=True,
+        priority=final_priority,
+        color=final_color,
     )
 
 
@@ -2271,7 +2289,7 @@ def _refuse_active_rc(kanban_root: PathLike, name: str, release_state: pathlib.P
 
 def remove_project(
     ctx: OpsContext,
-    project: Optional[str],
+    project: str | None,
     *,
     force: bool = False,
     dry_run: bool = False,
@@ -2360,9 +2378,7 @@ def remove_project(
         deleted = True
         _say(f"  + deleted: {project_dir}")
     _say("", "Done.")
-    return ProjectOutcome(
-        "remove_project", name, pathlib.Path(project_dir), changed=True, deleted=deleted
-    )
+    return ProjectOutcome("remove_project", name, pathlib.Path(project_dir), changed=True, deleted=deleted)
 
 
 # ---------------------------------------------------------------------------
@@ -2387,8 +2403,7 @@ def _cli_parser(verb: str) -> argparse.ArgumentParser:
         parser.add_argument(
             "--scripts-dir",
             help=(
-                "the caller's scripts/ directory; templates are read beside it (default: this "
-                "package's own tree)"
+                "the caller's scripts/ directory; templates are read beside it (default: this " "package's own tree)"
             ),
         )
     if verb == "create_project":
@@ -2417,15 +2432,12 @@ def _cli_parser(verb: str) -> argparse.ArgumentParser:
         parser.add_argument(
             "--force",
             action="store_true",
-            help=(
-                "also delete the project's directory under projects/ (default: the directory is "
-                "kept)"
-            ),
+            help=("also delete the project's directory under projects/ (default: the directory is " "kept)"),
         )
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run one registry verb from the command line (see the module docstring).
 
     Prints what the verb prints; a refusal goes to stderr (a dual-channel
@@ -2444,18 +2456,29 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
     try:
         if verb == "create_project":
             create_project(
-                ctx, opts.project,
-                workflow_type=opts.workflow_type, max_patch=opts.max_patch,
-                max_minor=opts.max_minor, max_major=opts.max_major,
-                git_remote=opts.git_remote, priority=opts.priority, color=opts.color,
-                dev_tree=opts.dev_tree, git_repo=opts.git_repo,
-                no_migrate=opts.no_migrate, dry_run=opts.dry_run,
+                ctx,
+                opts.project,
+                workflow_type=opts.workflow_type,
+                max_patch=opts.max_patch,
+                max_minor=opts.max_minor,
+                max_major=opts.max_major,
+                git_remote=opts.git_remote,
+                priority=opts.priority,
+                color=opts.color,
+                dev_tree=opts.dev_tree,
+                git_repo=opts.git_repo,
+                no_migrate=opts.no_migrate,
+                dry_run=opts.dry_run,
                 scripts_dir=opts.scripts_dir,
             )
         elif verb == "add_project":
             add_project(
-                ctx, opts.project, priority=opts.priority, color=opts.color,
-                no_migrate=opts.no_migrate, dry_run=opts.dry_run,
+                ctx,
+                opts.project,
+                priority=opts.priority,
+                color=opts.color,
+                no_migrate=opts.no_migrate,
+                dry_run=opts.dry_run,
                 scripts_dir=opts.scripts_dir,
             )
         else:

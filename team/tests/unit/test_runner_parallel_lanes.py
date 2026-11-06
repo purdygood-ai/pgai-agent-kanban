@@ -253,9 +253,7 @@ def test_coverage_enabled_parallel_plan_appends_on_the_serial_lane() -> None:
 
 
 def test_coverage_enabled_single_plan_matches_the_previous_options() -> None:
-    plan = _plan(
-        workers=1, suite="integration", coverage=lanes.coverage_decision(True, True, {}), coverage_dir="/cov"
-    )
+    plan = _plan(workers=1, suite="integration", coverage=lanes.coverage_decision(True, True, {}), coverage_dir="/cov")
 
     assert plan.lanes[0].argv == [
         *_UNIT_ARGV,
@@ -341,7 +339,9 @@ def test_shell_plan_reads_the_planner_records_into_lane_arrays(tmp_path: pathlib
 
 
 def test_shell_plan_falls_back_to_the_given_argv_when_the_planner_fails(tmp_path: pathlib.Path) -> None:
-    result = _bash(tmp_path, f"gated_runner_plan_lanes --suite no-such-suite -- -p no:randomly 'tests/a b.py'\n{_PRINT_LANES}")
+    result = _bash(
+        tmp_path, f"gated_runner_plan_lanes --suite no-such-suite -- -p no:randomly 'tests/a b.py'\n{_PRINT_LANES}"
+    )
 
     assert result.returncode == 0, _describe(result)
     assert _lane_lines(result.stdout) == {"single": " [-p] [no:randomly] [tests/a b.py]"}
@@ -374,7 +374,7 @@ def test_lane_exit_codes_combine_into_one(tmp_path: pathlib.Path, codes: list[st
 def test_scrub_removes_the_coverage_switch_from_the_shell_and_its_children(tmp_path: pathlib.Path) -> None:
     result = _bash(
         tmp_path,
-        "gated_runner_coverage_scrub_env\nbash -c 'printf \"%s\" \"${PGAI_TESTING_COVERAGE-unset}\"'",
+        'gated_runner_coverage_scrub_env\nbash -c \'printf "%s" "${PGAI_TESTING_COVERAGE-unset}"\'',
         PGAI_TESTING_COVERAGE="1",
     )
 
@@ -407,8 +407,19 @@ def test_serial_marker_is_registered_so_strict_markers_accepts_it(tmp_path: path
     home = tmp_path / "home"
     home.mkdir()
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:randomly", "--strict-markers", "--collect-only", "-q",
-         "-m", "serial", "test_marked.py"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:randomly",
+            "--strict-markers",
+            "--collect-only",
+            "-q",
+            "-m",
+            "serial",
+            "test_marked.py",
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -538,7 +549,7 @@ def test_runner_with_workers_zero_or_one_runs_one_lane_without_n(
     replays = _replay_lines(result.stdout)
     assert len(replays) == 1, _describe(result)
     assert " -n " not in replays[0] and "--dist" not in replays[0], replays[0]
-    assert "-m 'not quarantine'" in replays[0] or '-m not\\ quarantine' in replays[0], replays[0]
+    assert "-m 'not quarantine'" in replays[0] or "-m not\\ quarantine" in replays[0], replays[0]
     assert "Lane 1 of" not in result.stdout, _describe(result)
 
 
@@ -600,13 +611,23 @@ _INTEGRATION = "run-integration-tests.sh"
     [
         pytest.param(_UNIT, "workers = 1\n", {}, False, _DISABLED_LINE, id="unit-config-unset"),
         pytest.param(_INTEGRATION, "workers = 1\n", {}, False, _DISABLED_LINE, id="integration-config-unset"),
-        pytest.param(_UNIT, "workers = 1\ncoverage = true\n", {}, True, "coverage enabled by config", id="unit-config-true"),
         pytest.param(
-            _INTEGRATION, "workers = 1\ncoverage = true\n", {}, True, "coverage enabled by config",
+            _UNIT, "workers = 1\ncoverage = true\n", {}, True, "coverage enabled by config", id="unit-config-true"
+        ),
+        pytest.param(
+            _INTEGRATION,
+            "workers = 1\ncoverage = true\n",
+            {},
+            True,
+            "coverage enabled by config",
             id="integration-config-true",
         ),
         pytest.param(
-            _UNIT, "workers = 1\n", {"PGAI_TESTING_COVERAGE": "1"}, True, "PGAI_TESTING_COVERAGE=1",
+            _UNIT,
+            "workers = 1\n",
+            {"PGAI_TESTING_COVERAGE": "1"},
+            True,
+            "PGAI_TESTING_COVERAGE=1",
             id="unit-operator-env",
         ),
         pytest.param(
@@ -652,6 +673,12 @@ def test_help_documents_workers_serial_lane_and_coverage_gate(runner_name: str, 
     result = sandbox.run(team, runner_name, "--help")
 
     assert result.returncode == 0, _describe(result)
-    for text in ("[testing] workers", "-n <workers> --dist loadfile", "@pytest.mark.serial",
-                 "PGAI_TESTING_COVERAGE=1", _DISABLED_LINE, "[testing] coverage = true"):
+    for text in (
+        "[testing] workers",
+        "-n <workers> --dist loadfile",
+        "@pytest.mark.serial",
+        "PGAI_TESTING_COVERAGE=1",
+        _DISABLED_LINE,
+        "[testing] coverage = true",
+    ):
         assert text in result.stdout, f"--help does not mention {text!r}\n" + _describe(result)

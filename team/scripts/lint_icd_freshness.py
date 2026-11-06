@@ -63,8 +63,8 @@ import tempfile
 # Two parent levels: scripts/ → team/ → project_root/
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent           # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent              # project_root/
+_TEAM_DIR = _THIS_FILE.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _DEFAULT_ICD_PATH = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
 _DEFAULT_VERSION_FILE = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
 
@@ -93,15 +93,8 @@ def _record(findings: list | None, icd_path: pathlib.Path, cause: str) -> None:
     """
     if findings is None:
         return
-    remedy = (
-        f"cd {_DEV_TREE_ROOT} && {_REGENERATE_COMMAND} && "
-        f"python3 {_THIS_FILE} --icd {icd_path}"
-    )
-    findings.append(
-        quality_finding(
-            _LINT_NAME, cause, remedy, file=display_path(icd_path, _DEV_TREE_ROOT)
-        )
-    )
+    remedy = f"cd {_DEV_TREE_ROOT} && {_REGENERATE_COMMAND} && " f"python3 {_THIS_FILE} --icd {icd_path}"
+    findings.append(quality_finding(_LINT_NAME, cause, remedy, file=display_path(icd_path, _DEV_TREE_ROOT)))
 
 
 def _get_temp_root() -> pathlib.Path:
@@ -153,9 +146,7 @@ def _regenerate_to_temp(
         return None
 
     # Write to a named temp file under the framework temp root.
-    fd, tmp_str = tempfile.mkstemp(
-        prefix="icd_fresh_", suffix=".json", dir=str(temp_root)
-    )
+    fd, tmp_str = tempfile.mkstemp(prefix="icd_fresh_", suffix=".json", dir=str(temp_root))
     os.close(fd)
     tmp_path = pathlib.Path(tmp_str)
 
@@ -231,8 +222,7 @@ def check_freshness(
         _record(
             findings,
             icd_path,
-            f"{icd_path} is stale: it differs from a fresh regeneration from the "
-            "current codebase",
+            f"{icd_path} is stale: it differs from a fresh regeneration from the " "current codebase",
         )
         return False
 
@@ -258,18 +248,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--icd",
         metavar="PATH",
-        help=(
-            "Path to the checked-in ICD artifact.  Default: docs/api/icd.json "
-            "relative to the dev tree root."
-        ),
+        help=("Path to the checked-in ICD artifact.  Default: docs/api/icd.json " "relative to the dev tree root."),
     )
     parser.add_argument(
         "--version-file",
         metavar="PATH",
-        help=(
-            "Path to ICD_VERSION.  Default: docs/api/ICD_VERSION relative to "
-            "the dev tree root."
-        ),
+        help=("Path to ICD_VERSION.  Default: docs/api/ICD_VERSION relative to " "the dev tree root."),
     )
     parser.add_argument(
         "--findings-file",
@@ -305,8 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         # risk -- narrated and recorded as findings; main returns 0 below.
         emit_error_contract(
             "lint.icd-freshness",
-            f"{icd_path} does not match a fresh regeneration from the current "
-            "codebase; the cause is printed above.",
+            f"{icd_path} does not match a fresh regeneration from the current " "codebase; the cause is printed above.",
             findings[0]["remedy"],
         )
     return 0

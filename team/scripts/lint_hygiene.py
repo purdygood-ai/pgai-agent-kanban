@@ -60,11 +60,16 @@ Registered classes
                  drift shapes deliberately left out of scope.
 
   operator-literal  -- a literal that only makes sense on one operator's
-                 machine, in a file a public release would publish. Two
+                 machine, in a file a public release would publish. Three
                  labels: ``home-path`` (``/home/`` followed by a real
-                 account name) and ``ssh-host-alias`` (an scp-style remote
+                 account name), ``ssh-host-alias`` (an scp-style remote
                  ``git@<host>:`` whose host is a private ``~/.ssh/config``
-                 alias, such as a per-account forge alias). Neutral forms
+                 alias, such as a per-account forge alias), and
+                 ``operator-handle`` (an operator's own forge login as a
+                 whole word -- a git author, an email local part -- other
+                 than inside the organisation name, ``<handle>-ai`` on the
+                 forge and ``<handle>.ai`` as its domain, which the
+                 organisation URL and the licence carry). Neutral forms
                  are never findings:
                  ``$HOME/...`` and ``~/...``; an angle-bracket or variable
                  segment (``/home/<user>/``, ``/home/$USER/``); the
@@ -77,7 +82,8 @@ Registered classes
                  ``.test``, ``.invalid`` or ``.localhost`` names). One
                  finding per line per label. Scope is its own surface, the
                  tracked-file surface below, not the directory surfaces the
-                 other classes read.
+                 other classes read; on the test tree only
+                 ``operator-handle`` is reported.
 
 ``lint_comment_provenance.py`` -- the lint this module's ``provenance``
 class consolidates -- and its test module are retired; this module is now
@@ -364,9 +370,10 @@ Seven scan surfaces
 
   Tracked-file surface (``git ls-files`` at ``--repo-root``; read only by
     the ``operator-literal`` class) — every file git tracks, of any type,
-    except ``release-notes/``, the root ``CHANGELOG.md``, and ``team/tests/``
-    other than ``team/tests/artifacts/`` (archived snapshots shipped as-is,
-    so they stay in scope). Binary files (a NUL byte), symlinks, files
+    except ``release-notes/`` and the root ``CHANGELOG.md``. On
+    ``team/tests/`` only the ``operator-handle`` label is reported, except
+    under ``team/tests/artifacts/`` (archived snapshots shipped as-is),
+    which takes every label. Binary files (a NUL byte), symlinks, files
     missing from the work tree, and ``_FILE_WHITELIST`` names are skipped.
     The ``--*-dirs`` flags do not narrow this surface. It is empty unless
     ``--repo-root`` is itself the top of a git work tree -- an installed
@@ -476,7 +483,8 @@ import textwrap
 import tokenize
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, NamedTuple, Optional
+from typing import NamedTuple
+from collections.abc import Callable
 
 # ---------------------------------------------------------------------------
 # Provenance token patterns (class "provenance")
@@ -541,8 +549,7 @@ _UNSHIPPED_REQUIREMENTS_PATH: re.Pattern[str] = re.compile(
 # a failed trailing lookahead cannot make the engine backtrack to a
 # shorter, bogus slug match.
 _BARE_RELEASE_SLUG: re.Pattern[str] = re.compile(
-    r"(?<![\w./])v\d+\.\d+\.\d+-(?>[a-z][a-z0-9-]*)\b"
-    r"(?!\.md)(?!\s+(?:match(?:es)?|pattern)\b)",
+    r"(?<![\w./])v\d+\.\d+\.\d+-(?>[a-z][a-z0-9-]*)\b" r"(?!\.md)(?!\s+(?:match(?:es)?|pattern)\b)",
     re.IGNORECASE,
 )
 
@@ -607,9 +614,7 @@ _CHANGELOG_EXEMPT_LABELS: frozenset[str] = frozenset({"version-history"})
 # enforced on the sanctioned test-tree surface, regardless of comment/
 # docstring position -- a "vX.Y.Z-slug" is also the literal shape of a
 # requirements-discovery test's own fixture filename.
-_TEST_TREE_EXEMPT_LABELS: frozenset[str] = frozenset(
-    {"unshipped-requirements-path", "bare-release-slug"}
-)
+_TEST_TREE_EXEMPT_LABELS: frozenset[str] = frozenset({"unshipped-requirements-path", "bare-release-slug"})
 
 # ---------------------------------------------------------------------------
 # Version-named-test token patterns (class "version-named-test")
@@ -647,14 +652,21 @@ _TEST_FUNC_DEF: re.Pattern[str] = re.compile(r"^\s*def\s+(test_\w+)\s*\(")
 # description and `_scan_comment_drift_lines`'s docstring for the shapes
 # left out of scope and why.
 
-_ARG_COUNT_WORDS: "dict[str, int]" = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+_ARG_COUNT_WORDS: dict[str, int] = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
 }
 
 _ARG_COUNT_CLAIM: re.Pattern[str] = re.compile(
-    r"\b(?P<num>one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
-    r"(?P<noun>arguments?|parameters?)\b",
+    r"\b(?P<num>one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+" r"(?P<noun>arguments?|parameters?)\b",
     re.IGNORECASE,
 )
 
@@ -664,16 +676,13 @@ _ARG_COUNT_CLAIM: re.Pattern[str] = re.compile(
 # narrower class that catches less beats a broader one that misparses a
 # continuation line as the whole parameter list).
 _DEF_LINE: re.Pattern[str] = re.compile(
-    r"^(?P<indent>[ \t]*)(?:async\s+)?def\s+\w+\s*\((?P<params>.*)\)\s*"
-    r"(?:->\s*[^:]+)?:\s*$"
+    r"^(?P<indent>[ \t]*)(?:async\s+)?def\s+\w+\s*\((?P<params>.*)\)\s*" r"(?:->\s*[^:]+)?:\s*$"
 )
 
 # A single-line triple-quoted docstring, e.g. `    """Takes three args."""`.
 # Matches only when the whole docstring is on one physical line -- a
 # multi-line docstring is not a candidate, same rationale as _DEF_LINE.
-_SINGLE_LINE_DOCSTRING: re.Pattern[str] = re.compile(
-    r'^[ \t]*(?:"""(?P<body1>.*)"""|\'\'\'(?P<body2>.*)\'\'\')\s*$'
-)
+_SINGLE_LINE_DOCSTRING: re.Pattern[str] = re.compile(r'^[ \t]*(?:"""(?P<body1>.*)"""|\'\'\'(?P<body2>.*)\'\'\')\s*$')
 
 # ---------------------------------------------------------------------------
 # Operator-literal patterns (class "operator-literal")
@@ -686,33 +695,48 @@ _SINGLE_LINE_DOCSTRING: re.Pattern[str] = re.compile(
 # Anything that is not an account-name character right after "/home/" -- an
 # angle-bracket placeholder ("/home/<user>/"), a shell variable
 # ("/home/$USER/"), a glob ("/home/*/") -- never matches at all.
-_HOME_PATH: re.Pattern[str] = re.compile(
-    r"(?<![\w.~-])/home/(?P<name>[A-Za-z0-9_][A-Za-z0-9._-]*)"
-)
+_HOME_PATH: re.Pattern[str] = re.compile(r"(?<![\w.~-])/home/(?P<name>[A-Za-z0-9_][A-Za-z0-9._-]*)")
 
 # Home-directory names already used across the tree as neutral placeholders.
 # Compared after lower-casing and dropping "-"/"_", so "USERNAME",
 # "your-user" and "your_user" all read as the placeholders they are. A
 # realistic personal name ("alice", an operator's own login) is never here.
-_PLACEHOLDER_HOME_NAMES: frozenset[str] = frozenset(
-    {"you", "user", "youruser", "username", "op"}
-)
+_PLACEHOLDER_HOME_NAMES: frozenset[str] = frozenset({"you", "user", "youruser", "username", "op"})
 
 # An scp-style git remote, "git@<host>:<path>". The host is captured so the
 # public forge and the reserved example domains can be told apart from a
 # private alias defined in one operator's ~/.ssh/config.
-_SSH_GIT_REMOTE: re.Pattern[str] = re.compile(
-    r"(?<![\w.-])git@(?P<host>[A-Za-z0-9][A-Za-z0-9.-]*):"
-)
+_SSH_GIT_REMOTE: re.Pattern[str] = re.compile(r"(?<![\w.-])git@(?P<host>[A-Za-z0-9][A-Za-z0-9.-]*):")
 
 # Hosts that are neutral in shipped text: the public forge every example in
 # the tree points at, and the reserved example domains (RFC 2606, RFC 6761).
-_NEUTRAL_SSH_HOSTS: frozenset[str] = frozenset(
-    {"github.com", "example.com", "example.net", "example.org"}
+_NEUTRAL_SSH_HOSTS: frozenset[str] = frozenset({"github.com", "example.com", "example.net", "example.org"})
+_NEUTRAL_SSH_TOP_LABELS: frozenset[str] = frozenset({"example", "test", "invalid", "localhost"})
+
+# Operator forge logins a shipped file must not name, lower-case. Each is
+# written as two adjacent literals so this file -- scanned like any other
+# tracked file -- never carries the handle it flags, and a tree-wide search
+# for the handle finds only the organisation name.
+_OPERATOR_HANDLES: tuple[str, ...] = ("purdy" "good",)
+
+# One handle as a whole word, case-insensitive: not inside a longer
+# alphanumeric token, so a git author ("Author: <handle>"), a backticked
+# identity or an email local part all match. The organisation name built on
+# the handle -- "<handle>-ai" (the forge organisation, as in the clone URL)
+# and "<handle>.ai" (its domain, as in the licence) -- is the one neutral
+# form and never matches.
+_OPERATOR_HANDLE: re.Pattern[str] = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    + "|".join(re.escape(h) for h in _OPERATOR_HANDLES)
+    + r")(?![A-Za-z0-9])(?![-.]ai(?![A-Za-z0-9]))",
+    re.IGNORECASE,
 )
-_NEUTRAL_SSH_TOP_LABELS: frozenset[str] = frozenset(
-    {"example", "test", "invalid", "localhost"}
-)
+
+# Every operator-literal label, and the ones reported on the test tree
+# outside its archived ``artifacts/`` subtree: there the operator handle
+# alone is a finding, while home paths and git remotes are not.
+_OPERATOR_LITERAL_LABELS: frozenset[str] = frozenset({"home-path", "ssh-host-alias", "operator-handle"})
+_OPERATOR_LITERAL_TEST_TREE_LABELS: frozenset[str] = frozenset({"operator-handle"})
 
 # ---------------------------------------------------------------------------
 # Allowed-exception patterns (Exceptions 1-3: apply to every ID- and
@@ -753,38 +777,40 @@ def _is_exception(line: str) -> bool:
 # IDs, excluded from every surface.
 # ---------------------------------------------------------------------------
 
-_FILE_WHITELIST: frozenset[str] = frozenset({
-    "promote_bundled_items.py",    # CM tool that reads/routes BUG-NNNN IDs
-    "changelog_writer.py",         # reads bug IDs from ledger to build CHANGELOG
-    # This file is deliberately NOT on this list -- see the "Self-scanning"
-    # note below _FILE_WHITELIST's definition.
-    "test_lint_hygiene.py",        # this module's own test module.
-    "test_lint_hygiene_corpus.py",  # this module's false-positive/true-
-                                    # positive corpus: synthetic fixture
-                                    # strings for the provenance,
-                                    # version-named-test and comment-drift
-                                    # classes.
-    # The entries below are team/tests/fixtures/ top-level modules whose
-    # entire content is a deliberate good/bad-example corpus authored for a
-    # DIFFERENT lint's own unit tests (the same role test_lint_hygiene_corpus.py
-    # plays for this one) -- not shared test-fidelity helpers, so widening the
-    # test-tree surface to team/tests/fixtures/ must not turn them into
-    # candidates here.
-    "fixture_abs_path_prefix_controlled.py",       # lint_test_anti_patterns.py corpus
-    "fixture_abs_path_substring_assertion.py",     # lint_test_anti_patterns.py corpus
-    "fixture_api_drift_script.sh",                 # lint_api_parity.py corpus
-    "fixture_bare_mktemp_anti_pattern.py",         # lint_test_anti_patterns.py corpus
-    "fixture_bare_mktemp_d_runtime_script.sh",     # lint_test_anti_patterns.py corpus
-    "fixture_bare_tmp_fake_mkdir.py",              # lint_test_anti_patterns.py corpus
-    "fixture_bare_tmp_redirect.sh",                # lint_test_anti_patterns.py corpus
-    "fixture_direct_env_read_py.py",               # lint_test_anti_patterns.py corpus
-    "fixture_golden_comparison_explicit_env.py",   # lint_test_anti_patterns.py corpus
-    "fixture_golden_comparison_inherited_env.py",  # lint_test_anti_patterns.py corpus
-    "fixture_hardcoded_tmp_and_mkdtemp.py",        # lint_test_anti_patterns.py corpus
-    "fixture_inherited_env_without_golden_comparison.py",  # lint_test_anti_patterns.py corpus
-    "fixture_missing_env_bootstrap_sh.py",         # lint_test_anti_patterns.py corpus
-    "fixture_no_help_script.sh",                   # lint_help_presence.py corpus
-})
+_FILE_WHITELIST: frozenset[str] = frozenset(
+    {
+        "promote_bundled_items.py",  # CM tool that reads/routes BUG-NNNN IDs
+        "changelog_writer.py",  # reads bug IDs from ledger to build CHANGELOG
+        # This file is deliberately NOT on this list -- see the "Self-scanning"
+        # note below _FILE_WHITELIST's definition.
+        "test_lint_hygiene.py",  # this module's own test module.
+        "test_lint_hygiene_corpus.py",  # this module's false-positive/true-
+        # positive corpus: synthetic fixture
+        # strings for the provenance,
+        # version-named-test and comment-drift
+        # classes.
+        # The entries below are team/tests/fixtures/ top-level modules whose
+        # entire content is a deliberate good/bad-example corpus authored for a
+        # DIFFERENT lint's own unit tests (the same role test_lint_hygiene_corpus.py
+        # plays for this one) -- not shared test-fidelity helpers, so widening the
+        # test-tree surface to team/tests/fixtures/ must not turn them into
+        # candidates here.
+        "fixture_abs_path_prefix_controlled.py",  # lint_test_anti_patterns.py corpus
+        "fixture_abs_path_substring_assertion.py",  # lint_test_anti_patterns.py corpus
+        "fixture_api_drift_script.sh",  # lint_api_parity.py corpus
+        "fixture_bare_mktemp_anti_pattern.py",  # lint_test_anti_patterns.py corpus
+        "fixture_bare_mktemp_d_runtime_script.sh",  # lint_test_anti_patterns.py corpus
+        "fixture_bare_tmp_fake_mkdir.py",  # lint_test_anti_patterns.py corpus
+        "fixture_bare_tmp_redirect.sh",  # lint_test_anti_patterns.py corpus
+        "fixture_direct_env_read_py.py",  # lint_test_anti_patterns.py corpus
+        "fixture_golden_comparison_explicit_env.py",  # lint_test_anti_patterns.py corpus
+        "fixture_golden_comparison_inherited_env.py",  # lint_test_anti_patterns.py corpus
+        "fixture_hardcoded_tmp_and_mkdtemp.py",  # lint_test_anti_patterns.py corpus
+        "fixture_inherited_env_without_golden_comparison.py",  # lint_test_anti_patterns.py corpus
+        "fixture_missing_env_bootstrap_sh.py",  # lint_test_anti_patterns.py corpus
+        "fixture_no_help_script.sh",  # lint_help_presence.py corpus
+    }
+)
 
 # Self-scanning: this module's own basename is deliberately absent from
 # _FILE_WHITELIST above, so this file is a candidate on the code surface
@@ -805,9 +831,7 @@ _FILE_WHITELIST: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 # Segments excluded anywhere below a CODE-surface scan directory.
-_CODE_EXCLUDE_SEGMENTS: frozenset[str] = frozenset(
-    {"tests", "test", "fixtures", "__pycache__"}
-)
+_CODE_EXCLUDE_SEGMENTS: frozenset[str] = frozenset({"tests", "test", "fixtures", "__pycache__"})
 
 # Segments excluded anywhere below a TEST-TREE-surface scan directory.
 # "tests"/"test" are deliberately absent here -- the test-tree surface IS a
@@ -826,10 +850,10 @@ _TEST_TREE_EXCLUDE_SEGMENTS: frozenset[str] = frozenset(
     {
         "__pycache__",
         "artifacts",
-        "container_engine_free",   # lint_container_engine_free.py corpus
-        "engine_size_dupe",        # lint_engine_size_dupe.py corpus
-        "import_completeness",     # lint_python_import_completeness.py corpus
-        "hands_free_demo_green",   # hands-free demo's always-green pytest fixture
+        "container_engine_free",  # lint_container_engine_free.py corpus
+        "engine_size_dupe",  # lint_engine_size_dupe.py corpus
+        "import_completeness",  # lint_python_import_completeness.py corpus
+        "hands_free_demo_green",  # hands-free demo's always-green pytest fixture
     }
 )
 
@@ -975,9 +999,7 @@ def _collect_files(
         scan_dir = target.directory
         if not scan_dir.is_dir():
             continue
-        exclude_segments = (
-            _TEST_TREE_EXCLUDE_SEGMENTS if target.test_tree_surface else _CODE_EXCLUDE_SEGMENTS
-        )
+        exclude_segments = _TEST_TREE_EXCLUDE_SEGMENTS if target.test_tree_surface else _CODE_EXCLUDE_SEGMENTS
 
         def _accept(p: Path) -> bool:
             resolved = p.resolve()
@@ -1121,7 +1143,7 @@ _TO_END_OF_LINE = 1 << 30
 
 def _classify_python_line_surfaces(
     text: str,
-) -> "dict[int, list[tuple[int, int]]] | None":
+) -> dict[int, list[tuple[int, int]]] | None:
     """Return {1-indexed line -> [(start_col, end_col), ...]} for every span
     in *text* the test-tree surface treats as shipped prose a human reads at
     failure/runtime rather than ordinary test data: a ``#`` COMMENT, a
@@ -1178,9 +1200,7 @@ def _classify_python_line_surfaces(
         while j >= 0 and tokens[j].type in _SKIP_TOKEN_TYPES:
             j -= 1
         prev = tokens[j] if j >= 0 else None
-        is_docstring_position = prev is None or (
-            prev.type == tokenize.OP and prev.string == ":"
-        )
+        is_docstring_position = prev is None or (prev.type == tokenize.OP and prev.string == ":")
 
         k = idx + 1
         while k < len(tokens) and tokens[k].type in (tokenize.NL, tokenize.COMMENT):
@@ -1204,9 +1224,16 @@ def _classify_python_line_surfaces(
         while j >= 0 and tokens[j].type in (tokenize.NL, tokenize.COMMENT):
             j -= 1
         prev = tokens[j] if j >= 0 else None
-        is_stmt_start = prev is None or prev.type in (
-            tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
-        ) or (prev.type == tokenize.OP and prev.string == ";")
+        is_stmt_start = (
+            prev is None
+            or prev.type
+            in (
+                tokenize.NEWLINE,
+                tokenize.INDENT,
+                tokenize.DEDENT,
+            )
+            or (prev.type == tokenize.OP and prev.string == ";")
+        )
         if not is_stmt_start:
             continue
 
@@ -1278,9 +1305,7 @@ def _classify_python_line_surfaces(
     return spans
 
 
-def _match_overlaps_flagged_span(
-    match_start: int, match_end: int, line_spans: "list[tuple[int, int]]"
-) -> bool:
+def _match_overlaps_flagged_span(match_start: int, match_end: int, line_spans: list[tuple[int, int]]) -> bool:
     return any(match_start < end and start < match_end for start, end in line_spans)
 
 
@@ -1291,9 +1316,7 @@ _STRING_TEXT_TOKEN_TYPES: tuple[int, ...] = tuple(
 )
 
 
-def _python_value_string_text(
-    text: str, spans: "dict[int, list[tuple[int, int]]]"
-) -> str:
+def _python_value_string_text(text: str, spans: dict[int, list[tuple[int, int]]]) -> str:
     """Return the joined text of every string literal in *text* that sits
     in ordinary VALUE position -- not inside one of the comment, docstring,
     assert-message or ``pytest.fail`` spans *spans* holds (the
@@ -1362,13 +1385,13 @@ def _scan_lines(
     findings are collected (see ``_apply_sidecar_suppression``)."""
     findings: list[_Finding] = []
 
-    line_spans: "dict[int, list[tuple[int, int]]] | None" = None
+    line_spans: dict[int, list[tuple[int, int]]] | None = None
     if test_tree_surface:
         line_spans = _classify_python_line_surfaces("".join(lines))
     # The test file's own string-literal values, built on first need (a
     # version-history candidate on the test-tree surface) -- see
     # ``_version_used_as_test_value``.
-    value_text: Optional[str] = None
+    value_text: str | None = None
 
     for idx, line in enumerate(lines):
         lineno = idx + 1
@@ -1453,7 +1476,7 @@ class _ScanInputs:
     text_files: list[Path] = field(default_factory=list)
 
 
-def _scan_provenance_class(inputs: "_ScanInputs") -> list[_Finding]:
+def _scan_provenance_class(inputs: _ScanInputs) -> list[_Finding]:
     """The "provenance" hygiene class: reproduces lint_comment_provenance.py's
     detection behavior (see module docstring for the two deliberate changes)."""
     findings: list[_Finding] = []
@@ -1553,7 +1576,7 @@ def _function_body_text(lines: list[str], def_lineno_idx: int) -> str:
         depth += lines[sig_end_idx].count("(") - lines[sig_end_idx].count(")")
 
     body: list[str] = []
-    for line in lines[sig_end_idx + 1:]:
+    for line in lines[sig_end_idx + 1 :]:
         if line.strip() == "":
             body.append(line)
             continue
@@ -1628,7 +1651,7 @@ def _scan_version_named_test_file(filepath: Path, verbose: bool = False) -> list
     return findings
 
 
-def _scan_version_named_test_class(inputs: "_ScanInputs") -> list[_Finding]:
+def _scan_version_named_test_class(inputs: _ScanInputs) -> list[_Finding]:
     """The "version-named-test" hygiene class. Scoped to the test-tree
     surface only -- this class is about how test modules and test
     functions are named, and the test-tree surface (``team/tests/`` by
@@ -1673,7 +1696,7 @@ def _count_def_params(params_text: str) -> int:
     return count
 
 
-def _claimed_arg_count(text: str) -> Optional[int]:
+def _claimed_arg_count(text: str) -> int | None:
     """Return the argument/parameter count *text* claims (spelled-out one
     through ten, or a bare digit run), or ``None`` if it makes no such
     claim."""
@@ -1733,8 +1756,12 @@ def _scan_comment_drift_lines(cls_name: str, path: Path, lines: list[str]) -> li
             if actual != claimed:
                 findings.append(
                     _Finding(
-                        cls_name, path, idx + 1, "argument-count-drift",
-                        f"comment claims {claimed}, def has {actual}", stripped,
+                        cls_name,
+                        path,
+                        idx + 1,
+                        "argument-count-drift",
+                        f"comment claims {claimed}, def has {actual}",
+                        stripped,
                     )
                 )
             continue
@@ -1760,8 +1787,12 @@ def _scan_comment_drift_lines(cls_name: str, path: Path, lines: list[str]) -> li
         if actual != claimed:
             findings.append(
                 _Finding(
-                    cls_name, path, idx + 1, "argument-count-drift",
-                    f"docstring claims {claimed}, enclosing def has {actual}", stripped,
+                    cls_name,
+                    path,
+                    idx + 1,
+                    "argument-count-drift",
+                    f"docstring claims {claimed}, enclosing def has {actual}",
+                    stripped,
                 )
             )
 
@@ -1781,7 +1812,7 @@ def _scan_comment_drift_file(filepath: Path, verbose: bool = False) -> list[_Fin
     return _scan_comment_drift_lines("comment-drift", filepath, lines)
 
 
-def _scan_comment_drift_class(inputs: "_ScanInputs") -> list[_Finding]:
+def _scan_comment_drift_class(inputs: _ScanInputs) -> list[_Finding]:
     """The "comment-drift" hygiene class: checks the code and test-tree
     surfaces (Python ``def`` signatures only -- the prose surface carries
     no ``def`` to check a claim against)."""
@@ -1812,42 +1843,63 @@ def _is_neutral_ssh_host(host: str) -> bool:
     return h.rsplit(".", 1)[-1] in _NEUTRAL_SSH_TOP_LABELS
 
 
-def _scan_operator_literal_lines(cls_name: str, path: Path, lines: list[str]) -> list[_Finding]:
+def _scan_operator_literal_lines(
+    cls_name: str,
+    path: Path,
+    lines: list[str],
+    *,
+    labels: frozenset[str] = _OPERATOR_LITERAL_LABELS,
+) -> list[_Finding]:
     """Scan *lines* for operator-specific literals. At most one finding per
     line per label: the first home-path match whose name is not a neutral
-    placeholder, and the first ``git@<host>:`` remote whose host is not
+    placeholder, the first ``git@<host>:`` remote whose host is not
     neutral -- so a line carrying both a placeholder and a real name is
-    still reported, under the real one."""
+    still reported, under the real one -- and the first operator handle
+    outside the organisation name. Only the labels named in *labels* are
+    reported (all three by default)."""
     findings: list[_Finding] = []
     for idx, line in enumerate(lines):
-        if "/home/" not in line and "git@" not in line:
+        lowered = line.lower()
+        if "/home/" not in line and "git@" not in line and not any(h in lowered for h in _OPERATOR_HANDLES):
             continue
         stripped = line.strip()
-        for m in _HOME_PATH.finditer(line):
-            name = m.group("name").rstrip(".")
-            if _is_placeholder_home_name(name):
-                continue
-            findings.append(_Finding(cls_name, path, idx + 1, "home-path", "/home/" + name, stripped))
-            break
-        for m in _SSH_GIT_REMOTE.finditer(line):
-            if _is_neutral_ssh_host(m.group("host")):
-                continue
-            findings.append(_Finding(cls_name, path, idx + 1, "ssh-host-alias", m.group(0), stripped))
-            break
+        if "home-path" in labels:
+            for m in _HOME_PATH.finditer(line):
+                name = m.group("name").rstrip(".")
+                if _is_placeholder_home_name(name):
+                    continue
+                findings.append(_Finding(cls_name, path, idx + 1, "home-path", "/home/" + name, stripped))
+                break
+        if "ssh-host-alias" in labels:
+            for m in _SSH_GIT_REMOTE.finditer(line):
+                if _is_neutral_ssh_host(m.group("host")):
+                    continue
+                findings.append(_Finding(cls_name, path, idx + 1, "ssh-host-alias", m.group(0), stripped))
+                break
+        handle = _OPERATOR_HANDLE.search(line) if "operator-handle" in labels else None
+        if handle:
+            findings.append(_Finding(cls_name, path, idx + 1, "operator-handle", handle.group(0), stripped))
     return findings
 
 
-def _operator_literal_in_scope(relpath: str) -> bool:
-    """Return True if the repo-relative *relpath* is on the operator-literal
-    surface: every tracked file except release notes, the rendered
-    changelog, and the test tree -- with the test tree's archived
-    ``artifacts/`` subtree kept in scope, since those snapshots are shipped
-    as-is and read like documentation."""
+def _operator_literal_in_scope(relpath: str) -> frozenset[str]:
+    """Return the operator-literal labels reported for the repo-relative
+    *relpath*; an empty set means the file is off the surface. Every label
+    applies to every tracked file except release notes, the rendered
+    changelog, ``_FILE_WHITELIST`` names (no label at all) and the test
+    tree, ``team/tests/``. On the test tree only ``operator-handle`` is
+    reported -- the operator's handle is a finding in a fixture or a test
+    docstring as anywhere else, while home paths and git remotes there are
+    not -- except under its archived ``artifacts/`` subtree, which takes
+    every label, since those snapshots are shipped as-is and read like
+    documentation."""
     if relpath.startswith("release-notes/") or relpath == "CHANGELOG.md":
-        return False
+        return frozenset()
+    if Path(relpath).name in _FILE_WHITELIST:
+        return frozenset()
     if relpath.startswith("team/tests/") and not relpath.startswith("team/tests/artifacts/"):
-        return False
-    return Path(relpath).name not in _FILE_WHITELIST
+        return _OPERATOR_LITERAL_TEST_TREE_LABELS
+    return _OPERATOR_LITERAL_LABELS
 
 
 def _git_tracked_files(
@@ -1872,7 +1924,9 @@ def _git_tracked_files(
     try:
         top = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root:
             if verbose:
@@ -1880,7 +1934,8 @@ def _git_tracked_files(
             return []
         listed = subprocess.run(
             ["git", "-C", str(root), *ls_args],
-            capture_output=True, check=False,
+            capture_output=True,
+            check=False,
         )
     except OSError as exc:
         if verbose:
@@ -1892,18 +1947,21 @@ def _git_tracked_files(
     return [root / n for n in names]
 
 
-def _scan_operator_literal_class(inputs: "_ScanInputs") -> list[_Finding]:
+def _scan_operator_literal_class(inputs: _ScanInputs) -> list[_Finding]:
     """The "operator-literal" hygiene class: operator-specific home-directory
-    literals and private SSH host aliases in every tracked file outside
-    release notes, the changelog, and the test tree (whose ``artifacts/``
-    subtree stays in scope). Unlike the other classes, this one does not
+    literals, private SSH host aliases and operator forge handles in every
+    tracked file outside release notes and the changelog; on the test tree
+    (outside its ``artifacts/`` subtree, which takes every label) only the
+    operator handle is reported -- see ``_operator_literal_in_scope``.
+    Unlike the other classes, this one does not
     read the directory surfaces -- its surface is ``git ls-files`` at
     ``--repo-root``. Symlinks, files missing from the work tree, and binary
     files (a NUL byte in the content) are skipped."""
     findings: list[_Finding] = []
     for filepath in _git_tracked_files(inputs.repo_root, verbose=inputs.verbose):
         relpath = _to_relpath(filepath, inputs.repo_root.resolve())
-        if not _operator_literal_in_scope(relpath):
+        labels = _operator_literal_in_scope(relpath)
+        if not labels:
             continue
         if filepath.is_symlink() or not filepath.is_file():
             continue
@@ -1917,7 +1975,7 @@ def _scan_operator_literal_class(inputs: "_ScanInputs") -> list[_Finding]:
         if b"\0" in data:
             continue
         text = data.decode("utf-8", errors="replace")
-        findings.extend(_scan_operator_literal_lines("operator-literal", filepath, text.splitlines()))
+        findings.extend(_scan_operator_literal_lines("operator-literal", filepath, text.splitlines(), labels=labels))
     return findings
 
 
@@ -1934,12 +1992,12 @@ class HygieneClass:
 
     name: str
     description: str
-    scan: Callable[["_ScanInputs"], list[_Finding]]
+    scan: Callable[[_ScanInputs], list[_Finding]]
     rule: str
     example_justification: str
 
 
-_REGISTRY: "dict[str, HygieneClass]" = {}
+_REGISTRY: dict[str, HygieneClass] = {}
 
 
 def _register(hc: HygieneClass) -> None:
@@ -1988,8 +2046,7 @@ _register(
     HygieneClass(
         name="comment-drift",
         description=(
-            "a comment or docstring stating an argument/parameter count the "
-            "adjacent def signature contradicts"
+            "a comment or docstring stating an argument/parameter count the " "adjacent def signature contradicts"
         ),
         scan=_scan_comment_drift_class,
         rule=(
@@ -1998,8 +2055,7 @@ _register(
             "same change."
         ),
         example_justification=(
-            "retained intentionally: the stated count describes a different call shape, "
-            "not this def's own signature"
+            "retained intentionally: the stated count describes a different call shape, " "not this def's own signature"
         ),
     )
 )
@@ -2008,20 +2064,19 @@ _register(
     HygieneClass(
         name="operator-literal",
         description=(
-            "an operator-specific home-directory literal or private SSH host alias "
-            "in a tracked file outside release-notes/, CHANGELOG.md and team/tests/ "
-            "(team/tests/artifacts/ stays in scope)"
+            "an operator-specific home-directory literal, private SSH host alias or "
+            "operator forge handle in a tracked file outside release-notes/ and "
+            "CHANGELOG.md; on team/tests/ only the forge handle is reported "
+            "(team/tests/artifacts/ takes every label)"
         ),
         scan=_scan_operator_literal_class,
         rule=(
             "shipped files use neutral placeholders such as $HOME/..., ~/..., /home/user/ "
-            "or git@github.com:, never one operator's home directory or private SSH host "
-            "alias — a public release would publish the account name, and no other "
-            "machine resolves the alias."
+            "or git@github.com:, never one operator's home directory, private SSH host "
+            "alias or forge handle — a public release would publish the account name, "
+            "and no other machine resolves the alias."
         ),
-        example_justification=(
-            "retained intentionally as a deliberate literal path or host the format requires"
-        ),
+        example_justification=("retained intentionally as a deliberate literal path or host the format requires"),
     )
 )
 
@@ -2066,7 +2121,7 @@ class _SidecarEntry:
     cls: str
     content_hash: str
     justification: str
-    line_hint: Optional[int] = None
+    line_hint: int | None = None
 
 
 def _line_fingerprint(line_text: str) -> str:
@@ -2096,8 +2151,7 @@ def _load_sidecar(path: Path) -> list[_SidecarEntry]:
         raise _SidecarError(f"sidecar {path} is not valid JSON: {exc}") from exc
     if not isinstance(data, list):
         raise _SidecarError(
-            f"sidecar {path} must be a JSON array of entries; found a "
-            f"top-level {type(data).__name__}"
+            f"sidecar {path} must be a JSON array of entries; found a " f"top-level {type(data).__name__}"
         )
     return [_parse_sidecar_entry(path, idx, raw) for idx, raw in enumerate(data)]
 
@@ -2109,9 +2163,7 @@ def _parse_sidecar_entry(path: Path, idx: int, raw_entry: object) -> _SidecarEnt
     required = ("file", "class", "content_hash", "justification")
     missing = [key for key in required if key not in raw_entry]
     if missing:
-        raise _SidecarError(
-            f"sidecar {path} entry #{idx} is missing required field(s): {', '.join(missing)}"
-        )
+        raise _SidecarError(f"sidecar {path} entry #{idx} is missing required field(s): {', '.join(missing)}")
 
     justification = raw_entry["justification"]
     if not isinstance(justification, str) or not justification.strip():
@@ -2132,7 +2184,7 @@ def _parse_sidecar_entry(path: Path, idx: int, raw_entry: object) -> _SidecarEnt
     )
 
 
-def _suppressed_keys(entries: list[_SidecarEntry]) -> "set[tuple[str, str, str]]":
+def _suppressed_keys(entries: list[_SidecarEntry]) -> set[tuple[str, str, str]]:
     return {(e.file, e.cls, e.content_hash) for e in entries}
 
 
@@ -2182,8 +2234,7 @@ def _add_suppression(
         return 2
     if line_arg < 1 or line_arg > len(lines):
         print(
-            f"lint_hygiene: --add-suppression line {line_arg} is out of range for "
-            f"{target} ({len(lines)} line(s))",
+            f"lint_hygiene: --add-suppression line {line_arg} is out of range for " f"{target} ({len(lines)} line(s))",
             file=sys.stderr,
         )
         return 2
@@ -2258,8 +2309,12 @@ def _finding_remedy(f: _Finding, repo_root: Path, lint_script: Path, sidecar_pat
         )
     elif f.cls == "operator-literal" and f.label == "ssh-host-alias":
         base = (
-            f"replace '{f.token}' at {rel}:{f.lineno} with the public form, "
-            "for example git@github.com:org/repo.git"
+            f"replace '{f.token}' at {rel}:{f.lineno} with the public form, " "for example git@github.com:org/repo.git"
+        )
+    elif f.cls == "operator-literal" and f.label == "operator-handle":
+        base = (
+            f"replace '{f.token}' at {rel}:{f.lineno} with a neutral name, for example "
+            "operator for a git author or my-app for a project"
         )
     elif f.cls == "operator-literal":
         base = (
@@ -2311,6 +2366,11 @@ def _finding_cause(f: _Finding, repo_root: Path) -> str:
         return (
             f"{rel}:{f.lineno}: [{f.label}] private SSH host alias '{f.token}' in a "
             "shipped file -- it only resolves through one operator's ~/.ssh/config"
+        )
+    if f.cls == "operator-literal" and f.label == "operator-handle":
+        return (
+            f"{rel}:{f.lineno}: [{f.label}] operator forge handle '{f.token}' outside the "
+            "organisation name in a shipped file -- a public release would publish one person's login"
         )
     if f.cls == "operator-literal":
         return (
@@ -2396,9 +2456,9 @@ def run_hygiene_lint(
     config_dirs: list[Path],
     repo_root: Path,
     sidecar_path: Path,
-    docs_dirs: "list[Path] | None" = None,
-    text_dirs: "list[Path] | None" = None,
-    classes: Optional[list[str]] = None,
+    docs_dirs: list[Path] | None = None,
+    text_dirs: list[Path] | None = None,
+    classes: list[str] | None = None,
     include_repo_root_scripts: bool = False,
     include_repo_root_text_files: bool = False,
     verbose: bool = False,
@@ -2426,9 +2486,7 @@ def run_hygiene_lint(
     # directory to the test-tree surface instead of letting the code
     # surface's own exclusion drop it -- see module docstring's
     # "Scan-surface routing".
-    routed_test_tree_dirs = [
-        routed for d in code_dirs for routed in _discover_routed_test_tree_dirs(d)
-    ]
+    routed_test_tree_dirs = [routed for d in code_dirs for routed in _discover_routed_test_tree_dirs(d)]
     test_tree_targets = [_ScanTarget(d, test_tree_surface=True) for d in test_tree_dirs] + [
         _ScanTarget(d, test_tree_surface=True) for d in routed_test_tree_dirs
     ]
@@ -2436,15 +2494,9 @@ def run_hygiene_lint(
     code_pairs = _collect_files(code_targets, (".py", ".sh"), include_extensionless_shebang=True)
     if include_repo_root_scripts:
         code_pairs.extend(_collect_repo_root_scripts(repo_root))
-    test_tree_pairs = _collect_files(
-        test_tree_targets, (".py", ".sh"), include_extensionless_shebang=True
-    )
-    prose_pairs = _collect_files(
-        [_ScanTarget(d, test_tree_surface=False) for d in prose_dirs], (".md",)
-    )
-    docs_pairs = _collect_files(
-        [_ScanTarget(d, test_tree_surface=False) for d in (docs_dirs or [])], (".md",)
-    )
+    test_tree_pairs = _collect_files(test_tree_targets, (".py", ".sh"), include_extensionless_shebang=True)
+    prose_pairs = _collect_files([_ScanTarget(d, test_tree_surface=False) for d in prose_dirs], (".md",))
+    docs_pairs = _collect_files([_ScanTarget(d, test_tree_surface=False) for d in (docs_dirs or [])], (".md",))
     config_pairs = _collect_files(
         [_ScanTarget(d, test_tree_surface=False) for d in config_dirs],
         (".manifest", ".census", ".txt"),
@@ -2458,9 +2510,7 @@ def run_hygiene_lint(
         # The directory surfaces may already reach an example file (one
         # under team/templates/, say); each file is scanned once.
         already = {p for p, _ in text_pairs}
-        for pair in _collect_repo_root_text_files(repo_root) + _collect_example_files(
-            repo_root, verbose=verbose
-        ):
+        for pair in _collect_repo_root_text_files(repo_root) + _collect_example_files(repo_root, verbose=verbose):
             if pair[0] not in already:
                 already.add(pair[0])
                 text_pairs.append(pair)
@@ -2531,7 +2581,7 @@ def _default_text_dirs(repo_root: Path) -> list[Path]:
     ]
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_hygiene.py",
         description=textwrap.fill(
@@ -2541,65 +2591,116 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "in the module docstring for the one exception (a malformed sidecar).",
             width=78,
         ),
-        epilog="registered classes:\n" + "\n".join(
+        epilog="registered classes:\n"
+        + "\n".join(
             textwrap.fill(
-                f"{hc.name}: {hc.description}", width=78,
-                initial_indent="  ", subsequent_indent="      ",
+                f"{hc.name}: {hc.description}",
+                width=78,
+                initial_indent="  ",
+                subsequent_indent="      ",
             )
             for hc in _REGISTRY.values()
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--code-dirs", metavar="PATH", nargs="*", default=None,
-                         help="Code-surface directories to scan (.py/.sh). Default: the "
-                              "production code surfaces (see module docstring).")
-    parser.add_argument("--test-tree-dirs", metavar="PATH", nargs="*", default=None,
-                         help="Test-tree-surface directories to scan (.py/.sh). Default: team/tests/. "
-                              "Comments, docstrings and assert messages here are flagged for bug, "
-                              "priority, task and requirement IDs and versions cited as history; "
-                              "wording is not checked.")
-    parser.add_argument("--prose-dirs", metavar="PATH", nargs="*", default=None,
-                         help="Prose-surface directories to scan (.md). Default: release-notes/. "
-                              "BUG-ID/PRIORITY-ID/bare-release-slug/version-history are "
-                              "sanctioned content here.")
-    parser.add_argument("--docs-dirs", metavar="PATH", nargs="*", default=None,
-                         help="Docs-surface directories to scan (.md). Default: docs/. Unlike "
-                              "--prose-dirs, the full pattern set is enforced with no "
-                              "surface-specific exemption -- standalone documentation is not a "
-                              "change record (see module docstring's 'Docs surface').")
-    parser.add_argument("--config-dirs", metavar="PATH", nargs="*", default=None,
-                         help="Config-surface directories to scan (.manifest/.census/.txt). "
-                              "Default: team/config/.")
-    parser.add_argument("--text-dirs", metavar="PATH", nargs="*", default=None,
-                         help="Shipped-text-surface directories to scan: every non-binary "
-                              "file, whatever its suffix, with the full pattern set enforced. "
-                              "Default: team/roles/, subagents/, team/templates/, "
-                              "team/pm-agent/ and docker/, plus the top-level *.md files "
-                              "(except CHANGELOG.md) and every *_example / *.example file "
-                              "in the git work tree outside team/tests/ and release-notes/; "
-                              "an explicit list scans only the directories it names.")
-    parser.add_argument("--classes", metavar="NAME", nargs="*", default=None,
-                         help=f"Hygiene classes to run. Default: all registered classes "
-                              f"({', '.join(registered_class_names())}).")
-    parser.add_argument("--sidecar", metavar="PATH", default=None,
-                         help="Allowlist sidecar path. Default: "
-                              "team/scripts/hygiene-lint-allowlist.json.")
-    parser.add_argument("--repo-root", metavar="PATH", default=None,
-                         help="Root used to compute each finding's repo-relative 'file' "
-                              "identity. Default: inferred from this script's location.")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                         help="Write findings as a JSON array to PATH (parent dirs created "
-                              "as needed). Always printed to stdout as a remedy block regardless.")
+    parser.add_argument(
+        "--code-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help="Code-surface directories to scan (.py/.sh). Default: the "
+        "production code surfaces (see module docstring).",
+    )
+    parser.add_argument(
+        "--test-tree-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help="Test-tree-surface directories to scan (.py/.sh). Default: team/tests/. "
+        "Comments, docstrings and assert messages here are flagged for bug, "
+        "priority, task and requirement IDs and versions cited as history; "
+        "wording is not checked.",
+    )
+    parser.add_argument(
+        "--prose-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help="Prose-surface directories to scan (.md). Default: release-notes/. "
+        "BUG-ID/PRIORITY-ID/bare-release-slug/version-history are "
+        "sanctioned content here.",
+    )
+    parser.add_argument(
+        "--docs-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help="Docs-surface directories to scan (.md). Default: docs/. Unlike "
+        "--prose-dirs, the full pattern set is enforced with no "
+        "surface-specific exemption -- standalone documentation is not a "
+        "change record (see module docstring's 'Docs surface').",
+    )
+    parser.add_argument(
+        "--config-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help="Config-surface directories to scan (.manifest/.census/.txt). " "Default: team/config/.",
+    )
+    parser.add_argument(
+        "--text-dirs",
+        metavar="PATH",
+        nargs="*",
+        default=None,
+        help="Shipped-text-surface directories to scan: every non-binary "
+        "file, whatever its suffix, with the full pattern set enforced. "
+        "Default: team/roles/, subagents/, team/templates/, "
+        "team/pm-agent/ and docker/, plus the top-level *.md files "
+        "(except CHANGELOG.md) and every *_example / *.example file "
+        "in the git work tree outside team/tests/ and release-notes/; "
+        "an explicit list scans only the directories it names.",
+    )
+    parser.add_argument(
+        "--classes",
+        metavar="NAME",
+        nargs="*",
+        default=None,
+        help=f"Hygiene classes to run. Default: all registered classes " f"({', '.join(registered_class_names())}).",
+    )
+    parser.add_argument(
+        "--sidecar",
+        metavar="PATH",
+        default=None,
+        help="Allowlist sidecar path. Default: " "team/scripts/hygiene-lint-allowlist.json.",
+    )
+    parser.add_argument(
+        "--repo-root",
+        metavar="PATH",
+        default=None,
+        help="Root used to compute each finding's repo-relative 'file' "
+        "identity. Default: inferred from this script's location.",
+    )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help="Write findings as a JSON array to PATH (parent dirs created "
+        "as needed). Always printed to stdout as a remedy block regardless.",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Print each file name as it is scanned.")
-    parser.add_argument("--add-suppression", metavar=("FILE", "LINE", "CLASS", "JUSTIFICATION"),
-                         nargs=4, default=None,
-                         help="Append a sidecar entry suppressing CLASS's finding on FILE's "
-                              "current LINE, with the given JUSTIFICATION. Derives the "
-                              "content-hash anchor from FILE's actual text.")
+    parser.add_argument(
+        "--add-suppression",
+        metavar=("FILE", "LINE", "CLASS", "JUSTIFICATION"),
+        nargs=4,
+        default=None,
+        help="Append a sidecar entry suppressing CLASS's finding on FILE's "
+        "current LINE, with the given JUSTIFICATION. Derives the "
+        "content-hash anchor from FILE's actual text.",
+    )
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the hygiene lint, or record a suppression with ``--add-suppression``.
 
     Exit codes: 0 the lint ran to completion, with or without findings (a
@@ -2610,7 +2711,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
 
     script_dir = Path(__file__).resolve().parent  # team/scripts/
-    default_repo_root = script_dir.parent.parent   # repo root
+    default_repo_root = script_dir.parent.parent  # repo root
     repo_root = Path(args.repo_root).resolve() if args.repo_root else default_repo_root
     sidecar_path = Path(args.sidecar).resolve() if args.sidecar else _default_sidecar_path(script_dir)
 
@@ -2635,9 +2736,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     default_code = args.code_dirs is None
     code_dirs = (
-        _default_code_dirs(script_dir, repo_root)
-        if default_code
-        else [Path(d).resolve() for d in args.code_dirs if d]
+        _default_code_dirs(script_dir, repo_root) if default_code else [Path(d).resolve() for d in args.code_dirs if d]
     )
     test_tree_dirs = (
         [repo_root / "team" / "tests"]
@@ -2645,26 +2744,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         else [Path(d).resolve() for d in args.test_tree_dirs if d]
     )
     prose_dirs = (
-        [repo_root / "release-notes"]
-        if args.prose_dirs is None
-        else [Path(d).resolve() for d in args.prose_dirs if d]
+        [repo_root / "release-notes"] if args.prose_dirs is None else [Path(d).resolve() for d in args.prose_dirs if d]
     )
-    docs_dirs = (
-        [repo_root / "docs"]
-        if args.docs_dirs is None
-        else [Path(d).resolve() for d in args.docs_dirs if d]
-    )
+    docs_dirs = [repo_root / "docs"] if args.docs_dirs is None else [Path(d).resolve() for d in args.docs_dirs if d]
     config_dirs = (
         [repo_root / "team" / "config"]
         if args.config_dirs is None
         else [Path(d).resolve() for d in args.config_dirs if d]
     )
     default_text = args.text_dirs is None
-    text_dirs = (
-        _default_text_dirs(repo_root)
-        if default_text
-        else [Path(d).resolve() for d in args.text_dirs if d]
-    )
+    text_dirs = _default_text_dirs(repo_root) if default_text else [Path(d).resolve() for d in args.text_dirs if d]
 
     print(
         f"lint_hygiene: scanning {len(code_dirs)} code dir(s), {len(test_tree_dirs)} "
@@ -2691,8 +2780,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     lint_script = Path(__file__).resolve()
     total_files = (
-        len(code_dirs) + len(test_tree_dirs) + len(prose_dirs) + len(docs_dirs)
-        + len(config_dirs) + len(text_dirs)
+        len(code_dirs) + len(test_tree_dirs) + len(prose_dirs) + len(docs_dirs) + len(config_dirs) + len(text_dirs)
     )
 
     if findings:

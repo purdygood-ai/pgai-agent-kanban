@@ -110,6 +110,14 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+# The pgai_agent_kanban package sits beside scripts/ in the same tree
+# (team/ in the dev tree, the kanban root when installed); each tree finds
+# its own copy.
+_PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
+from pgai_agent_kanban.lint.source_text import mask_comment_lines as _mask_comment_lines  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -150,24 +158,6 @@ class Violation(NamedTuple):
 # Comment masking (same technique as lint_dashboard_network_git_gate.py:
 # exclude documentation prose from the scan while preserving line numbers)
 # ---------------------------------------------------------------------------
-
-
-def _mask_comment_lines(text: str) -> str:
-    """Return *text* with every comment-only line blanked out (same length).
-
-    A line is a "comment line" when its first non-whitespace character is
-    ``#`` -- the shared line-comment convention both bash and Python use,
-    matching team/config/default_palette.txt's own documented parse rule.
-    Blanking (rather than deleting) preserves line numbers for subsequent
-    regex matches and their derived line-number reporting.
-    """
-    masked_lines = []
-    for line in text.splitlines(keepends=False):
-        if line.lstrip().startswith("#"):
-            masked_lines.append("")
-        else:
-            masked_lines.append(line)
-    return "\n".join(masked_lines)
 
 
 def _line_number_for_offset(text: str, offset: int) -> int:
@@ -259,15 +249,10 @@ def scan_dashboard_dirs(team_dir: Path, *, verbose: bool = False) -> list[Violat
 def _build_causes(violations: list[Violation]) -> list[str]:
     """Return one cause bullet per violation, naming path:line, kind, and snippet."""
     kind_label = {"ansi_escape": "raw ANSI escape literal", "tmux_fg": "raw tmux #[fg=...] markup literal"}
-    return [
-        f"{v.path}:{v.line}: {kind_label[v.kind]} found — {v.snippet!r}"
-        for v in violations
-    ]
+    return [f"{v.path}:{v.line}: {kind_label[v.kind]} found — {v.snippet!r}" for v in violations]
 
 
-def _build_fix_commands(
-    violations: list[Violation], *, team_dir: Path, lint_script: Path
-) -> list[str]:
+def _build_fix_commands(violations: list[Violation], *, team_dir: Path, lint_script: Path) -> list[str]:
     """Return the numbered, verbatim-runnable fix commands for *violations*.
 
     Unlike lint_dashboard_network_git_gate.py's "comment it out" stop-gap,
@@ -293,9 +278,7 @@ def _build_fix_commands(
     return commands
 
 
-def _format_remedy_block(
-    violations: list[Violation], *, team_dir: Path, lint_script: Path
-) -> str:
+def _format_remedy_block(violations: list[Violation], *, team_dir: Path, lint_script: Path) -> str:
     """Assemble the full three-part remedy block."""
     causes = _build_causes(violations)
     commands = _build_fix_commands(violations, team_dir=team_dir, lint_script=lint_script)
@@ -381,8 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     scanned_roots = [team_dir / subpath for subpath in _SCANNED_SUBPATHS]
     if not any(root.is_dir() for root in scanned_roots):
         print(
-            "ERROR: neither scanned root exists: "
-            + ", ".join(str(r) for r in scanned_roots),
+            "ERROR: neither scanned root exists: " + ", ".join(str(r) for r in scanned_roots),
             file=sys.stderr,
         )
         return 2
@@ -395,15 +377,13 @@ def main(argv: list[str] | None = None) -> int:
     if violations:
         lint_script = Path(__file__).resolve()
         print(
-            "\n"
-            + _format_remedy_block(violations, team_dir=team_dir, lint_script=lint_script),
+            "\n" + _format_remedy_block(violations, team_dir=team_dir, lint_script=lint_script),
             flush=True,
         )
         return 1
 
     print(
-        "lint_dashboard_hardcode_colors: OK "
-        f"({' and '.join(str(r) for r in scanned_roots)} are single-source clean)"
+        "lint_dashboard_hardcode_colors: OK " f"({' and '.join(str(r) for r in scanned_roots)} are single-source clean)"
     )
     return 0
 

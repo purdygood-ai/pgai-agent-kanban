@@ -53,26 +53,18 @@ def _require_git() -> None:
     """
     require_binary("git", label="cm-release-hooks")
 
+
 # Paths to the libraries under test (relative to team/, where pytest runs from).
 _LIB_PROJECT_PATHS = "scripts/lib/project_paths.sh"
 _LIB_PROJECTS = "scripts/lib/projects.sh"
 _LIB_HOOKS = "scripts/lib/cm_release_hooks.sh"
 
 # Source preamble that loads the two prerequisites before cm_release_hooks.sh.
-_SOURCE_PREAMBLE = (
-    f"source {_LIB_PROJECT_PATHS} && "
-    f"source {_LIB_PROJECTS} && "
-    f"source {_LIB_HOOKS}"
-)
+_SOURCE_PREAMBLE = f"source {_LIB_PROJECT_PATHS} && " f"source {_LIB_PROJECTS} && " f"source {_LIB_HOOKS}"
 
 # A minimal cm_halt stub: prints HALT info to stdout (so tests can inspect it)
 # and exits 2 to signal the halt path was taken.
-_CM_HALT_STUB = (
-    "cm_halt() { "
-    "  echo \"HALT: trigger=$1 reason=$2\"; "
-    "  exit 2; "
-    "}"
-)
+_CM_HALT_STUB = "cm_halt() { " '  echo "HALT: trigger=$1 reason=$2"; ' "  exit 2; " "}"
 
 
 def _make_sandbox(
@@ -101,9 +93,7 @@ def _make_sandbox(
     # Write a minimal project.cfg
     cfg_path = project_kanban_dir / "project.cfg"
     cfg_path.write_text(
-        "[project]\n"
-        f"project_name = {project_name}\n"
-        f"dev_tree_path = {dev_tree}\n",
+        "[project]\n" f"project_name = {project_name}\n" f"dev_tree_path = {dev_tree}\n",
         encoding="utf-8",
     )
 
@@ -143,7 +133,7 @@ def _run_resolve(
         f"_rc=0\n"
         f"cm_resolve_and_enforce_hook {project_name!r} {phase!r} "
         f"{str(project_hooks_dir)!r} {str(dev_tree_path)!r} || _rc=$?\n"
-        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
+        f'echo "RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH"\n'
         f"exit $_rc\n"
     )
     return run_bash(
@@ -178,8 +168,8 @@ def _run_resolver_func(
         # Run in the current shell (no subshell) — redirect stdout to temp file.
         f"projects_resolve_release_hook_path {project_name!r} {phase!r} > {tmpfile!r} 2>&1\n"
         f"path=$(cat {tmpfile!r})\n"
-        f"echo \"PATH:$path\"\n"
-        f"echo \"SOURCE:$_PGAI_HOOK_LAST_SOURCE\"\n"
+        f'echo "PATH:$path"\n'
+        f'echo "SOURCE:$_PGAI_HOOK_LAST_SOURCE"\n'
     )
     return run_bash(
         tmp_path,
@@ -342,6 +332,7 @@ def test_inrepo_hook_survives_project_recreation(tmp_path: pathlib.Path) -> None
 
     # Simulate remove-project: delete the kanban-side project directory entirely.
     import shutil
+
     shutil.rmtree(str(project_dir))
 
     # Simulate create-project: recreate the kanban-side directory with a fresh
@@ -349,9 +340,7 @@ def test_inrepo_hook_survives_project_recreation(tmp_path: pathlib.Path) -> None
     project_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = project_dir / "project.cfg"
     cfg_path.write_text(
-        "[project]\n"
-        "project_name = portable-proj\n"
-        f"dev_tree_path = {dev_tree}\n",
+        "[project]\n" "project_name = portable-proj\n" f"dev_tree_path = {dev_tree}\n",
         encoding="utf-8",
     )
 
@@ -563,9 +552,7 @@ def test_nonexecutable_inrepo_hook_names_path_in_error(tmp_path: pathlib.Path) -
 
     result = _run_resolve(tmp_path, kanban_root, "noexec-proj2", project_dir / "hooks", dev_tree)
     combined = result.stdout + result.stderr
-    assert str(inrepo_hook) in combined, (
-        f"Expected hook path {inrepo_hook} in error output; got: {combined!r}"
-    )
+    assert str(inrepo_hook) in combined, f"Expected hook path {inrepo_hook} in error output; got: {combined!r}"
 
 
 def test_nonexecutable_inrepo_hook_mentions_chmod(tmp_path: pathlib.Path) -> None:
@@ -576,9 +563,7 @@ def test_nonexecutable_inrepo_hook_mentions_chmod(tmp_path: pathlib.Path) -> Non
 
     result = _run_resolve(tmp_path, kanban_root, "noexec-proj3", project_dir / "hooks", dev_tree)
     combined = result.stdout + result.stderr
-    assert "chmod" in combined, (
-        f"Expected 'chmod' fix hint in error output; got: {combined!r}"
-    )
+    assert "chmod" in combined, f"Expected 'chmod' fix hint in error output; got: {combined!r}"
 
 
 def test_nonexecutable_inrepo_hook_not_silently_skipped(tmp_path: pathlib.Path) -> None:
@@ -621,9 +606,9 @@ def _run_resolve_with_remedy_globals(
         f"_rc=0\n"
         f"cm_resolve_and_enforce_hook {project_name!r} {phase!r} "
         f"{str(project_hooks_dir)!r} {str(dev_tree_path)!r}{rc_branch_arg} || _rc=$?\n"
-        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
-        f"echo \"NONEXEC_PATH:$CM_HOOK_NONEXEC_PATH\"\n"
-        f"echo \"NONEXEC_FIX_CMD:$CM_HOOK_NONEXEC_FIX_CMD\"\n"
+        f'echo "RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH"\n'
+        f'echo "NONEXEC_PATH:$CM_HOOK_NONEXEC_PATH"\n'
+        f'echo "NONEXEC_FIX_CMD:$CM_HOOK_NONEXEC_FIX_CMD"\n'
         f"exit $_rc\n"
     )
     return run_bash(
@@ -639,9 +624,7 @@ def test_nonexecutable_inrepo_hook_prints_full_remedy_block(tmp_path: pathlib.Pa
     inrepo_hook = dev_tree / ".pgai" / "hooks" / "cm-release-pre-tag.sh"
     _write_hook(inrepo_hook, executable=False)
 
-    result = _run_resolve(
-        tmp_path, kanban_root, "noexec-remedy1", project_dir / "hooks", dev_tree, phase="pre-tag"
-    )
+    result = _run_resolve(tmp_path, kanban_root, "noexec-remedy1", project_dir / "hooks", dev_tree, phase="pre-tag")
     combined = result.stdout + result.stderr
     assert "Cause(s):" in combined
     assert "To fix:" in combined
@@ -696,9 +679,9 @@ def test_nonexecutable_inrepo_hook_remedy_command_clears_the_gate(tmp_path: path
         tmp_path, kanban_root, "noexec-remedy4", project_dir / "hooks", dev_tree, phase="pre-tag"
     )
     assert first.returncode == 1
-    fix_cmd = next(
-        l for l in first.stdout.splitlines() if l.startswith("NONEXEC_FIX_CMD:")
-    ).removeprefix("NONEXEC_FIX_CMD:")
+    fix_cmd = next(l for l in first.stdout.splitlines() if l.startswith("NONEXEC_FIX_CMD:")).removeprefix(
+        "NONEXEC_FIX_CMD:"
+    )
     assert fix_cmd == f"chmod +x {inrepo_hook}"
 
     # Execute the printed fix command verbatim through a real shell.
@@ -706,9 +689,7 @@ def test_nonexecutable_inrepo_hook_remedy_command_clears_the_gate(tmp_path: path
     assert exec_result.returncode == 0, f"Fix command failed: {exec_result.stderr}"
 
     # Re-run: must now succeed (source: in-repo, resolves to the now-executable hook).
-    second = _run_resolve(
-        tmp_path, kanban_root, "noexec-remedy4", project_dir / "hooks", dev_tree, phase="pre-tag"
-    )
+    second = _run_resolve(tmp_path, kanban_root, "noexec-remedy4", project_dir / "hooks", dev_tree, phase="pre-tag")
     assert second.returncode == 0, f"Gate still fails after applying the fix: {second.stdout} {second.stderr}"
     assert "source: in-repo" in second.stdout
 
@@ -731,8 +712,13 @@ def test_rc_branch_aware_nonexecutable_hook_prints_full_remedy_block(
     _git(dev_tree, "checkout", "main")
 
     result = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "rcaware-remedy", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch="rc/v9.9.5",
+        tmp_path,
+        kanban_root,
+        "rcaware-remedy",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch="rc/v9.9.5",
     )
     combined = result.stdout + result.stderr
     assert result.returncode == 1
@@ -740,9 +726,9 @@ def test_rc_branch_aware_nonexecutable_hook_prints_full_remedy_block(
     assert "To fix:" in combined
     assert "Rule:" in combined
     assert "git update-index --chmod=+x" in combined
-    nonexec_path = next(
-        l for l in result.stdout.splitlines() if l.startswith("NONEXEC_PATH:")
-    ).removeprefix("NONEXEC_PATH:")
+    nonexec_path = next(l for l in result.stdout.splitlines() if l.startswith("NONEXEC_PATH:")).removeprefix(
+        "NONEXEC_PATH:"
+    )
     assert nonexec_path == f"{hook_rel} (on rc/v9.9.5)"
 
 
@@ -774,9 +760,7 @@ def _extract_pretag_call_site() -> str:
     text = pathlib.Path(_RELEASE_SH).read_text(encoding="utf-8")
     lines = text.splitlines()
     start = next(
-        i
-        for i, l in enumerate(lines)
-        if l.lstrip().startswith('cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag"')
+        i for i, l in enumerate(lines) if l.lstrip().startswith('cm_resolve_and_enforce_hook "$PROJECT_NAME" "pre-tag"')
     )
     end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "}")
     return "\n".join(lines[start : end + 1])
@@ -834,12 +818,7 @@ def _extract_call_site(phase: str) -> str:
 
 
 # A cm_halt stub that reports its error key and its fourth argument.
-_CM_HALT_ARGS_STUB = (
-    "cm_halt() { "
-    "  echo \"HALT: key=$1 flag=${4:-none}\"; "
-    "  exit 2; "
-    "}"
-)
+_CM_HALT_ARGS_STUB = "cm_halt() { " '  echo "HALT: key=$1 flag=${4:-none}"; ' "  exit 2; " "}"
 
 
 @pytest.mark.parametrize(
@@ -873,6 +852,57 @@ def test_release_sh_non_executable_hook_halt_also_writes_the_inbox(
 
     assert result.returncode == 2, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert f"HALT: key={key} flag=--inbox" in result.stdout, result.stdout
+
+
+def _extract_pre_squash_step() -> str:
+    """release.sh's ``_cm_run_pre_squash_hook_step`` function, verbatim."""
+    lines = pathlib.Path(_RELEASE_SH).read_text(encoding="utf-8").splitlines()
+    start = lines.index("_cm_run_pre_squash_hook_step() {")
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "}")
+    return "\n".join(lines[start : end + 1])
+
+
+@pytest.mark.parametrize(
+    "runner_broken, key, hook_runs",
+    [
+        (True, "cm-release.trigger-4.pre-squash-hook-runner-failed", False),
+        (False, "cm-release.trigger-4.pre-squash-hook-failed", True),
+    ],
+)
+def test_release_sh_pre_squash_trigger_4_names_the_runner_or_the_hook(
+    tmp_path: pathlib.Path, runner_broken: bool, key: str, hook_runs: bool
+) -> None:
+    """Trigger 4 blames the hook only when the hook ran and failed: a runner
+    that cannot start it (no PYTHONPATH) HALTs under the runner key with a
+    reason naming the runner, and the hook never runs."""
+    kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "release-callsite")
+    marker = tmp_path / "hook-ran.txt"
+    hook = project_dir / "hooks" / "cm-release-pre-squash.sh"
+    _write_hook(hook, content=f"#!/usr/bin/env bash\necho ran > {str(marker)!r}\nexit 7\n")
+
+    script = "\n".join(
+        [
+            'cm_halt() { echo "HALT: key=$1 flag=${4:-none} reason=$2"; exit 2; }',
+            f"cm_resolve_and_enforce_hook() {{ CM_RESOLVED_HOOK_PATH={str(hook)!r}; }}",
+            "source scripts/lib/error_contract.sh",
+            "source scripts/lib/pp_run_ops.sh",
+            "source scripts/lib/cm/release_hook_runner.sh",
+            "_PP_RUN_OPS_OWN_ROOT=''" if runner_broken else "",
+            f"PROJECT_NAME='release-callsite' PROJECT_HOOKS_DIR={str(project_dir / 'hooks')!r}",
+            f"REPO_ROOT={str(dev_tree)!r} RC_BRANCH='rc/v1.0.0' ACTIVE_RC='v1.0.0'",
+            f"_CM_PROJECT_ROOT={str(project_dir)!r} KANBAN_ROOT={str(kanban_root)!r}",
+            _extract_pre_squash_step(),
+            "_cm_run_pre_squash_hook_step",
+        ]
+    )
+    result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
+
+    assert result.returncode == 2, f"stdout={result.stdout}\nstderr={result.stderr}"
+    assert f"HALT: key={key} flag=--inbox" in result.stdout, result.stdout
+    assert marker.exists() is hook_runs, f"stdout={result.stdout}\nstderr={result.stderr}"
+    if runner_broken:
+        assert "hook runner could not start" in result.stdout, result.stdout
+        assert str(hook) not in result.stdout + result.stderr, result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -933,10 +963,7 @@ def test_kanban_side_hook_not_shadowed_by_absent_cfg(tmp_path: pathlib.Path) -> 
 def test_pp_hook_required_returns_false_by_default(tmp_path: pathlib.Path) -> None:
     """pp_hook_required returns false when the key is absent from project.cfg."""
     kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, "req-test1")
-    script = (
-        f"source {_LIB_PROJECT_PATHS} && "
-        f"pp_hook_required req-test1 pre-squash"
-    )
+    script = f"source {_LIB_PROJECT_PATHS} && " f"pp_hook_required req-test1 pre-squash"
     result = run_bash(
         tmp_path,
         script,
@@ -958,10 +985,7 @@ def test_pp_hook_required_returns_true_when_set(tmp_path: pathlib.Path) -> None:
     )
     (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
-    script = (
-        f"source {_LIB_PROJECT_PATHS} && "
-        f"pp_hook_required req-test2 pre-squash"
-    )
+    script = f"source {_LIB_PROJECT_PATHS} && " f"pp_hook_required req-test2 pre-squash"
     result = run_bash(
         tmp_path,
         script,
@@ -986,19 +1010,16 @@ def test_pp_hook_required_supports_all_phases(tmp_path: pathlib.Path) -> None:
     (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
     for phase, expected in [("pre-squash", "true"), ("pre-tag", "false"), ("post-tag", "true")]:
-        script = (
-            f"source {_LIB_PROJECT_PATHS} && "
-            f"pp_hook_required req-test3 {phase!r}"
-        )
+        script = f"source {_LIB_PROJECT_PATHS} && " f"pp_hook_required req-test3 {phase!r}"
         result = run_bash(
             tmp_path,
             script,
             extra_env={"KANBAN_ROOT": str(kanban_root)},
         )
         assert result.returncode == 0, f"Phase {phase!r} failed: {result.stderr}"
-        assert result.stdout.strip() == expected, (
-            f"Phase {phase!r}: expected {expected!r}, got {result.stdout.strip()!r}"
-        )
+        assert (
+            result.stdout.strip() == expected
+        ), f"Phase {phase!r}: expected {expected!r}, got {result.stdout.strip()!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -1017,8 +1038,11 @@ def test_different_hooks_per_phase(tmp_path: pathlib.Path) -> None:
 
     for phase_name in ("pre-squash", "pre-tag", "post-tag"):
         result = _run_resolve(
-            tmp_path, kanban_root, "multi-phase",
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            "multi-phase",
+            project_dir / "hooks",
+            dev_tree,
             phase=phase_name,
         )
         assert result.returncode == 0, f"Phase {phase_name!r}: rc={result.returncode}"
@@ -1035,7 +1059,8 @@ def _git(dev_tree: pathlib.Path, *args: str) -> None:
     """Run a git command in *dev_tree*, raising on failure."""
     subprocess.run(
         ["git", "-C", str(dev_tree)] + list(args),
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -1081,8 +1106,8 @@ def test_rc_branch_aware_in_repo_hook_resolves_from_ref_not_checkout(
         f"_rc=0\n"
         f"cm_resolve_and_enforce_hook 'rcaware-proj' 'pre-squash' "
         f"{str(project_dir / 'hooks')!r} {str(dev_tree)!r} 'rc/v9.9.9' || _rc=$?\n"
-        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
-        f"echo \"IS_TEMP:$CM_RESOLVED_HOOK_IS_TEMP\"\n"
+        f'echo "RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH"\n'
+        f'echo "IS_TEMP:$CM_RESOLVED_HOOK_IS_TEMP"\n'
         f"exit $_rc\n"
     )
     result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
@@ -1091,9 +1116,7 @@ def test_rc_branch_aware_in_repo_hook_resolves_from_ref_not_checkout(
     assert "source: in-repo (rc/v9.9.9)" in result.stdout
     assert "IS_TEMP:1" in result.stdout
 
-    resolved_line = [
-        l for l in result.stdout.splitlines() if l.startswith("RESOLVED_PATH:")
-    ][0]
+    resolved_line = [l for l in result.stdout.splitlines() if l.startswith("RESOLVED_PATH:")][0]
     resolved_path = pathlib.Path(resolved_line.split(":", 1)[1])
     assert resolved_path.exists(), "materialized hook file must exist on disk"
     assert resolved_path.read_text(encoding="utf-8") == hook_content
@@ -1177,16 +1200,14 @@ def test_rc_branch_aware_cfg_relative_path_resolves_from_ref(
         f"_rc=0\n"
         f"cm_resolve_and_enforce_hook 'rcaware-cfg' 'post-tag' "
         f"{str(project_dir / 'hooks')!r} {str(dev_tree)!r} 'rc/v9.9.7' || _rc=$?\n"
-        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
+        f'echo "RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH"\n'
         f"exit $_rc\n"
     )
     result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(kanban_root)})
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert "source: cfg (rc/v9.9.7)" in result.stdout
-    resolved_line = [
-        l for l in result.stdout.splitlines() if l.startswith("RESOLVED_PATH:")
-    ][0]
+    resolved_line = [l for l in result.stdout.splitlines() if l.startswith("RESOLVED_PATH:")][0]
     resolved_path = pathlib.Path(resolved_line.split(":", 1)[1])
     assert resolved_path.read_text(encoding="utf-8") == hook_content
 
@@ -1275,7 +1296,9 @@ def _git_out(dev_tree: pathlib.Path, *args: str) -> str:
     """Run a git command in *dev_tree* and return its stdout."""
     return subprocess.run(
         ["git", "-C", str(dev_tree)] + list(args),
-        capture_output=True, check=True, text=True,
+        capture_output=True,
+        check=True,
+        text=True,
     ).stdout
 
 
@@ -1404,8 +1427,13 @@ def test_rc_branch_symlinked_in_repo_hook_resolves_to_target_content(
     assert _tree_mode(dev_tree, rc, "tools/real-hook.sh") == "100755"
 
     result = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-inrepo", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-inrepo",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert f"source: in-repo ({rc})" in result.stdout
@@ -1427,13 +1455,22 @@ def test_rc_branch_symlinked_cfg_relative_hook_resolves_to_target_content(
         _plant_symlink(dev_tree, _SYMLINK_CFG_HOOK_REL, "../tools/real-notify.sh")
 
     kanban_root, project_dir, dev_tree = _build_rc_repo_with(
-        tmp_path, "symlink-cfg", rc, plant, cfg_hook_rel=_SYMLINK_CFG_HOOK_REL,
+        tmp_path,
+        "symlink-cfg",
+        rc,
+        plant,
+        cfg_hook_rel=_SYMLINK_CFG_HOOK_REL,
     )
     assert _tree_mode(dev_tree, rc, _SYMLINK_CFG_HOOK_REL) == "120000"
 
     result = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-cfg", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-cfg",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert f"source: cfg ({rc})" in result.stdout
@@ -1456,8 +1493,13 @@ def test_rc_branch_symlink_chain_resolves_to_final_regular_file(
 
     kanban_root, project_dir, dev_tree = _build_rc_repo_with(tmp_path, "symlink-chain", rc, plant)
     result = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-chain", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-chain",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     _assert_resolved_to_target_content(result)
@@ -1466,7 +1508,9 @@ def test_rc_branch_symlink_chain_resolves_to_final_regular_file(
 @pytest.mark.parametrize("channel", ["stderr", "fix_cmd"])
 @pytest.mark.parametrize("tier", ["in-repo", "cfg"])
 def test_rc_branch_symlink_to_nonexecutable_target_remedy_clears_refusal(
-    tmp_path: pathlib.Path, tier: str, channel: str,
+    tmp_path: pathlib.Path,
+    tier: str,
+    channel: str,
 ) -> None:
     """A symlink to a 100644 file is refused with a remedy that chmods the
     target, not the link; run as printed (either the stderr 'To fix:' steps
@@ -1481,15 +1525,23 @@ def test_rc_branch_symlink_to_nonexecutable_target_remedy_clears_refusal(
         _plant_symlink(dev_tree, link_rel, link_text)
 
     kanban_root, project_dir, dev_tree = _build_rc_repo_with(
-        tmp_path, "symlink-plain", rc, plant,
+        tmp_path,
+        "symlink-plain",
+        rc,
+        plant,
         cfg_hook_rel=_SYMLINK_CFG_HOOK_REL if tier == "cfg" else "",
     )
     assert _tree_mode(dev_tree, rc, link_rel) == "120000"
     assert _tree_mode(dev_tree, rc, "tools/plain-hook.sh") == "100644"
 
     first = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-plain", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-plain",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert first.returncode == 1, f"stdout={first.stdout}\nstderr={first.stderr}"
     _assert_no_chmod_on_symlink(first, link_rel)
@@ -1505,8 +1557,13 @@ def test_rc_branch_symlink_to_nonexecutable_target_remedy_clears_refusal(
     # file's permission bits, so a checkout away would see a local change.
 
     second = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-plain", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-plain",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert second.returncode == 0, f"refusal not cleared: stdout={second.stdout}\nstderr={second.stderr}"
     _assert_resolved_to_target_content(second)
@@ -1553,7 +1610,10 @@ def _plant_gitlink(dev_tree: pathlib.Path) -> None:
     ids=["target-not-committed", "target-above-repo-root", "absolute-target", "target-is-directory", "submodule-entry"],
 )
 def test_rc_branch_unresolvable_hook_entry_remedy_clears_refusal(
-    tmp_path: pathlib.Path, plant, entry_mode: str, channel: str,
+    tmp_path: pathlib.Path,
+    plant,
+    entry_mode: str,
+    channel: str,
 ) -> None:
     """A hook entry that cannot reach a committed regular file — a symlink
     whose target is missing, outside the repository or a directory, or a
@@ -1564,8 +1624,13 @@ def test_rc_branch_unresolvable_hook_entry_remedy_clears_refusal(
     assert _tree_mode(dev_tree, rc, _SYMLINK_HOOK_REL) == entry_mode
 
     first = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-unusable", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-unusable",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert first.returncode == 1, f"stdout={first.stdout}\nstderr={first.stderr}"
     assert "--chmod=+x" not in first.stderr
@@ -1581,8 +1646,13 @@ def test_rc_branch_unresolvable_hook_entry_remedy_clears_refusal(
     # file's permission bits, so a checkout away would see a local change.
 
     second = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-unusable", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "symlink-unusable",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert second.returncode == 0, f"refusal not cleared: stdout={second.stdout}\nstderr={second.stderr}"
     assert _global(second, "NONEXEC_FIX_CMD") == ""
@@ -1600,7 +1670,12 @@ def test_filesystem_symlinked_hook_without_rc_branch_follows_the_link(
     link = dev_tree / _SYMLINK_HOOK_REL
 
     first = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-fs", project_dir / "hooks", dev_tree, phase="pre-tag",
+        tmp_path,
+        kanban_root,
+        "symlink-fs",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
     )
     assert first.returncode == 1
     fix_cmd = _global(first, "NONEXEC_FIX_CMD")
@@ -1609,7 +1684,12 @@ def test_filesystem_symlinked_hook_without_rc_branch_follows_the_link(
     assert ran.returncode == 0, ran.stderr
 
     second = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "symlink-fs", project_dir / "hooks", dev_tree, phase="pre-tag",
+        tmp_path,
+        kanban_root,
+        "symlink-fs",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
     )
     assert second.returncode == 0, f"stdout={second.stdout}\nstderr={second.stderr}"
     assert _global(second, "RESOLVED_PATH") == str(link)
@@ -1629,7 +1709,9 @@ def test_filesystem_symlinked_hook_without_rc_branch_follows_the_link(
 @pytest.mark.parametrize("channel", ["stderr", "fix_cmd"])
 @pytest.mark.parametrize("target_rel", ["tools/my hook.sh", "tools/it's a hook.sh"])
 def test_rc_branch_symlink_to_spaced_nonexecutable_target_remedy_runs_as_printed(
-    tmp_path: pathlib.Path, target_rel: str, channel: str,
+    tmp_path: pathlib.Path,
+    target_rel: str,
+    channel: str,
 ) -> None:
     """A pre-tag symlink whose target path holds a space (or a quote) at
     100644 is refused with a quoted remedy that exits 0 as printed, and the
@@ -1645,8 +1727,13 @@ def test_rc_branch_symlink_to_spaced_nonexecutable_target_remedy_runs_as_printed
     assert _tree_mode(dev_tree, rc, target_rel) == "100644"
 
     first = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "spaced-target", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "spaced-target",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert first.returncode == 1, f"stdout={first.stdout}\nstderr={first.stderr}"
     fix_cmd = _global(first, "NONEXEC_FIX_CMD")
@@ -1657,8 +1744,13 @@ def test_rc_branch_symlink_to_spaced_nonexecutable_target_remedy_runs_as_printed
     assert _tree_mode(dev_tree, rc, target_rel) == "100755"
 
     second = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "spaced-target", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "spaced-target",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert second.returncode == 0, f"refusal not cleared: stdout={second.stdout}\nstderr={second.stderr}"
     _assert_resolved_to_target_content(second)
@@ -1666,7 +1758,8 @@ def test_rc_branch_symlink_to_spaced_nonexecutable_target_remedy_runs_as_printed
 
 @pytest.mark.parametrize("channel", ["stderr", "fix_cmd"])
 def test_rc_branch_cfg_hook_with_spaced_relative_path_remedy_runs_as_printed(
-    tmp_path: pathlib.Path, channel: str,
+    tmp_path: pathlib.Path,
+    channel: str,
 ) -> None:
     """A tier (a) cm_release_pre_tag_hook relative path holding a space,
     committed at 100644, is refused with a quoted chmod remedy that exits 0
@@ -1678,13 +1771,22 @@ def test_rc_branch_cfg_hook_with_spaced_relative_path_remedy_runs_as_printed(
         _plant_target(dev_tree, hook_rel, 0o644)
 
     kanban_root, project_dir, dev_tree = _build_rc_repo_with(
-        tmp_path, "spaced-cfg", rc, plant, cfg_hook_rel=hook_rel,
+        tmp_path,
+        "spaced-cfg",
+        rc,
+        plant,
+        cfg_hook_rel=hook_rel,
     )
     assert _tree_mode(dev_tree, rc, hook_rel) == "100644"
 
     first = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "spaced-cfg", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "spaced-cfg",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert first.returncode == 1, f"stdout={first.stdout}\nstderr={first.stderr}"
     assert _global(first, "NONEXEC_PATH") == f"{hook_rel} (on {rc})"
@@ -1695,8 +1797,13 @@ def test_rc_branch_cfg_hook_with_spaced_relative_path_remedy_runs_as_printed(
     assert _tree_mode(dev_tree, rc, hook_rel) == "100755"
 
     second = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "spaced-cfg", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "spaced-cfg",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert second.returncode == 0, f"refusal not cleared: stdout={second.stdout}\nstderr={second.stderr}"
     assert f"source: cfg ({rc})" in second.stdout
@@ -1705,7 +1812,8 @@ def test_rc_branch_cfg_hook_with_spaced_relative_path_remedy_runs_as_printed(
 
 @pytest.mark.parametrize("channel", ["stderr", "fix_cmd"])
 def test_rc_branch_unresolvable_symlink_at_spaced_cfg_path_git_rm_runs_as_printed(
-    tmp_path: pathlib.Path, channel: str,
+    tmp_path: pathlib.Path,
+    channel: str,
 ) -> None:
     """An unresolvable symlink at a cfg-declared hook path holding a space is
     refused with a quoted git rm remedy that exits 0 as printed; with the
@@ -1717,13 +1825,22 @@ def test_rc_branch_unresolvable_symlink_at_spaced_cfg_path_git_rm_runs_as_printe
         _plant_symlink(dev_tree, hook_rel, "../tools/never-committed.sh")
 
     kanban_root, project_dir, dev_tree = _build_rc_repo_with(
-        tmp_path, "spaced-unusable", rc, plant, cfg_hook_rel=hook_rel,
+        tmp_path,
+        "spaced-unusable",
+        rc,
+        plant,
+        cfg_hook_rel=hook_rel,
     )
     assert _tree_mode(dev_tree, rc, hook_rel) == "120000"
 
     first = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "spaced-unusable", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "spaced-unusable",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert first.returncode == 1, f"stdout={first.stdout}\nstderr={first.stderr}"
     fix_cmd = _global(first, "NONEXEC_FIX_CMD")
@@ -1734,8 +1851,13 @@ def test_rc_branch_unresolvable_symlink_at_spaced_cfg_path_git_rm_runs_as_printe
     assert _git_out(dev_tree, "ls-tree", rc, "--", hook_rel).strip() == ""
 
     second = _run_resolve_with_remedy_globals(
-        tmp_path, kanban_root, "spaced-unusable", project_dir / "hooks", dev_tree,
-        phase="pre-tag", rc_branch=rc,
+        tmp_path,
+        kanban_root,
+        "spaced-unusable",
+        project_dir / "hooks",
+        dev_tree,
+        phase="pre-tag",
+        rc_branch=rc,
     )
     assert second.returncode == 0, f"refusal not cleared: stdout={second.stdout}\nstderr={second.stderr}"
     assert _global(second, "NONEXEC_FIX_CMD") == ""

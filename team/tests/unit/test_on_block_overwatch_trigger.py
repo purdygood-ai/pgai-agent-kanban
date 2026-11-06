@@ -145,9 +145,7 @@ class _Sandbox:
             "[chain]\npm_mode = manual\n\n[wake]\nmax_tasks_per_wake = 1\n",
             encoding="utf-8",
         )
-        (self.root / "projects.cfg").write_text(
-            f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
         project_cfg = f"[project]\nproject_name = {_PROJECT}\nworkflow_type = {self.workflow}\n"
         if self.workflow == "release":
             not_a_repo = self.tmp_path / "dev-tree-not-a-repo"
@@ -220,7 +218,11 @@ class _Sandbox:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(self.root / "scripts" / "wake" / "claude.sh"), "--agent=coder"],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=_WAKE_TIMEOUT_S,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_WAKE_TIMEOUT_S,
         )
 
     def wait_for_sweep(self) -> str:
@@ -326,9 +328,7 @@ def test_pre_dispatch_block_nudges_once_after_the_lock_release(tmp_path):
     provider_log = tmp_path / "provider-calls.log"
     stub = box.bin_dir / "claude"
     stub.write_text(
-        stub.read_text(encoding="utf-8").replace(
-            "set -u\n", f"set -u\necho \"$*\" >> {provider_log}\n", 1
-        ),
+        stub.read_text(encoding="utf-8").replace("set -u\n", f'set -u\necho "$*" >> {provider_log}\n', 1),
         encoding="utf-8",
     )
 
@@ -352,7 +352,7 @@ def test_pre_dispatch_block_nudges_once_after_the_lock_release(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _nudge_root(tmp_path: pathlib.Path, sweep_body: "str | None") -> pathlib.Path:
+def _nudge_root(tmp_path: pathlib.Path, sweep_body: str | None) -> pathlib.Path:
     """A minimal kanban root whose scripts/overwatch-sweep.sh is a stub
     printing its arguments (None: no sweep script at all)."""
     root = tmp_path / "kanban"
@@ -449,14 +449,14 @@ def _function_body(path: pathlib.Path, name: str) -> list[str]:
     lines = path.read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith(f"{name}() {{"))
     end = next(i for i in range(start + 1, len(lines)) if lines[i] == "}")
-    return lines[start:end + 1]
+    return lines[start : end + 1]
 
 
 def test_finalize_blocked_arm_records_the_block_and_fires_nothing():
     body = _function_body(_FINALIZE, "wd_finalize_task")
     arm_start = next(i for i, line in enumerate(body) if line.strip() == "BLOCKED)")
     arm_end = next(i for i in range(arm_start, len(body)) if body[i].strip() == ";;")
-    arm = "\n".join(body[arm_start:arm_end + 1])
+    arm = "\n".join(body[arm_start : arm_end + 1])
     assert "_chain_blocked_a_task=true" in arm
     code = "\n".join(line for line in arm.splitlines() if not line.strip().startswith("#"))
     assert "wake-now.sh" not in code and "overwatch-sweep.sh" not in code and "nohup" not in code
@@ -467,10 +467,7 @@ def test_chain_nudges_only_after_its_lock_release_and_only_when_flagged():
     code = [line for line in body if not line.strip().startswith("#")]
     nudge = [i for i, line in enumerate(code) if "fire_block_triage_nudge" in line]
     assert len(nudge) == 1, "run_project_chain must fire the nudge exactly once"
-    last_release = max(
-        i for i, line in enumerate(code)
-        if "pgai_lock_release " in line or "pgai_lock_abandon " in line
-    )
+    last_release = max(i for i, line in enumerate(code) if "pgai_lock_release " in line or "pgai_lock_abandon " in line)
     assert nudge[0] > last_release, "the nudge must follow the end-of-chain lock release"
-    assert '_chain_blocked_a_task' in code[nudge[0] - 1], "the nudge must be guarded by the chain's block flag"
+    assert "_chain_blocked_a_task" in code[nudge[0] - 1], "the nudge must be guarded by the chain's block flag"
     assert any("local _chain_blocked_a_task=false" in line for line in code)

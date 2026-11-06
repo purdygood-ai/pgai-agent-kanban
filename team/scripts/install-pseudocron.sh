@@ -59,13 +59,13 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script's directory so we can find lib/ and templates/install/ relative
 # to the dev tree, regardless of where the operator invokes it from.
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _SAFE_OVERWRITE_LIB="${_SCRIPT_DIR}/lib/safe_overwrite.sh"
 _ARGPARSE_LIB="${_SCRIPT_DIR}/lib/argparse.sh"
 _TEMPLATES_DIR="$(cd "${_SCRIPT_DIR}/../templates/install" 2>/dev/null && pwd)" || _TEMPLATES_DIR="${_SCRIPT_DIR}/../templates/install"
@@ -85,23 +85,10 @@ unset _ARGPARSE_LIB
 source "${_SCRIPT_DIR}/lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
-# Color helpers (only when stdout is a terminal)
+# Colour table (only when stdout is a terminal) and status-line logger
+# (info/ok/warn/err/die, lib/script_common.sh)
 # ---------------------------------------------------------------------------
-if [[ -t 1 ]]; then
-  C_RED=$'\033[0;31m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BLUE=$'\033[0;34m'
-  C_RESET=$'\033[0m'
-else
-  C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_RESET=""
-fi
-
-info()  { echo "${C_BLUE}[install-pseudocron]${C_RESET} $*"; }
-ok()    { echo "${C_GREEN}[install-pseudocron]${C_RESET} $*"; }
-warn()  { echo "${C_YELLOW}[install-pseudocron]${C_RESET} WARNING: $*"; }
-err()   { echo "${C_RED}[install-pseudocron]${C_RESET} ERROR: $*" >&2; }
-die()   { err "$*"; exit 1; }
+script_log_init install-pseudocron --labelled
 
 # ---------------------------------------------------------------------------
 # Argument parsing

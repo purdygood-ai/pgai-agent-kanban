@@ -24,7 +24,7 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 import pytest
 
@@ -59,7 +59,7 @@ class Case:
     source: str
     section: str = "release"
     key: str = "knob"
-    default: Optional[str] = "fallback"
+    default: str | None = "fallback"
     project: bool = True
     legacy: bool = True
 
@@ -69,80 +69,111 @@ CASES = [
     Case(
         "project_cfg_outranks_kanban_cfg",
         {_PROJECT_CFG: "[release]\nknob = from-project\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-project", "project.cfg", _PROJECT_CFG,
+        "from-project",
+        "project.cfg",
+        _PROJECT_CFG,
     ),
     Case(
         "kanban_cfg_answers_when_only_it_sets_the_key",
         {_PROJECT_CFG: "[release]\nother = x\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "default_answers_when_neither_sets_the_key",
         {_PROJECT_CFG: "[release]\nother = x\n", _KANBAN_CFG: "[release]\nother = y\n"},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
     Case(
         "omitted_default_reads_as_empty",
         {_KANBAN_CFG: "[release]\nother = y\n"},
-        "", "default", "", default=None,
+        "",
+        "default",
+        "",
+        default=None,
     ),
     # --- blank values ------------------------------------------------------
     Case(
         "blank_project_value_falls_through_to_kanban_cfg",
         {_PROJECT_CFG: "[release]\nknob =\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "whitespace_only_project_value_falls_through",
         {_PROJECT_CFG: "[release]\nknob =   \t\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "blank_in_both_files_falls_through_to_default",
         {_PROJECT_CFG: "[release]\nknob =\n", _KANBAN_CFG: "[release]\nknob = \n"},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
     # --- missing files and sections ----------------------------------------
     Case(
         "missing_project_cfg_reads_kanban_cfg",
         {_KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "missing_kanban_cfg_still_reads_project_cfg",
         {_PROJECT_CFG: "[release]\nknob = from-project\n"},
-        "from-project", "project.cfg", _PROJECT_CFG,
+        "from-project",
+        "project.cfg",
+        _PROJECT_CFG,
     ),
     Case(
         "missing_kanban_cfg_and_unset_project_key_give_default",
         {_PROJECT_CFG: "[release]\nother = x\n"},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
     Case(
         "no_config_files_at_all_give_default",
         {},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
     Case(
         "key_under_another_section_in_project_cfg_is_not_read",
         {_PROJECT_CFG: "[locks]\nknob = wrong-section\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "missing_section_in_both_files_gives_default",
         {_PROJECT_CFG: "[project]\nknob = a\n", _KANBAN_CFG: "[wake]\nknob = b\n"},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
     # --- legacy PROJECT.cfg ------------------------------------------------
     Case(
         "legacy_project_cfg_bare_line_is_read_when_project_cfg_is_absent",
         {_LEGACY_CFG: 'knob="from-legacy"\n', _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-legacy", "project.cfg", _LEGACY_CFG,
+        "from-legacy",
+        "project.cfg",
+        _LEGACY_CFG,
     ),
     Case(
         "legacy_project_cfg_section_line_is_read_when_project_cfg_is_absent",
         {_LEGACY_CFG: "[release]\nknob = legacy-section\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "legacy-section", "project.cfg", _LEGACY_CFG,
+        "legacy-section",
+        "project.cfg",
+        _LEGACY_CFG,
     ),
     Case(
         "legacy_project_cfg_is_ignored_when_project_cfg_exists",
@@ -151,66 +182,98 @@ CASES = [
             _LEGACY_CFG: "knob=from-legacy\n",
             _KANBAN_CFG: "[release]\nknob = from-kanban\n",
         },
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "legacy_opt_out_ignores_a_lone_project_cfg_legacy_file",
         {_LEGACY_CFG: "knob=from-legacy\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG, legacy=False,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
+        legacy=False,
     ),
     Case(
         "legacy_opt_out_still_reads_project_cfg",
         {_PROJECT_CFG: "[release]\nknob = from-project\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-project", "project.cfg", _PROJECT_CFG, legacy=False,
+        "from-project",
+        "project.cfg",
+        _PROJECT_CFG,
+        legacy=False,
     ),
     # --- root-only -----------------------------------------------------------
     Case(
         "root_only_skips_the_project_tier",
         {_PROJECT_CFG: "[release]\nknob = from-project\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG, project=False,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
+        project=False,
     ),
     Case(
         "root_only_with_nothing_set_gives_default",
         {_PROJECT_CFG: "[release]\nknob = from-project\n"},
-        "fallback", "default", "", project=False,
+        "fallback",
+        "default",
+        "",
+        project=False,
     ),
     # --- read_ini line rules -----------------------------------------------
     Case(
         "inline_comment_is_stripped",
         {_PROJECT_CFG: "[release]\nknob = 7   # seven\n", _KANBAN_CFG: "[release]\nknob = 3 ; three\n"},
-        "7", "project.cfg", _PROJECT_CFG,
+        "7",
+        "project.cfg",
+        _PROJECT_CFG,
     ),
     Case(
         "crlf_line_endings_read_as_lf",
         {_KANBAN_CFG: "[release]\r\nknob = crlf-value\r\n"},
-        "crlf-value", "kanban.cfg", _KANBAN_CFG,
+        "crlf-value",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "spaced_section_header_matches",
         {_KANBAN_CFG: "[ release ]\nknob = spaced\n"},
-        "spaced", "kanban.cfg", _KANBAN_CFG,
+        "spaced",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "key_match_is_case_sensitive",
         {_PROJECT_CFG: "[release]\nKNOB = upper\n", _KANBAN_CFG: "[release]\nKnob = mixed\n"},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
     Case(
         "first_matching_line_wins",
         {_KANBAN_CFG: "[release]\nknob = first\nknob = second\n"},
-        "first", "kanban.cfg", _KANBAN_CFG,
+        "first",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "value_keeps_equals_signs",
         {_KANBAN_CFG: "[release]\nknob = a=b=c\n"},
-        "a=b=c", "kanban.cfg", _KANBAN_CFG,
+        "a=b=c",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     Case(
         "other_section_and_key_resolve_through_the_same_chain",
-        {_PROJECT_CFG: "[locks]\nstale_lock_reap_after_wake_periods = 10\n",
-         _KANBAN_CFG: "[locks]\nstale_lock_reap_after_wake_periods = 3\n"},
-        "10", "project.cfg", _PROJECT_CFG,
-        section="locks", key="stale_lock_reap_after_wake_periods", default="3",
+        {
+            _PROJECT_CFG: "[locks]\nstale_lock_reap_after_wake_periods = 10\n",
+            _KANBAN_CFG: "[locks]\nstale_lock_reap_after_wake_periods = 3\n",
+        },
+        "10",
+        "project.cfg",
+        _PROJECT_CFG,
+        section="locks",
+        key="stale_lock_reap_after_wake_periods",
+        default="3",
     ),
 ]
 
@@ -238,7 +301,7 @@ def _python_resolve(root: pathlib.Path, case: Case) -> project_cfg.TieredValue:
     )
 
 
-def _bash_resolve(tmp_path: pathlib.Path, root: pathlib.Path, case: Case) -> "tuple[list[str], str]":
+def _bash_resolve(tmp_path: pathlib.Path, root: pathlib.Path, case: Case) -> tuple[list[str], str]:
     """Run the bash twin under strict mode; return (--with-tier lines, plain value)."""
     args = [] if case.legacy else ["--no-legacy"]
     args += [str(root), str(root / _PROJECT_DIR) if case.project else "", case.section, case.key]
@@ -261,11 +324,15 @@ def _bash_resolve(tmp_path: pathlib.Path, root: pathlib.Path, case: Case) -> "tu
     )
     proc = subprocess.run(
         ["bash", "-c", script, "resolve", str(_PROJECT_PATHS), *args],
-        capture_output=True, text=True, env=env, timeout=30, cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        cwd=str(tmp_path),
     )
-    assert proc.returncode == 0, (
-        f"bash twin failed (rc={proc.returncode}):\nstdout={proc.stdout!r}\nstderr={proc.stderr}"
-    )
+    assert (
+        proc.returncode == 0
+    ), f"bash twin failed (rc={proc.returncode}):\nstdout={proc.stdout!r}\nstderr={proc.stderr}"
     tiered, sep, plain = proc.stdout.partition("PLAIN:")
     assert sep, f"bash twin output lacks the plain-value marker:\n{proc.stdout!r}\nstderr={proc.stderr}"
     return tiered.split("\n")[:-1], plain
@@ -302,22 +369,22 @@ _UNREADABLE_ROWS = [
     (
         _PROJECT_CFG,
         {_PROJECT_CFG: "[release]\nknob = from-project\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "from-kanban", "kanban.cfg", _KANBAN_CFG,
+        "from-kanban",
+        "kanban.cfg",
+        _KANBAN_CFG,
     ),
     (
         _KANBAN_CFG,
         {_PROJECT_CFG: "[release]\nother = x\n", _KANBAN_CFG: "[release]\nknob = from-kanban\n"},
-        "fallback", "default", "",
+        "fallback",
+        "default",
+        "",
     ),
 ]
 
 
-@pytest.mark.parametrize(
-    "unreadable, files, value, tier, source", _UNREADABLE_ROWS, ids=["project_cfg", "kanban_cfg"]
-)
-def test_unreadable_file_passes_to_the_next_tier_in_both_languages(
-    tmp_path, unreadable, files, value, tier, source
-):
+@pytest.mark.parametrize("unreadable, files, value, tier, source", _UNREADABLE_ROWS, ids=["project_cfg", "kanban_cfg"])
+def test_unreadable_file_passes_to_the_next_tier_in_both_languages(tmp_path, unreadable, files, value, tier, source):
     case = Case(f"unreadable_{unreadable}", files, value, tier, source)
     root = _build_root(tmp_path, case.files)
     path = root / unreadable

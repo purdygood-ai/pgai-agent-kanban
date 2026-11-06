@@ -111,7 +111,7 @@ def _run_item_scan(kanban_root: pathlib.Path, bugs_dir: pathlib.Path) -> subproc
 def _status_of(path: pathlib.Path) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     index = next(i for i, line in enumerate(lines) if line.strip().lower() == "## status")
-    return next(line.strip().lower() for line in lines[index + 1:] if line.strip())
+    return next(line.strip().lower() for line in lines[index + 1 :] if line.strip())
 
 
 def _write_bug(bugs_dir: pathlib.Path, name: str) -> pathlib.Path:
@@ -141,16 +141,26 @@ def _open_inbox_entries(project_root: pathlib.Path) -> list[dict[str, str]]:
 
     ctx = OpsContext(kanban_root=project_root.parent.parent)
     return [
-        {"id": e.entry_id, "source": e.source, "question": e.question}
-        for e in inbox.list_open(ctx, project_root.name)
+        {"id": e.entry_id, "source": e.source, "question": e.question} for e in inbox.list_open(ctx, project_root.name)
     ]
 
 
 def _answer(kanban_root: pathlib.Path, entry_id: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.overwatch.inbox", "answer",
-         "--project", _PROJECT, "--kanban-root", str(kanban_root), "--id", entry_id,
-         "--answer", "Retry limit is 3; bundle it again."],
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.overwatch.inbox",
+            "answer",
+            "--project",
+            _PROJECT,
+            "--kanban-root",
+            str(kanban_root),
+            "--id",
+            entry_id,
+            "--answer",
+            "Retry limit is 3; bundle it again.",
+        ],
         capture_output=True,
         text=True,
         env={**_sandbox_env(kanban_root), "PYTHONPATH": str(_TEAM_DIR)},
@@ -282,7 +292,9 @@ def test_backlog_cache_offers_neither_a_carried_nor_a_needs_operator_bug(tmp_pat
     converted = _write_bug(bugs_dir, "BUG-9205-converted-thing.md")
     _write_bug(bugs_dir, "BUG-9206-open-thing.md")
     for path in (carried, in_flight, never_listed):
-        path.write_text(path.read_text(encoding="utf-8").replace("## Status\nopen", "## Status\nrunning"), encoding="utf-8")
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("## Status\nopen", "## Status\nrunning"), encoding="utf-8"
+        )
     converted.write_text(
         converted.read_text(encoding="utf-8").replace("## Status\nopen", "## Status\nneeds-operator"), encoding="utf-8"
     )

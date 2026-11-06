@@ -92,6 +92,7 @@ _ENV_RE = re.compile(r"source\s+\"\$\w+/env\"")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _Sandbox:
     """A throwaway kanban root with HOME inside it."""
 
@@ -121,15 +122,17 @@ class _Sandbox:
         script = f"source {str(_CONFIG_LOADER)!r}\n{body}"
         return subprocess.run(
             ["bash", "-c", script],
-            capture_output=True, text=True, env=self.env(extra_env), timeout=30,
+            capture_output=True,
+            text=True,
+            env=self.env(extra_env),
+            timeout=30,
         )
 
 
 def _pm_mode_after_prelude(sb: _Sandbox, extra_env: dict[str, str] | None = None) -> str:
     """PGAI_KANBAN_PM_MODE as a child process sees it after the step."""
     result = sb.run(
-        'config_startup_prelude "$KANBAN_ROOT"\n'
-        'bash -c \'printf "%s" "${PGAI_KANBAN_PM_MODE-<unset>}"\'',
+        'config_startup_prelude "$KANBAN_ROOT"\n' 'bash -c \'printf "%s" "${PGAI_KANBAN_PM_MODE-<unset>}"\'',
         extra_env,
     )
     assert result.returncode == 0, result.stderr
@@ -144,6 +147,7 @@ def sb(tmp_path: pathlib.Path) -> _Sandbox:
 # ---------------------------------------------------------------------------
 # PGAI_KANBAN_PM_MODE precedence
 # ---------------------------------------------------------------------------
+
 
 def test_kanban_cfg_value_exported_when_unset(sb: _Sandbox) -> None:
     sb.write_kanban_cfg("[chain]\npm_mode = manual\n")
@@ -175,9 +179,7 @@ def test_user_cfg_value_beats_kanban_cfg_and_is_exported(sb: _Sandbox) -> None:
 def test_user_cfg_is_sourced_before_kanban_cfg_is_read(sb: _Sandbox, tmp_path: pathlib.Path) -> None:
     seen = tmp_path / "seen"
     sb.write_kanban_cfg("[chain]\npm_mode = manual\n")
-    sb.user_cfg.write_text(
-        f'printf "%s" "${{PGAI_KANBAN_PM_MODE-<unset>}}" > {str(seen)!r}\n', encoding="utf-8"
-    )
+    sb.user_cfg.write_text(f'printf "%s" "${{PGAI_KANBAN_PM_MODE-<unset>}}" > {str(seen)!r}\n', encoding="utf-8")
     assert _pm_mode_after_prelude(sb) == "manual"
     assert seen.read_text() == "<unset>"
 
@@ -193,6 +195,7 @@ def test_root_defaults_to_kanban_root_path(sb: _Sandbox) -> None:
 # User config sourcing and idempotency
 # ---------------------------------------------------------------------------
 
+
 def test_user_cfg_assignments_reach_the_caller(sb: _Sandbox) -> None:
     sb.user_cfg.write_text("OPERATOR_TUNABLE=from-user-cfg\n", encoding="utf-8")
     result = sb.run('config_startup_prelude "$KANBAN_ROOT"\nprintf "%s" "${OPERATOR_TUNABLE-}"')
@@ -202,15 +205,15 @@ def test_user_cfg_assignments_reach_the_caller(sb: _Sandbox) -> None:
 
 def test_second_call_is_a_no_op(sb: _Sandbox, tmp_path: pathlib.Path) -> None:
     counter = tmp_path / "sourced"
-    sb.user_cfg.write_text(f'echo x >> {str(counter)!r}\n', encoding="utf-8")
+    sb.user_cfg.write_text(f"echo x >> {str(counter)!r}\n", encoding="utf-8")
     sb.write_kanban_cfg("[chain]\npm_mode = manual\n")
     other = tmp_path / "other"
     other.mkdir()
     (other / "kanban.cfg").write_text("[chain]\npm_mode = automatic\n", encoding="utf-8")
     result = sb.run(
         'config_startup_prelude "$KANBAN_ROOT"\n'
-        'unset PGAI_KANBAN_PM_MODE\n'
-        f'config_startup_prelude {str(other)!r}\n'
+        "unset PGAI_KANBAN_PM_MODE\n"
+        f"config_startup_prelude {str(other)!r}\n"
         'printf "%s" "${PGAI_KANBAN_PM_MODE-<unset>}"'
     )
     assert result.returncode == 0, result.stderr
@@ -220,10 +223,9 @@ def test_second_call_is_a_no_op(sb: _Sandbox, tmp_path: pathlib.Path) -> None:
 
 def test_child_shell_runs_its_own_step(sb: _Sandbox, tmp_path: pathlib.Path) -> None:
     counter = tmp_path / "sourced"
-    sb.user_cfg.write_text(f'echo x >> {str(counter)!r}\n', encoding="utf-8")
+    sb.user_cfg.write_text(f"echo x >> {str(counter)!r}\n", encoding="utf-8")
     result = sb.run(
-        'config_startup_prelude "$KANBAN_ROOT"\n'
-        f'bash -c "source {_CONFIG_LOADER} && config_startup_prelude"'
+        'config_startup_prelude "$KANBAN_ROOT"\n' f'bash -c "source {_CONFIG_LOADER} && config_startup_prelude"'
     )
     assert result.returncode == 0, result.stderr
     assert counter.read_text().count("x") == 2
@@ -239,6 +241,7 @@ def test_returns_zero_under_strict_mode_with_nothing_to_source(sb: _Sandbox) -> 
 # ---------------------------------------------------------------------------
 # Converted entry points
 # ---------------------------------------------------------------------------
+
 
 def _live_lines(path: pathlib.Path) -> list[tuple[int, str]]:
     return [
@@ -278,7 +281,10 @@ def test_entry_point_sources_user_cfg_after_bashrc_and_env(sb: _Sandbox) -> None
     sb.user_cfg.write_text(f"echo user-cfg >> {str(trace)!r}\n", encoding="utf-8")
     subprocess.run(
         ["bash", str(_SCRIPTS_DIR / "verify-rc-state.sh"), "no-such-project"],
-        capture_output=True, text=True, env=sb.env(), timeout=60,
+        capture_output=True,
+        text=True,
+        env=sb.env(),
+        timeout=60,
     )
     assert trace.read_text().split() == ["bashrc", "env", "user-cfg"]
 
@@ -288,9 +294,7 @@ def _write_demo_project(sb: _Sandbox) -> None:
     (sb.root / "projects.cfg").write_text("[project:demo]\npriority = 1\n", encoding="utf-8")
     proj = sb.root / "projects" / "demo"
     (proj / "tasks" / "queues").mkdir(parents=True)
-    (proj / "project.cfg").write_text(
-        "[project]\nproject_name = demo\nworkflow_type = release\n", encoding="utf-8"
-    )
+    (proj / "project.cfg").write_text("[project]\nproject_name = demo\nworkflow_type = release\n", encoding="utf-8")
 
 
 def test_status_bar_shows_user_cfg_pm_mode_and_keeps_its_stderr_quiet(sb: _Sandbox) -> None:
@@ -298,12 +302,13 @@ def test_status_bar_shows_user_cfg_pm_mode_and_keeps_its_stderr_quiet(sb: _Sandb
     # never reaches the tmux status line, and its value beats kanban.cfg.
     _write_demo_project(sb)
     sb.write_kanban_cfg("[chain]\npm_mode = manual\n")
-    sb.user_cfg.write_text(
-        "echo user-cfg-noise >&2\nexport PGAI_KANBAN_PM_MODE=automatic\n", encoding="utf-8"
-    )
+    sb.user_cfg.write_text("echo user-cfg-noise >&2\nexport PGAI_KANBAN_PM_MODE=automatic\n", encoding="utf-8")
     result = subprocess.run(
         ["bash", str(_SCRIPTS_DIR / "dashboard" / "status-right.sh"), str(sb.root), "demo"],
-        capture_output=True, text=True, env=sb.env(), timeout=60,
+        capture_output=True,
+        text=True,
+        env=sb.env(),
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert "PM:auto" in result.stdout
@@ -318,8 +323,17 @@ def test_dashboard_renderer_runs_the_user_cfg(sb: _Sandbox) -> None:
     trace = sb.root / "trace"
     sb.user_cfg.write_text(f"echo user-cfg >> {str(trace)!r}\n", encoding="utf-8")
     subprocess.run(
-        ["bash", str(_SCRIPTS_DIR / "dashboard" / "show-attention.sh"),
-         "--kanban-root", str(sb.root), "--project", "demo"],
-        capture_output=True, text=True, env=sb.env(), timeout=60,
+        [
+            "bash",
+            str(_SCRIPTS_DIR / "dashboard" / "show-attention.sh"),
+            "--kanban-root",
+            str(sb.root),
+            "--project",
+            "demo",
+        ],
+        capture_output=True,
+        text=True,
+        env=sb.env(),
+        timeout=60,
     )
     assert "user-cfg" in trace.read_text().split()

@@ -78,10 +78,7 @@ def _make_repo_with_recorded_output_fixture(
     fixture_dir.mkdir(parents=True)
 
     (prod_dir / "snapshot.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        "render_missing_snapshot() {\n"
-        f'    echo "{narration}" >&2\n'
-        "}\n",
+        "#!/usr/bin/env bash\n" "render_missing_snapshot() {\n" f'    echo "{narration}" >&2\n' "}\n",
         encoding="utf-8",
     )
     (fixture_dir / "board-render.txt").write_text(
@@ -96,9 +93,7 @@ def _make_repo_with_recorded_output_fixture(
     _git(repo, "commit", "-m", "baseline: production narration and golden agree")
 
 
-def _run_check(
-    repo: pathlib.Path, diff_range: str, *extra: str
-) -> subprocess.CompletedProcess:
+def _run_check(repo: pathlib.Path, diff_range: str, *extra: str) -> subprocess.CompletedProcess:
     # Without PGAI_PROJECT_NAME the dual-channel emitter on a check that
     # cannot run records nothing in any project's refusal ledger.
     env = {k: v for k, v in os.environ.items() if k != "PGAI_PROJECT_NAME"}
@@ -116,10 +111,7 @@ def _reword_narration(repo: pathlib.Path, new_narration: str) -> None:
     """Commit a production change that rewords the narration sentence."""
     prod_file = repo / "team" / "scripts" / "dashboard" / "lib" / "snapshot.sh"
     prod_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "render_missing_snapshot() {\n"
-        f'    echo "{new_narration}" >&2\n'
-        "}\n",
+        "#!/usr/bin/env bash\n" "render_missing_snapshot() {\n" f'    echo "{new_narration}" >&2\n' "}\n",
         encoding="utf-8",
     )
     _git(repo, "add", ".")
@@ -144,10 +136,7 @@ def test_reworded_narration_names_the_stale_recorded_output_fixture(
 
     prod_file = repo / "team" / "scripts" / "dashboard" / "lib" / "snapshot.sh"
     prod_file.write_text(
-        "#!/usr/bin/env bash\n"
-        "render_missing_snapshot() {\n"
-        f'    echo "{new_narration}" >&2\n'
-        "}\n",
+        "#!/usr/bin/env bash\n" "render_missing_snapshot() {\n" f'    echo "{new_narration}" >&2\n' "}\n",
         encoding="utf-8",
     )
     _git(repo, "add", ".")
@@ -310,9 +299,7 @@ def test_unresolvable_range_says_not_checked_names_the_range_and_exits_zero(
     _make_repo_with_recorded_output_fixture(repo, narration="a narration sentence")
     findings_file = tmp_path / "findings.json"
 
-    result = _run_check(
-        repo, "no_such_ref_xyz..HEAD", "--findings-file", str(findings_file)
-    )
+    result = _run_check(repo, "no_such_ref_xyz..HEAD", "--findings-file", str(findings_file))
 
     assert result.returncode == 0, result.stderr
     assert "## Stale Literal Risks" in result.stdout
@@ -413,9 +400,7 @@ def test_frozen_icd_baseline_contributes_no_literal_to_the_search(
         "proves nothing about the search: " + result.stdout
     )
     for literal in _BASELINE_LITERALS:
-        assert literal not in result.stdout, (
-            f"baseline literal {literal!r} reached the search: " + result.stdout
-        )
+        assert literal not in result.stdout, f"baseline literal {literal!r} reached the search: " + result.stdout
     findings = json.loads(findings_file.read_text(encoding="utf-8"))
     assert [f["literal"] for f in findings] == [f'"{_AUTHORED_LITERAL}"'], findings
 
@@ -455,9 +440,7 @@ def test_missing_required_argument_still_exits_one(tmp_path: pathlib.Path) -> No
 
 
 def test_help_states_the_exit_contract() -> None:
-    result = subprocess.run(
-        ["bash", str(_SCRIPT), "--help"], capture_output=True, text=True, timeout=30
-    )
+    result = subprocess.run(["bash", str(_SCRIPT), "--help"], capture_output=True, text=True, timeout=30)
 
     assert result.returncode == 0
     assert "--findings-file" in result.stdout

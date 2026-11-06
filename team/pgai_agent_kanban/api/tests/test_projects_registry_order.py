@@ -12,7 +12,7 @@ The fixture kanban root lives under pytest's tmp_path.
 from __future__ import annotations
 
 import pathlib
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,9 +52,7 @@ def registry_root(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 @pytest.fixture
-def registry_client(
-    registry_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[TestClient, None, None]:
+def registry_client(registry_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
     from pgai_agent_kanban.api.app import create_app
     from pgai_agent_kanban.api.config import ApiConfig
 

@@ -528,7 +528,9 @@ def test_skipped_pairs_missing_report_prints_nothing(tmp_path):
 def test_block_names_the_bug_by_substance_not_bare_id(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0042", "legacy-artefact-defect",
+        bugs_dir,
+        "BUG-0042",
+        "legacy-artefact-defect",
         "The legacy artefact importer crashes on a malformed header it has never actually exercised.",
     )
     result = run_bash(
@@ -546,7 +548,9 @@ def test_block_names_the_bug_by_substance_not_bare_id(tmp_path):
 def test_block_cites_public_id_when_assigned(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0050", "disclosed-defect",
+        bugs_dir,
+        "BUG-0050",
+        "disclosed-defect",
         "A disclosed pre-existing defect.",
         public_id="KI-2.12.0.3",
     )
@@ -581,7 +585,9 @@ def test_block_scrubs_task_id_from_symptom_text(tmp_path, prefix):
     task_id = f"{prefix}-20260910-008-verify-2-14-2"
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0222", "release-notes-cite-task-id",
+        bugs_dir,
+        "BUG-0222",
+        "release-notes-cite-task-id",
         f"The importer still crashes on a malformed header (Source Task: {task_id}).",
     )
     result = run_bash(
@@ -602,18 +608,16 @@ def test_block_scrubs_task_id_from_symptom_text(tmp_path, prefix):
     # after "Source Task: ".
     assert not _STRANDED_HYPHEN_FRAGMENT_RE.search(line), line
     assert "-verify-2-14-2" not in line
-    assert (
-        "The importer still crashes on a malformed header "
-        "(Source Task: another item)."
-        in line
-    )
+    assert "The importer still crashes on a malformed header " "(Source Task: another item)." in line
 
 
 def test_block_scrubs_task_id_from_public_id_field(tmp_path):
     task_id = "TESTER-20260909-045-verify-2-14-1"
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0223", "public-id-carries-task-id",
+        bugs_dir,
+        "BUG-0223",
+        "public-id-carries-task-id",
         "A disclosed pre-existing defect.",
         public_id=f"KI-2026.09 (see {task_id})",
     )
@@ -662,7 +666,9 @@ def test_block_is_empty_with_no_bug_files(tmp_path):
 def test_block_renders_normal_symptom_byte_identically(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0300", "no-internal-identifier",
+        bugs_dir,
+        "BUG-0300",
+        "no-internal-identifier",
         "A perfectly ordinary defect with no identifiers of any kind, spanning two clauses - here is the second.",
     )
     result = run_bash(
@@ -696,8 +702,7 @@ def test_bugs_skipped_block_renders_one_row_per_pair(tmp_path):
     b = _write_bug(bugs_dir, "BUG-0401", "second", "Second substance.")
     result = run_bash(
         tmp_path,
-        f"source {_LIB} && build_bugs_skipped_notes_block "
-        f"'{a}' 'Deferred to next release.' '{b}' 'Low impact.'",
+        f"source {_LIB} && build_bugs_skipped_notes_block " f"'{a}' 'Deferred to next release.' '{b}' 'Low impact.'",
     )
     assert result.returncode == 0, result.stderr
     lines = [l for l in result.stdout.splitlines() if l.strip()]
@@ -715,7 +720,9 @@ def test_bugs_skipped_block_scrubs_task_id_from_rationale(tmp_path, prefix):
     task_id = f"{prefix}-20260910-009-verify-2-14-2"
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0402", "rationale-carries-task-id",
+        bugs_dir,
+        "BUG-0402",
+        "rationale-carries-task-id",
         "The importer crashes on a malformed header.",
     )
     rationale = f"Deferred; see {task_id} for the root cause."
@@ -739,7 +746,9 @@ def test_bugs_skipped_block_scrubs_task_id_from_symptom(tmp_path, prefix):
     task_id = f"{prefix}-20260910-010-verify-2-14-2"
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0403", "symptom-carries-task-id",
+        bugs_dir,
+        "BUG-0403",
+        "symptom-carries-task-id",
         f"The importer crashes on a malformed header (Source Task: {task_id}).",
     )
     result = run_bash(
@@ -756,7 +765,9 @@ def test_bugs_skipped_block_scrubs_task_id_from_symptom(tmp_path, prefix):
 def test_bugs_skipped_block_cites_public_id_when_assigned(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0404", "disclosed-skip",
+        bugs_dir,
+        "BUG-0404",
+        "disclosed-skip",
         "A disclosed pre-existing defect.",
         public_id="KI-2.12.0.4",
     )
@@ -814,7 +825,9 @@ def _split_table_row(line: str) -> list[str]:
 def test_bugs_skipped_block_flattens_multiline_severity_to_one_line_word(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0407", "multiline-severity",
+        bugs_dir,
+        "BUG-0407",
+        "multiline-severity",
         "A defect whose severity section carries an explanatory paragraph.",
     )
     _append_multiline_severity_section(bug_path, "medium")
@@ -834,7 +847,9 @@ def test_bugs_skipped_block_flattens_multiline_severity_to_one_line_word(tmp_pat
 def test_bugs_skipped_block_splits_into_four_cells_when_symptom_carries_a_pipe(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(
-        bugs_dir, "BUG-0408", "symptom-carries-pipe",
+        bugs_dir,
+        "BUG-0408",
+        "symptom-carries-pipe",
         "The parser reads a | delimited value and mis-splits the row.",
     )
     result = run_bash(
@@ -900,7 +915,8 @@ def _write_notes(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
 
 def test_stamp_known_issue_replaces_status_and_known_issues_section(tmp_path):
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n"
         "## Status\nPENDING-RELEASE\n\n"
         "## Summary\nTest.\n\n"
@@ -908,7 +924,9 @@ def test_stamp_known_issue_replaces_status_and_known_issues_section(tmp_path):
         "Issues that exist in this release. Users should be aware of these.\n\n"
         "- **<Issue title>** — Description and any available workaround.\n",
     )
-    block = "- The importer crashes on a malformed header. (internal-only, not yet disclosed) — No workaround available."
+    block = (
+        "- The importer crashes on a malformed header. (internal-only, not yet disclosed) — No workaround available."
+    )
     result = run_bash(
         tmp_path,
         f"source {_LIB} && cm_stamp_release_notes_status '{notes}' 'KNOWN-ISSUE' '{block}'",
@@ -923,7 +941,8 @@ def test_stamp_known_issue_replaces_status_and_known_issues_section(tmp_path):
 
 def test_stamp_known_issue_appends_section_when_absent(tmp_path):
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n## Status\nPENDING-RELEASE\n\n## Summary\nTest.\n",
     )
     block = "- Substance bullet. (internal-only, not yet disclosed) — No workaround available."
@@ -944,7 +963,8 @@ def test_stamp_functional_never_touches_known_issues_section(tmp_path):
         "- **<Issue title>** — Description and any available workaround.\n"
     )
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n## Status\nPENDING-RELEASE\n\n## Summary\nTest.\n\n" + original_ki,
     )
     result = run_bash(
@@ -959,7 +979,8 @@ def test_stamp_functional_never_touches_known_issues_section(tmp_path):
 
 def test_stamp_reports_failure_when_placeholder_absent(tmp_path):
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n## Status\nFUNCTIONAL\n\n## Summary\nTest.\n",
     )
     result = run_bash(
@@ -984,7 +1005,8 @@ def test_stamp_reports_failure_when_placeholder_absent(tmp_path):
 
 def test_stamp_replaces_hand_authored_bugs_skipped_section(tmp_path):
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n"
         "## Status\nPENDING-RELEASE\n\n"
         "## Summary\nTest.\n\n"
@@ -1011,7 +1033,8 @@ def test_stamp_replaces_hand_authored_bugs_skipped_section(tmp_path):
 
 def test_stamp_bugs_skipped_replacement_is_independent_of_target_status(tmp_path):
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n"
         "## Status\nPENDING-RELEASE\n\n"
         "## Summary\nTest.\n\n"
@@ -1030,7 +1053,8 @@ def test_stamp_bugs_skipped_replacement_is_independent_of_target_status(tmp_path
 
 def test_stamp_leaves_bugs_skipped_untouched_when_block_empty(tmp_path):
     notes = _write_notes(
-        tmp_path, "notes.md",
+        tmp_path,
+        "notes.md",
         "# Release Notes: demo v0.0.0\n\n"
         "## Status\nPENDING-RELEASE\n\n"
         "## Summary\nTest.\n\n"

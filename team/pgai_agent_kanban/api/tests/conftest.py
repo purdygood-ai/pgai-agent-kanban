@@ -30,7 +30,7 @@ import sys
 # Going up four levels reaches the project root (parent of team/).
 _API_TESTS_DIR = pathlib.Path(__file__).parent
 _TEAM_DIR = _API_TESTS_DIR.parent.parent.parent  # team/
-_PROJECT_ROOT = _TEAM_DIR.parent                  # project root (contains team/)
+_PROJECT_ROOT = _TEAM_DIR.parent  # project root (contains team/)
 
 # Add the project root to sys.path so that app.py can resolve its
 # ``from team.pgai_agent_kanban...`` imports when tests run from team/.

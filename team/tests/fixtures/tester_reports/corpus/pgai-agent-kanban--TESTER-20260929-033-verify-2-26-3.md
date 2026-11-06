@@ -166,7 +166,7 @@ Process note (not a YES): CODER-028 ran `test_lint_changelog_freshness.py` once 
 
 ## Caveats
 
-- Commit `6ce9b36` carries author name `Claude` where the other 18 carry `purdygood`; same e-mail, same session shape. Cosmetic git-identity variance, not an intervention.
+- Commit `6ce9b36` carries author name `Claude` where the other 18 carry `operator`; same e-mail, same session shape. Cosmetic git-identity variance, not an intervention.
 - The live install at `$HOME/pgai_agent_kanban` reports `VERSION` v2.25.2 while `## Last Released` is v2.26.2 and CM-032 observed no `v2.26.*` tags in the dev tree; none of this is an RC input, recorded for the operator as CM-032 did.
 - TESTER.md "Git workflow" asks for artifacts on a feature branch merged into the RC; the wake prompt forbids creating a branch and Step 9 forbids committing process artifacts into the dev tree. Followed the wake prompt and Step 9; nothing committed, artifacts in this task folder. Recorded in `status.md`.
 - Sandboxes used by the probes remain under `/tmp/pgai_kanban_tmp/sandbox-*` (framework temp root; not deleted, no bare `/tmp` entries).

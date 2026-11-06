@@ -38,7 +38,7 @@ _DEEP_VERIFY_SH = _TEAM_DIR / "scripts" / "deep-verify.sh"
 _PROJECT_PATHS_SH = _TEAM_DIR / "scripts" / "lib" / "project_paths.sh"
 _ERROR_CONTRACT_SH = _TEAM_DIR / "scripts" / "lib" / "error_contract.sh"
 
-_START_MARKER = "_dv_mode_stderr_file=\"$(pgai_mktemp deep_verify_mode_stderr)\""
+_START_MARKER = '_dv_mode_stderr_file="$(pgai_mktemp deep_verify_mode_stderr)"'
 _ANCHOR_MARKER = "# CENSUS-ANCHOR: deep-verify-02"
 
 
@@ -130,5 +130,5 @@ def test_resolver_diagnostic_carries_the_file_the_refusal_reads():
     body = source.split("pp_deep_verify_mode() {", 1)[1].split("\n}\n", 1)[0]
     assert "for project '${name}' in ${source_file} [release] deep_verify" in body, (
         "pp_deep_verify_mode's refusal no longer prints \"for project '<name>' in <file> "
-        "[release] deep_verify\"; deep-verify.sh reads the file from that shape"
+        '[release] deep_verify"; deep-verify.sh reads the file from that shape'
     )

@@ -231,12 +231,12 @@
 # BLOCK-WORTHY: an unreachable bootstrap prelude leaves every downstream
 # tunable/path resolution undefined for this runner.
 # CENSUS-ANCHOR: run-unit-tests-env-bootstrap-01
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve kanban root and script directory ---
 # PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
-_RUT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RUT_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # --- Source optional config files ---
 # This MUST happen before `set -euo pipefail`. User bashrc files commonly
@@ -285,6 +285,10 @@ source "${_RUT_SCRIPT_DIR}/lib/dev_tree.sh"
 source "${_RUT_SCRIPT_DIR}/lib/config_loader.sh"
 # shellcheck source=lib/gated_runner_lanes.sh
 source "${_RUT_SCRIPT_DIR}/lib/gated_runner_lanes.sh"
+# Source gated_runner_args.sh: the flag parser and flag validators both
+# gated runners share (see "Parse arguments" below).
+# shellcheck source=lib/gated_runner_args.sh
+source "${_RUT_SCRIPT_DIR}/lib/gated_runner_args.sh"
 # Self-locate fallback: derive the dev tree from the runner's own location
 # so the suite can run from a clean checkout with no configured dev_tree_path.
 # Precedence: PGAI_DEV_TREE_PATH env var > kanban.cfg dev_tree_path > self-located root.
@@ -303,14 +307,14 @@ set -euo pipefail
 
 # --- Clean exit handling ---
 # shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Resolve script directory and the repository root ---
 # Run from a checkout (team/scripts/), the root is that checkout; run from an
 # install (scripts/), it is the resolved dev tree, PGAI_DEV_TREE_PATH
 # (resolve_runner_repo_root in lib/dev_tree.sh).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(resolve_runner_repo_root "$SCRIPT_DIR" "$TEAM_ROOT/kanban.cfg")"
 
 # --- Resolve this project's temp subtree ---
@@ -452,75 +456,11 @@ CLEANUP_ON_EXIT_PRE_HOOK=_ru_write_findings_on_exit
 fi
 
 # --- Parse arguments ---
-# One case arm per flag. A flag that takes a list (--files) consumes every
-# following argument up to the next one starting with "-".
-VERBOSE=false
-PRE_MERGE_BASE=
-COVERAGE=false
-QUARANTINED=false
-REUSE_IF_GREEN=false
-NO_SCRATCH_SWEEP=false
-REQUESTED_WORKERS=""
-TARGETED_FILES=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --verbose|-v)
-      VERBOSE=true
-      shift
-      ;;
-    --workers)
-      if [[ ! "${2:-}" =~ ^[0-9]+$ ]]; then
-        # CENSUS-ANCHOR: run-unit-tests-workers-flag-01
-        # AGENT-RESOLVABLE: the caller passes a whole number after --workers and re-runs.
-        pgai_emit_error_contract "run-unit-tests.workers-flag-invalid" \
-          "--workers needs a non-negative whole number in decimal digits after it (got '${2:-}'); it lowers this run's worker budget below kanban.cfg [testing] workers and never raises it." \
-          "bash \"${BASH_SOURCE[0]}\" --workers 1"
-        exit 1
-      fi
-      REQUESTED_WORKERS="$2"
-      shift 2
-      ;;
-    --no-scratch-sweep)
-      NO_SCRATCH_SWEEP=true
-      shift
-      ;;
-    --coverage)
-      COVERAGE=true
-      shift
-      ;;
-    --quarantined)
-      QUARANTINED=true
-      shift
-      ;;
-    --reuse-if-green)
-      REUSE_IF_GREEN=true
-      shift
-      ;;
-    --files)
-      shift
-      while [[ $# -gt 0 && "$1" != -* ]]; do
-        TARGETED_FILES+=("$1")
-        shift
-      done
-      ;;
-    --pre-merge)
-      # Already decided by the argv pre-scan above (_RU_PRE_MERGE).
-      shift
-      ;;
-    --base)
-      if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
-        # CENSUS-ANCHOR: run-unit-tests-pre-merge-01
-        # AGENT-RESOLVABLE: the caller names a git ref after --base, or drops --base for the default base, and re-runs.
-        pgai_emit_error_contract "run-unit-tests.pre-merge-base-missing" \
-          "--base needs a git ref after it (got '${2:-}'), e.g. --base ai_main; without --base a pre-merge run compares HEAD with the local RC branch this worktree was cut from." \
-          "bash \"${BASH_SOURCE[0]}\" --pre-merge"
-        exit 1
-      fi
-      PRE_MERGE_BASE="$2"
-      shift 2
-      ;;
-    --help|-h)
-      cat <<EOF
+# The flag contract both gated runners share -- every flag's case arm and
+# every refusal of a flag or flag combination -- is lib/gated_runner_args.sh's
+# (see its header); this runner keeps only its --help text.
+_ru_print_help() {
+  cat <<EOF
 Usage: $(basename "$0") [--verbose] [--coverage] [--workers N] [--no-scratch-sweep] [--quarantined] [--reuse-if-green] [--files PATH [PATH ...]]
        $(basename "$0") --pre-merge [--base REF] [--workers N]
 
@@ -680,113 +620,27 @@ Exit codes:
   2  = pytest not installed, or (--pre-merge only) the pre-merge engine
        could not start (unknown base, no RC or main branch to default to)
 EOF
-      exit 0
-      ;;
-    *)
-      # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
-      # diagnose"): the offending argument is named deterministically, but which
-      # valid flag the operator meant to pass is user intent this runner
-      # cannot resolve — --help names every accepted flag as the next step.
-      echo "FAIL: unrecognized argument '$1'." >&2
-      echo "" >&2
-      echo "Cause(s):" >&2
-      echo "  - '$1' does not match any flag this runner accepts." >&2
-      echo "" >&2
-      echo "To fix:" >&2
-      echo "  1. bash \"${BASH_SOURCE[0]}\" --help          # list every accepted flag" >&2
-      echo "  2. Re-run with the corrected flag, e.g.: bash \"${BASH_SOURCE[0]}\" --verbose" >&2
-      echo "" >&2
-      echo "Rule: this runner accepts only the flags listed in its --help output; an" >&2
-      echo "unrecognized argument is rejected rather than silently ignored." >&2
-      exit 1
-      ;;
-  esac
-done
+}
+gated_runner_parse_args run-unit-tests "${BASH_SOURCE[0]}" _ru_print_help "$@"
 
 # --- Validate a pre-merge run's flags ---
-# Both refusals are AGENT-RESOLVABLE: the caller fixes its own argv and
-# re-runs in the same session. A pre-merge run chooses its own tests and is
-# never a certification run, so the flags that select tests (--files,
-# --quarantined), measure coverage or reuse a certified result are refused
-# beside it; --base names a pre-merge run's diff base and means nothing
-# without one. Both refuse before any gate, lint or pytest runs.
-if [[ "$_RU_PRE_MERGE" == "true" ]]; then
-  _ru_pre_merge_conflicts=()
-  [[ "$_RU_TARGETED" == "true" ]] && _ru_pre_merge_conflicts+=("--files")
-  [[ "$COVERAGE" == "true" ]] && _ru_pre_merge_conflicts+=("--coverage")
-  [[ "$QUARANTINED" == "true" ]] && _ru_pre_merge_conflicts+=("--quarantined")
-  [[ "$REUSE_IF_GREEN" == "true" ]] && _ru_pre_merge_conflicts+=("--reuse-if-green")
-  if [[ ${#_ru_pre_merge_conflicts[@]} -gt 0 ]]; then
-    # CENSUS-ANCHOR: run-unit-tests-pre-merge-02
-    # AGENT-RESOLVABLE: the caller drops the flags a pre-merge run does not take and re-runs.
-    pgai_emit_error_contract "run-unit-tests.pre-merge-incompatible-flags" \
-      "--pre-merge cannot be combined with ${_ru_pre_merge_conflicts[*]}: a pre-merge run chooses its own tests (the by-path module test, the ratchet lints, the whole-tree guards and the unit tests affected by git diff BASE...HEAD), is never a certification run, and measures no coverage." \
-      "bash \"${BASH_SOURCE[0]}\" --pre-merge${PRE_MERGE_BASE:+ --base ${PRE_MERGE_BASE@Q}}"
-    exit 1
-  fi
-  unset _ru_pre_merge_conflicts
-  echo "pre-merge run — not a certification run"
-  echo "Exit code will be written to: ${_RU_PRE_MERGE_EXIT_FILE}"
-elif [[ -n "$PRE_MERGE_BASE" ]]; then
-  # CENSUS-ANCHOR: run-unit-tests-pre-merge-03
-  # AGENT-RESOLVABLE: the caller adds --pre-merge (or drops --base) and re-runs.
-  pgai_emit_error_contract "run-unit-tests.base-without-pre-merge" \
-    "--base ${PRE_MERGE_BASE} was given without --pre-merge; --base names the diff base a pre-merge run chooses its affected tests from, and a certification or --files run has none." \
-    "bash \"${BASH_SOURCE[0]}\" --pre-merge --base ${PRE_MERGE_BASE@Q}"
-  exit 1
-fi
+# Refuses --files, --coverage, --quarantined or --reuse-if-green beside
+# --pre-merge, and --base without it, before any gate, lint or pytest runs.
+gated_runner_validate_pre_merge_flags run-unit-tests "${BASH_SOURCE[0]}" "$_RU_PRE_MERGE" "$_RU_TARGETED" \
+  "$_RU_PRE_MERGE_EXIT_FILE" \
+  "the by-path module test, the ratchet lints, the whole-tree guards and the unit tests affected by git diff BASE...HEAD"
 
 # --- Validate a targeted run's --files arguments ---
-# Every refusal here is AGENT-RESOLVABLE: the caller fixes its own argv and
-# re-runs in the same session. Paths are classified by
-# gated_runner_targeted_resolve_path against this runner's own test roots
-# (the directories its certification pytest argv collects), so a path that
-# escapes them -- tests/../../etc/passwd -- is refused rather than collected.
+# Each path must be an existing test file under this runner's own test
+# roots (the directories its certification pytest argv collects).
 _RU_TARGETED_ROOTS=("tests/unit" "pgai_agent_kanban/api/tests")
 _RU_TARGETED_EXAMPLE="tests/unit/test_semver.py"
 if [[ "$_RU_TARGETED" == "true" ]]; then
-  if [[ ${#TARGETED_FILES[@]} -eq 0 ]]; then
-    # CENSUS-ANCHOR: run-unit-tests-targeted-files-01
-    # AGENT-RESOLVABLE: the caller names the test files it touched and re-runs.
-    pgai_emit_error_contract "run-unit-tests.targeted-files-missing" \
-      "--files was given without any test file path after it; a targeted run needs at least one test file under ${_RU_TARGETED_ROOTS[*]} (paths relative to team/)." \
-      "bash \"${BASH_SOURCE[0]}\" --files ${_RU_TARGETED_EXAMPLE}"
-    exit 1
-  fi
-  if [[ "$COVERAGE" == "true" ]]; then
-    # CENSUS-ANCHOR: run-unit-tests-targeted-files-02
-    # AGENT-RESOLVABLE: drop --coverage from the targeted run; coverage belongs to a full run.
-    pgai_emit_error_contract "run-unit-tests.targeted-files-with-coverage" \
-      "--files cannot be combined with --coverage: coverage measured over a handful of test files is not a meaningful coverage figure, so a targeted run never measures it." \
-      "bash \"${BASH_SOURCE[0]}\" --files ${TARGETED_FILES[*]@Q}"
-    exit 1
-  fi
-  _RU_TARGETED_RESOLVED=()
-  for _ru_path in "${TARGETED_FILES[@]}"; do
-    _ru_rc=0
-    _ru_rel="$(gated_runner_targeted_resolve_path "$REPO_ROOT/team" "$_ru_path" "${_RU_TARGETED_ROOTS[@]}")" || _ru_rc=$?
-    if [[ $_ru_rc -eq 3 ]]; then
-      # CENSUS-ANCHOR: run-unit-tests-targeted-files-03
-      # AGENT-RESOLVABLE: the caller passes a path under this runner's own test roots.
-      pgai_emit_error_contract "run-unit-tests.targeted-file-outside-test-root" \
-        "--files path '${_ru_path}' resolves outside this runner's test roots (${_RU_TARGETED_ROOTS[*]}, relative to ${REPO_ROOT}/team); the unit runner only runs unit test files. An integration test file belongs to run-integration-tests.sh --files." \
-        "bash \"${BASH_SOURCE[0]}\" --files ${_RU_TARGETED_EXAMPLE}"
-      exit 1
-    fi
-    if [[ $_ru_rc -ne 0 ]]; then
-      # CENSUS-ANCHOR: run-unit-tests-targeted-files-04
-      # AGENT-RESOLVABLE: the caller corrects the file name and re-runs.
-      pgai_emit_error_contract "run-unit-tests.targeted-file-not-found" \
-        "--files path '${_ru_path}' is not an existing test file (looked for ${REPO_ROOT}/team/${_ru_rel}); each --files path must name a file, not a directory, under ${_RU_TARGETED_ROOTS[*]}." \
-        "ls \"${REPO_ROOT}/team/tests/unit\" && bash \"${BASH_SOURCE[0]}\" --files ${_RU_TARGETED_EXAMPLE}"
-      exit 1
-    fi
-    _RU_TARGETED_RESOLVED+=("$_ru_rel")
-  done
-  unset _ru_path _ru_rc _ru_rel
-  echo "targeted run — not a certification run"
-  echo "Targeted test files: ${_RU_TARGETED_RESOLVED[*]}"
-  echo "Exit code will be written to: ${_RU_TARGETED_EXIT_FILE}"
+  gated_runner_validate_targeted_files run-unit-tests "${BASH_SOURCE[0]}" "$REPO_ROOT/team" \
+    "$_RU_TARGETED_EXIT_FILE" "$_RU_TARGETED_EXAMPLE" \
+    "the unit runner only runs unit test files. An integration test file belongs to run-integration-tests.sh --files." \
+    "${_RU_TARGETED_ROOTS[@]}"
+  _RU_TARGETED_RESOLVED=("${GATED_RUNNER_TARGETED_RESOLVED[@]}")
 fi
 
 # --- Resolve the kanban.cfg [testing] settings this run uses ---
@@ -836,21 +690,8 @@ if [[ "$COVERAGE" == "true" ]]; then
 fi
 
 # --- Check pytest is available ---
-# Full remedy (docs/coding-standards.md "Gates prescribe, not just
-# diagnose"): pytest's absence has one universal, verbatim-runnable fix.
-if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/null 2>&1; then
-  echo "FAIL: pytest is not installed in this Python environment." >&2
-  echo "" >&2
-  echo "Cause(s):" >&2
-  echo "  - no 'pytest' executable found on PATH" >&2
-  echo "  - 'python3 -m pytest --version' also failed (pytest not importable)" >&2
-  echo "" >&2
-  echo "To fix:" >&2
-  echo "  1. pip install pytest" >&2
-  echo "  2. bash \"${BASH_SOURCE[0]}\"" >&2
-  echo "" >&2
-  echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
-  echo "the test suite without it." >&2
+if ! gated_runner_pytest_available; then
+  gated_runner_report_pytest_missing "bash \"${BASH_SOURCE[0]}\"" "the test suite"
   # Records that this run aborted here (see the findings-file claim, top
   # of this script) so the findings file reads as an honestly-aborted run
   # rather than a clean pass with zero findings -- the two would otherwise
@@ -1380,9 +1221,10 @@ gated_runner_run_quality_lint "env_bootstrap" -- \
 gated_runner_merge_findings_file "$_RU_ENV_BOOTSTRAP_FINDINGS"
 unset _RU_ENV_BOOTSTRAP_FINDINGS
 
-# Help-presence lint: asserts that every operator-facing shell script under
-# team/scripts/ implements a --help or -h flag (Directive 6,
-# docs/coding-standards.md).  Scripts in help_presence_exempt.txt are exempt.
+# Help-presence lint: asserts that every executable script in the tree
+# (recursively; sourced libraries and workflow plugins exempt by rule)
+# implements a --help or -h flag (Directive 6, docs/coding-standards.md).
+# Scripts in help_presence_exempt.txt are exempt.
 # Exits 0 on findings and writes them per instance with --findings-file;
 # they are merged into the aggregate below. The wrapper still records a
 # non-zero exit (a usage error or a crash) as one coarse finding.

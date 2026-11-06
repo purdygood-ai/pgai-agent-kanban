@@ -121,7 +121,7 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 # Run by file path (``python3 .../bug_filer.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -183,9 +183,10 @@ def _pairs_record(
     "## Deep-Verify Pairs"."""
     pair_keys = [_pair_key(p) for p in pairs]
     pair_summary = "; ".join(pair_keys) if pair_keys else "unknown pair"
-    step_lines = "\n".join(
-        f"- `{_pair_key(p)}` failed at step: {p.step}" for p in pairs
-    ) or "- no structured engine/flavor/step detail could be extracted from captured output"
+    step_lines = (
+        "\n".join(f"- `{_pair_key(p)}` failed at step: {p.step}" for p in pairs)
+        or "- no structured engine/flavor/step detail could be extracted from captured output"
+    )
     reproduction = "\n".join(
         f"{i}. From an operator shell (the container tier is operator-only), run "
         f"`PGAI_CONTAINER_TIER=1 team/scripts/deep-verify.sh --project {project} --image all` (or wait for the "
@@ -224,10 +225,7 @@ def _pairs_record(
         actual=step_lines,
         reproduction=reproduction,
         files_involved=files_involved,
-        hypothesis=(
-            "Speculative -- see the failing step named above for the Dockerfile line to "
-            "start from."
-        ),
+        hypothesis=("Speculative -- see the failing step named above for the Dockerfile line to " "start from."),
         key_heading=_PAIRS_HEADING,
         key=tuple(pair_keys),
         extra_sections=(_run_section(project, version, commit),),
@@ -281,8 +279,7 @@ def _tests_record(
     more = f" and {len(tests) - 1} more" if len(tests) > 1 else ""
     test_lines = "\n".join(
         f"- `{t.nodeid}` {t.outcome} -- file `{_repo_path(t.file)}`, test "
-        f"`{t.test_id or '(module collection)'}`"
-        + (f": {t.reason}" if t.reason else "")
+        f"`{t.test_id or '(module collection)'}`" + (f": {t.reason}" if t.reason else "")
         for t in tests
     )
     files = sorted({_repo_path(t.file) for t in tests})
@@ -369,8 +366,8 @@ class FilingResult:
     """
 
     outcome: str
-    bug_id: "str | None"
-    bug_path: "str | None"
+    bug_id: str | None
+    bug_path: str | None
     pairs: tuple
     tests: tuple = ()
 
@@ -382,7 +379,7 @@ def file_or_cite_bug(
     version: str,
     commit: str,
     output_text: str,
-    filed_at: "str | None" = None,
+    filed_at: str | None = None,
 ) -> FilingResult:
     """File a bug for a failed deep-verify run, or cite an existing one that
     already covers the same failure.
@@ -413,7 +410,7 @@ def file_or_cite_bug(
     test_keys = frozenset(t.nodeid for t in tests)
 
     slug = _slug_for_tests(tests) if tests else _slug_for_pairs(pairs)
-    filed_at = filed_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filed_at = filed_at or datetime.now(UTC).strftime("%Y-%m-%d")
     if tests:
         record = _tests_record(
             slug=slug,
@@ -490,7 +487,7 @@ unreadable captured_output_file.
 """
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI: bug_filer.py <bugs_dir> <project> <version> <commit> <captured_output_file>
 
     Prints five "key=value" lines to stdout: outcome, bug_id, bug_path,
@@ -505,23 +502,20 @@ def main(argv: "list | None" = None) -> int:
         return 0
     if len(argv) != 5:
         print(
-            "usage: bug_filer.py <bugs_dir> <project> <version> <commit> "
-            "<captured_output_file>",
+            "usage: bug_filer.py <bugs_dir> <project> <version> <commit> " "<captured_output_file>",
             file=sys.stderr,
         )
         return 2
 
     bugs_dir, project, version, commit, output_file = argv
     try:
-        with open(output_file, "r", encoding="utf-8", errors="replace") as handle:
+        with open(output_file, encoding="utf-8", errors="replace") as handle:
             output_text = handle.read()
     except OSError as exc:
         print(f"bug_filer.py: could not read {output_file}: {exc}", file=sys.stderr)
         return 2
 
-    result = file_or_cite_bug(
-        bugs_dir, project=project, version=version, commit=commit, output_text=output_text
-    )
+    result = file_or_cite_bug(bugs_dir, project=project, version=version, commit=commit, output_text=output_text)
     print(f"outcome={result.outcome}")
     print(f"bug_id={result.bug_id or ''}")
     print(f"bug_path={result.bug_path or ''}")

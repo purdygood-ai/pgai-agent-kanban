@@ -474,9 +474,7 @@ def _diff_is_rc_tolerable(
         stripped = s.rstrip("\n")
         return stripped == "" or stripped == "---"
 
-    for diff_line in difflib.unified_diff(
-        checked_in_lines, regenerated_lines, lineterm=""
-    ):
+    for diff_line in difflib.unified_diff(checked_in_lines, regenerated_lines, lineterm=""):
         # Skip diff header lines (--- / +++ / @@ context markers).
         if diff_line.startswith("---") or diff_line.startswith("+++"):
             continue
@@ -530,21 +528,20 @@ def _diff_is_rc_tolerable(
                     _inside_drift_fence = False  # Closing fence — context ends.
                 continue
 
-            if _DRIFT_FIXED_HEADER_RE.match(removed_content):        # Category 3
+            if _DRIFT_FIXED_HEADER_RE.match(removed_content):  # Category 3
                 has_drift_removals = True
                 continue
-            if _DRIFT_KI_RESOLVED_RE.match(removed_content):         # Category 4
+            if _DRIFT_KI_RESOLVED_RE.match(removed_content):  # Category 4
                 has_drift_removals = True
                 continue
-            if _DRIFT_TRIPLE_BACKTICK_RE.match(removed_content):     # Category 5 (open)
+            if _DRIFT_TRIPLE_BACKTICK_RE.match(removed_content):  # Category 5 (open)
                 # Opening fence — enter fence context; subsequent removed lines
                 # are the code block content (also tolerable as drift).
                 has_drift_removals = True
                 _inside_drift_fence = True
                 continue
-            if (                                                     # Category 6
-                _EMPTY_SECTION_PLACEHOLDER_RE.match(removed_content)
-                and _KNOWN_ISSUES_HEADING_RE.match(_last_context_line)
+            if _EMPTY_SECTION_PLACEHOLDER_RE.match(removed_content) and _KNOWN_ISSUES_HEADING_RE.match(  # Category 6
+                _last_context_line
             ):
                 # The empty-section placeholder; admitted only if the next diff
                 # line is the section's first entry (a Category 1 addition).
@@ -556,9 +553,7 @@ def _diff_is_rc_tolerable(
 
             # --- Category 1: KI-line addition ---
             ki_match = _KI_LINE_RE.match(content)
-            if not ki_match and (
-                _pending_placeholder_removal or _in_placeholder_replacement
-            ):
+            if not ki_match and (_pending_placeholder_removal or _in_placeholder_replacement):
                 # Something other than a KI entry took the placeholder's place,
                 # or followed the entry that did.
                 return False, ""
@@ -665,9 +660,7 @@ def _diff_is_rc_tolerable(
     if has_ki_additions:
         clauses.append("post-CHANGELOG-commit KI additions tolerated")
     if has_new_release_section:
-        clauses.append(
-            "new-release section addition backed by release-notes file tolerated"
-        )
+        clauses.append("new-release section addition backed by release-notes file tolerated")
     if has_drift_removals:
         clauses.append(
             "writer-migration drift removals tolerated "
@@ -675,10 +668,7 @@ def _diff_is_rc_tolerable(
             "and/or embedded triple-backtick code fences)"
         )
     if has_placeholder_replacements:
-        clauses.append(
-            "empty Known Issues placeholder replaced by its first "
-            "post-commit entry tolerated"
-        )
+        clauses.append("empty Known Issues placeholder replaced by its first " "post-commit entry tolerated")
     clause_description = "; ".join(clauses)
 
     return True, clause_description
@@ -768,19 +758,11 @@ def _regenerate_to_temp(
     # (test fixtures only in practice) so a fixture can exercise a
     # new-release-section regeneration without a real release-notes file.
     if extra_release_notes_dir is not None and extra_release_notes_dir.is_dir():
-        extra_versions = [
-            p.stem
-            for p in extra_release_notes_dir.glob("v*.md")
-            if p.stem not in versions
-        ]
-        versions = sorted(
-            versions + extra_versions, key=_parse_version, reverse=True
-        )
+        extra_versions = [p.stem for p in extra_release_notes_dir.glob("v*.md") if p.stem not in versions]
+        versions = sorted(versions + extra_versions, key=_parse_version, reverse=True)
 
     # Write to a named temp file under the framework temp root.
-    fd, tmp_str = tempfile.mkstemp(
-        prefix="changelog_fresh_", suffix=".md", dir=str(temp_root)
-    )
+    fd, tmp_str = tempfile.mkstemp(prefix="changelog_fresh_", suffix=".md", dir=str(temp_root))
     os.close(fd)
     tmp_path = pathlib.Path(tmp_str)
 
@@ -835,9 +817,13 @@ def _current_git_branch(repo_root: pathlib.Path) -> str:
         # Detached HEAD — check for an rc/* or ai_rc/* branch at this commit.
         result2 = _sp.run(
             [
-                "git", "-C", str(repo_root),
-                "branch", "--format=%(refname:short)",
-                "--points-at", "HEAD",
+                "git",
+                "-C",
+                str(repo_root),
+                "branch",
+                "--format=%(refname:short)",
+                "--points-at",
+                "HEAD",
             ],
             capture_output=True,
             text=True,
@@ -885,9 +871,7 @@ def _resolve_branch_prefix() -> str:
         from pgai_agent_kanban.lib.branch_prefix import resolve_branch_prefix
     except ImportError:
         return _DEFAULT_BRANCH_PREFIX
-    return resolve_branch_prefix(
-        project_name=_DEFAULT_PROJECT_NAME, default=_DEFAULT_BRANCH_PREFIX
-    )
+    return resolve_branch_prefix(project_name=_DEFAULT_PROJECT_NAME, default=_DEFAULT_BRANCH_PREFIX)
 
 
 def _is_rc_branch(branch: str, branch_prefix: str = "") -> bool:
@@ -1064,9 +1048,7 @@ def _build_causes(
             "checked-in artifact does not have it"
         )
 
-    causes.extend(
-        _build_collision_causes(changelog_path, checked_in_text, regenerated_text)
-    )
+    causes.extend(_build_collision_causes(changelog_path, checked_in_text, regenerated_text))
 
     if not causes:
         # No heading-level divergence — the drift is inside a section body
@@ -1085,10 +1067,7 @@ def _build_causes(
         ]
         sample = diff_lines[:5]
         if sample:
-            causes.append(
-                f"{changelog_path} differs from a fresh regeneration; first "
-                f"divergent line(s): {sample}"
-            )
+            causes.append(f"{changelog_path} differs from a fresh regeneration; first " f"divergent line(s): {sample}")
         else:
             causes.append(
                 f"{changelog_path} is byte-different from a fresh regeneration "
@@ -1099,9 +1078,7 @@ def _build_causes(
     return causes
 
 
-def _build_remedy_commands(
-    changelog_path: pathlib.Path, bugs_dir: pathlib.Path
-) -> tuple[str, str]:
+def _build_remedy_commands(changelog_path: pathlib.Path, bugs_dir: pathlib.Path) -> tuple[str, str]:
     """Return (regenerate_command, relint_command) as verbatim-runnable strings.
 
     Both commands are derived entirely from values the gate already resolved
@@ -1139,10 +1116,7 @@ def _build_remedy_commands(
         f'bash "{pp_run_ops_script}" pgai_agent_kanban.cm.changelog_writer '
         f'"{repo_root}" "{bugs_dir}" > "{changelog_path}"'
     )
-    relint_cmd = (
-        f'python3 "{_THIS_FILE}" --changelog "{changelog_path}" '
-        f'--bugs-dir "{bugs_dir}"'
-    )
+    relint_cmd = f'python3 "{_THIS_FILE}" --changelog "{changelog_path}" ' f'--bugs-dir "{bugs_dir}"'
     return regen_cmd, relint_cmd
 
 
@@ -1283,8 +1257,7 @@ def check_freshness(
             findings,
             changelog_path,
             bugs_dir,
-            f"{changelog_path} could not be checked: regenerating CHANGELOG.md "
-            "failed (the error is printed above)",
+            f"{changelog_path} could not be checked: regenerating CHANGELOG.md " "failed (the error is printed above)",
         )
         return False
 
@@ -1324,10 +1297,7 @@ def check_freshness(
             extra_release_notes_dir=extra_release_notes_dir,
         )
         if is_tolerable:
-            print(
-                f"lint_changelog_freshness: ok — {changelog_path} is fresh "
-                f"(RC mode: {clause_description})."
-            )
+            print(f"lint_changelog_freshness: ok — {changelog_path} is fresh " f"(RC mode: {clause_description}).")
             return True
 
         causes = _build_causes(changelog_path, checked_in_text, regenerated_text)
@@ -1393,10 +1363,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--changelog",
         metavar="PATH",
-        help=(
-            "Path to the checked-in CHANGELOG.md artifact.  Default: CHANGELOG.md "
-            "relative to the dev tree root."
-        ),
+        help=("Path to the checked-in CHANGELOG.md artifact.  Default: CHANGELOG.md " "relative to the dev tree root."),
     )
     parser.add_argument(
         "--bugs-dir",
@@ -1429,9 +1396,7 @@ def main(argv: list[str] | None = None) -> int:
         to --findings-file); 2 usage error (argparse).
     """
     args = _parse_args(argv)
-    changelog_path = (
-        pathlib.Path(args.changelog) if args.changelog else _DEFAULT_CHANGELOG_PATH
-    )
+    changelog_path = pathlib.Path(args.changelog) if args.changelog else _DEFAULT_CHANGELOG_PATH
     bugs_dir = pathlib.Path(args.bugs_dir) if args.bugs_dir else None
 
     findings: list = []

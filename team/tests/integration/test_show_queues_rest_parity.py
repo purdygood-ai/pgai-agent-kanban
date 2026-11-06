@@ -63,18 +63,12 @@ def _seed_queue_reconciliation(project_dir: pathlib.Path) -> None:
 
     # WORKING task: role coder, queue marker "B" (BLOCKED) disagrees with
     # status.md's WORKING -- a real marker_mismatch.
-    (project_dir / "tasks" / ids["WORKING"] / "README.md").write_text(
-        "## Role\nCODER\n", encoding="utf-8"
-    )
+    (project_dir / "tasks" / ids["WORKING"] / "README.md").write_text("## Role\nCODER\n", encoding="utf-8")
     # BACKLOG task: role coder, queue marker " " agrees with BACKLOG -- a
     # clean match (no warning).
-    (project_dir / "tasks" / ids["BACKLOG"] / "README.md").write_text(
-        "## Role\nCODER\n", encoding="utf-8"
-    )
+    (project_dir / "tasks" / ids["BACKLOG"] / "README.md").write_text("## Role\nCODER\n", encoding="utf-8")
     # WAITING task: role writer, no writer_backlog.md at all -- no_queue_entry.
-    (project_dir / "tasks" / ids["WAITING"] / "README.md").write_text(
-        "## Role\nWRITER\n", encoding="utf-8"
-    )
+    (project_dir / "tasks" / ids["WAITING"] / "README.md").write_text("## Role\nWRITER\n", encoding="utf-8")
     # BLOCKED task: no README.md at all -- falls back to "unknown", and
     # (no queue entry for it either) -- also no_queue_entry, under a
     # different agent bucket than the WAITING task above.
@@ -82,15 +76,12 @@ def _seed_queue_reconciliation(project_dir: pathlib.Path) -> None:
     queues_dir = project_dir / "tasks" / "queues"
     queues_dir.mkdir(parents=True, exist_ok=True)
     (queues_dir / "coder_backlog.md").write_text(
-        f"- [B] {ids['WORKING']}\n"
-        f"- [ ] {ids['BACKLOG']}\n",
+        f"- [B] {ids['WORKING']}\n" f"- [ ] {ids['BACKLOG']}\n",
         encoding="utf-8",
     )
     # A queue entry with no matching task folder anywhere -- folder_missing,
     # under pm (queue_file_to_agent maps "pm_backlog" -> "pm").
-    (queues_dir / "pm_backlog.md").write_text(
-        f"- [ ] {_GHOST_TASK_ID}\n", encoding="utf-8"
-    )
+    (queues_dir / "pm_backlog.md").write_text(f"- [ ] {_GHOST_TASK_ID}\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +110,7 @@ def _cli_env(kanban_root: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def _warning_text_to_token(text: "str | None") -> "str | None":
+def _warning_text_to_token(text: str | None) -> str | None:
     if text is None:
         return None
     if text in _WARNING_TEXT_TO_TOKEN:
@@ -138,10 +129,13 @@ def _cli_show_queues_details(board_root: pathlib.Path) -> dict:
     show_queues_sh = board_root / "scripts" / "dashboard" / "show-queues.sh"
     result = subprocess.run(
         [
-            "bash", str(show_queues_sh),
-            "--project", PROJECT_NAME,
+            "bash",
+            str(show_queues_sh),
+            "--project",
+            PROJECT_NAME,
             "--details",
-            "--kanban-root", str(board_root),
+            "--kanban-root",
+            str(board_root),
         ],
         capture_output=True,
         text=True,
@@ -151,8 +145,8 @@ def _cli_show_queues_details(board_root: pathlib.Path) -> dict:
     assert result.returncode == 0, f"show-queues.sh --details failed: {result.stderr!r}"
 
     grouped: dict = {agent: {state: [] for state in STATE_ORDER} for agent in AGENT_ORDER}
-    current_agent: "str | None" = None
-    current_state: "str | None" = None
+    current_agent: str | None = None
+    current_state: str | None = None
     for line in result.stdout.splitlines():
         m = _AGENT_HEADER_RE.match(line)
         if m:
@@ -186,9 +180,7 @@ def _get_json(url: str) -> dict:
 
 
 def _rest_show_queues_details(port: int) -> dict:
-    body = _get_json(
-        f"http://127.0.0.1:{port}/show-queues?project={PROJECT_NAME}&details=true"
-    )
+    body = _get_json(f"http://127.0.0.1:{port}/show-queues?project={PROJECT_NAME}&details=true")
     return body["details"]
 
 
@@ -223,27 +215,14 @@ def test_per_agent_details_listing_matches_between_cli_and_rest(
     # collapsed trivial "nothing to reconcile" board that would pass even
     # if the resolver ignored queue reconciliation entirely.
     ids = task_ids_by_state()
-    assert cli_details["coder"]["WORKING"] == [
-        {"task_id": ids["WORKING"], "warning": "marker_mismatch"}
-    ]
-    assert cli_details["coder"]["BACKLOG"] == [
-        {"task_id": ids["BACKLOG"], "warning": None}
-    ]
-    assert cli_details["writer"]["WAITING"] == [
-        {"task_id": ids["WAITING"], "warning": "no_queue_entry"}
-    ]
-    assert cli_details["unknown"]["BLOCKED"] == [
-        {"task_id": ids["BLOCKED"], "warning": "no_queue_entry"}
-    ]
-    assert cli_details["pm"]["BACKLOG"] == [
-        {"task_id": _GHOST_TASK_ID, "warning": "folder_missing"}
-    ]
+    assert cli_details["coder"]["WORKING"] == [{"task_id": ids["WORKING"], "warning": "marker_mismatch"}]
+    assert cli_details["coder"]["BACKLOG"] == [{"task_id": ids["BACKLOG"], "warning": None}]
+    assert cli_details["writer"]["WAITING"] == [{"task_id": ids["WAITING"], "warning": "no_queue_entry"}]
+    assert cli_details["unknown"]["BLOCKED"] == [{"task_id": ids["BLOCKED"], "warning": "no_queue_entry"}]
+    assert cli_details["pm"]["BACKLOG"] == [{"task_id": _GHOST_TASK_ID, "warning": "folder_missing"}]
     # DONE/WONT-DO tasks never appear in the details view on either surface.
     all_ids = {
-        entry["task_id"]
-        for agent in AGENT_ORDER
-        for state in STATE_ORDER
-        for entry in cli_details[agent][state]
+        entry["task_id"] for agent in AGENT_ORDER for state in STATE_ORDER for entry in cli_details[agent][state]
     }
     assert ids["DONE"] not in all_ids
     assert ids["WONT-DO"] not in all_ids

@@ -73,8 +73,7 @@ _GET_QUEUES = "module:pgai_agent_kanban.ops.read.get_queues"
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-ROUTER = textwrap.dedent(
-    '''\
+ROUTER = textwrap.dedent("""\
     import subprocess
 
     from fastapi import APIRouter
@@ -130,19 +129,15 @@ ROUTER = textwrap.dedent(
     @router.post("/no-call")
     def post_no_call(body):
         return {}
-    '''
-)
+    """)
 
-SCRIPT_CALL_FORM = textwrap.dedent(
-    """\
+SCRIPT_CALL_FORM = textwrap.dedent("""\
     #!/usr/bin/env bash
     source "$(dirname "${BASH_SOURCE[0]}")/lib/pp_run_ops.sh"
     pp_run_ops pgai_agent_kanban.ops halt "${_project_root}"
-    """
-)
+    """)
 
-SCRIPT_IMPORT_FORM = textwrap.dedent(
-    """\
+SCRIPT_IMPORT_FORM = textwrap.dedent("""\
     #!/usr/bin/env bash
     source "$(dirname "${BASH_SOURCE[0]}")/lib/pp_run_ops.sh"
     PYTHONPATH="$(pp_pythonpath)" python3 - "$1" <<'PY'
@@ -150,22 +145,32 @@ SCRIPT_IMPORT_FORM = textwrap.dedent(
         get_queues,
     )
     PY
-    """
-)
+    """)
 
-SCRIPT_NOT_REACHING = textwrap.dedent(
-    """\
+SCRIPT_NOT_REACHING = textwrap.dedent("""\
     #!/usr/bin/env bash
     # pp_run_ops pgai_agent_kanban.ops halt "${_project_root}"
     python3 -m pgai_agent_kanban.ops halt "${_project_root}"
-    """
-)
+    """)
 
 
 def _row(name: str, route: str, script: str, impl: str) -> str:
     return "\t".join(
-        ["V", name, "active", script, "project|help", "yes", "idempotent", "POST", route,
-         "NONE", "action", "DualChannelShellEnvelope", impl]
+        [
+            "V",
+            name,
+            "active",
+            script,
+            "project|help",
+            "yes",
+            "idempotent",
+            "POST",
+            route,
+            "NONE",
+            "action",
+            "DualChannelShellEnvelope",
+            impl,
+        ]
     )
 
 
@@ -346,7 +351,9 @@ def test_emit_baseline_writes_a_baseline_the_lint_accepts(tmp_path):
     root = _make_tree(tmp_path, _shell_rows(4), baseline=None)
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--root", str(root), "--emit-baseline"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert proc.returncode == 0
     assert re.search(r"^shell_rows\t4$", proc.stdout, re.M)
@@ -382,7 +389,9 @@ def test_real_tree_is_clean_and_baseline_matches_the_measured_count(tmp_path):
     findings_file = tmp_path / "findings.json"
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--findings-file", str(findings_file)],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert proc.returncode == 0
     assert json.loads(findings_file.read_text(encoding="utf-8")) == [], proc.stdout
@@ -533,7 +542,9 @@ def test_emit_baseline_counts_launchers(tmp_path):
     root = _make_tree(tmp_path, _shell_rows(3), baseline=None, launchers=launchers)
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--root", str(root), "--emit-baseline"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert proc.returncode == 0
     assert re.search(r"^shell_rows\t3$", proc.stdout, re.M)

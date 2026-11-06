@@ -43,7 +43,6 @@ than *max_rows* items the window is cut to ``max_rows - 1`` rows and a
 from __future__ import annotations
 
 import pathlib
-from typing import Optional
 
 from pgai_agent_kanban.board import (
     classify_intake_file,
@@ -101,7 +100,8 @@ def input_files(input_dir: pathlib.Path) -> list:
     input pane draws and ``GET /board`` returns for an intake column.
     """
     files = [
-        entry for entry in input_dir.iterdir()
+        entry
+        for entry in input_dir.iterdir()
         if entry.is_file() and entry.name.endswith(".md") and not entry.name.upper().startswith("README")
     ]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -114,7 +114,7 @@ def classify_input_file(
     is_requirements: bool,
     active_rc: str,
     last_released: str,
-    carried: Optional[frozenset] = None,
+    carried: frozenset | None = None,
 ) -> tuple:
     """Return ``(board_status, raw_status)`` for one input file.
 
@@ -157,7 +157,10 @@ def render_input_column(
     def classify(path):
         if path not in statuses:
             statuses[path] = classify_input_file(
-                path, is_requirements=is_requirements, active_rc=active_rc, last_released=last_released,
+                path,
+                is_requirements=is_requirements,
+                active_rc=active_rc,
+                last_released=last_released,
                 carried=carried,
             )
         return statuses[path]
@@ -193,10 +196,10 @@ def render_input_column(
             if end < total:
                 lines.append(truncate_ansi(f"... ({total - end} more below)", width, palette))
     elif total > max_rows:
-        lines = [row(p) for p in files[:max_rows - 1]]
+        lines = [row(p) for p in files[: max_rows - 1]]
         lines.append(truncate_ansi(f"... and {total - (max_rows - 1)} more", width, palette))
     else:
-        lines = [row(p) for p in files[:min(rows, max_rows)]]
+        lines = [row(p) for p in files[: min(rows, max_rows)]]
     return lines or list(_EMPTY)
 
 
@@ -215,13 +218,15 @@ def queue_items(backlog_file: pathlib.Path, tasks_dir: pathlib.Path) -> list:
             continue
         marker, task_id, date_str, seq = parsed
         state = read_task_state_from_status_md(tasks_dir, task_id) or marker_to_state(marker)
-        items.append({
-            "task_id": task_id,
-            "date_str": date_str,
-            "seq": seq,
-            "state": state,
-            "status": classify_queue_item(state),
-        })
+        items.append(
+            {
+                "task_id": task_id,
+                "date_str": date_str,
+                "seq": seq,
+                "state": state,
+                "status": classify_queue_item(state),
+            }
+        )
     items.sort(key=lambda e: (e["date_str"], e["seq"]), reverse=True)
     return items
 
@@ -245,7 +250,7 @@ def render_queue_column(
     window = middle_position_window(items, lambda e: e["state"], min(rows, QUEUE_MAX_ROWS))
     n_more = 0
     if len(items) > max_rows:
-        window = window[:max_rows - 1]
+        window = window[: max_rows - 1]
         n_more = len(items) - len(window)
 
     lines = []

@@ -3,7 +3,7 @@ test_cm_release_hook_failure_remedy.py
 =======================================
 Retrofit: a blocking release-lifecycle hook that exits
 non-zero (the `_run_release_hook` failure path in
-team/scripts/lib/cm/release_finalize.sh — see "WHY EXTRACTION" below) is
+team/scripts/lib/cm/release_hook_runner.sh) is
 classified non-deterministic (exempt) — the hook is project-supplied, so its failure cause is not knowable from the
 caller.  Per docs/coding-standards.md "The non-deterministic exemption", the
 failure is exempt from a numbered fix-command block but must still name the
@@ -15,19 +15,14 @@ printed; a failed inbox write is narrated and the exit stays 1. Without the
 flag (the pre-squash phase, whose trigger 4 HALT writes the entry) the inbox
 is left alone.
 
-WHY EXTRACTION, NOT REPLICATION
---------------------------------
-`_run_release_hook` is a private helper defined at file scope in
-release_finalize.sh (moved there from release.sh by the v2.9.20
-engine-decomposition, since every one of its call sites is one of the
-hook-step callbacks release.sh threads through by name — see that file's
-"Why two callbacks"). It is not exposed as part of the lib's public API, so
-it cannot be `source`d and called directly the way cm_release_finalize can.
-Rather than hand-retype its body into the test (risking silent drift from
-the real script), this file extracts the function verbatim from the live
-release_finalize.sh text at test time and sources the extracted text into a
-bash harness. The test therefore exercises the production function body,
-not a copy of it.
+A runner that cannot start the hook (its PYTHONPATH cannot be composed, or
+the bounded runner cannot be imported) is reported as the runner's failure:
+the hook does not run, and the stop carries its own error key and names the
+runner rather than the hook path.
+
+The harness sources the real release_hook_runner.sh, a single-concern stage
+with no source-time dependencies, so every case exercises the production
+function bodies.
 """
 
 from __future__ import annotations
@@ -35,41 +30,15 @@ from __future__ import annotations
 import pathlib
 import stat
 
+import pytest
+
 from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
-_RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
+_LIB_HOOK_RUNNER = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_hook_runner.sh"
 _LIB_ERROR_CONTRACT = _TEAM_DIR / "scripts" / "lib" / "error_contract.sh"
 _LIB_PP_RUN_OPS = _TEAM_DIR / "scripts" / "lib" / "pp_run_ops.sh"
 _LIB_PREFLIGHT = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_preflight.sh"
-
-_FUNCTION_NAME = "_run_release_hook"
-
-
-def _extract_function(source_path: pathlib.Path, function_name: str) -> str:
-    """Extract a top-level bash function definition verbatim.
-
-    Scans for a line exactly matching "<function_name>() {" and returns
-    every line up to and including the next line that is exactly "}"
-    (the closing brace of a function defined at column 0 — the convention
-    release_finalize.sh's file-scope helpers follow). Raises AssertionError
-    if the function or its closing brace cannot be found, so a rename or
-    reformat upstream fails this test loudly rather than silently testing
-    nothing.
-    """
-    text = source_path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    header = f"{function_name}() {{"
-    start = next((i for i, l in enumerate(lines) if l == header), None)
-    assert start is not None, (
-        f"Could not find '{header}' in {source_path}. "
-        "The function may have been renamed or reformatted."
-    )
-    end = next((i for i in range(start + 1, len(lines)) if lines[i] == "}"), None)
-    assert end is not None, (
-        f"Could not find the closing brace for {function_name}() in {source_path}."
-    )
-    return "\n".join(lines[start : end + 1])
 
 
 def _write_hook(path: pathlib.Path, content: str) -> None:
@@ -84,23 +53,22 @@ def _run_hook_call(
     *,
     no_block: bool = False,
     inbox: bool = False,
+    setup: str = "",
 ) -> object:
     """Source the real _run_release_hook() and invoke it against hook_path.
 
-    With *inbox* the call passes --inbox and the harness also sources the
-    real inbox helper (release_preflight.sh) and pp_run_ops.sh, against the
-    sandbox kanban root ``tmp_path/kanban``.
+    The harness sources pp_run_ops.sh, which runs the hook. With *inbox* the
+    call passes --inbox and the harness also sources the real inbox helper
+    (release_preflight.sh), against the sandbox kanban root ``tmp_path/kanban``.
+    *setup* is bash run just before the call.
     """
-    fn_body = _extract_function(_RELEASE_FINALIZE_SH, _FUNCTION_NAME)
     repo_root = tmp_path / "repo"
     repo_root.mkdir(parents=True, exist_ok=True)
 
     no_block_arg = " '--no-block'" if no_block else ""
     if inbox:
         no_block_arg = " '--inbox'"
-    inbox_sources = (
-        f"source {str(_LIB_PP_RUN_OPS)!r}\nsource {str(_LIB_PREFLIGHT)!r}\n" if inbox else ""
-    )
+    inbox_sources = f"source {str(_LIB_PREFLIGHT)!r}\n" if inbox else ""
     script = f"""\
 set -uo pipefail
 REPO_ROOT={str(repo_root)!r}
@@ -110,9 +78,10 @@ _CM_PROJECT_ROOT={str(tmp_path / "kanban_project")!r}
 RC_BRANCH='rc/v9.9.9'
 KANBAN_ROOT={str(tmp_path / "kanban")!r}
 source {str(_LIB_ERROR_CONTRACT)!r}
+source {str(_LIB_PP_RUN_OPS)!r}
 {inbox_sources}
-{fn_body}
-
+source {str(_LIB_HOOK_RUNNER)!r}
+{setup}
 _run_release_hook 'cm-release-pre-tag' {str(hook_path)!r}{no_block_arg}
 """
     kanban = tmp_path / "kanban"
@@ -268,3 +237,85 @@ def test_inbox_write_failure_keeps_the_exit_and_is_narrated(tmp_path: pathlib.Pa
     assert "error:   cm-release.hook-failure.cm-release-pre-tag" in result.stderr
     assert "WARNING: the operator inbox entry for this stop" in result.stderr
     assert "could not be written" in result.stderr
+
+
+# The two ways the runner can fail before the hook starts, each with the
+# diagnostic its stop must carry: pp_pythonpath cannot compose a PYTHONPATH
+# (no own-tree root), or the bounded runner is not importable from the one
+# it composes (an own-tree root and a sandbox KANBAN_ROOT holding no package,
+# and the hook's cwd, the sandbox repo, holding none either).
+_RUNNER_FAULTS = [
+    pytest.param("_PP_RUN_OPS_OWN_ROOT=''", "could not derive own-tree root", id="no-pythonpath"),
+    pytest.param(
+        "unset PYTHONPATH; _PP_RUN_OPS_OWN_ROOT=/nonexistent-own-root",
+        "No module named",
+        id="runner-not-importable",
+    ),
+]
+
+_RUNNER_KEY = "cm-release.hook-runner-failure.cm-release-pre-tag"
+
+
+def _marker_hook(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+    """A hook that leaves a marker file when it runs, then fails."""
+    marker = tmp_path / "hook-ran.txt"
+    hook = tmp_path / "hooks" / "cm-release-pre-tag.sh"
+    _write_hook(hook, f"#!/usr/bin/env bash\necho ran > {str(marker)!r}\nexit 7\n")
+    return hook, marker
+
+
+@pytest.mark.parametrize(("setup", "reason"), _RUNNER_FAULTS)
+def test_runner_fault_names_the_runner_and_never_runs_the_hook(tmp_path: pathlib.Path, setup: str, reason: str) -> None:
+    """A runner that cannot start the hook stops the phase under its own error
+    key, names the runner and its diagnostic, and never runs or blames the hook."""
+    hook, marker = _marker_hook(tmp_path)
+
+    result = _run_hook_call(tmp_path, hook, setup=setup)
+
+    assert result.returncode == 1, result.stderr
+    assert not marker.exists(), "the hook ran although its runner could not start it"
+    assert f"error:   {_RUNNER_KEY}" in result.stderr, result.stderr
+    assert "cm-release.hook-failure." not in result.stderr, result.stderr
+    assert str(hook) not in result.stdout + result.stderr, result.stderr
+    assert "hook runner" in result.stderr and reason in result.stderr, result.stderr
+    assert "Cause(s):" not in result.stderr and "running hook" not in result.stdout
+    lines = result.stderr.splitlines()
+    remedy = lines[lines.index(f"error:   {_RUNNER_KEY}") + 2].removeprefix("remedy:  ")
+    assert str(_LIB_PP_RUN_OPS) in remedy and "<" not in remedy, remedy
+
+
+# Only the bounded runner fails to start; the inbox writer, which shares
+# pp_run_ops' PYTHONPATH, still works.
+_BOUNDED_RUN_START_FAULT = (
+    'python3() { if [[ "${2:-}" == pgai_agent_kanban.lib.bounded_run ]]; then '
+    "echo 'bounded_run: simulated start failure' >&2; return 1; fi; command python3 \"$@\"; }"
+)
+
+
+def test_runner_fault_with_inbox_writes_the_runner_triple(tmp_path: pathlib.Path) -> None:
+    """--inbox (the pre-tag phase): the runner's stop writes one inbox entry
+    carrying the runner's error key, not the hook-failure key."""
+    inbox = _inbox_file(tmp_path)
+    hook, marker = _marker_hook(tmp_path)
+
+    result = _run_hook_call(tmp_path, hook, inbox=True, setup=_BOUNDED_RUN_START_FAULT)
+
+    assert result.returncode == 1, result.stderr
+    assert not marker.exists()
+    text = inbox.read_text(encoding="utf-8")
+    assert text.count("### INBOX-") == 1, text
+    assert _RUNNER_KEY in text and "cm-release.hook-failure." not in text, text
+    assert "simulated start failure" in text, text
+
+
+def test_runner_fault_under_no_block_is_a_warning(tmp_path: pathlib.Path) -> None:
+    """--no-block (post-tag): a runner that cannot start the hook warns, names
+    the runner, and the release continues without running the hook."""
+    hook, marker = _marker_hook(tmp_path)
+
+    result = _run_hook_call(tmp_path, hook, no_block=True, setup="_PP_RUN_OPS_OWN_ROOT=''")
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    assert "WARNING: The release hook runner could not start" in result.stderr, result.stderr
+    assert "error:   " not in result.stderr

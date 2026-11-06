@@ -54,6 +54,10 @@ Fixtures exercised:
       match under set -euo pipefail.
   (S) The real matcher run 200 times in sequence under set -euo pipefail on
       a span whose signature is not on the last line → zero misses.
+  (T) A task at the ceiling, and (U) a requeued task's worktree carrying
+      commits, each file one bug through intake: BUG-NNNN-<slug>.md with a
+      number past an archived bug's, no staged draft left behind; a second
+      sweep on the same defect is refused as a duplicate and files nothing.
   (X) A block its agent wrote itself (Block Record reason_code
       agent_unclassified, Needs Human yes, a question in ## Blockers) whose
       span carries transient words only in the agent's own reply (a file
@@ -88,6 +92,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="overwatch-transient-api-error-bash")
 
+
 # ---------------------------------------------------------------------------
 # Path to the check module (relative to the team/ cwd used by run-unit-tests.sh)
 # ---------------------------------------------------------------------------
@@ -97,6 +102,7 @@ _CHECK_TRANSIENT = "scripts/lib/overwatch-checks/check-transient-api-error.sh"
 # ---------------------------------------------------------------------------
 # Git helpers (shared with test_overwatch_push_lag_bash.py pattern)
 # ---------------------------------------------------------------------------
+
 
 def _git(repo: pathlib.Path, *args: str) -> str:
     """Run a git command inside repo; return stripped stdout."""
@@ -132,6 +138,7 @@ def _make_commit(repo: pathlib.Path, msg: str = "bump") -> str:
 # Kanban fixture builder
 # ---------------------------------------------------------------------------
 
+
 def _build_kanban(
     kanban_root: pathlib.Path,
     project_name: str,
@@ -159,9 +166,7 @@ def _build_kanban(
         cfg_lines.append(f"branch_prefix={branch_prefix}\n")
     (proj_dir / "project.cfg").write_text("".join(cfg_lines), encoding="utf-8")
 
-    (proj_dir / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n", encoding="utf-8"
-    )
+    (proj_dir / "release-state.md").write_text("# Release State\n\n## Active RC\nnone\n", encoding="utf-8")
 
     return proj_dir
 
@@ -283,11 +288,7 @@ def _write_batch_log_with_error(
 
     preamble = "[wake] preamble: batch started\n"
     if span is None:
-        span = (
-            "Agent started.\nProcessing task...\n"
-            f"ERROR: {error_text}\n"
-            "Agent exited.\n"
-        )
+        span = "Agent started.\nProcessing task...\n" f"ERROR: {error_text}\n" "Agent exited.\n"
     batch_log.write_text(preamble + span + following, encoding="utf-8")
     offset_start = len(preamble.encode("utf-8"))
     offset_end = offset_start + len(span.encode("utf-8"))
@@ -377,40 +378,29 @@ def test_transient_529_requeues_to_backlog(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-transient-api-error should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-transient-api-error should exit 0\nstderr={result.stderr}"
 
     status = _read_status(task_dir)
-    assert "BACKLOG" in status, (
-        f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
-    )
-    assert "TRANSIENT" in status, (
-        f"TRANSIENT label should be present\nstatus:\n{status}\nstderr={result.stderr}"
-    )
-    assert "## Transient Retry" in status, (
-        f"Durable ## Transient Retry record should be present\nstatus:\n{status}"
-    )
+    assert "BACKLOG" in status, f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
+    assert "TRANSIENT" in status, f"TRANSIENT label should be present\nstatus:\n{status}\nstderr={result.stderr}"
+    assert "## Transient Retry" in status, f"Durable ## Transient Retry record should be present\nstatus:\n{status}"
     # Count should be 1
     import re as _re
+
     count_match = _re.search(r"retry_count:\s*(\d+)", status)
     assert count_match is not None, f"Could not find retry_count value\nstatus:\n{status}"
-    assert count_match.group(1) == "1", (
-        f"Count should be 1, got {count_match.group(1)}\nstatus:\n{status}"
-    )
+    assert count_match.group(1) == "1", f"Count should be 1, got {count_match.group(1)}\nstatus:\n{status}"
     # retry_limit in the record should match the single ceiling (default 3;
     # no kanban.cfg present in this synthetic root, so transient_retry_limit()
     # falls back to its built-in default).
     limit_match = _re.search(r"retry_limit:\s*(\d+)", status)
     assert limit_match is not None, f"Could not find retry_limit value\nstatus:\n{status}"
-    assert limit_match.group(1) == "3", (
-        f"retry_limit should default to 3, got {limit_match.group(1)}\nstatus:\n{status}"
-    )
+    assert (
+        limit_match.group(1) == "3"
+    ), f"retry_limit should default to 3, got {limit_match.group(1)}\nstatus:\n{status}"
 
     log = _action_log(proj_dir)
-    assert "transient-auto-requeued" in log, (
-        f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
-    )
+    assert "transient-auto-requeued" in log, f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -441,9 +431,7 @@ def test_transient_ceiling_bug_files_at_cap(tmp_path: pathlib.Path) -> None:
     tasks_root = proj_dir / "tasks"
     # retry_count=3 (== the default retry_limit) means the ceiling has
     # already been reached → this occurrence should bug-file, not requeue.
-    task_dir = _build_blocked_task(
-        tasks_root, task_id, requeue_count=3, labels="TRANSIENT", retry_limit=3
-    )
+    task_dir = _build_blocked_task(tasks_root, task_id, requeue_count=3, labels="TRANSIENT", retry_limit=3)
     _build_queue_with_blocked(tasks_root / "queues", task_id)
     _write_batch_log_with_error(kanban_root, task_dir, "API Error: 503 Service Unavailable")
 
@@ -456,41 +444,33 @@ def test_transient_ceiling_bug_files_at_cap(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-transient-api-error should exit 0 even at ceiling\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-transient-api-error should exit 0 even at ceiling\nstderr={result.stderr}"
 
     # State must remain BLOCKED (no requeue on ceiling hit)
     status = _read_status(task_dir)
-    assert "BLOCKED" in status, (
-        f"State should remain BLOCKED at ceiling\nstatus:\n{status}"
-    )
+    assert "BLOCKED" in status, f"State should remain BLOCKED at ceiling\nstatus:\n{status}"
 
     # Needs Human must be escalated to yes — no limbo state at exactly-at-cap.
     import re as _re
+
     needs_human_match = _re.search(r"## Needs Human\s*\n(\S+)", status)
     assert needs_human_match is not None, f"Could not find Needs Human value\nstatus:\n{status}"
-    assert needs_human_match.group(1).strip().lower() == "yes", (
-        f"Needs Human should be escalated to 'yes' at exactly-at-cap\nstatus:\n{status}"
-    )
+    assert (
+        needs_human_match.group(1).strip().lower() == "yes"
+    ), f"Needs Human should be escalated to 'yes' at exactly-at-cap\nstatus:\n{status}"
 
     # A bug file must have been created
-    bugs = list((proj_dir / "bugs").glob("BUG-overwatch-transient-*.md"))
-    assert len(bugs) >= 1, (
-        f"Expected at least one bug file under {proj_dir / 'bugs'}\n"
-        f"stderr={result.stderr}"
+    bugs = list(
+        (proj_dir / "bugs").glob(f"BUG-[0-9][0-9][0-9][0-9]-transient-retry-ceiling-{task_id.lower()}-reached.md")
     )
+    assert len(bugs) >= 1, f"Expected at least one bug file under {proj_dir / 'bugs'}\n" f"stderr={result.stderr}"
 
     # Bug file should mention the task ID
     bug_text = bugs[0].read_text(encoding="utf-8")
-    assert task_id in bug_text, (
-        f"Bug file should reference {task_id}\nbug:\n{bug_text}"
-    )
+    assert task_id in bug_text, f"Bug file should reference {task_id}\nbug:\n{bug_text}"
 
     log = _action_log(proj_dir)
-    assert "transient-ceiling-bug-filed" in log, (
-        f"Action log should contain 'transient-ceiling-bug-filed'\nlog:\n{log}"
-    )
+    assert "transient-ceiling-bug-filed" in log, f"Action log should contain 'transient-ceiling-bug-filed'\nlog:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -536,30 +516,24 @@ def test_orphaned_worktree_no_commits_pruned(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-transient-api-error should exit 0\nstderr={result.stderr}\nstdout={result.stdout}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"check-transient-api-error should exit 0\nstderr={result.stderr}\nstdout={result.stdout}"
 
     log = _action_log(proj_dir)
     # Either the worktree was pruned or the worktree path wasn't found via git worktree list
     # (both are valid — the worktree registration may not match task_id substring).
     # The key assertion: task was requeued.
     status = _read_status(task_dir)
-    assert "BACKLOG" in status, (
-        f"Task should be requeued to BACKLOG\nstatus:\n{status}\nstderr={result.stderr}"
-    )
+    assert "BACKLOG" in status, f"Task should be requeued to BACKLOG\nstatus:\n{status}\nstderr={result.stderr}"
 
     # Verify action log has the requeue entry
-    assert "transient-auto-requeued" in log, (
-        f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
-    )
+    assert "transient-auto-requeued" in log, f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
 
     # If the worktree was detected (path contains task_id), it should have been pruned
     if "worktree-pruned" in log:
         # Verify the worktree directory was removed
-        assert not wt_path.exists(), (
-            f"Worktree directory should be removed after prune\npath: {wt_path}"
-        )
+        assert not wt_path.exists(), f"Worktree directory should be removed after prune\npath: {wt_path}"
 
 
 # ---------------------------------------------------------------------------
@@ -609,15 +583,13 @@ def test_worktree_with_commits_bug_filed(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-transient-api-error should exit 0\nstderr={result.stderr}\nstdout={result.stdout}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"check-transient-api-error should exit 0\nstderr={result.stderr}\nstdout={result.stdout}"
 
     # The task should still be requeued (transient detection is independent of worktree check)
     status = _read_status(task_dir)
-    assert "BACKLOG" in status, (
-        f"Task should be requeued to BACKLOG\nstatus:\n{status}\nstderr={result.stderr}"
-    )
+    assert "BACKLOG" in status, f"Task should be requeued to BACKLOG\nstatus:\n{status}\nstderr={result.stderr}"
 
     log = _action_log(proj_dir)
 
@@ -625,19 +597,19 @@ def test_worktree_with_commits_bug_filed(tmp_path: pathlib.Path) -> None:
     # it should have been bug-filed and preserved.
     if "worktree-carries-commits" in log or "worktree-commits" in log:
         # Worktree detected and bug-filed
-        assert wt_path.exists(), (
-            f"Worktree with commits should be preserved, not removed\npath: {wt_path}"
-        )
+        assert wt_path.exists(), f"Worktree with commits should be preserved, not removed\npath: {wt_path}"
         # Bug file should exist
-        bugs = list((proj_dir / "bugs").glob("BUG-overwatch-transient-*.md"))
+        bugs = list(
+            (proj_dir / "bugs").glob(
+                f"BUG-[0-9][0-9][0-9][0-9]-transient-requeue-worktree-{task_id.lower()}-carries-commits.md"
+            )
+        )
         # There may be a bug for the task itself if ceiling reached, or just the worktree
         worktree_bugs = [
-            b for b in bugs
-            if b.read_text(encoding="utf-8") and "commits" in b.read_text(encoding="utf-8")
+            b for b in bugs if b.read_text(encoding="utf-8") and "commits" in b.read_text(encoding="utf-8")
         ]
         assert len(worktree_bugs) >= 1, (
-            f"Expected a bug file for the worktree-with-commits condition\n"
-            f"bugs found: {[b.name for b in bugs]}"
+            f"Expected a bug file for the worktree-with-commits condition\n" f"bugs found: {[b.name for b in bugs]}"
         )
 
 
@@ -672,20 +644,14 @@ def test_non_transient_log_skipped(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-transient-api-error should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-transient-api-error should exit 0\nstderr={result.stderr}"
 
     # State should still be BLOCKED (not requeued)
     status = _read_status(task_dir)
-    assert "BLOCKED" in status, (
-        f"Non-transient task state should remain BLOCKED\nstatus:\n{status}"
-    )
+    assert "BLOCKED" in status, f"Non-transient task state should remain BLOCKED\nstatus:\n{status}"
 
     log = _action_log(proj_dir)
-    assert "transient-auto-requeued" not in log, (
-        f"No requeue should happen for non-transient error\nlog:\n{log}"
-    )
+    assert "transient-auto-requeued" not in log, f"No requeue should happen for non-transient error\nlog:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -728,8 +694,7 @@ def test_all_transient_signatures_detected(tmp_path: pathlib.Path) -> None:
         """)
         result = run_bash(tmp_path, script)
         assert result.returncode == 0 and "MATCH" in result.stdout, (
-            f"Signature not detected: {sig_text!r}\n"
-            f"stdout={result.stdout}\nstderr={result.stderr}"
+            f"Signature not detected: {sig_text!r}\n" f"stdout={result.stdout}\nstderr={result.stderr}"
         )
 
 
@@ -760,9 +725,7 @@ def test_transient_requeue_preserves_existing_labels(tmp_path: pathlib.Path) -> 
 
     proj_dir = _build_kanban(kanban_root, project_name)
     tasks_root = proj_dir / "tasks"
-    task_dir = _build_blocked_task(
-        tasks_root, task_id, requeue_count=0, labels="EXISTING-LABEL"
-    )
+    task_dir = _build_blocked_task(tasks_root, task_id, requeue_count=0, labels="EXISTING-LABEL")
     _build_queue_with_blocked(tasks_root / "queues", task_id)
     _write_batch_log_with_error(kanban_root, task_dir, "rate limit exceeded on upstream API")
 
@@ -781,25 +744,18 @@ def test_transient_requeue_preserves_existing_labels(tmp_path: pathlib.Path) -> 
     )
 
     status = _read_status(task_dir)
-    assert "BACKLOG" in status, (
-        f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
-    )
+    assert "BACKLOG" in status, f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
 
     import re as _re
+
     labels_match = _re.search(r"^## Labels\s*\n(.*?)(\n+##|\Z)", status, flags=_re.S | _re.M)
     assert labels_match is not None, f"Labels section should still be present\nstatus:\n{status}"
     labels_value = labels_match.group(1)
-    assert "EXISTING-LABEL" in labels_value, (
-        f"Pre-existing label must be preserved\nlabels:\n{labels_value}"
-    )
-    assert "TRANSIENT" in labels_value, (
-        f"TRANSIENT label should be appended\nlabels:\n{labels_value}"
-    )
+    assert "EXISTING-LABEL" in labels_value, f"Pre-existing label must be preserved\nlabels:\n{labels_value}"
+    assert "TRANSIENT" in labels_value, f"TRANSIENT label should be appended\nlabels:\n{labels_value}"
 
     log = _action_log(proj_dir)
-    assert "transient-auto-requeued" in log, (
-        f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
-    )
+    assert "transient-auto-requeued" in log, f"Action log should contain 'transient-auto-requeued'\nlog:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -852,16 +808,15 @@ def test_transient_repair_failure_reports_nonzero_exit(tmp_path: pathlib.Path) -
         f"A failed repair must never report success from the outer check\n"
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
-    assert "repair failure" in result.stderr.lower(), (
-        f"Repair failure should be narrated on stderr\nstderr={result.stderr}"
-    )
+    assert (
+        "repair failure" in result.stderr.lower()
+    ), f"Repair failure should be narrated on stderr\nstderr={result.stderr}"
 
     # The task's status.md should remain BLOCKED — the requeue transaction
     # failed before the State field was updated.
     status = _read_status(task_dir)
     assert "BLOCKED" in status, (
-        f"Task should remain BLOCKED when the repair transaction fails\n"
-        f"status:\n{status}\nstderr={result.stderr}"
+        f"Task should remain BLOCKED when the repair transaction fails\n" f"status:\n{status}\nstderr={result.stderr}"
     )
 
 
@@ -913,20 +868,16 @@ def test_signature_in_batch_log_recorded_by_real_writer_detected(tmp_path: pathl
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-transient-api-error should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-transient-api-error should exit 0\nstderr={result.stderr}"
     assert not list((task_dir / "logs").glob("*.log")), "fixture must not seed a task-local .log"
-    assert f"LATEST: {batch_log}\t{len(preamble)}\t" in result.stdout, (
-        f"dispatch_record_latest should resolve the batch log and span\nstdout={result.stdout}"
-    )
-    assert "no transient signature" not in result.stderr, (
-        f"signature in the recorded batch log must be seen\nstderr={result.stderr}"
-    )
+    assert (
+        f"LATEST: {batch_log}\t{len(preamble)}\t" in result.stdout
+    ), f"dispatch_record_latest should resolve the batch log and span\nstdout={result.stdout}"
+    assert (
+        "no transient signature" not in result.stderr
+    ), f"signature in the recorded batch log must be seen\nstderr={result.stderr}"
     status = _read_status(task_dir)
-    assert "BACKLOG" in status, (
-        f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
-    )
+    assert "BACKLOG" in status, f"State should be BACKLOG after requeue\nstatus:\n{status}\nstderr={result.stderr}"
     assert "transient-auto-requeued" in _action_log(proj_dir)
 
 
@@ -969,15 +920,13 @@ def test_no_dispatch_record_narrated_skip(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"a task without a dispatch record must never fail the sweep\nstderr={result.stderr}"
-    )
-    assert "no dispatch record" in result.stderr and "skipping" in result.stderr, (
-        f"skip must be narrated\nstderr={result.stderr}"
-    )
-    assert str(task_dir / "logs" / "dispatch.jsonl") in result.stderr, (
-        f"skip narration should name the ledger path\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"a task without a dispatch record must never fail the sweep\nstderr={result.stderr}"
+    assert (
+        "no dispatch record" in result.stderr and "skipping" in result.stderr
+    ), f"skip must be narrated\nstderr={result.stderr}"
+    assert (
+        str(task_dir / "logs" / "dispatch.jsonl") in result.stderr
+    ), f"skip narration should name the ledger path\nstderr={result.stderr}"
     assert "handled 0 transient task(s)" in result.stderr, result.stderr
     assert _read_status(task_dir) == before, "status.md must be left untouched"
     assert _action_log(proj_dir) == "", "no action may be logged for a skipped task"
@@ -1029,12 +978,10 @@ def test_second_dispatch_record_supersedes_first(tmp_path: pathlib.Path) -> None
 
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
-    assert f"LATEST: {second}\t" in result.stdout, (
-        f"the newer dispatch must win\nstdout={result.stdout}"
-    )
-    assert "no transient signature" in result.stderr, (
-        f"the superseded log's 529 must not be read\nstderr={result.stderr}"
-    )
+    assert f"LATEST: {second}\t" in result.stdout, f"the newer dispatch must win\nstdout={result.stdout}"
+    assert (
+        "no transient signature" in result.stderr
+    ), f"the superseded log's 529 must not be read\nstderr={result.stderr}"
     assert "BLOCKED" in _read_status(task_dir)
     assert "transient-auto-requeued" not in _action_log(proj_dir)
 
@@ -1060,7 +1007,9 @@ def test_signature_outside_recorded_span_not_attributed(tmp_path: pathlib.Path) 
     task_dir = _build_blocked_task(tasks_root, task_id, requeue_count=0)
     _build_queue_with_blocked(tasks_root / "queues", task_id)
     _write_batch_log_with_error(
-        kanban_root, task_dir, "Permission denied: cannot access the dev tree",
+        kanban_root,
+        task_dir,
+        "Permission denied: cannot access the dev tree",
         following="starting next task\nAPI Error: 529 overloaded_error\n",
     )
 
@@ -1074,9 +1023,9 @@ def test_signature_outside_recorded_span_not_attributed(tmp_path: pathlib.Path) 
 
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
-    assert "no transient signature" in result.stderr, (
-        f"a 529 outside the task's span must not be attributed to it\nstderr={result.stderr}"
-    )
+    assert (
+        "no transient signature" in result.stderr
+    ), f"a 529 outside the task's span must not be attributed to it\nstderr={result.stderr}"
     assert "BLOCKED" in _read_status(task_dir)
     assert "transient-auto-requeued" not in _action_log(proj_dir)
 
@@ -1171,9 +1120,7 @@ def _render_status(sections: list[tuple[str, str]]) -> str:
     return "".join(parts)
 
 
-def _run_requeue_writer(
-    tmp_path: pathlib.Path, proj_dir: pathlib.Path, task_dir: pathlib.Path, new_count: int = 1
-):
+def _run_requeue_writer(tmp_path: pathlib.Path, proj_dir: pathlib.Path, task_dir: pathlib.Path, new_count: int = 1):
     """Run the shipped _ctae_do_requeue against task_dir/status.md."""
     status_file = task_dir / "status.md"
     script = _stub_header(proj_dir) + textwrap.dedent(f"""\
@@ -1193,9 +1140,9 @@ def _assert_requeue_outcome(before: str, after: str, expected_labels: str) -> No
     """Assert the requeue's intended rewrite and that no section was lost or altered."""
     # Every heading survives, in order; the durable retry record is the only
     # addition the requeue makes.
-    assert [h for h in _headings(after) if h != "Transient Retry"] == _headings(before), (
-        f"requeue removed or reordered a section\nbefore:\n{before}\nafter:\n{after}"
-    )
+    assert [h for h in _headings(after) if h != "Transient Retry"] == _headings(
+        before
+    ), f"requeue removed or reordered a section\nbefore:\n{before}\nafter:\n{after}"
     assert _section_body(after, "State") == "BACKLOG", after
     assert _section_body(after, "Labels") == expected_labels, after
     assert _section_body(after, "Blockers") == "none", after
@@ -1203,9 +1150,9 @@ def _assert_requeue_outcome(before: str, after: str, expected_labels: str) -> No
     assert (_section_body(after, "Summary") or "").startswith("Auto-requeued by OVERWATCH"), after
     # Sections the requeue does not own are left exactly as they were.
     for heading in ("Task", "Next Recommended Step", "Instruction Conflicts"):
-        assert _section_body(after, heading) == _section_body(before, heading), (
-            f"## {heading} was altered\nbefore:\n{before}\nafter:\n{after}"
-        )
+        assert _section_body(after, heading) == _section_body(
+            before, heading
+        ), f"## {heading} was altered\nbefore:\n{before}\nafter:\n{after}"
 
 
 def test_requeue_fills_empty_labels_without_removing_next_section(tmp_path: pathlib.Path) -> None:
@@ -1244,9 +1191,7 @@ def test_requeue_fills_empty_labels_without_removing_next_section(tmp_path: path
 
 
 @pytest.mark.parametrize("empty_heading", ["State", "Summary", "Labels", "Blockers", "Needs Human"])
-def test_requeue_with_empty_section_removes_no_other_section(
-    tmp_path: pathlib.Path, empty_heading: str
-) -> None:
+def test_requeue_with_empty_section_removes_no_other_section(tmp_path: pathlib.Path, empty_heading: str) -> None:
     """
     Fixture (O): the requeue writer runs on a status file where one section
     it rewrites has an empty body and is followed by other sections.
@@ -1257,10 +1202,7 @@ def test_requeue_with_empty_section_removes_no_other_section(
     kanban_root = tmp_path / "kanban"
     proj_dir = _build_kanban(kanban_root, "test-project-o")
     task_dir = _build_blocked_task(proj_dir / "tasks", "CODER-20260101-021-section-writer")
-    sections = [
-        (heading, "" if heading == empty_heading else body)
-        for heading, body in _REQUEUE_SECTIONS
-    ]
+    sections = [(heading, "" if heading == empty_heading else body) for heading, body in _REQUEUE_SECTIONS]
     # Labels stays empty in every case; the populated case is fixture (P).
     before = _render_status(sections)
     (task_dir / "status.md").write_text(before, encoding="utf-8")
@@ -1281,18 +1223,13 @@ def test_requeue_appends_transient_to_populated_labels(tmp_path: pathlib.Path) -
     kanban_root = tmp_path / "kanban"
     proj_dir = _build_kanban(kanban_root, "test-project-p")
     task_dir = _build_blocked_task(proj_dir / "tasks", "CODER-20260101-022-section-writer")
-    sections = [
-        (heading, "EXISTING-LABEL" if heading == "Labels" else body)
-        for heading, body in _REQUEUE_SECTIONS
-    ]
+    sections = [(heading, "EXISTING-LABEL" if heading == "Labels" else body) for heading, body in _REQUEUE_SECTIONS]
     before = _render_status(sections)
     (task_dir / "status.md").write_text(before, encoding="utf-8")
 
     result = _run_requeue_writer(tmp_path, proj_dir, task_dir)
     assert result.returncode == 0, result.stderr
-    _assert_requeue_outcome(
-        before, _read_status(task_dir), expected_labels="EXISTING-LABEL TRANSIENT"
-    )
+    _assert_requeue_outcome(before, _read_status(task_dir), expected_labels="EXISTING-LABEL TRANSIENT")
 
 
 @pytest.mark.parametrize("empty_heading", ["Needs Human", "Blocked Reason"])
@@ -1338,15 +1275,15 @@ def test_ceiling_escalation_with_empty_section_removes_no_other_section(
     assert result.returncode == 0, result.stderr
 
     after = _read_status(task_dir)
-    assert _headings(after) == _headings(before), (
-        f"escalation removed or reordered a section\nbefore:\n{before}\nafter:\n{after}"
-    )
+    assert _headings(after) == _headings(
+        before
+    ), f"escalation removed or reordered a section\nbefore:\n{before}\nafter:\n{after}"
     assert _section_body(after, "Needs Human") == "yes", after
     assert "retry ceiling reached (3/3" in (_section_body(after, "Blocked Reason") or ""), after
     for heading in ("Task", "State", "Blockers", "Next Recommended Step"):
-        assert _section_body(after, heading) == _section_body(before, heading), (
-            f"## {heading} was altered\nbefore:\n{before}\nafter:\n{after}"
-        )
+        assert _section_body(after, heading) == _section_body(
+            before, heading
+        ), f"## {heading} was altered\nbefore:\n{before}\nafter:\n{after}"
 
 
 # ---------------------------------------------------------------------------
@@ -1409,11 +1346,7 @@ def test_signature_on_early_line_matches_when_reader_exits_at_first_match(
     pipefail must fail with the writer's SIGPIPE status (141), which is
     exactly how a pipe-fed matcher would lose the match.
     """
-    script = (
-        "set -euo pipefail\n"
-        f"source {_CHECK_TRANSIENT}\n"
-        + _EARLY_EXIT_GREP_STANDIN
-        + textwrap.dedent(f"""\
+    script = "set -euo pipefail\n" f"source {_CHECK_TRANSIENT}\n" + _EARLY_EXIT_GREP_STANDIN + textwrap.dedent(f"""\
             filler="$(printf '%*s' {_EARLY_EXIT_FILLER_BYTES} '' | tr ' ' 'x')"
             text=$'run started\\n''{signature_line}'$'\\n'"${{filler}}"$'\\nrun ended'
 
@@ -1430,13 +1363,11 @@ def test_signature_on_early_line_matches_when_reader_exits_at_first_match(
                 echo "NO_MATCH"
             fi
         """)
-    )
     result = run_bash(tmp_path, script, timeout=60)
     assert result.returncode == 0, _diagnostic(result)
     assert "pipe_writer_status=141" in result.stdout, (
         "The early-exit grep stand-in no longer breaks a pipe writer, so this "
-        "test cannot tell a race-free matcher from a racy one\n"
-        + _diagnostic(result)
+        "test cannot tell a race-free matcher from a racy one\n" + _diagnostic(result)
     )
     assert "MATCH" in result.stdout.splitlines(), (
         f"Signature {signature_line!r} on an early line was reported as no "
@@ -1467,10 +1398,9 @@ def test_matcher_has_zero_misses_over_200_sequential_runs(tmp_path: pathlib.Path
     """)
     result = run_bash(tmp_path, script, timeout=120)
     assert result.returncode == 0, _diagnostic(result)
-    assert "misses=0" in result.stdout.splitlines(), (
-        "The transient matcher missed a signature it should always match\n"
-        + _diagnostic(result)
-    )
+    assert (
+        "misses=0" in result.stdout.splitlines()
+    ), "The transient matcher missed a signature it should always match\n" + _diagnostic(result)
 
 
 # ---------------------------------------------------------------------------
@@ -1620,6 +1550,145 @@ def test_escalation_at_the_ceiling_keeps_the_worktree(tmp_path: pathlib.Path) ->
 
 
 # ---------------------------------------------------------------------------
+# (T)/(U) Bug reports are deposited through intake, once per live defect
+# ---------------------------------------------------------------------------
+#
+# The REAL protocol and the real scripts/intake.sh: the ceiling bug (T) and
+# the worktree-carries-commits bug (U) each take the next number no live or
+# archived bug holds, and a repeat while that bug is live is refused.
+
+
+def _archive_bug(kanban_root: pathlib.Path, project_name: str, number: int) -> None:
+    """Put a closed bug holding *number* in the project's archive."""
+    archived = kanban_root / "archive" / project_name / "bugs"
+    archived.mkdir(parents=True, exist_ok=True)
+    (archived / f"BUG-{number:04d}-archived-defect.md").write_text(
+        f"# BUG-{number:04d}-archived-defect\n\n## Status\ndone\n", encoding="utf-8"
+    )
+
+
+def _filed_bugs(proj_dir: pathlib.Path) -> list[str]:
+    return sorted(p.name for p in (proj_dir / "bugs").glob("BUG-*.md"))
+
+
+def _ceiling_fixture(tmp_path: pathlib.Path, task_id: str):
+    kanban_root, dev_tree = tmp_path / "kanban", tmp_path / "dev"
+    project_name = "test-project-t"
+    _prefixed_repo(dev_tree)
+    proj_dir = _real_protocol_root(kanban_root, project_name, dev_tree)
+    task_dir = _build_blocked_task(proj_dir / "tasks", task_id, requeue_count=3, retry_limit=3)
+    _build_queue_with_blocked(proj_dir / "tasks" / "queues", task_id)
+    _write_batch_log_with_error(kanban_root, task_dir, "API Error: 503 Service Unavailable")
+    return kanban_root, project_name, proj_dir, task_dir
+
+
+def _worktree_commits_fixture(tmp_path: pathlib.Path, task_id: str):
+    kanban_root, dev_tree = tmp_path / "kanban", tmp_path / "dev"
+    project_name = "test-project-u"
+    _prefixed_repo(dev_tree)
+    wt_path = tmp_path / "worktrees" / task_id
+    _git(dev_tree, "worktree", "add", "-b", f"ai_feature/{task_id}", str(wt_path))
+    _make_commit(wt_path, "work-found-nowhere-else")
+    proj_dir = _real_protocol_root(kanban_root, project_name, dev_tree)
+    task_dir = _build_blocked_task(proj_dir / "tasks", task_id)
+    _build_queue_with_blocked(proj_dir / "tasks" / "queues", task_id)
+    _write_batch_log_with_error(kanban_root, task_dir, "529 Overloaded")
+    return kanban_root, project_name, proj_dir, task_dir, wt_path
+
+
+def test_ceiling_bug_is_deposited_through_intake_past_an_archived_number(tmp_path: pathlib.Path) -> None:
+    """(T) The ceiling report takes the next number no live or archived bug holds."""
+    task_id = "CODER-20260101-041-fixture-t1"
+    slug = "transient-retry-ceiling-coder-20260101-041-fixture-t1-reached"
+    kanban_root, project_name, proj_dir, task_dir = _ceiling_fixture(tmp_path, task_id)
+    (proj_dir / "bugs" / "BUG-0001-earlier-defect.md").write_text(
+        "# BUG-0001-earlier-defect\n\n## Status\nopen\n", encoding="utf-8"
+    )
+    _archive_bug(kanban_root, project_name, 2)
+
+    result = _run_real_check(tmp_path, kanban_root, project_name, task_dir, tmp_path / "obs.txt")
+
+    assert result.returncode == 0, result.stderr
+    assert _filed_bugs(proj_dir) == ["BUG-0001-earlier-defect.md", f"BUG-0003-{slug}.md"], result.stderr
+    text = (proj_dir / "bugs" / f"BUG-0003-{slug}.md").read_text(encoding="utf-8")
+    assert text.startswith(f"# BUG-0003-{slug}: Transient API error retry ceiling reached for {task_id}\n"), text
+    assert "## Status\nopen\n" in text and task_id in text, text
+    assert not list((kanban_root / "tmp").glob("overwatch-bug-draft*")), "the staged draft is removed"
+    rows = _actions_rows(proj_dir, "transient-ceiling-bug-filed")
+    assert len(rows) == 1 and f"bug filed at {proj_dir / 'bugs' / f'BUG-0003-{slug}.md'}" in rows[0][5], rows
+    assert "Needs Human\nyes" in _read_status(task_dir)
+
+
+def test_a_second_ceiling_sweep_on_a_live_bug_files_nothing(tmp_path: pathlib.Path) -> None:
+    """(T) A repeat while the ceiling bug is live is refused as the same defect; the task still escalates."""
+    task_id = "CODER-20260101-042-fixture-t2"
+    slug = "transient-retry-ceiling-coder-20260101-042-fixture-t2-reached"
+    kanban_root, project_name, proj_dir, task_dir = _ceiling_fixture(tmp_path, task_id)
+    _archive_bug(kanban_root, project_name, 1)
+
+    first = _run_real_check(tmp_path, kanban_root, project_name, task_dir, tmp_path / "obs.txt")
+    assert first.returncode == 0, first.stderr
+    filed = _filed_bugs(proj_dir)
+    assert filed == [f"BUG-0002-{slug}.md"], first.stderr
+
+    second = _run_real_check(tmp_path, kanban_root, project_name, task_dir, tmp_path / "obs.txt")
+
+    assert second.returncode == 0, second.stderr
+    assert _filed_bugs(proj_dir) == filed, "no second bug"
+    assert "same defect as BUG-0002" in second.stderr, second.stderr
+    rows = _actions_rows(proj_dir, "transient-ceiling-bug-filed")
+    assert len(rows) == 2 and f"already filed as {proj_dir / 'bugs' / filed[0]}" in rows[1][5], rows
+    assert "Needs Human\nyes" in _read_status(task_dir)
+
+
+def test_worktree_commits_bug_is_deposited_through_intake_past_an_archived_number(tmp_path: pathlib.Path) -> None:
+    """(U) The worktree-carries-commits report takes the next free number."""
+    task_id = "CODER-20260101-043-fixture-u1"
+    slug = "transient-requeue-worktree-coder-20260101-043-fixture-u1-carries-commits"
+    kanban_root, project_name, proj_dir, task_dir, wt_path = _worktree_commits_fixture(tmp_path, task_id)
+    _archive_bug(kanban_root, project_name, 4)
+
+    result = _run_real_check(tmp_path, kanban_root, project_name, task_dir, tmp_path / "obs.txt")
+
+    assert result.returncode == 0, result.stderr
+    assert wt_path.is_dir(), "a worktree carrying commits is kept"
+    assert _filed_bugs(proj_dir) == [f"BUG-0005-{slug}.md"], result.stderr
+    text = (proj_dir / "bugs" / f"BUG-0005-{slug}.md").read_text(encoding="utf-8")
+    assert text.startswith(f"# BUG-0005-{slug}: Worktree of transient-blocked task {task_id} carries commits\n"), text
+    assert str(wt_path) in text, text
+    assert not list((kanban_root / "tmp").glob("overwatch-bug-draft*")), "the staged draft is removed"
+    rows = _actions_rows(proj_dir, "worktree-carries-commits-bug-filed")
+    assert len(rows) == 1 and "bug filed at " in rows[0][5], rows
+
+
+def test_a_second_worktree_commits_report_on_a_live_bug_files_nothing(tmp_path: pathlib.Path) -> None:
+    """(U) The same worktree reported again while its bug is live is refused."""
+    task_id = "CODER-20260101-044-fixture-u2"
+    slug = "transient-requeue-worktree-coder-20260101-044-fixture-u2-carries-commits"
+    kanban_root, project_name, proj_dir, task_dir, wt_path = _worktree_commits_fixture(tmp_path, task_id)
+    status = task_dir / "status.md"
+    queue = proj_dir / "tasks" / "queues" / "coder_backlog.md"
+    blocked_status, blocked_queue = status.read_text(encoding="utf-8"), queue.read_text(encoding="utf-8")
+
+    first = _run_real_check(tmp_path, kanban_root, project_name, task_dir, tmp_path / "obs.txt")
+    assert first.returncode == 0, first.stderr
+    filed = _filed_bugs(proj_dir)
+    assert filed == [f"BUG-0001-{slug}.md"], first.stderr
+
+    # The requeued task blocks again on a transient error with the same worktree.
+    status.write_text(blocked_status, encoding="utf-8")
+    queue.write_text(blocked_queue, encoding="utf-8")
+    second = _run_real_check(tmp_path, kanban_root, project_name, task_dir, tmp_path / "obs.txt")
+
+    assert second.returncode == 0, second.stderr
+    assert wt_path.is_dir()
+    assert _filed_bugs(proj_dir) == filed, "no second bug"
+    assert "same defect as BUG-0001" in second.stderr, second.stderr
+    rows = _actions_rows(proj_dir, "worktree-carries-commits-bug-filed")
+    assert len(rows) == 2 and f"already filed as {proj_dir / 'bugs' / filed[0]}" in rows[1][5], rows
+
+
+# ---------------------------------------------------------------------------
 # (X)-(Z) A block its agent wrote itself is classed on the provider's own
 # error lines only
 # ---------------------------------------------------------------------------
@@ -1635,15 +1704,19 @@ _AGENT_QUESTION = "Merge conflict in team/scripts/lib/rate_limit.sh: which side 
 
 # The agent's own final reply: transient signature words, no provider failure.
 _AGENT_PROSE_REPLIES = {
-    "rate_limit_path": ("BLOCKED: git merge reported a conflict in team/scripts/lib/rate_limit.sh; "
-                        "left the feature branch in place for inspection."),
-    "500_chars": ("BLOCKED: requirements doc missing; the summary was cut at 500 chars and the "
-                  "PM ticket is unparseable."),
+    "rate_limit_path": (
+        "BLOCKED: git merge reported a conflict in team/scripts/lib/rate_limit.sh; "
+        "left the feature branch in place for inspection."
+    ),
+    "500_chars": (
+        "BLOCKED: requirements doc missing; the summary was cut at 500 chars and the " "PM ticket is unparseable."
+    ),
 }
 
 
-def _build_agent_blocked_task(tasks_root: pathlib.Path, task_id: str,
-                              reason_code: str = "agent_unclassified") -> pathlib.Path:
+def _build_agent_blocked_task(
+    tasks_root: pathlib.Path, task_id: str, reason_code: str = "agent_unclassified"
+) -> pathlib.Path:
     """A BLOCKED task as its agent records a block: a Block Record, Needs Human yes and a question.
 
     last_blocked_at lies far in the past, so a requeue is never held back by
@@ -1694,7 +1767,8 @@ def _run_check_on_agent_block(tmp_path: pathlib.Path, span: str, reason_code: st
 
 @pytest.mark.parametrize("reply", list(_AGENT_PROSE_REPLIES.values()), ids=list(_AGENT_PROSE_REPLIES))
 def test_agent_block_with_signature_words_only_in_its_reply_is_left_as_found(
-    tmp_path: pathlib.Path, reply: str,
+    tmp_path: pathlib.Path,
+    reply: str,
 ) -> None:
     """(X) Transient words in the agent's own reply requeue nothing."""
     span = f"Agent started.\nWorking on the merge.\n{reply}\n"
@@ -1702,7 +1776,9 @@ def test_agent_block_with_signature_words_only_in_its_reply_is_left_as_found(
 
     assert result.returncode == 0, result.stderr
     status = _read_status(task_dir)
-    assert status == before, f"the agent's block must be left exactly as found\nstatus:\n{status}\nstderr={result.stderr}"
+    assert (
+        status == before
+    ), f"the agent's block must be left exactly as found\nstatus:\n{status}\nstderr={result.stderr}"
     assert _section_body(status, "State") == "BLOCKED", status
     assert _section_body(status, "Blockers") == _AGENT_QUESTION, "the agent's question must not be overwritten"
     assert _section_body(status, "Needs Human") == "yes", status
@@ -1716,7 +1792,7 @@ def test_agent_block_with_a_provider_error_line_is_still_requeued(tmp_path: path
     """(Y) A real provider failure still turns the agent's block into a transient retry."""
     span = (
         "Agent started.\n"
-        "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n"
+        'API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n'
         f"{_AGENT_PROSE_REPLIES['rate_limit_path']}\n"
     )
     result, proj_dir, task_dir, _before = _run_check_on_agent_block(tmp_path, span)

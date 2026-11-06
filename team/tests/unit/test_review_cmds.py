@@ -39,7 +39,6 @@ import pathlib
 import subprocess
 import sys
 import textwrap
-from unittest.mock import patch
 
 import pytest
 
@@ -48,8 +47,8 @@ import pytest
 # Three parent levels: unit/ → tests/ → team/ → project_root/
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent          # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                     # project_root/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _ICD_ARTIFACT = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
 _ICD_JSON = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
@@ -64,6 +63,7 @@ if _team_str not in sys.path:
 # ---------------------------------------------------------------------------
 # Fixture builder helpers (mirrors pattern in existing test files)
 # ---------------------------------------------------------------------------
+
 
 def _write_task(
     tasks_dir: pathlib.Path,
@@ -119,9 +119,11 @@ def _build_project(
 # Window-14 render helper
 # ---------------------------------------------------------------------------
 
+
 def _render_window14(kanban_root: pathlib.Path) -> str:
     """Return the no-color output of scan_pending_approvals."""
     from pgai_agent_kanban.dashboard.scan_human_approvals import scan_pending_approvals
+
     buf = io.StringIO()
     old_stdout = sys.stdout
     sys.stdout = buf
@@ -143,7 +145,8 @@ class TestReviewBlockOrdering:
     def test_review_appears_before_approve(self, tmp_path: pathlib.Path) -> None:
         """'Review:' label appears before 'Approve:' in the rendered output."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         rendered = _render_window14(tmp_path)
@@ -159,7 +162,8 @@ class TestReviewBlockOrdering:
     def test_review_appears_before_reject(self, tmp_path: pathlib.Path) -> None:
         """'Review:' label appears before 'Reject:' in the rendered output."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         rendered = _render_window14(tmp_path)
@@ -168,14 +172,14 @@ class TestReviewBlockOrdering:
         assert review_pos != -1, f"'Review:' not found in rendered output:\n{rendered}"
         assert reject_pos != -1, f"'Reject:' not found in rendered output:\n{rendered}"
         assert review_pos < reject_pos, (
-            f"'Review:' (pos {review_pos}) must appear BEFORE 'Reject:' (pos {reject_pos}).\n"
-            f"Rendered:\n{rendered}"
+            f"'Review:' (pos {review_pos}) must appear BEFORE 'Reject:' (pos {reject_pos}).\n" f"Rendered:\n{rendered}"
         )
 
     def test_approve_appears_before_reject(self, tmp_path: pathlib.Path) -> None:
         """'Approve:' label appears before 'Reject:' in the rendered output."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         rendered = _render_window14(tmp_path)
@@ -198,22 +202,19 @@ class TestReviewBlockOrdering:
 class TestReviewBlockContent:
     """Review block contains the correct verbatim command strings."""
 
-    def test_show_sh_line_always_present_with_known_rc(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_show_sh_line_always_present_with_known_rc(self, tmp_path: pathlib.Path) -> None:
         """show.sh command appears in the Review block when RC version is known."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         rendered = _render_window14(tmp_path)
-        assert "scripts/show.sh --project proj-alpha --key HUMAN-APPROVE-v1.10.0-099" in rendered, (
-            f"Expected show.sh command not found in rendered output:\n{rendered}"
-        )
+        assert (
+            "scripts/show.sh --project proj-alpha --key HUMAN-APPROVE-v1.10.0-099" in rendered
+        ), f"Expected show.sh command not found in rendered output:\n{rendered}"
 
-    def test_show_sh_line_always_present_without_rc(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_show_sh_line_always_present_without_rc(self, tmp_path: pathlib.Path) -> None:
         """show.sh command appears even when RC version is unknown (fallback task_id)."""
         task_id = "HUMAN-APPROVE-v1.10.0-099"
         # Write a task WITHOUT a README (so release_ver falls back to task_id).
@@ -221,45 +222,37 @@ class TestReviewBlockContent:
         tasks_dir.mkdir(parents=True, exist_ok=True)
         task_dir = tasks_dir / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "status.md").write_text(
-            "# Status\n\n## State\nWAITING\n", encoding="utf-8"
-        )
+        (task_dir / "status.md").write_text("# Status\n\n## State\nWAITING\n", encoding="utf-8")
         # No README.md → release_ver fallback = task_id
         rendered = _render_window14(tmp_path)
-        assert f"scripts/show.sh --project proj-alpha --key {task_id}" in rendered, (
-            f"Expected show.sh command not found in rendered output:\n{rendered}"
-        )
+        assert (
+            f"scripts/show.sh --project proj-alpha --key {task_id}" in rendered
+        ), f"Expected show.sh command not found in rendered output:\n{rendered}"
 
-    def test_test_report_line_present_when_rc_version_known(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_test_report_line_present_when_rc_version_known(self, tmp_path: pathlib.Path) -> None:
         """show-test-report.sh line appears in Review block when RC version is known."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         rendered = _render_window14(tmp_path)
-        assert "scripts/show-test-report.sh --project proj-alpha --key v1.10.0" in rendered, (
-            f"Expected show-test-report.sh command not found in rendered output:\n{rendered}"
-        )
+        assert (
+            "scripts/show-test-report.sh --project proj-alpha --key v1.10.0" in rendered
+        ), f"Expected show-test-report.sh command not found in rendered output:\n{rendered}"
 
-    def test_test_report_line_absent_when_rc_version_unknown(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_test_report_line_absent_when_rc_version_unknown(self, tmp_path: pathlib.Path) -> None:
         """show-test-report.sh line is OMITTED when RC version is not known (fallback)."""
         task_id = "HUMAN-APPROVE-v1.10.0-099"
         tasks_dir = tmp_path / "projects" / "proj-alpha" / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
         task_dir = tasks_dir / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "status.md").write_text(
-            "# Status\n\n## State\nWAITING\n", encoding="utf-8"
-        )
+        (task_dir / "status.md").write_text("# Status\n\n## State\nWAITING\n", encoding="utf-8")
         # No README → release_ver = task_id (starts with "HUMAN-APPROVE", not "v")
         rendered = _render_window14(tmp_path)
         assert "scripts/show-test-report.sh" not in rendered, (
-            f"show-test-report.sh should NOT appear when RC version is unknown.\n"
-            f"Rendered:\n{rendered}"
+            f"show-test-report.sh should NOT appear when RC version is unknown.\n" f"Rendered:\n{rendered}"
         )
 
 
@@ -285,18 +278,18 @@ class TestShowShExecutable:
         proj = "proj-alpha"
         task_id = "HUMAN-APPROVE-v1.10.0-099"
         _build_project(
-            tmp_path, proj,
+            tmp_path,
+            proj,
             [(task_id, "WAITING", "v1.10.0", "Review release v1.10.0.")],
         )
 
         # Extract the show.sh command from the Review block.
         from pgai_agent_kanban.dashboard.scan_human_approvals import _build_review_cmds
+
         review_cmds = _build_review_cmds(proj, task_id, "v1.10.0")
         show_cmd = review_cmds[0]  # always the show.sh command
 
-        assert "scripts/show.sh" in show_cmd, (
-            f"First review_cmd should be a show.sh command; got: {show_cmd!r}"
-        )
+        assert "scripts/show.sh" in show_cmd, f"First review_cmd should be a show.sh command; got: {show_cmd!r}"
 
         # The command is relative ("scripts/show.sh ..."); resolve it relative to
         # the SCRIPTS_DIR in the dev tree for invocation.
@@ -349,12 +342,11 @@ class TestApprovalsReviewCmdsField:
         cfg = ApiConfig(host="127.0.0.1", port=0, kanban_root=sandbox_root)
         return TestClient(create_app(cfg=cfg), raise_server_exceptions=True)
 
-    def test_review_cmds_field_present(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_review_cmds_field_present(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """GET /approvals response records include the review_cmds field."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         with self._make_client(tmp_path, monkeypatch) as client:
@@ -365,16 +357,14 @@ class TestApprovalsReviewCmdsField:
         assert len(records) == 1
         record = records[0]
         assert "review_cmds" in record, (
-            f"'review_cmds' field missing from /approvals record.\n"
-            f"Record keys: {list(record.keys())}"
+            f"'review_cmds' field missing from /approvals record.\n" f"Record keys: {list(record.keys())}"
         )
 
-    def test_review_cmds_is_non_empty_list(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_review_cmds_is_non_empty_list(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """review_cmds is a non-empty list (at minimum the show.sh command)."""
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review release.")],
         )
         with self._make_client(tmp_path, monkeypatch) as client:
@@ -382,21 +372,16 @@ class TestApprovalsReviewCmdsField:
 
         record = resp.json()[0]
         review_cmds = record["review_cmds"]
-        assert isinstance(review_cmds, list), (
-            f"review_cmds must be a list; got {type(review_cmds).__name__}"
-        )
-        assert len(review_cmds) > 0, (
-            f"review_cmds must be non-empty; got: {review_cmds!r}"
-        )
+        assert isinstance(review_cmds, list), f"review_cmds must be a list; got {type(review_cmds).__name__}"
+        assert len(review_cmds) > 0, f"review_cmds must be non-empty; got: {review_cmds!r}"
 
-    def test_review_cmds_contains_show_sh(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_review_cmds_contains_show_sh(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """First entry in review_cmds is the show.sh command."""
         proj = "proj-alpha"
         task_id = "HUMAN-APPROVE-v1.10.0-099"
         _build_project(
-            tmp_path, proj,
+            tmp_path,
+            proj,
             [(task_id, "WAITING", "v1.10.0", "Review release.")],
         )
         with self._make_client(tmp_path, monkeypatch) as client:
@@ -405,17 +390,10 @@ class TestApprovalsReviewCmdsField:
         record = resp.json()[0]
         show_cmd = record["review_cmds"][0]
         assert "scripts/show.sh" in show_cmd, (
-            f"First review_cmd should contain 'scripts/show.sh'.\n"
-            f"Got: {show_cmd!r}"
+            f"First review_cmd should contain 'scripts/show.sh'.\n" f"Got: {show_cmd!r}"
         )
-        assert proj in show_cmd, (
-            f"show.sh command should contain project name '{proj}'.\n"
-            f"Got: {show_cmd!r}"
-        )
-        assert task_id in show_cmd, (
-            f"show.sh command should contain task_id '{task_id}'.\n"
-            f"Got: {show_cmd!r}"
-        )
+        assert proj in show_cmd, f"show.sh command should contain project name '{proj}'.\n" f"Got: {show_cmd!r}"
+        assert task_id in show_cmd, f"show.sh command should contain task_id '{task_id}'.\n" f"Got: {show_cmd!r}"
 
     def test_review_cmds_contains_test_report_when_rc_known(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
@@ -425,7 +403,8 @@ class TestApprovalsReviewCmdsField:
         task_id = "HUMAN-APPROVE-v1.10.0-099"
         rc = "v1.10.0"
         _build_project(
-            tmp_path, proj,
+            tmp_path,
+            proj,
             [(task_id, "WAITING", rc, "Review release.")],
         )
         with self._make_client(tmp_path, monkeypatch) as client:
@@ -434,17 +413,14 @@ class TestApprovalsReviewCmdsField:
         record = resp.json()[0]
         review_cmds = record["review_cmds"]
         assert len(review_cmds) >= 2, (
-            f"Expected at least 2 review_cmds when RC version is known.\n"
-            f"Got: {review_cmds!r}"
+            f"Expected at least 2 review_cmds when RC version is known.\n" f"Got: {review_cmds!r}"
         )
         report_cmd = review_cmds[1]
         assert "scripts/show-test-report.sh" in report_cmd, (
-            f"Second review_cmd should contain 'scripts/show-test-report.sh'.\n"
-            f"Got: {report_cmd!r}"
+            f"Second review_cmd should contain 'scripts/show-test-report.sh'.\n" f"Got: {report_cmd!r}"
         )
         assert proj in report_cmd and rc in report_cmd, (
-            f"show-test-report.sh command should contain project and RC key.\n"
-            f"Got: {report_cmd!r}"
+            f"show-test-report.sh command should contain project and RC key.\n" f"Got: {report_cmd!r}"
         )
 
 
@@ -487,20 +463,19 @@ class TestReviewCmdsJsonVsWindow14:
 
         # Two-project fixture.
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Alpha release.")],
         )
         _build_project(
-            tmp_path, "proj-beta",
+            tmp_path,
+            "proj-beta",
             [("HUMAN-APPROVE-v2.0.0-001", "BACKLOG", "v2.0.0", "Beta release.")],
         )
 
         # Get review_cmds from JSON (collect_pending_approvals).
         json_records = collect_pending_approvals(str(tmp_path))
-        json_review_cmds = {
-            r["task_id"]: r["review_cmds"]
-            for r in json_records
-        }
+        json_review_cmds = {r["task_id"]: r["review_cmds"] for r in json_records}
 
         # Get window-14 rendered text.
         rendered = _render_window14(tmp_path)
@@ -524,7 +499,8 @@ class TestReviewCmdsJsonVsWindow14:
         )
 
         _build_project(
-            tmp_path, "proj-alpha",
+            tmp_path,
+            "proj-alpha",
             [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Alpha review.")],
         )
 
@@ -536,8 +512,7 @@ class TestReviewCmdsJsonVsWindow14:
         rendered = _render_window14(tmp_path)
         for cmd in review_cmds:
             assert cmd in rendered, (
-                f"review_cmd {cmd!r} from JSON not found in window-14 rendered output.\n"
-                f"Rendered:\n{rendered}"
+                f"review_cmd {cmd!r} from JSON not found in window-14 rendered output.\n" f"Rendered:\n{rendered}"
             )
 
 
@@ -547,38 +522,70 @@ class TestReviewCmdsJsonVsWindow14:
 
 
 class TestIcdLifecycle:
-    """ICD version 1.21.3 lifecycle: version file, artifact, baselines, freeze."""
+    """ICD version 1.23.0 lifecycle: version file, artifact, baselines, freeze."""
 
-    def test_icd_version_file_is_1_21_3(self) -> None:
-        """docs/api/ICD_VERSION contains exactly '1.21.3\\n'.
+    def test_icd_version_file_is_1_23_0(self) -> None:
+        """docs/api/ICD_VERSION contains exactly '1.23.0\\n'.
 
         Note: When the ICD version is bumped in a future RC, update this
-        assertion to the new version. This bump (1.21.2 -> 1.21.3) is a
-        description-only patch bump: POST /operations/add-project's
-        description states the project-name rule its project_invalid
-        refusal applies. No route, request field or response field changed.
+        assertion to the new version. This bump (1.22.0 -> 1.23.0) is an
+        additive minor bump: POST /operations/reset gains the optional
+        discard_branch request field. No route was added or removed and no
+        response field changed.
         """
         icd_version_file = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
-        assert icd_version_file.exists(), (
-            f"ICD_VERSION not found at {icd_version_file}"
-        )
+        assert icd_version_file.exists(), f"ICD_VERSION not found at {icd_version_file}"
         raw = icd_version_file.read_bytes()
-        assert raw == b"1.21.3\n", (
-            f"ICD_VERSION content is {raw!r}; expected b'1.21.3\\n'."
-        )
+        assert raw == b"1.23.0\n", f"ICD_VERSION content is {raw!r}; expected b'1.23.0\\n'."
 
-    def test_icd_json_info_version_is_1_21_3(self) -> None:
-        """docs/api/icd.json info.version is '1.21.3'."""
+    def test_icd_json_info_version_is_1_23_0(self) -> None:
+        """docs/api/icd.json info.version is '1.23.0'."""
         assert _ICD_JSON.exists(), f"icd.json not found at {_ICD_JSON}"
         artifact = json.loads(_ICD_JSON.read_text(encoding="utf-8"))
         version = artifact.get("info", {}).get("version")
-        assert version == "1.21.3", (
-            f"icd.json info.version is {version!r}; expected '1.21.3'."
-        )
+        assert version == "1.23.0", f"icd.json info.version is {version!r}; expected '1.23.0'."
 
     @pytest.mark.parametrize(
         "version",
-        ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.13.1", "1.14.0", "1.15.0", "1.16.0", "1.16.1", "1.17.0", "1.17.1", "1.18.0", "1.18.1", "1.18.2", "1.18.3", "1.18.4", "1.18.5", "1.19.0", "1.19.1", "1.20.0", "1.20.1", "1.21.0", "1.21.1", "1.21.2", "1.21.3"],
+        [
+            "1.0.0",
+            "1.1.0",
+            "1.2.0",
+            "1.3.0",
+            "1.4.0",
+            "1.5.0",
+            "1.6.0",
+            "1.7.0",
+            "1.8.0",
+            "1.9.0",
+            "1.10.0",
+            "1.11.0",
+            "1.12.0",
+            "1.13.0",
+            "1.13.1",
+            "1.14.0",
+            "1.15.0",
+            "1.16.0",
+            "1.16.1",
+            "1.17.0",
+            "1.17.1",
+            "1.18.0",
+            "1.18.1",
+            "1.18.2",
+            "1.18.3",
+            "1.18.4",
+            "1.18.5",
+            "1.19.0",
+            "1.19.1",
+            "1.20.0",
+            "1.20.1",
+            "1.21.0",
+            "1.21.1",
+            "1.21.2",
+            "1.21.3",
+            "1.22.0",
+            "1.23.0",
+        ],
     )
     def test_supported_contains_version(self, version: str) -> None:
         """docs/api/baselines/SUPPORTED lists every frozen ICD version (backward compat preserved)."""
@@ -627,8 +634,10 @@ class TestIcdLifecycle:
             ("1.21.0", "The 1.21.0 baseline must be preserved — it proves backward compatibility."),
             ("1.21.1", "The 1.21.1 baseline must be preserved — it proves backward compatibility."),
             ("1.21.2", "The 1.21.2 baseline must be preserved — it proves backward compatibility."),
+            ("1.21.3", "The 1.21.3 baseline must be preserved — it proves backward compatibility."),
+            ("1.22.0", "The 1.22.0 baseline must be preserved — it proves backward compatibility."),
             (
-                "1.21.3",
+                "1.23.0",
                 "The file must be created as a byte-identical copy of docs/api/icd.json.",
             ),
         ],
@@ -636,30 +645,28 @@ class TestIcdLifecycle:
     def test_icd_baseline_exists(self, version: str, extra_context: str) -> None:
         """docs/api/baselines/icd-v<version>.json exists for every frozen ICD version."""
         baseline = _BASELINES_DIR / f"icd-v{version}.json"
-        assert baseline.exists(), (
-            f"Baseline icd-v{version}.json not found at {baseline}.\n{extra_context}"
-        )
+        assert baseline.exists(), f"Baseline icd-v{version}.json not found at {baseline}.\n{extra_context}"
 
-    def test_icd_v1_21_3_baseline_byte_identical_to_icd_json(self) -> None:
-        """docs/api/baselines/icd-v1.21.3.json is byte-identical to docs/api/icd.json.
+    def test_icd_v1_23_0_baseline_byte_identical_to_icd_json(self) -> None:
+        """docs/api/baselines/icd-v1.23.0.json is byte-identical to docs/api/icd.json.
 
         Note: this test asserts the invariant for whichever version is
-        CURRENT (1.21.3, the description-only patch bump). A
+        CURRENT (1.23.0, the additive minor bump). A
         future version bump renames this test and repoints it at the new
-        current version -- the prior version's baseline (icd-v1.21.2.json)
+        current version -- the prior version's baseline (icd-v1.22.0.json)
         remains frozen and untouched, proven by test_icd_baseline_exists
         above.
         """
-        baseline = _BASELINES_DIR / "icd-v1.21.3.json"
-        assert baseline.exists(), f"Baseline icd-v1.21.3.json not found at {baseline}"
+        baseline = _BASELINES_DIR / "icd-v1.23.0.json"
+        assert baseline.exists(), f"Baseline icd-v1.23.0.json not found at {baseline}"
 
         current_bytes = _ICD_JSON.read_bytes()
         baseline_bytes = baseline.read_bytes()
         assert current_bytes == baseline_bytes, (
-            "icd-v1.21.3.json is NOT byte-identical to docs/api/icd.json.\n"
+            "icd-v1.23.0.json is NOT byte-identical to docs/api/icd.json.\n"
             f"icd.json size: {len(current_bytes)} bytes\n"
-            f"icd-v1.21.3.json size: {len(baseline_bytes)} bytes\n"
-            "Create the baseline with: cp docs/api/icd.json docs/api/baselines/icd-v1.21.3.json"
+            f"icd-v1.23.0.json size: {len(baseline_bytes)} bytes\n"
+            "Create the baseline with: cp docs/api/icd.json docs/api/baselines/icd-v1.23.0.json"
         )
 
 
@@ -710,9 +717,7 @@ class TestIcdFreshnessGate:
 class TestIcdCompatGate:
     """ICD compat gate exits 0 with both 1.0.0 and 1.1.0 baselines supported."""
 
-    def test_compat_gate_exits_0_with_both_baselines(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_compat_gate_exits_0_with_both_baselines(self, capsys: pytest.CaptureFixture[str]) -> None:
         """lint_icd_compat.check_compat() returns True for the committed artifacts.
 
         SUPPORTED lists 1.0.0 and 1.1.0.  icd.json (1.1.0) must be a compatible
@@ -748,6 +753,7 @@ class TestIcdCompatGate:
         scratch_baselines.mkdir()
         (scratch_baselines / "SUPPORTED").write_text("1.0.0\n", encoding="utf-8")
         import shutil
+
         shutil.copy(
             str(_BASELINES_DIR / "icd-v1.0.0.json"),
             str(scratch_baselines / "icd-v1.0.0.json"),

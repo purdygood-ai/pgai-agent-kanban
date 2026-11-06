@@ -9,7 +9,7 @@
 #   - Closed items (DONE / WONT-DO / BLOCKED) fill the slots below.
 #
 # This script is a thin dispatch layer. The rendering algorithm lives in
-# dashboard/column-render.sh (queue subcommand) so that both the tmux watch
+# dashboard/column-render.sh (queue subcommand) so that both the tmux cadence-loop.sh
 # panes and --no-tmux mode share one implementation.
 #
 # Usage:
@@ -61,24 +61,16 @@
 #   status colors, and the projects.cfg override flow.
 
 set -euo pipefail
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Delegate entirely to dashboard/column-render.sh which holds the algorithm.
 exec "${SCRIPT_DIR}/column-render.sh" "$@"

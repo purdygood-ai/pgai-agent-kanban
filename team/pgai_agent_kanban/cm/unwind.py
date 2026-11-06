@@ -15,7 +15,7 @@ stderr and exits 1 unless noted)
 0. Confirmation (not for a dry run): ``confirm=True``, ``force=True`` with
    *force_answers_prompt*, or a *prompt* to ask. With none of them the call
    refuses before reading anything (``unwind_rc.confirmation_required``,
-   the one dual-channel refusal).
+   a dual-channel refusal).
 1. The project name resolves (exact, then unambiguous prefix, against
    ``projects.cfg``); a refusal prints the resolver's dual-channel block.
    The push decision (see "Push decision and the remote boundary" below)
@@ -33,9 +33,16 @@ stderr and exits 1 unless noted)
 5. The project directory exists.
 6. The version is not a tag in the repository (shipped releases are never
    unwound).
-7. ``release-state.md`` exists, its Active RC is not ``none``, and it is the
+7. ``release-state.md`` exists, can be read and is not empty (an unreadable
+   or empty file refuses dual-channel, ``unwind_rc.state_unreadable`` /
+   ``unwind_rc.state_empty``), its Active RC is not ``none``, and it is the
    version being unwound. ``force=True`` bypasses this last comparison and
    nothing else.
+8. Every state input the plan reads -- task READMEs, queue files, the
+   requirements file, plan markers, the tasks directory -- that exists can
+   be read; one that cannot refuses dual-channel
+   (``unwind_rc.state_unreadable``) before anything is changed, rather than
+   reading as empty and being skipped.
 
 ``force`` and ``confirm`` are separate parameters. ``confirm`` answers the
 confirmation prompt and bypasses no check. ``force`` bypasses only the
@@ -157,19 +164,21 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pgai_agent_kanban import task_status
 from pgai_agent_kanban.cm import cancel as _cancel
 from pgai_agent_kanban.cm import write_rc_state
 from pgai_agent_kanban.cm.read_state_field import read_state_field
-from pgai_agent_kanban.lib import ini, md_fields
+from pgai_agent_kanban.lib import md_fields
 from pgai_agent_kanban.lib import push_decision as _push_decision
 from pgai_agent_kanban.lib import temp_root as _temp_root_resolver
 from pgai_agent_kanban.lib.atomic_write import atomic_write
+from pgai_agent_kanban.lib.dev_tree import global_dev_tree, project_dev_tree
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.stdio import write_stderr as _write_stderr
 from pgai_agent_kanban.lib.stdio import write_stdout as _write_stdout
@@ -226,7 +235,7 @@ _BUNDLED_ITEMS_HEADING = "Bundled Items"
 _SUPERSEDED_STATUS = "wont-do"
 
 Writer = Callable[[str], None]
-Prompt = Callable[[str], Optional[str]]
+Prompt = Callable[[str], str | None]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -289,20 +298,12 @@ def _resolve_project(ctx: OpsContext, typed: str) -> str:
         # registered project there is nothing to unwind; the resolver's own
         # dual-channel block is printed, then the script's closing line.
         # CENSUS-ANCHOR: unwind-project-unresolved-01
-        raise UnwindRcError(
-            key, f"{exc}\n\nERROR: could not resolve project context for '{typed}'.\n"
-        ) from exc
+        raise UnwindRcError(key, f"{exc}\n\nERROR: could not resolve project context for '{typed}'.\n") from exc
 
 
 def _dev_tree_fallback(ctx: OpsContext) -> str:
-    """``PGAI_DEV_TREE_PATH``, else ``kanban.cfg [paths] dev_tree_path``."""
-    value = os.environ.get("PGAI_DEV_TREE_PATH", "")
-    if value:
-        return value
-    kanban_cfg = ctx.kanban_root / "kanban.cfg"
-    if kanban_cfg.is_file():
-        return ini.read_line_value(kanban_cfg, "paths", "dev_tree_path") or ""
-    return ""
+    """``PGAI_DEV_TREE_PATH``, else ``kanban.cfg [paths] dev_tree_path`` (:func:`global_dev_tree`)."""
+    return global_dev_tree(ctx.kanban_root)
 
 
 def _repo_root(ctx: OpsContext, project: str) -> str:
@@ -315,10 +316,8 @@ def _repo_root(ctx: OpsContext, project: str) -> str:
     project_root = ctx.project_root(project)
     new_cfg = project_root / "project.cfg"
     old_cfg = project_root / "PROJECT.cfg"
-    if new_cfg.is_file():
-        value = ini.read_line_value(new_cfg, "project", "dev_tree_path") or ""
-    elif old_cfg.is_file():
-        value = _cancel._read_cfg_key(old_cfg, "project", "dev_tree_path")
+    if new_cfg.is_file() or old_cfg.is_file():
+        value = project_dev_tree(project_root)
     else:
         # BLOCK-WORTHY (docs/blocking-site-census.md): with no project
         # configuration there is no repository to unwind the RC in.
@@ -419,7 +418,10 @@ def _git(repo: str, *args: str, merge_stderr: bool = False) -> subprocess.Comple
             ["git", "-C", repo, *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
-            text=True, errors="replace", check=False, stdin=subprocess.DEVNULL,
+            text=True,
+            errors="replace",
+            check=False,
+            stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError:
         return subprocess.CompletedProcess(["git", *args], 127, "", "git: command not found\n")
@@ -458,10 +460,10 @@ class _Inventory:
     bugs_to_flip: list[str]
     discovery_files: list[str]
     rc_json: pathlib.Path
-    rc_json_outcome: Optional[str]
+    rc_json_outcome: str | None
 
 
-def _version_pattern(version: str) -> "re.Pattern[str]":
+def _version_pattern(version: str) -> re.Pattern[str]:
     """*version* as a search pattern, ``.`` matching any character (a grep pattern)."""
     return re.compile(version)
 
@@ -471,11 +473,35 @@ def _grep_literal(text: str) -> str:
     return "".join("." if char == "." else re.escape(char) for char in text)
 
 
-def _read_text(path: "str | pathlib.Path") -> str:
+def _read_text(path: str | pathlib.Path) -> str:
+    """*path*'s text, ``""`` when it cannot be read (the steps after the backup)."""
     try:
         return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+class _UnreadableState(Exception):
+    """A state file or directory the inventory needs exists but cannot be read."""
+
+    def __init__(self, path: str | pathlib.Path, exc: OSError) -> None:
+        super().__init__(f"{path}: {exc.strerror or exc}")
+        self.path = str(path)
+        self.reason = exc.strerror or str(exc)
+
+
+def _read_state_text(path: str | pathlib.Path) -> str:
+    """*path*'s text for the inventory: ``""`` when absent, :class:`_UnreadableState` when unreadable.
+
+    The plan is built from these reads, so an input that exists but cannot
+    be read must stop the unwind rather than read as empty and be skipped.
+    """
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        raise _UnreadableState(path, exc) from exc
 
 
 def _terminated_lines(text: str) -> list[str]:
@@ -484,14 +510,20 @@ def _terminated_lines(text: str) -> list[str]:
 
 
 def _sorted_entries(directory: pathlib.Path) -> list[str]:
-    """Non-hidden entry names of *directory* in code-point order (``[]`` when unreadable)."""
+    """Non-hidden entry names of *directory* in code-point order.
+
+    ``[]`` when *directory* does not exist; :class:`_UnreadableState` when it
+    exists but cannot be listed.
+    """
     try:
         return sorted(name for name in os.listdir(directory) if not name.startswith("."))
-    except OSError:
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise _UnreadableState(directory, exc) from exc
 
 
-def _find_names(top: pathlib.Path, pattern: str, max_depth: Optional[int] = None) -> list[str]:
+def _find_names(top: pathlib.Path, pattern: str, max_depth: int | None = None) -> list[str]:
     """Paths below *top* whose names match *pattern*, in ``find``'s directory order.
 
     Entries come in the order the directory lists them, each directory's
@@ -520,14 +552,11 @@ def _bundled_ids_to_flip(backlog: pathlib.Path, requirements_text: str, kind: st
     if not backlog.is_file() or not requirements_text:
         return []
     names = sorted(set(re.findall(kind + r'-[0-9]+[^`)"\s]+', requirements_text)))
-    lines = _read_text(backlog).splitlines()
-    return [
-        name for name in names
-        if any(re.match(r"\[x\].*" + _grep_literal(name), line) for line in lines)
-    ]
+    lines = _read_state_text(backlog).splitlines()
+    return [name for name in names if any(re.match(r"\[x\].*" + _grep_literal(name), line) for line in lines)]
 
 
-def _rc_json_outcome(path: pathlib.Path) -> Optional[str]:
+def _rc_json_outcome(path: pathlib.Path) -> str | None:
     """The per-RC record's ``outcome`` as text, ``(unknown)`` / ``(unreadable)``, or None when absent."""
     if not path.is_file():
         return None
@@ -556,7 +585,7 @@ def _inventory(
         readme = folder / "README.md"
         if not folder.is_dir() or not readme.is_file():
             continue
-        if not pattern.search(_read_text(readme)):
+        if not pattern.search(_read_state_text(readme)):
             continue
         tasks_all.append(name)
         status = folder / "status.md"
@@ -568,7 +597,7 @@ def _inventory(
     for queue in queue_files:
         if not queue.is_file():
             continue
-        for line in _terminated_lines(_read_text(queue)):
+        for line in _terminated_lines(_read_state_text(queue)):
             if _OPEN_QUEUE_LINE_RE.search(line) and pattern.search(line):
                 queue_entries.append(f"{queue.name}: {line}")
 
@@ -586,10 +615,10 @@ def _inventory(
     plans_dir = tasks_dir / "queues" / "plans"
     if plans_dir.is_dir():
         for marker in sorted(glob.glob(str(plans_dir / ".materialized.*"))):
-            if os.path.isfile(marker) and pattern.search(_read_text(marker)):
+            if os.path.isfile(marker) and pattern.search(_read_state_text(marker)):
                 plan_markers.append(marker)
 
-    requirements_text = _read_text(requirements_file) if requirements_file else ""
+    requirements_text = _read_state_text(requirements_file) if requirements_file else ""
     discovery_dir = ctx.project_root(project) / ".discovery-state"
     rc_json = ctx.project_root(project) / "release-state" / f"{version}.json"
     return _Inventory(
@@ -625,11 +654,11 @@ def unwind_rc(
     confirm: bool = False,
     force: bool = False,
     force_answers_prompt: bool = False,
-    prompt: Optional[Prompt] = None,
-    repo_root: Optional[str] = None,
-    temp_root: Optional[str] = None,
-    out: Optional[Writer] = None,
-    err: Optional[Writer] = None,
+    prompt: Prompt | None = None,
+    repo_root: str | None = None,
+    temp_root: str | None = None,
+    out: Writer | None = None,
+    err: Writer | None = None,
 ) -> UnwindOutcome:
     """Unwind *project*'s in-flight RC *version* (see the module docstring).
 
@@ -686,10 +715,9 @@ def unwind_rc(
                 "unwind_rc.confirmation_required",
                 f"unwind-rc would unwind RC {version} of project {project} across every state "
                 "store, and the call carried no confirmation.",
-                installed_script_command(
-                    ctx.kanban_root, _SCRIPT, "--project", project, "--key", version, "--confirm"
-                ),
-            ) + "\n",
+                installed_script_command(ctx.kanban_root, _SCRIPT, "--project", project, "--key", version, "--confirm"),
+            )
+            + "\n",
         )
 
     name = _resolve_project(ctx, project)
@@ -708,6 +736,25 @@ def unwind_rc(
     tmp_root = temp_root or _temp_root(ctx)
 
     _preflight(ctx, name, version, repo_root, release_tag, force)
+    try:
+        state_text = _read_state_text(release_state)
+    except _UnreadableState as exc:
+        raise _unreadable_state_refusal(ctx, name, version, exc) from exc
+    if not state_text.strip():
+        # BLOCK-WORTHY (docs/blocking-site-census.md): verification unable
+        # to run. An empty release-state.md names no active RC, so there is
+        # nothing to check the requested version against or to reset.
+        # CENSUS-ANCHOR: unwind-release-state-empty-01
+        raise UnwindRcError(
+            "unwind_rc.state_empty",
+            format_error_contract(
+                "unwind_rc.state_empty",
+                f"unwind-rc refused: {release_state} is empty, so project {name} has no recorded "
+                f"Active RC to check {version} against; nothing was changed.",
+                _state_remedy(ctx, name, version, str(release_state)),
+            )
+            + "\n",
+        )
     active = read_state_field(str(release_state), "Active RC")
     if active == "none":
         # BLOCK-WORTHY (docs/blocking-site-census.md): with no active RC
@@ -739,13 +786,26 @@ def unwind_rc(
             f"  Requested: {version}\n\n"
         )
 
-    inv = _inventory(ctx, name, version, repo_root, rc_branch, origin_skip, remote)
+    try:
+        inv = _inventory(ctx, name, version, repo_root, rc_branch, origin_skip, remote)
+    except _UnreadableState as exc:
+        raise _unreadable_state_refusal(ctx, name, version, exc) from exc
     ts = _local_now()
     halt_scope = "global" if (ctx.kanban_root / "HALT").is_file() else "per-project"
     _print_plan(
-        say, inv, name=name, version=version, halt_scope=halt_scope, dry_run=dry_run,
-        confirm=confirm, force=force, active=active, tmp_root=tmp_root, rc_branch=rc_branch,
-        release_state=release_state, ts=ts,
+        say,
+        inv,
+        name=name,
+        version=version,
+        halt_scope=halt_scope,
+        dry_run=dry_run,
+        confirm=confirm,
+        force=force,
+        active=active,
+        tmp_root=tmp_root,
+        rc_branch=rc_branch,
+        release_state=release_state,
+        ts=ts,
     )
     if dry_run:
         say("Dry run complete.  No changes were made.")
@@ -787,9 +847,32 @@ def unwind_rc(
     return UnwindOutcome(name, rc_branch, "unwound", backup_dir, tuple(cancelled))
 
 
-def _preflight(
-    ctx: OpsContext, name: str, version: str, repo: str, release_tag: str, force: bool
-) -> None:
+def _state_remedy(ctx: OpsContext, name: str, version: str, path: str) -> str:
+    """Show *path*, then re-run the unwind as a dry run: runnable as printed."""
+    dry_run = installed_script_command(ctx.kanban_root, _SCRIPT, "--project", name, "--key", version, "--dry-run")
+    return f"ls -ld -- {shlex.quote(path)} && {dry_run}"
+
+
+def _unreadable_state_refusal(ctx: OpsContext, name: str, version: str, exc: _UnreadableState) -> UnwindRcError:
+    """The refusal for a state input that exists but cannot be read."""
+    # BLOCK-WORTHY (docs/blocking-site-census.md): verification unable to
+    # run. Every plan entry comes from these reads, so an unreadable input
+    # would be skipped as if empty and the unwind would leave its state
+    # half reset; it is refused before anything is changed.
+    # CENSUS-ANCHOR: unwind-state-unreadable-01
+    return UnwindRcError(
+        "unwind_rc.state_unreadable",
+        format_error_contract(
+            "unwind_rc.state_unreadable",
+            f"unwind-rc refused: cannot read {exc.path} ({exc.reason}), so the unwind plan for "
+            f"{version} of project {name} would be incomplete; nothing was changed.",
+            _state_remedy(ctx, name, version, exc.path),
+        )
+        + "\n",
+    )
+
+
+def _preflight(ctx: OpsContext, name: str, version: str, repo: str, release_tag: str, force: bool) -> None:
     """Checks 3-6 and the release-state.md presence check, in the script's order."""
     if not _VERSION_RE.match(version):
         # BLOCK-WORTHY (docs/blocking-site-census.md): a malformed version
@@ -1031,8 +1114,13 @@ def _step_backup(
 
 
 def _step_git(
-    say: Callable[..., None], warn: Callable[[str], None],
-    name: str, repo: str, main_branch: str, rc_branch: str, inv: _Inventory,
+    say: Callable[..., None],
+    warn: Callable[[str], None],
+    name: str,
+    repo: str,
+    main_branch: str,
+    rc_branch: str,
+    inv: _Inventory,
 ) -> None:
     """Step c: leave the RC branch, delete it locally and on the remote, delete orphan task branches.
 
@@ -1092,7 +1180,7 @@ def _step_git(
     listing = _git(repo, "branch")
     for line in _terminated_lines(listing.stdout if listing.returncode == 0 else ""):
         branch = line.removeprefix("  ").removeprefix(" ").removeprefix("* ")
-        if branch.startswith(_ORPHAN_BRANCH_PREFIX) and branch[len("feature/"):] in cancelled:
+        if branch.startswith(_ORPHAN_BRANCH_PREFIX) and branch[len("feature/") :] in cancelled:
             orphans.append(branch)
     if orphans:
         say(f"  WARNING: Found {len(orphans)} orphan feature branch(es) from cancelled tasks:")
@@ -1116,8 +1204,13 @@ def say_text(say: Callable[..., None], text: str) -> None:
 
 
 def _step_tasks(
-    say: Callable[..., None], warn_raw: Writer, ctx: OpsContext, name: str,
-    version: str, ts: str, inv: _Inventory,
+    say: Callable[..., None],
+    warn_raw: Writer,
+    ctx: OpsContext,
+    name: str,
+    version: str,
+    ts: str,
+    inv: _Inventory,
 ) -> list[str]:
     """Step d: WONT-DO and a Cancellation Note for every task folder naming the version."""
     say("--- Step d: Task folder state ---")
@@ -1334,8 +1427,15 @@ def _intake_file(requirements_text: str, ident: str, fallback_dir: pathlib.Path)
 
 
 def _step_reopen_bundled(
-    say: Callable[..., None], warn: Callable[[str], None], ctx: OpsContext, name: str,
-    superseded: str, kind: str, letter: str, title: str, agent: str,
+    say: Callable[..., None],
+    warn: Callable[[str], None],
+    ctx: OpsContext,
+    name: str,
+    superseded: str,
+    kind: str,
+    letter: str,
+    title: str,
+    agent: str,
 ) -> None:
     """Steps h / i: reopen every bundled PRIORITY / BUG item (backlog ``[ ]``, ``## Status`` open)."""
     say(f"--- Step {letter}: {title} backlog ---")
@@ -1397,8 +1497,9 @@ def _set_status_line(path: str, value: str) -> bool:
         text = pathlib.Path(path).read_text(encoding="utf-8")
         if task_status.read_section(text, "Status", end_at_subheading=True) is None:
             return False
-        atomic_write(path, md_fields.set_value_line(text, "Status", value),
-                     prefix=".unwind_rc_tmp_", preserve_mode=True)
+        atomic_write(
+            path, md_fields.set_value_line(text, "Status", value), prefix=".unwind_rc_tmp_", preserve_mode=True
+        )
     except (OSError, UnicodeDecodeError):
         return False
     return True
@@ -1474,7 +1575,7 @@ def _step_rc_json(
     """Step l: mark the per-RC record cancelled; an absent record is skipped, a failure warned."""
     say("--- Step l: Per-RC release-state JSON ---")
     record = project_root / "release-state" / f"{version}.json"
-    closed_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    closed_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     if not record.is_file():
         say(f"  Per-RC JSON not found: {record}")
         say("  Skipping — absent JSON is not an error (RC may have been unwound before open-rc wrote it).")
@@ -1538,7 +1639,7 @@ def _cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run ``unwind_rc`` from the command line (see the module docstring).
 
     ``--force`` also answers the prompt here, as the script's ``--force``
@@ -1553,10 +1654,16 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
     ctx = OpsContext(kanban_root=pathlib.Path(opts.kanban_root))
     try:
         unwind_rc(
-            ctx, opts.project, opts.key,
-            dry_run=opts.dry_run, confirm=opts.confirm, force=opts.force,
-            force_answers_prompt=True, prompt=_cancel._stdin_prompt,
-            repo_root=opts.repo_root or None, temp_root=opts.temp_root or None,
+            ctx,
+            opts.project,
+            opts.key,
+            dry_run=opts.dry_run,
+            confirm=opts.confirm,
+            force=opts.force,
+            force_answers_prompt=True,
+            prompt=_cancel._stdin_prompt,
+            repo_root=opts.repo_root or None,
+            temp_root=opts.temp_root or None,
         )
     except UnwindRcError as exc:
         if exc.text:

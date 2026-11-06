@@ -53,9 +53,9 @@
 
 set -euo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-_MIG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_MIG_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _MIG_SCRIPT_PATH="${_MIG_SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 # shellcheck source=../lib/error_contract.sh
 source "${_MIG_SCRIPT_DIR}/../lib/error_contract.sh"

@@ -52,15 +52,17 @@ import re
 import subprocess
 import sys
 import traceback
-from typing import Callable, Iterable, Iterator, Mapping, Optional, TextIO
+from typing import TextIO
+from collections.abc import Callable, Iterable, Iterator, Mapping
 
 from pgai_agent_kanban.archive.lookup import archived_task_ids
 from pgai_agent_kanban.cm.read_state_field import read_state_field, validate_release_state_fields
-from pgai_agent_kanban.lib import ini, semver
+from pgai_agent_kanban.lib.dev_tree import resolve_dev_tree
+from pgai_agent_kanban.lib import semver
 from pgai_agent_kanban.lib.branch_prefix import branch_prefix_from_cfg
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.git_remote import DEFAULT_REMOTE_NAME, InvalidRemoteName, remote_name_from_cfg
-from pgai_agent_kanban.lib.project_cfg import project_cfg_file, read_cfg_key
+from pgai_agent_kanban.lib.project_cfg import project_cfg_file
 from pgai_agent_kanban.lib.released_version import last_released_version
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import Ambiguous, NotFound, OpsError
@@ -77,11 +79,11 @@ _SCRIPT = "verify-rc-state.sh"
 #: The agent backlogs checks b and c read, in this order.
 _QUEUE_AGENTS = ("coder", "cm", "pm", "tester", "writer", "bug", "priority")
 
-_LINE_PAT = re.compile(r'^\s*-\s+\[([^\]]*)\]\s+(\S+)')
-_TASK_ID_PAT = re.compile(r'^[A-Z]+-[A-Z]+-\d{8}-\d+')
-_PREREQ_ID_PAT = re.compile(r'\b(CLAUDE-[A-Z]+-\d{8}-\d+-\S+)')
+_LINE_PAT = re.compile(r"^\s*-\s+\[([^\]]*)\]\s+(\S+)")
+_TASK_ID_PAT = re.compile(r"^[A-Z]+-[A-Z]+-\d{8}-\d+")
+_PREREQ_ID_PAT = re.compile(r"\b(CLAUDE-[A-Z]+-\d{8}-\d+-\S+)")
 _BUNDLE_REF_PAT = re.compile(r'\b((?:PRIORITY|BUG)-\d+[^\s\`)"]*)')
-_BRANCH_PREFIX_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
+_BRANCH_PREFIX_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class _Stop(Exception):
@@ -143,16 +145,7 @@ def _refuse(err: TextIO, error: str, message: str, remedy: str) -> None:
 
 def _dev_tree(kanban_root: pathlib.Path, cfg: pathlib.Path, env: Mapping[str, str]) -> str:
     """The dev tree the checks read: project config, then environment, then kanban.cfg."""
-    configured = read_cfg_key(cfg, "project", "dev_tree_path")
-    if configured:
-        return configured
-    from_env = env.get("PGAI_DEV_TREE_PATH", "")
-    if from_env:
-        return from_env
-    kanban_cfg = kanban_root / "kanban.cfg"
-    if kanban_cfg.is_file():
-        return ini.read_line_value(kanban_cfg, "paths", "dev_tree_path") or ""
-    return ""
+    return resolve_dev_tree(kanban_root, cfg.parent, env)
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +168,7 @@ def _queue_entries(queue_files: Iterable[pathlib.Path]) -> Iterator[tuple[str, s
                 yield m.group(2), m.group(1), qpath.name
 
 
-def _state_line(status_file: pathlib.Path) -> Optional[str]:
+def _state_line(status_file: pathlib.Path) -> str | None:
     """The first non-blank, non-``#`` line of the ``## State`` section, stripped.
 
     The section is read by :func:`task_status.read_section` and ends at the
@@ -184,12 +177,12 @@ def _state_line(status_file: pathlib.Path) -> Optional[str]:
     """
     for line in (read_section(status_file.read_text(), "State") or "").split("\n"):
         value = line.strip()
-        if value and not value.startswith('#'):
+        if value and not value.startswith("#"):
             return value
     return None
 
 
-def _remote_main_ref(project: str, cfg: Optional[pathlib.Path]) -> str:
+def _remote_main_ref(project: str, cfg: pathlib.Path | None) -> str:
     """``<remote>/<prefix>main`` for *project*: its configured git remote
     (``lib/git_remote.py``; the default when the value is refused, since
     this names the ref in a warning only) and its branch prefix."""
@@ -200,8 +193,13 @@ def _remote_main_ref(project: str, cfg: Optional[pathlib.Path]) -> str:
     return f"{remote}/{branch_prefix_from_cfg(cfg)}main"
 
 
-def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_state: pathlib.Path,
-             main_ref: str = f"{DEFAULT_REMOTE_NAME}/main") -> None:
+def _check_a(
+    report: _Report,
+    kanban_root: pathlib.Path,
+    project: str,
+    release_state: pathlib.Path,
+    main_ref: str = f"{DEFAULT_REMOTE_NAME}/main",
+) -> None:
     report.heading("Check a: release-state.md consistency")
     if not release_state.is_file():
         report.error(f"release-state.md not found: {release_state}")
@@ -218,16 +216,22 @@ def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_s
         if result.ok:
             value = result.value or ""
             if result.heading == "Active RC":
-                report.ok("Active RC is 'none' (no RC in flight)" if value == "none"
-                          else f"Active RC has valid format: {value}")
+                report.ok(
+                    "Active RC is 'none' (no RC in flight)"
+                    if value == "none"
+                    else f"Active RC has valid format: {value}"
+                )
             elif result.heading == "RC Opened At":
                 report.ok(f"RC Opened At timestamp valid: {value}")
             elif result.heading == "RC Opened By Task":
                 report.ok(f"RC Opened By Task is valid: {value}")
             elif result.heading == "Last Released":
                 last_released = value
-                report.ok("Last Released is 'none' (no prior release)" if value == "none"
-                          else f"Last Released has valid format: {value}")
+                report.ok(
+                    "Last Released is 'none' (no prior release)"
+                    if value == "none"
+                    else f"Last Released has valid format: {value}"
+                )
         elif result.heading in ("Active RC", "RC Opened At", "RC Opened By Task", "Last Released"):
             report.error(f"release-state.md: {result.message} — remedy: {result.remedy} — file: {release_state}")
 
@@ -250,7 +254,7 @@ def _check_a(report: _Report, kanban_root: pathlib.Path, project: str, release_s
 
 def _queue_folder_findings(tasks_dir: pathlib.Path, queue_files: list[pathlib.Path]) -> Iterator[tuple[str, str]]:
     all_queued = {tid: (marker, qname) for tid, marker, qname in _queue_entries(queue_files)}
-    open_queued = {tid: entry for tid, entry in all_queued.items() if entry[0] != 'x'}
+    open_queued = {tid: entry for tid, entry in all_queued.items() if entry[0] != "x"}
 
     # Only task ids (OWNER-ROLE-YYYYMMDD-NNN) live under tasks/; BUG- and
     # PRIORITY- ids belong to their own directories.
@@ -268,19 +272,21 @@ def _queue_folder_findings(tasks_dir: pathlib.Path, queue_files: list[pathlib.Pa
 
     ok2 = 0
     for d in sorted(tasks_dir.iterdir()):
-        if not d.is_dir() or d.name in ('queues', 'README.md') or not _TASK_ID_PAT.match(d.name):
+        if not d.is_dir() or d.name in ("queues", "README.md") or not _TASK_ID_PAT.match(d.name):
             continue
         if d.name in all_queued:
             ok2 += 1
             continue
-        status_file = d / 'status.md'
+        status_file = d / "status.md"
         if status_file.is_file():
-            state = _state_line(status_file) or 'unknown'
-            if state in ('DONE', 'WONT-DO'):
+            state = _state_line(status_file) or "unknown"
+            if state in ("DONE", "WONT-DO"):
                 ok2 += 1
             else:
-                yield "WARN", (f"Task folder {d.name} (state: {state}) has no matching queue entry — "
-                               "tasks/queues may be out of sync")
+                yield "WARN", (
+                    f"Task folder {d.name} (state: {state}) has no matching queue entry — "
+                    "tasks/queues may be out of sync"
+                )
         else:
             yield "WARN", f"Task folder {d.name} has no status.md and no queue entry — orphaned task folder"
     if ok2:
@@ -302,12 +308,12 @@ def _check_b(report: _Report, tasks_dir: pathlib.Path, err: TextIO) -> None:
 # Expected queue marker per state; BLOCKED prefers [B] and accepts the
 # legacy [ ] and [A] with a warning.
 _EXPECTED_MARKER = {
-    'BACKLOG': ' ',
-    'WAITING': 'W',
-    'WORKING': 'A',
-    'BLOCKED': ('B', ' ', 'A'),
-    'DONE': 'x',
-    'WONT-DO': 'x',
+    "BACKLOG": " ",
+    "WAITING": "W",
+    "WORKING": "A",
+    "BLOCKED": ("B", " ", "A"),
+    "DONE": "x",
+    "WONT-DO": "x",
 }
 
 
@@ -322,13 +328,13 @@ def _state_marker_findings(tasks_dir: pathlib.Path, queue_files: list[pathlib.Pa
     for d in sorted(tasks_dir.iterdir()):
         if not d.is_dir() or not _TASK_ID_PAT.match(d.name) or d.name not in id_to_marker:
             continue
-        status_file = d / 'status.md'
+        status_file = d / "status.md"
         if not status_file.is_file():
             continue
-        state = _state_line(status_file) or 'none'
+        state = _state_line(status_file) or "none"
         marker = id_to_marker[d.name]
         qref = id_to_qfile[d.name]
-        if state == 'none':
+        if state == "none":
             yield "WARN", f"status/marker: {d.name} has no ## State field in {status_file}"
             continue
         if state not in _EXPECTED_MARKER:
@@ -337,18 +343,22 @@ def _state_marker_findings(tasks_dir: pathlib.Path, queue_files: list[pathlib.Pa
         expected = _EXPECTED_MARKER[state]
         if isinstance(expected, tuple):
             if marker not in expected:
-                yield "ERROR", (f"status/marker mismatch: {d.name} state={state} but queue marker=[{marker}] "
-                                f"in {qref} (expected [B] or legacy [ ]/[A]) — status: {status_file}")
-            elif marker in (' ', 'A'):
+                yield "ERROR", (
+                    f"status/marker mismatch: {d.name} state={state} but queue marker=[{marker}] "
+                    f"in {qref} (expected [B] or legacy [ ]/[A]) — status: {status_file}"
+                )
+            elif marker in (" ", "A"):
                 yield "WARN", f"status/marker: {d.name} state=BLOCKED has marker=[{marker}] in {qref} (prefer [B])"
             else:
                 c_ok += 1
         elif marker == expected:
             c_ok += 1
         else:
-            exp_display = f"[{expected}]" if expected != ' ' else "[ ]"
-            yield "ERROR", (f"status/marker mismatch: {d.name} state={state} but queue marker=[{marker}] "
-                            f"in {qref} (expected {exp_display}) — status: {status_file}")
+            exp_display = f"[{expected}]" if expected != " " else "[ ]"
+            yield "ERROR", (
+                f"status/marker mismatch: {d.name} state={state} but queue marker=[{marker}] "
+                f"in {qref} (expected {exp_display}) — status: {status_file}"
+            )
     if c_ok:
         yield "OK", f"State/marker: {c_ok} task(s) consistent"
 
@@ -382,13 +392,13 @@ def _prerequisite_findings(tasks_dir: pathlib.Path) -> Iterator[tuple[str, str]]
     for d in sorted(tasks_dir.iterdir()):
         if not d.is_dir() or not _TASK_ID_PAT.match(d.name):
             continue
-        readme = d / 'README.md'
+        readme = d / "README.md"
         if not readme.is_file():
             continue
         prereqs = read_section(readme.read_text(), "Prerequisites") or ""
         for line in prereqs.split("\n"):
-            for m in _PREREQ_ID_PAT.finditer(line.strip().rstrip('.,')):
-                prereq_id = m.group(1).rstrip('.,')
+            for m in _PREREQ_ID_PAT.finditer(line.strip().rstrip(".,")):
+                prereq_id = m.group(1).rstrip(".,")
                 if prereq_id in task_folders:
                     d_ok += 1
                     continue
@@ -397,8 +407,10 @@ def _prerequisite_findings(tasks_dir: pathlib.Path) -> Iterator[tuple[str, str]]
                 if archived[prereq_id]:
                     d_archived += 1
                 else:
-                    yield "ERROR", (f"Prerequisites: dangling reference in {d.name} README — '{prereq_id}' "
-                                    f"has no task folder at {tasks_dir / prereq_id}")
+                    yield "ERROR", (
+                        f"Prerequisites: dangling reference in {d.name} README — '{prereq_id}' "
+                        f"has no task folder at {tasks_dir / prereq_id}"
+                    )
     if d_ok:
         yield "OK", f"Prerequisites: {d_ok} reference(s) resolved"
     if d_archived:
@@ -431,9 +443,12 @@ def _is_git_repo(path: str, env: Mapping[str, str]) -> bool:
 
 def _git_ok(repo: str, args: list[str]) -> bool:
     try:
-        return subprocess.run(
-            ["git", "-C", repo, *args], capture_output=True, stdin=subprocess.DEVNULL, check=False
-        ).returncode == 0
+        return (
+            subprocess.run(
+                ["git", "-C", repo, *args], capture_output=True, stdin=subprocess.DEVNULL, check=False
+            ).returncode
+            == 0
+        )
     except OSError:
         return False
 
@@ -443,7 +458,10 @@ def _git_branches(repo: str, pattern: str) -> list[str]:
     try:
         done = subprocess.run(
             ["git", "-C", repo, "branch", "--list", pattern],
-            capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            check=False,
         )
     except OSError:
         return []
@@ -470,8 +488,15 @@ def _branch_prefix(project: str, cfg: pathlib.Path, err: TextIO) -> str:
     return raw
 
 
-def _check_e(report: _Report, project: str, cfg: pathlib.Path, release_state: pathlib.Path, repo_root: str,
-             env: Mapping[str, str], err: TextIO) -> None:
+def _check_e(
+    report: _Report,
+    project: str,
+    cfg: pathlib.Path,
+    release_state: pathlib.Path,
+    repo_root: str,
+    env: Mapping[str, str],
+    err: TextIO,
+) -> None:
     report.heading("Check e: release-state.md <-> git branch consistency")
     if not release_state.is_file():
         report.warn("release-state.md not found — skipping git branch consistency checks")
@@ -500,20 +525,25 @@ def _check_e(report: _Report, project: str, cfg: pathlib.Path, release_state: pa
         if not rc_branches:
             report.ok(f"Active RC is none and no local {rc_glob} branches exist")
         for branch in rc_branches:
-            report.warn(f"release-state.md shows Active RC=none but local branch exists: {branch} — may be "
-                        "operator-staged or orphaned work")
+            report.warn(
+                f"release-state.md shows Active RC=none but local branch exists: {branch} — may be "
+                "operator-staged or orphaned work"
+            )
         return
 
     rc_branch = f"{prefix}rc/{active_rc}"
     if _git_ok(repo_root, ["rev-parse", "--verify", f"refs/heads/{rc_branch}"]):
         report.ok(f"Active RC {active_rc} has matching local branch: {rc_branch}")
     else:
-        report.error(f"release-state.md Active RC={active_rc} but local branch {rc_branch} does not exist in "
-                     f"{repo_root}")
+        report.error(
+            f"release-state.md Active RC={active_rc} but local branch {rc_branch} does not exist in " f"{repo_root}"
+        )
     for branch in rc_branches:
         if branch != rc_branch:
-            report.warn(f"Extra {rc_glob} branch found: {branch} (Active RC is {active_rc}) — may be a stale or "
-                        f"orphaned branch in {repo_root}")
+            report.warn(
+                f"Extra {rc_glob} branch found: {branch} (Active RC is {active_rc}) — may be a stale or "
+                f"orphaned branch in {repo_root}"
+            )
 
 
 def _bundled_ids(req_file: pathlib.Path) -> list[str]:
@@ -527,51 +557,59 @@ def _bundled_ids(req_file: pathlib.Path) -> list[str]:
         m = _BUNDLE_REF_PAT.search(line)
         if m:
             ident = m.group(1)
-            ident = ident[:-3] if ident.endswith('.md') else ident
+            ident = ident[:-3] if ident.endswith(".md") else ident
             if ident not in ids:
                 ids.append(ident)
     return ids
 
 
-def _bundle_findings(priority_dir: pathlib.Path, bugs_dir: pathlib.Path, priority_backlog: pathlib.Path,
-                     bug_backlog: pathlib.Path, req_files: list[pathlib.Path]) -> Iterator[tuple[str, str]]:
+def _bundle_findings(
+    priority_dir: pathlib.Path,
+    bugs_dir: pathlib.Path,
+    priority_backlog: pathlib.Path,
+    bug_backlog: pathlib.Path,
+    req_files: list[pathlib.Path],
+) -> Iterator[tuple[str, str]]:
     f_ok = 0
     for req_file in req_files:
         for ref_id in _bundled_ids(req_file):
-            if ref_id.startswith('PRIORITY-'):
+            if ref_id.startswith("PRIORITY-"):
                 ref_dir = priority_dir
-            elif ref_id.startswith('BUG-'):
+            elif ref_id.startswith("BUG-"):
                 ref_dir = bugs_dir
             else:
                 continue
-            candidate = next(iter(ref_dir.glob(ref_id + '*.md')), None) if ref_dir.is_dir() else None
+            candidate = next(iter(ref_dir.glob(ref_id + "*.md")), None) if ref_dir.is_dir() else None
             if candidate is not None:
                 yield "OK", f"Bundle ref exists: {ref_id} -> {candidate} (in {req_file.name})"
                 f_ok += 1
             else:
-                yield "ERROR", (f"Bundle invariant: {req_file.name} references {ref_id} but no matching file "
-                                f"found in {ref_dir}")
+                yield "ERROR", (
+                    f"Bundle invariant: {req_file.name} references {ref_id} but no matching file " f"found in {ref_dir}"
+                )
 
     bundled = {"PRIORITY": set(), "BUG": set()}
     for req_file in req_files:
         for ref_id in _bundled_ids(req_file):
             for kind in bundled:
-                if ref_id.startswith(kind + '-'):
+                if ref_id.startswith(kind + "-"):
                     bundled[kind].add(ref_id)
 
-    for backlog, kind in ((priority_backlog, 'PRIORITY'), (bug_backlog, 'BUG')):
+    for backlog, kind in ((priority_backlog, "PRIORITY"), (bug_backlog, "BUG")):
         if not backlog.is_file():
             continue
         ok_n = 0
         for line in backlog.read_text().splitlines():
             m = _LINE_PAT.match(line)
-            if not (m and m.group(1) == 'x') or not m.group(2).startswith(kind + '-'):
+            if not (m and m.group(1) == "x") or not m.group(2).startswith(kind + "-"):
                 continue
             if m.group(2) in bundled[kind]:
                 ok_n += 1
             else:
-                yield "WARN", (f"{kind} backlog [x]: {m.group(2)} is marked done but not found in any active "
-                               "requirements file — may have been bundled into a superseded RC or already shipped")
+                yield "WARN", (
+                    f"{kind} backlog [x]: {m.group(2)} is marked done but not found in any active "
+                    "requirements file — may have been bundled into a superseded RC or already shipped"
+                )
         if ok_n:
             yield "OK", f"{kind} backlog: {ok_n} [x] entries accounted for in active bundles"
 
@@ -586,21 +624,32 @@ def _check_f(report: _Report, project_root: pathlib.Path, err: TextIO) -> None:
         report.warn(f"Requirements directory not found: {requirements_dir} — skipping bundle invariant checks")
         return
     names = sorted(
-        (entry.name for entry in requirements_dir.iterdir()
-         if entry.name.endswith(".md") and not entry.name.startswith(".")),
+        (
+            entry.name
+            for entry in requirements_dir.iterdir()
+            if entry.name.endswith(".md") and not entry.name.startswith(".")
+        ),
         key=functools.cmp_to_key(locale.strcoll),
     )
     req_files = [
-        requirements_dir / name for name in names
-        if (requirements_dir / name).is_file() and name != "README.md" and "SUPERSEDED" not in str(requirements_dir / name)
+        requirements_dir / name
+        for name in names
+        if (requirements_dir / name).is_file()
+        and name != "README.md"
+        and "SUPERSEDED" not in str(requirements_dir / name)
     ]
     if not req_files:
         report.ok("No active requirements files found (nothing to validate)")
         return
     queues = project_root / "tasks" / "queues"
     report.findings(
-        lambda: _bundle_findings(project_root / "priority", project_root / "bugs",
-                                 queues / "priority_backlog.md", queues / "bug_backlog.md", req_files),
+        lambda: _bundle_findings(
+            project_root / "priority",
+            project_root / "bugs",
+            queues / "priority_backlog.md",
+            queues / "bug_backlog.md",
+            req_files,
+        ),
         err,
     )
 
@@ -627,22 +676,30 @@ def _run(ctx: OpsContext, project_arg: str, verbose: bool, env: Mapping[str, str
         # the resolver passes a name through unchecked, so this directory
         # check is the backstop that refuses a project never found rather
         # than checking a directory that does not exist.
-        _refuse(err, "verify_rc_state.project_directory_missing",
-                f"{_SCRIPT}: project directory not found: {project_root}.",
-                "Check the project name against projects.cfg, or create it first with "
-                f"{installed_script_command(kanban_root, 'create-project.sh', '--project', project)}.")
+        _refuse(
+            err,
+            "verify_rc_state.project_directory_missing",
+            f"{_SCRIPT}: project directory not found: {project_root}.",
+            "Check the project name against projects.cfg, or create it first with "
+            f"{installed_script_command(kanban_root, 'create-project.sh', '--project', project)}.",
+        )
         # CENSUS-ANCHOR: verify-rc-state-project-directory-missing-01
         return 2
 
     cfg = project_cfg_file(project_root)
     if cfg is None:
-        err.write(f"project_paths.sh: PROJECT.cfg not found at {project_root / 'PROJECT.cfg'} "
-                  f"(and project.cfg not found at {project_root / 'project.cfg'})\n")
+        err.write(
+            f"project_paths.sh: PROJECT.cfg not found at {project_root / 'PROJECT.cfg'} "
+            f"(and project.cfg not found at {project_root / 'project.cfg'})\n"
+        )
         # BLOCK-WORTHY (docs/blocking-site-census.md): every check below
         # depends on the project's config, so there is nothing left to check.
-        _refuse(err, "verify_rc_state.project_config_unloadable",
-                f"{_SCRIPT}: could not load project config for '{project}'.",
-                f"Check that {project_root}/project.cfg exists and is valid INI.")
+        _refuse(
+            err,
+            "verify_rc_state.project_config_unloadable",
+            f"{_SCRIPT}: could not load project config for '{project}'.",
+            f"Check that {project_root}/project.cfg exists and is valid INI.",
+        )
         # CENSUS-ANCHOR: verify-rc-state-project-config-unloadable-01
         return 2
 
@@ -651,9 +708,12 @@ def _run(ctx: OpsContext, project_arg: str, verbose: bool, env: Mapping[str, str
         # BLOCK-WORTHY (docs/blocking-site-census.md): every branch and tag
         # check needs a dev tree, so this refuses rather than silently
         # skipping half the report.
-        _refuse(err, "verify_rc_state.dev_tree_path_unset",
-                f"{_SCRIPT}: dev_tree_path is not set in project config for '{project}'.",
-                f"Set [project] dev_tree_path in {project_root}/project.cfg.")
+        _refuse(
+            err,
+            "verify_rc_state.dev_tree_path_unset",
+            f"{_SCRIPT}: dev_tree_path is not set in project config for '{project}'.",
+            f"Set [project] dev_tree_path in {project_root}/project.cfg.",
+        )
         # CENSUS-ANCHOR: verify-rc-state-dev-tree-path-unset-01
         return 2
 
@@ -684,7 +744,7 @@ def verify_rc_state(
     project: str,
     verbose: bool = False,
     *,
-    environ: Optional[Mapping[str, str]] = None,
+    environ: Mapping[str, str] | None = None,
 ) -> ReadOutput:
     """Return what ``verify-rc-state.sh PROJECT [--verbose]`` prints and exits with.
 
@@ -708,7 +768,7 @@ def verify_rc_state(
 CLI_VERBS: tuple[str, ...] = ("verify_rc_state",)
 
 
-def _cli_main(argv: Optional[list] = None) -> int:
+def _cli_main(argv: list | None = None) -> int:
     """``python3 -m pgai_agent_kanban.ops verify_rc_state KANBAN_ROOT PROJECT [VERBOSE]``.
 
     Prints :func:`verify_rc_state`'s stdout and stderr and exits with its
@@ -719,15 +779,15 @@ def _cli_main(argv: Optional[list] = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     rest = args[1:]
     if not 2 <= len(rest) <= 3:
-        print("usage: python3 -m pgai_agent_kanban.ops verify_rc_state KANBAN_ROOT PROJECT [VERBOSE]",
-              file=sys.stderr)
+        print("usage: python3 -m pgai_agent_kanban.ops verify_rc_state KANBAN_ROOT PROJECT [VERBOSE]", file=sys.stderr)
         return 2
     try:
         locale.setlocale(locale.LC_COLLATE, "")
     except locale.Error:
         pass
-    output = verify_rc_state(OpsContext(kanban_root=pathlib.Path(rest[0])), rest[1],
-                             verbose=len(rest) == 3 and rest[2] == "1")
+    output = verify_rc_state(
+        OpsContext(kanban_root=pathlib.Path(rest[0])), rest[1], verbose=len(rest) == 3 and rest[2] == "1"
+    )
     sys.stdout.write(output.stdout)
     sys.stdout.flush()
     sys.stderr.write(output.stderr)

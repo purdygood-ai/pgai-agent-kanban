@@ -85,7 +85,7 @@ import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
@@ -142,9 +142,7 @@ def build_synthetic_kanban_root(
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {project_name}\n"
-        "workflow_type = document\n",
+        "[project]\n" f"project_name = {project_name}\n" "workflow_type = document\n",
         encoding="utf-8",
     )
     queues_dir = proj / "tasks" / "queues"
@@ -194,11 +192,8 @@ def build_stub_provider_cli(
     bin_dir.mkdir(parents=True, exist_ok=True)
     marker_file = tmp_path / _STUB_MARKER_FILENAME
 
-    probe_prints = "\n".join(
-        f'printf "{var}=%s " "${{{var}:-<unset>}}"' for var in probe_env_vars
-    )
-    script = textwrap.dedent(
-        f"""\
+    probe_prints = "\n".join(f'printf "{var}=%s " "${{{var}:-<unset>}}"' for var in probe_env_vars)
+    script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         # Stand-in for the real provider CLI. Answers --version (the only
         # shape the wake entry point uses on a firing with no queued work);
@@ -212,8 +207,7 @@ def build_stub_provider_cli(
         fi
         echo "unexpected invocation args=[$*]" >> "{marker_file}"
         exit 99
-        """
-    )
+        """)
     stub_path = bin_dir / "claude"
     stub_path.write_text(script, encoding="utf-8")
     stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -249,7 +243,7 @@ def scrubbed_wake_env(
     temp_dir: pathlib.Path,
     home_dir: pathlib.Path,
     stub_bin_dir: pathlib.Path,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
 ) -> dict:
     """Build a wake-subprocess environment from an explicit minimal set of
     names -- never `dict(os.environ)` with deletions layered on top.
@@ -338,7 +332,7 @@ class WakeAcceptanceResult:
     stderr: str
     combined: str = field(init=False)
     env: dict = field(default_factory=dict)
-    cwd: Optional[pathlib.Path] = field(default=None)
+    cwd: pathlib.Path | None = field(default=None)
 
     def __post_init__(self) -> None:
         self.combined = self.stdout + self.stderr

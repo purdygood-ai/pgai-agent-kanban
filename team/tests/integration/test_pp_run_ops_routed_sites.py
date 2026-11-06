@@ -59,10 +59,7 @@ _DECOY_PORT = 1
 
 def _diagnostic(result: subprocess.CompletedProcess) -> str:
     """Render a subprocess's own words for an assertion message."""
-    return (
-        f"exit={result.returncode}\n--- stdout ---\n{result.stdout}\n"
-        f"--- stderr ---\n{result.stderr}"
-    )
+    return f"exit={result.returncode}\n--- stdout ---\n{result.stdout}\n" f"--- stderr ---\n{result.stderr}"
 
 
 def _build_installed_root(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -91,9 +88,7 @@ def _build_decoy_package(tmp_path: pathlib.Path) -> pathlib.Path:
     for sub in ("pgai_agent_kanban", "pgai_agent_kanban/api", "pgai_agent_kanban/halt_after"):
         (decoy / sub).mkdir(parents=True, exist_ok=True)
         (decoy / sub / "__init__.py").write_text("", encoding="utf-8")
-    (decoy / "pgai_agent_kanban" / "api" / "config.py").write_text(
-        f"print({_DECOY_PORT})\n", encoding="utf-8"
-    )
+    (decoy / "pgai_agent_kanban" / "api" / "config.py").write_text(f"print({_DECOY_PORT})\n", encoding="utf-8")
     (decoy / "pgai_agent_kanban" / "halt_after" / "describe.py").write_text(
         "import sys\nsys.stdout.write('answered-by-decoy')\n", encoding="utf-8"
     )
@@ -124,8 +119,7 @@ def _port_probe_dirs() -> list:
     """
     dirs = []
     for name in ("ss", "lsof"):
-        found = shutil.which(name, path=os.pathsep.join(
-            [os.environ.get("PATH", ""), "/usr/sbin", "/sbin"]))
+        found = shutil.which(name, path=os.pathsep.join([os.environ.get("PATH", ""), "/usr/sbin", "/sbin"]))
         if found:
             dirs.append(str(pathlib.Path(found).parent))
     return dirs

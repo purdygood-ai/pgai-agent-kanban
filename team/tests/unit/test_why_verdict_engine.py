@@ -182,9 +182,12 @@ def test_no_arguments_walks_every_project_in_priority_order_with_one_of_four_ver
 
     for line in lines:
         verdict_word = line.split(": ", 1)[1].split(" ", 1)[0].rstrip("—-")
-        assert verdict_word in {"RUNNING", "BLOCKED", "HALTED", "IDLE"}, (
-            f"line does not open with a canonical verdict word: {line!r}"
-        )
+        assert verdict_word in {
+            "RUNNING",
+            "BLOCKED",
+            "HALTED",
+            "IDLE",
+        }, f"line does not open with a canonical verdict word: {line!r}"
 
 
 def test_no_arguments_with_no_registered_projects_fails_rather_than_printing_nothing(

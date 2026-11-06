@@ -152,9 +152,7 @@ def _run_guard_wiring(
         echo "PGAI_GIT_LOCAL_ONLY=[${{PGAI_GIT_LOCAL_ONLY:-}}]"
     """)
 
-    result = subprocess.run(
-        ["bash", "-c", harness], capture_output=True, text=True, timeout=15
-    )
+    result = subprocess.run(["bash", "-c", harness], capture_output=True, text=True, timeout=15)
     return result, task_log_dir
 
 
@@ -169,31 +167,25 @@ def _log_calls(tmp_path: pathlib.Path) -> str:
 
 
 @pytest.mark.parametrize("subagent", ["coder", "writer", "tester", "po", "pm"])
-def test_non_cm_role_gets_shim_first_on_path_and_both_variables_exported(
-    tmp_path: pathlib.Path, subagent: str
-) -> None:
-    result, task_log_dir = _run_guard_wiring(
-        tmp_path, subagent=subagent, shim_dir_exists=True
-    )
+def test_non_cm_role_gets_shim_first_on_path_and_both_variables_exported(tmp_path: pathlib.Path, subagent: str) -> None:
+    result, task_log_dir = _run_guard_wiring(tmp_path, subagent=subagent, shim_dir_exists=True)
     assert result.returncode == 0, result.stderr
     stdout = result.stdout
 
     expected_shim_dir = str(tmp_path / "wake" / "git-guard")
-    assert f"PATH=[{expected_shim_dir}:" in stdout, (
-        f"shim directory must be the first PATH entry for role '{subagent}'.\n{stdout}"
-    )
+    assert (
+        f"PATH=[{expected_shim_dir}:" in stdout
+    ), f"shim directory must be the first PATH entry for role '{subagent}'.\n{stdout}"
     assert f"PGAI_AGENT_ROLE=[{subagent}]" in stdout, stdout
-    assert "PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE=[]" not in stdout, (
-        f"evidence file variable must be non-empty for role '{subagent}'.\n{stdout}"
-    )
+    assert (
+        "PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE=[]" not in stdout
+    ), f"evidence file variable must be non-empty for role '{subagent}'.\n{stdout}"
     assert "PGAI_GIT_LOCAL_ONLY=[1]" in stdout, (
         f"PGAI_GIT_LOCAL_ONLY must be exported as '1' for the non-CM role "
         f"'{subagent}', so pp_last_released_version and _disc_git_tag_exists "
         f"answer from local refs instead of reaching for origin.\n{stdout}"
     )
-    assert _log_calls(tmp_path) == "", (
-        "no warning expected when the shim directory exists"
-    )
+    assert _log_calls(tmp_path) == "", "no warning expected when the shim directory exists"
 
 
 # ---------------------------------------------------------------------------
@@ -209,25 +201,21 @@ def test_non_cm_role_pins_git_guard_real_git_when_unset(tmp_path: pathlib.Path) 
     prepended (base_path here), so the pin names a real, executable git
     binary rather than the shim itself."""
     base_path = "/usr/bin:/bin"
-    result, _ = _run_guard_wiring(
-        tmp_path, subagent="coder", shim_dir_exists=True, base_path=base_path
-    )
+    result, _ = _run_guard_wiring(tmp_path, subagent="coder", shim_dir_exists=True, base_path=base_path)
     assert result.returncode == 0, result.stderr
     stdout = result.stdout
 
-    pin_line = [
-        line for line in stdout.splitlines() if line.startswith("GIT_GUARD_REAL_GIT=[")
-    ]
+    pin_line = [line for line in stdout.splitlines() if line.startswith("GIT_GUARD_REAL_GIT=[")]
     assert pin_line, stdout
     pinned_path = pin_line[0].split("[", 1)[1].rstrip("]")
     assert pinned_path, f"expected a non-empty GIT_GUARD_REAL_GIT pin.\n{stdout}"
-    assert os.path.isfile(pinned_path) and os.access(pinned_path, os.X_OK), (
-        f"pinned GIT_GUARD_REAL_GIT ({pinned_path!r}) must be an executable file"
-    )
+    assert os.path.isfile(pinned_path) and os.access(
+        pinned_path, os.X_OK
+    ), f"pinned GIT_GUARD_REAL_GIT ({pinned_path!r}) must be an executable file"
     expected_shim_dir = str(tmp_path / "wake" / "git-guard")
-    assert not pinned_path.startswith(expected_shim_dir), (
-        f"the pin must never resolve to the guard's own shim directory.\n{stdout}"
-    )
+    assert not pinned_path.startswith(
+        expected_shim_dir
+    ), f"the pin must never resolve to the guard's own shim directory.\n{stdout}"
 
 
 def test_non_cm_role_never_overwrites_a_preset_git_guard_real_git(
@@ -244,9 +232,7 @@ def test_non_cm_role_never_overwrites_a_preset_git_guard_real_git(
         preset_git_guard_real_git="/not/a/real/path/but/preserved",
     )
     assert result.returncode == 0, result.stderr
-    assert "GIT_GUARD_REAL_GIT=[/not/a/real/path/but/preserved]" in result.stdout, (
-        result.stdout
-    )
+    assert "GIT_GUARD_REAL_GIT=[/not/a/real/path/but/preserved]" in result.stdout, result.stdout
 
 
 def test_missing_shim_directory_sets_no_git_guard_real_git_pin(
@@ -257,9 +243,7 @@ def test_missing_shim_directory_sets_no_git_guard_real_git_pin(
     absent, matching the existing fail-clean (not fail-closed) contract
     for a missing shim directory."""
     base_path = "/usr/bin:/bin"
-    result, _ = _run_guard_wiring(
-        tmp_path, subagent="coder", shim_dir_exists=False, base_path=base_path
-    )
+    result, _ = _run_guard_wiring(tmp_path, subagent="coder", shim_dir_exists=False, base_path=base_path)
     assert result.returncode == 0, result.stderr
     assert "GIT_GUARD_REAL_GIT=[]" in result.stdout, result.stdout
 
@@ -271,19 +255,15 @@ def test_missing_shim_directory_sets_no_git_guard_real_git_pin(
 
 def test_cm_role_path_never_gains_shim_directory(tmp_path: pathlib.Path) -> None:
     base_path = "/usr/bin:/bin"
-    result, _ = _run_guard_wiring(
-        tmp_path, subagent="cm", shim_dir_exists=True, base_path=base_path
-    )
+    result, _ = _run_guard_wiring(tmp_path, subagent="cm", shim_dir_exists=True, base_path=base_path)
     assert result.returncode == 0, result.stderr
     stdout = result.stdout
 
-    assert f"PATH=[{base_path}]" in stdout, (
-        f"CM's PATH must be untouched by the guard wiring.\n{stdout}"
-    )
+    assert f"PATH=[{base_path}]" in stdout, f"CM's PATH must be untouched by the guard wiring.\n{stdout}"
     shim_dir = str(tmp_path / "wake" / "git-guard")
-    assert shim_dir not in stdout.split("PATH=[")[1].split("]")[0], (
-        f"CM's exported PATH must never contain the shim directory.\n{stdout}"
-    )
+    assert (
+        shim_dir not in stdout.split("PATH=[")[1].split("]")[0]
+    ), f"CM's exported PATH must never contain the shim directory.\n{stdout}"
     # The role signal is still exported (positive and explicit for every
     # role, including cm) -- it is what lets the guard's own role=="cm"
     # pass-through path do the work, rather than a PATH-based exemption.
@@ -295,9 +275,7 @@ def test_cm_role_path_never_gains_shim_directory(tmp_path: pathlib.Path) -> None
     # And CM never receives the local-only flag: its fetches are exactly
     # the remote operations the boundary exists to let through, and a
     # suppressed fetch would leave CM with a stale view of origin's tags.
-    assert "PGAI_GIT_LOCAL_ONLY=[]" in stdout, (
-        f"PGAI_GIT_LOCAL_ONLY must NOT be exported for the cm role.\n{stdout}"
-    )
+    assert "PGAI_GIT_LOCAL_ONLY=[]" in stdout, f"PGAI_GIT_LOCAL_ONLY must NOT be exported for the cm role.\n{stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -308,22 +286,15 @@ def test_cm_role_path_never_gains_shim_directory(tmp_path: pathlib.Path) -> None
 def test_evidence_file_resolves_inside_task_logs_directory(
     tmp_path: pathlib.Path,
 ) -> None:
-    result, task_log_dir = _run_guard_wiring(
-        tmp_path, subagent="coder", shim_dir_exists=True
-    )
+    result, task_log_dir = _run_guard_wiring(tmp_path, subagent="coder", shim_dir_exists=True)
     assert result.returncode == 0, result.stderr
     stdout = result.stdout
 
-    evidence_line = [
-        line
-        for line in stdout.splitlines()
-        if line.startswith("PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE=[")
-    ]
+    evidence_line = [line for line in stdout.splitlines() if line.startswith("PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE=[")]
     assert evidence_line, stdout
     evidence_path = evidence_line[0].split("[", 1)[1].rstrip("]")
     assert evidence_path.startswith(str(task_log_dir) + "/"), (
-        f"evidence file must live under the task's logs/ directory "
-        f"({task_log_dir}), got: {evidence_path}"
+        f"evidence file must live under the task's logs/ directory " f"({task_log_dir}), got: {evidence_path}"
     )
 
 
@@ -336,15 +307,10 @@ def test_missing_shim_directory_logs_warning_and_dispatch_still_proceeds(
     tmp_path: pathlib.Path,
 ) -> None:
     base_path = "/usr/bin:/bin"
-    result, _ = _run_guard_wiring(
-        tmp_path, subagent="coder", shim_dir_exists=False, base_path=base_path
-    )
-    assert result.returncode == 0, (
-        f"dispatch must still proceed when the shim directory is missing.\n{result.stderr}"
-    )
+    result, _ = _run_guard_wiring(tmp_path, subagent="coder", shim_dir_exists=False, base_path=base_path)
+    assert result.returncode == 0, f"dispatch must still proceed when the shim directory is missing.\n{result.stderr}"
     assert f"PATH=[{base_path}]" in result.stdout, (
-        "PATH must be unchanged when the shim directory does not exist.\n"
-        f"{result.stdout}"
+        "PATH must be unchanged when the shim directory does not exist.\n" f"{result.stdout}"
     )
     # The local-only flag does not depend on the shim: it stops a non-CM
     # dispatch reaching for origin at all, guard or no guard.
@@ -356,8 +322,7 @@ def test_missing_shim_directory_logs_warning_and_dispatch_still_proceeds(
     expected_missing_dir = str(tmp_path / "wake" / "git-guard")
     assert "WARNING" in calls, f"expected a warning; log calls were: {calls!r}"
     assert expected_missing_dir in calls, (
-        f"warning must name the missing shim directory ({expected_missing_dir}); "
-        f"got: {calls!r}"
+        f"warning must name the missing shim directory ({expected_missing_dir}); " f"got: {calls!r}"
     )
 
 
@@ -381,21 +346,17 @@ def test_empty_shim_directory_logs_warning_and_does_not_extend_path(
         shim_file_present=False,
         base_path=base_path,
     )
-    assert result.returncode == 0, (
-        f"dispatch must still proceed when the shim directory is empty.\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"dispatch must still proceed when the shim directory is empty.\n{result.stderr}"
     expected_shim_dir = str(tmp_path / "wake" / "git-guard")
     assert f"PATH=[{base_path}]" in result.stdout, (
         "PATH must NOT gain the shim directory when it holds no shim "
         f"executable -- an empty directory must not look like an active "
         f"guard.\n{result.stdout}"
     )
-    assert expected_shim_dir not in result.stdout.split("PATH=[")[1].split("]")[0], (
-        f"an empty shim directory must never reach PATH.\n{result.stdout}"
-    )
-    assert "GIT_GUARD_REAL_GIT=[]" in result.stdout, (
-        f"no pin is set when there is no shim to protect.\n{result.stdout}"
-    )
+    assert (
+        expected_shim_dir not in result.stdout.split("PATH=[")[1].split("]")[0]
+    ), f"an empty shim directory must never reach PATH.\n{result.stdout}"
+    assert "GIT_GUARD_REAL_GIT=[]" in result.stdout, f"no pin is set when there is no shim to protect.\n{result.stdout}"
     calls = _log_calls(tmp_path)
     assert "WARNING" in calls, (
         f"a directory with no shim executable inside it must warn exactly "
@@ -416,16 +377,12 @@ def test_empty_shim_directory_logs_warning_and_does_not_extend_path(
 
 def test_header_comment_names_exported_variables_and_evidence_location() -> None:
     lib_content = _WAKE_GUARD_WIRING_LIB.read_text(encoding="utf-8")
-    assert "PGAI_AGENT_ROLE" in lib_content, (
-        "wake_guard_wiring.sh must document the PGAI_AGENT_ROLE export."
-    )
+    assert "PGAI_AGENT_ROLE" in lib_content, "wake_guard_wiring.sh must document the PGAI_AGENT_ROLE export."
     assert "PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE" in lib_content, (
-        "wake_guard_wiring.sh must document the "
-        "PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE export."
+        "wake_guard_wiring.sh must document the " "PGAI_GIT_BOUNDARY_GUARD_EVIDENCE_FILE export."
     )
     assert "logs/" in lib_content or "task_log_dir" in lib_content, (
-        "wake_guard_wiring.sh must state where the evidence file is "
-        "written (under the task's own logs/ directory)."
+        "wake_guard_wiring.sh must state where the evidence file is " "written (under the task's own logs/ directory)."
     )
     assert "PGAI_GIT_LOCAL_ONLY" in lib_content, (
         "wake_guard_wiring.sh must document the PGAI_GIT_LOCAL_ONLY export "

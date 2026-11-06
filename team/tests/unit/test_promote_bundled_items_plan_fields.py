@@ -65,7 +65,9 @@ def test_a_needs_operator_item_is_left_untouched_and_never_carried(tmp_path, cap
     bundle = req_dir / "v9.9.9-bugfix-bundle-20990101.md"
     bundle.write_text(
         "# bundle\n\n## Status\nrunning\n\n## Bundled Items\n\n"
-        + _listing(fixed) + _listing(waiting) + _listing(other),
+        + _listing(fixed)
+        + _listing(waiting)
+        + _listing(other),
         encoding="utf-8",
     )
     waiting_before = waiting.read_bytes()
@@ -80,7 +82,7 @@ def test_a_needs_operator_item_is_left_untouched_and_never_carried(tmp_path, cap
     assert result["carried_items"] == []
     assert result["cannot_auto_promote"] == []
     assert f"left for the operator (needs-operator): {waiting.name}" in out
-    report = out[out.index("post-ship report"):]
+    report = out[out.index("post-ship report") :]
     assert waiting.name not in report
     assert "1 needs-operator (left for the operator)" in out
     assert _pbi.read_status_value(bundle) == "done"
@@ -109,7 +111,8 @@ def test_ride_alongs_are_promoted_or_carried_exactly_as_bundle_items(tmp_path, c
     requirement = req_dir / "v9.9.9-feature.md"
     requirement.write_text(
         "# feature\n\n## Status\nrunning\n\n## Deliverables\n1. A feature.\n\n## Bundled Items\n\n"
-        + _listing(claimed, " — ride-along") + _listing(unclaimed, " — ride-along"),
+        + _listing(claimed, " — ride-along")
+        + _listing(unclaimed, " — ride-along"),
         encoding="utf-8",
     )
 

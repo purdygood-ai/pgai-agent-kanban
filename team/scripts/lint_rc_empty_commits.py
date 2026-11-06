@@ -160,10 +160,7 @@ def find_empty_commits(repo: Path, rev_range: str) -> list[EmptyCommit]:
     """
     rev_list = _git(repo, "rev-list", "--no-merges", rev_range)
     if rev_list.returncode != 0:
-        raise ValueError(
-            f"git rev-list --no-merges {rev_range!r} failed: "
-            f"{rev_list.stderr.strip()}"
-        )
+        raise ValueError(f"git rev-list --no-merges {rev_range!r} failed: " f"{rev_list.stderr.strip()}")
 
     empty: list[EmptyCommit] = []
     for sha in (line.strip() for line in rev_list.stdout.splitlines() if line.strip()):
@@ -182,8 +179,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lint_rc_empty_commits",
         description=(
-            "Flag a non-merge commit in a release branch's range against "
-            "its main branch that changes no file."
+            "Flag a non-merge commit in a release branch's range against " "its main branch that changes no file."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -242,8 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         toplevel = _git(here, "rev-parse", "--show-toplevel")
         if toplevel.returncode != 0:
             print(
-                f"lint_rc_empty_commits: {here} is not inside a git repository: "
-                f"{toplevel.stderr.strip()}",
+                f"lint_rc_empty_commits: {here} is not inside a git repository: " f"{toplevel.stderr.strip()}",
                 file=sys.stderr,
             )
             return 2
@@ -259,10 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         ranges = discover_rc_ranges(repo)
 
     if not ranges:
-        print(
-            "lint_rc_empty_commits: no <prefix>rc/vX.Y.Z branch found locally "
-            "-- nothing to check."
-        )
+        print("lint_rc_empty_commits: no <prefix>rc/vX.Y.Z branch found locally " "-- nothing to check.")
         write_findings_file(args.findings_file, [], lint="lint_rc_empty_commits")
         return 0
 
@@ -278,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         quality_finding(
             _LINT_NAME,
             f"empty non-merge commit {hit.sha[:7]} in {hit.rev_range} -- "
-            f"\"{hit.subject}\" changes no file against its parent",
+            f'"{hit.subject}" changes no file against its parent',
             f"git -C {repo} show --stat {hit.sha}",
             sha=hit.sha,
             range=hit.rev_range,
@@ -298,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
     for hit in hits:
         print(
             f"lint_rc_empty_commits: empty non-merge commit {hit.sha[:7]} "
-            f"in {hit.rev_range} -- \"{hit.subject}\" changes no file "
+            f'in {hit.rev_range} -- "{hit.subject}" changes no file '
             "against its parent."
         )
 

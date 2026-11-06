@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import pathlib
 import shlex
-from typing import Optional
 
 import pytest
 
@@ -48,7 +47,7 @@ def _bash_resolve(tmp_path: pathlib.Path, kanban_root: pathlib.Path, typed: str)
     )
 
 
-def _board(tmp_path: pathlib.Path, registry: Optional[str]) -> pathlib.Path:
+def _board(tmp_path: pathlib.Path, registry: str | None) -> pathlib.Path:
     root = tmp_path / "board"
     root.mkdir()
     if registry is not None:
@@ -65,7 +64,7 @@ def _board(tmp_path: pathlib.Path, registry: Optional[str]) -> pathlib.Path:
     ],
 )
 def test_resolved_name_matches_the_bash_resolver(
-    tmp_path: pathlib.Path, registry: Optional[str], typed: str, expected: str
+    tmp_path: pathlib.Path, registry: str | None, typed: str, expected: str
 ) -> None:
     root = _board(tmp_path, registry)
     bash = _bash_resolve(tmp_path, root, typed)

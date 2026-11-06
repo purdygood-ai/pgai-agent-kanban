@@ -159,9 +159,7 @@ def _summaries(path: pathlib.Path) -> list[str]:
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_second_certification_run_reads_nothing_the_first_run_wrote(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_second_certification_run_reads_nothing_the_first_run_wrote(runner_name: str, tmp_path: pathlib.Path) -> None:
     suite = _SUITES[runner_name]["suite"]
     writers = _SUITES[runner_name]["writers"]
     team = _fixture(tmp_path, runner_name)
@@ -174,12 +172,12 @@ def test_second_certification_run_reads_nothing_the_first_run_wrote(
     assert first.returncode == 0, _describe(first)
     for name in writers.values():
         assert _summaries(sandbox.lint(name)) == [f"written by the {_FIRST_RUN}"], name
-    assert sum(f"written by the {_FIRST_RUN}" in s for s in _summaries(aggregate)) == len(writers), (
-        "precondition: the first run's aggregate carries each writer's finding\n" + _describe(first)
-    )
-    assert sandbox.coverage(suite).is_file(), (
-        "precondition: the first run measured coverage and wrote its report\n" + _describe(first)
-    )
+    assert sum(f"written by the {_FIRST_RUN}" in s for s in _summaries(aggregate)) == len(
+        writers
+    ), "precondition: the first run's aggregate carries each writer's finding\n" + _describe(first)
+    assert sandbox.coverage(
+        suite
+    ).is_file(), "precondition: the first run measured coverage and wrote its report\n" + _describe(first)
 
     sandbox.configure("workers = 1\n")
     second = sandbox.run(team, runner_name)
@@ -191,11 +189,12 @@ def test_second_certification_run_reads_nothing_the_first_run_wrote(
             "the second run's lint wrote nothing, so the file must be absent\n" + _describe(second)
         )
     leaked = [s for s in _summaries(aggregate) if _FIRST_RUN in s]
-    assert leaked == [], (
-        f"the second run's lint/findings-{suite}.json carries the first run's findings {leaked}\n"
-        + _describe(second)
-    )
-    assert not sandbox.coverage(suite).exists(), (
+    assert (
+        leaked == []
+    ), f"the second run's lint/findings-{suite}.json carries the first run's findings {leaked}\n" + _describe(second)
+    assert not sandbox.coverage(
+        suite
+    ).exists(), (
         f"coverage/{suite}.json from the first run survived a second run that measured no coverage\n"
         + _describe(second)
     )
@@ -204,15 +203,14 @@ def test_second_certification_run_reads_nothing_the_first_run_wrote(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_leaves_earlier_certification_evidence_untouched(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_leaves_earlier_certification_evidence_untouched(runner_name: str, tmp_path: pathlib.Path) -> None:
     suite = _SUITES[runner_name]["suite"]
     team = _fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
-    seeded = [
-        sandbox.lint(name) for name in _SUITES[runner_name]["writers"].values()
-    ] + [sandbox.coverage(suite), sandbox.lint(f"durations-{suite}.json")]
+    seeded = [sandbox.lint(name) for name in _SUITES[runner_name]["writers"].values()] + [
+        sandbox.coverage(suite),
+        sandbox.lint(f"durations-{suite}.json"),
+    ]
     for path in seeded:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("certification evidence\n", encoding="utf-8")
@@ -250,13 +248,21 @@ def _clear(temp_root: str, suite: str, tmp_path: pathlib.Path) -> subprocess.Com
 def _evidence_tree(root: pathlib.Path) -> dict[str, list[pathlib.Path]]:
     files = {
         "unit": [
-            "lint/findings-unit.json", "lint/findings-unit.json.runid", "lint/durations-unit.json",
-            "lint/hygiene_unit.json", "lint/test_anti_patterns_unit.json", "coverage/unit.json",
-            "coverage/unit-data/.coverage", "coverage/unit-data/.coverage.host.1.abc",
+            "lint/findings-unit.json",
+            "lint/findings-unit.json.runid",
+            "lint/durations-unit.json",
+            "lint/hygiene_unit.json",
+            "lint/test_anti_patterns_unit.json",
+            "coverage/unit.json",
+            "coverage/unit-data/.coverage",
+            "coverage/unit-data/.coverage.host.1.abc",
         ],
         "integration": [
-            "lint/findings-integration.json", "lint/findings-integration.json.runid",
-            "lint/hygiene_integration.json", "coverage/integration.json", "coverage/integration-data/.coverage",
+            "lint/findings-integration.json",
+            "lint/findings-integration.json.runid",
+            "lint/hygiene_integration.json",
+            "coverage/integration.json",
+            "coverage/integration-data/.coverage",
         ],
         "neither": ["lint/notes.txt", "targeted-unit.exit", "pre-merge.exit"],
     }
@@ -300,6 +306,10 @@ def test_clear_with_an_unexpected_scope_removes_nothing_and_says_so(
     assert result.returncode == 0, "an unexpected scope is narrated, never fatal\n" + _describe(result)
     assert sorted(p for p in root.rglob("*") if p.is_file()) == before, "an unexpected scope removed files"
     assert all(path.exists() for paths in made.values() for path in paths)
-    for field in ("error:   gated_runner.run_evidence_scope", "message:", "remedy:  grep -n gated_runner_clear_run_evidence"):
+    for field in (
+        "error:   gated_runner.run_evidence_scope",
+        "message:",
+        "remedy:  grep -n gated_runner_clear_run_evidence",
+    ):
         assert field in result.stderr, _describe(result)
     assert os.path.isabs(result.stderr.split("remedy:", 1)[1].split()[3]), _describe(result)

@@ -171,7 +171,8 @@ import shlex
 import sys
 import tempfile
 import time
-from typing import Iterable, NoReturn, Optional
+from typing import NoReturn
+from collections.abc import Iterable
 
 # Started by file path (python3 .../overwatch/runaway.py) the module has no
 # parent package and only its own directory on sys.path: put this tree's own
@@ -269,7 +270,11 @@ COUNTERS: tuple[CounterSpec, ...] = (
     CounterSpec(COUNTER_RELEASES, "runaway_releases_per_hour", 5, _HOUR, "1h", "releases shipped"),
     CounterSpec(COUNTER_RC_CYCLES, "runaway_rc_cycles_per_day", 2, _DAY, "1d", "RC open/cancel cycles"),
     CounterSpec(
-        COUNTER_REASON_REPEATS, "runaway_reason_repeats", 3, 7 * _DAY, "7d",
+        COUNTER_REASON_REPEATS,
+        "runaway_reason_repeats",
+        3,
+        7 * _DAY,
+        "7d",
         "blocks of one task with one reason code",
     ),
     CounterSpec(COUNTER_INBOX_ENTRIES, "runaway_inbox_entries_per_day", 20, _DAY, "1d", "operator inbox entries"),
@@ -332,13 +337,13 @@ def _sed_remedy(key: str, value: str, source: str) -> str:
     return f"sed -i 's/^[[:space:]]*{key}[[:space:]]*=.*/{key} = {value}/' {shlex.quote(source)}"
 
 
-def _tiered(kanban_root: "pathlib.Path | str", project: str, key: str) -> project_cfg.TieredValue:
+def _tiered(kanban_root: pathlib.Path | str, project: str, key: str) -> project_cfg.TieredValue:
     """``[overwatch] key`` from the project's project.cfg, then kanban.cfg."""
     project_root = pathlib.Path(kanban_root) / "projects" / project
     return project_cfg.resolve_tiered_cfg_value(kanban_root, project_root, CONFIG_SECTION, key, legacy=False)
 
 
-def resolve_thresholds(kanban_root: "pathlib.Path | str", project: str) -> dict[str, int]:
+def resolve_thresholds(kanban_root: pathlib.Path | str, project: str) -> dict[str, int]:
     """Every counter's threshold for *project*, keyed by counter name.
 
     Each ``runaway_*`` key is read from ``projects/<project>/project.cfg``
@@ -368,7 +373,7 @@ def resolve_thresholds(kanban_root: "pathlib.Path | str", project: str) -> dict[
     return thresholds
 
 
-def resolve_halt_after_auto_resume(kanban_root: "pathlib.Path | str", project: str) -> bool:
+def resolve_halt_after_auto_resume(kanban_root: pathlib.Path | str, project: str) -> bool:
     """``[overwatch] halt_after_auto_resume`` for *project*.
 
     Whether a HALT the HALT-AFTER promotion wrote, once its drain completed,
@@ -422,7 +427,7 @@ class Event:
     at: str
     subject: str = PROJECT_SUBJECT
     detail: str = ""
-    requeues: Optional[int] = None
+    requeues: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Return the event as a JSON-ready dict (``requeues`` only when known)."""
@@ -437,7 +442,7 @@ class Event:
         return self.subject.split(":", 1)[0]
 
     @classmethod
-    def from_dict(cls, raw: object) -> Optional["Event"]:
+    def from_dict(cls, raw: object) -> Event | None:
         """The event, or None for a malformed entry or an unknown counter."""
         if not isinstance(raw, dict):
             return None
@@ -531,7 +536,7 @@ class RunawayResult:
     outcome: str
     trips: tuple[Trip, ...] = ()
     observed: int = 0
-    halt_path: Optional[str] = None
+    halt_path: str | None = None
     inbox_entry: str = ""
     error: dict = dataclasses.field(default_factory=dict)
     warnings: tuple[str, ...] = ()
@@ -595,14 +600,14 @@ def _checked_project(ctx: OpsContext, project: str) -> pathlib.Path:
     return project_dir
 
 
-def _now(now: Optional[datetime.datetime]) -> datetime.datetime:
-    value = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
+def _now(now: datetime.datetime | None) -> datetime.datetime:
+    value = now if now is not None else datetime.datetime.now(datetime.UTC)
     if value.tzinfo is None:
-        value = value.replace(tzinfo=datetime.timezone.utc)
+        value = value.replace(tzinfo=datetime.UTC)
     return value
 
 
-def _when(text: str) -> Optional[datetime.datetime]:
+def _when(text: str) -> datetime.datetime | None:
     """*text* as an aware datetime, or None when it is not ISO-8601."""
     return try_parse_iso(text) if isinstance(text, str) and text.strip() else None
 
@@ -647,14 +652,12 @@ class _CountersLock:
         self._op = op
         self._held = None
 
-    def __enter__(self) -> "_CountersLock":
+    def __enter__(self) -> _CountersLock:
         lock_file = _lock_path(self._ctx, self._project)
         deadline = time.monotonic() + LOCK_WAIT_SECONDS
         while True:
             try:
-                self._held = acquire_lock(
-                    lock_file, holder=_LOCK_HOLDER, pid=os.getpid(), op=self._op, task="none"
-                )
+                self._held = acquire_lock(lock_file, holder=_LOCK_HOLDER, pid=os.getpid(), op=self._op, task="none")
                 return self
             except LockContended as busy:
                 if time.monotonic() >= deadline:
@@ -726,7 +729,10 @@ def _release_events(project_dir: pathlib.Path) -> Iterable[Event]:
             stamp = format_iso(closed)
             opened = one_line(data.get("opened_at") or "unknown")
             yield Event(
-                COUNTER_RC_CYCLES, f"rc-cancel:{rc}:{stamp}", stamp, PROJECT_SUBJECT,
+                COUNTER_RC_CYCLES,
+                f"rc-cancel:{rc}:{stamp}",
+                stamp,
+                PROJECT_SUBJECT,
                 f"cancelled {rc} (opened {opened})",
             )
 
@@ -751,12 +757,16 @@ def _block_events(project_dir: pathlib.Path) -> Iterable[Event]:
         yield _block_event(task_id, record.reason_code, format_iso(blocked), record.requeues)
 
 
-def _block_event(task_id: str, reason_code: str, at: str, requeues: Optional[int] = None) -> Event:
+def _block_event(task_id: str, reason_code: str, at: str, requeues: int | None = None) -> Event:
     """One ``reason_repeats`` event: *task_id* blocked with *reason_code* at *at*,
     its Block Record having been requeued *requeues* times (None: unknown)."""
     return Event(
-        COUNTER_REASON_REPEATS, f"block:{task_id}:{at}", at, f"{task_id}:{reason_code}",
-        f"{task_id} blocked: {reason_code}", requeues,
+        COUNTER_REASON_REPEATS,
+        f"block:{task_id}:{at}",
+        at,
+        f"{task_id}:{reason_code}",
+        f"{task_id} blocked: {reason_code}",
+        requeues,
     )
 
 
@@ -773,7 +783,10 @@ def _inbox_events(ctx: OpsContext, project: str, own_entries: set[str]) -> Itera
             continue
         question = one_line(entry.question)[:120]
         yield Event(
-            COUNTER_INBOX_ENTRIES, f"inbox:{entry.entry_id}", format_iso(written), PROJECT_SUBJECT,
+            COUNTER_INBOX_ENTRIES,
+            f"inbox:{entry.entry_id}",
+            format_iso(written),
+            PROJECT_SUBJECT,
             f"{entry.entry_id} from {one_line(entry.source)}: {question}",
         )
 
@@ -782,16 +795,19 @@ def _own_inbox_entries(state: _State) -> set[str]:
     return {str(t.get("inbox")) for t in state.trips if t.get("inbox")}
 
 
-def _observe_into(ctx: OpsContext, project: str, project_dir: pathlib.Path, state: _State,
-                  now: datetime.datetime) -> int:
+def _observe_into(
+    ctx: OpsContext, project: str, project_dir: pathlib.Path, state: _State, now: datetime.datetime
+) -> int:
     cutoff = now - datetime.timedelta(seconds=_RETENTION_SECONDS)
     seen = state.keys()
     fresh = (
-        e for source in (
+        e
+        for source in (
             _release_events(project_dir),
             _block_events(project_dir),
             _inbox_events(ctx, project, _own_inbox_entries(state)),
-        ) for e in source
+        )
+        for e in source
         if (_when(e.at) or now) >= cutoff
     )
     return _add(state, fresh, seen)
@@ -840,9 +856,13 @@ def _requeue_retries(events: Iterable[Event]) -> set[str]:
     return retries
 
 
-def _counted(state: _State, spec: CounterSpec, now: datetime.datetime,
-             latest: dict[tuple[str, str], datetime.datetime],
-             retries: set[str]) -> dict[str, list[tuple[datetime.datetime, Event]]]:
+def _counted(
+    state: _State,
+    spec: CounterSpec,
+    now: datetime.datetime,
+    latest: dict[tuple[str, str], datetime.datetime],
+    retries: set[str],
+) -> dict[str, list[tuple[datetime.datetime, Event]]]:
     """*spec*'s counted events per subject, oldest first: inside its window,
     newer than the subject's last trip, and (for ``reason_repeats``) not a
     retry after a triage requeue (*retries*, from :func:`_requeue_retries`)."""
@@ -875,14 +895,16 @@ def _evaluate_state(state: _State, thresholds: dict[str, int], now: datetime.dat
         for subject in sorted(groups):
             counted = groups[subject]
             if len(counted) > threshold:
-                trips.append(Trip(
-                    counter=spec.name,
-                    subject=subject,
-                    threshold=threshold,
-                    count=len(counted),
-                    window=spec.window_label,
-                    events=tuple(e for _, e in counted[-EVIDENCE_EVENTS:]),
-                ))
+                trips.append(
+                    Trip(
+                        counter=spec.name,
+                        subject=subject,
+                        threshold=threshold,
+                        count=len(counted),
+                        window=spec.window_label,
+                        events=tuple(e for _, e in counted[-EVIDENCE_EVENTS:]),
+                    )
+                )
     return tuple(trips)
 
 
@@ -897,10 +919,10 @@ def record_event(
     counter: str,
     *,
     key: str,
-    at: "datetime.datetime | str",
-    subject: Optional[str] = None,
+    at: datetime.datetime | str,
+    subject: str | None = None,
     detail: str = "",
-    requeues: Optional[int] = None,
+    requeues: int | None = None,
 ) -> bool:
     """Add one event to *project*'s persisted counters; return False when its key was already there.
 
@@ -961,7 +983,7 @@ def record_event(
     return bool(added)
 
 
-def observe(ctx: OpsContext, project: str, *, now: Optional[datetime.datetime] = None) -> int:
+def observe(ctx: OpsContext, project: str, *, now: datetime.datetime | None = None) -> int:
     """Read *project*'s durable records into its persisted counters; return the new events.
 
     Raises:
@@ -982,8 +1004,8 @@ def evaluate(
     ctx: OpsContext,
     project: str,
     *,
-    now: Optional[datetime.datetime] = None,
-    thresholds: Optional[dict[str, int]] = None,
+    now: datetime.datetime | None = None,
+    thresholds: dict[str, int] | None = None,
 ) -> tuple[Trip, ...]:
     """The counters that trip now, from the persisted events alone. Reads only.
 
@@ -1008,8 +1030,9 @@ def _stop_contract(ctx: OpsContext, project: str, trips: tuple[Trip, ...]) -> di
     }
 
 
-def _halt_body(ctx: OpsContext, project: str, trips: tuple[Trip, ...], contract: dict[str, str],
-               now: datetime.datetime) -> str:
+def _halt_body(
+    ctx: OpsContext, project: str, trips: tuple[Trip, ...], contract: dict[str, str], now: datetime.datetime
+) -> str:
     first = trips[0]
     reason = first.reason if len(trips) == 1 else f"{first.reason} (and {len(trips) - 1} more counter(s))"
     lines = [
@@ -1082,7 +1105,7 @@ def _inbox_text(ctx: OpsContext, project: str, trips: tuple[Trip, ...], halt_pat
     }
 
 
-def run(ctx: OpsContext, project: str, *, now: Optional[datetime.datetime] = None) -> RunawayResult:
+def run(ctx: OpsContext, project: str, *, now: datetime.datetime | None = None) -> RunawayResult:
     """Observe, evaluate and, on a trip, stop *project* with a chain HALT and one inbox entry.
 
     A project that already has a HALT is left alone (``already-halted``):
@@ -1126,19 +1149,19 @@ def run(ctx: OpsContext, project: str, *, now: Optional[datetime.datetime] = Non
             warnings.append(f"the HALT stands but no inbox entry was written: {exc.error}: {exc.message}")
         stamp = format_iso(moment)
         for trip in trips:
-            state.trips.append({
-                "counter": trip.counter,
-                "subject": trip.subject,
-                "at": stamp,
-                "count": trip.count,
-                "threshold": trip.threshold,
-                "halt": "written",
-                "inbox": entry_id,
-            })
+            state.trips.append(
+                {
+                    "counter": trip.counter,
+                    "subject": trip.subject,
+                    "at": stamp,
+                    "count": trip.count,
+                    "threshold": trip.threshold,
+                    "halt": "written",
+                    "inbox": entry_id,
+                }
+            )
         _save(path, state, moment)
-    return RunawayResult(
-        project, OUTCOME_TRIPPED, trips, observed, str(halt_path), entry_id, contract, tuple(warnings)
-    )
+    return RunawayResult(project, OUTCOME_TRIPPED, trips, observed, str(halt_path), entry_id, contract, tuple(warnings))
 
 
 # ---------------------------------------------------------------------------
@@ -1160,7 +1183,8 @@ def _build_parser() -> argparse.ArgumentParser:
     def common(p: argparse.ArgumentParser) -> None:
         p.add_argument("--project", required=True, help="the project to check, e.g. pgai-agent-kanban")
         p.add_argument(
-            "--kanban-root", default="",
+            "--kanban-root",
+            default="",
             help="the kanban root (default: the root the environment names, PGAI_AGENT_KANBAN_ROOT_PATH)",
         )
         p.add_argument("--json", action="store_true", help="print the result as one JSON object")
@@ -1193,7 +1217,7 @@ def _context(kanban_root: str) -> OpsContext:
         )
 
 
-def _cli_now(text: str) -> Optional[datetime.datetime]:
+def _cli_now(text: str) -> datetime.datetime | None:
     if not text.strip():
         return None
     when = _when(text)
@@ -1215,14 +1239,20 @@ def _status_rows(ctx: OpsContext, project: str, now: datetime.datetime) -> list[
     for spec in COUNTERS:
         counts = {subject: len(events) for subject, events in _counted(state, spec, now, latest, retries).items()}
         subject, count = max(counts.items(), key=lambda kv: (kv[1], kv[0]), default=(PROJECT_SUBJECT, 0))
-        rows.append({
-            "counter": spec.name, "key": spec.cfg_key, "window": spec.window_label,
-            "threshold": thresholds[spec.name], "count": count, "subject": subject,
-        })
+        rows.append(
+            {
+                "counter": spec.name,
+                "key": spec.cfg_key,
+                "window": spec.window_label,
+                "threshold": thresholds[spec.name],
+                "count": count,
+                "subject": subject,
+            }
+        )
     return rows
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the command line; return the exit code."""
     parser = _build_parser()
     args = parser.parse_args(argv)

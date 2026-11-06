@@ -102,7 +102,7 @@ class Case:
         tmp_path: pathlib.Path,
         *,
         registered: bool = True,
-        cfg: "str | None" = None,
+        cfg: str | None = None,
         write_cfg: bool = True,
     ) -> None:
         self.tmp_path = tmp_path
@@ -113,9 +113,7 @@ class Case:
         (self.root / "tmp").mkdir()
         (self.root / "kanban.cfg").write_text("[paths]\n", encoding="utf-8")
         registered_name = _PROJECT if registered else "other-project"
-        (self.root / "projects.cfg").write_text(
-            f"[project:{registered_name}]\npriority = 1\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{registered_name}]\npriority = 1\n", encoding="utf-8")
         self.dev, self.origin = _dev_tree(tmp_path / "repos")
         if write_cfg:
             text = cfg if cfg is not None else f"[project]\ndev_tree_path = {self.dev}\n"
@@ -161,9 +159,7 @@ class Case:
         return [line for line in self.gh_log.read_text(encoding="utf-8").splitlines() if line]
 
     def run_lib(self, call: str, **extra_env: str):
-        return run_bash(
-            self.tmp_path, f"source {_LIB} && {call}", base_env=self.env(**extra_env), timeout=60
-        )
+        return run_bash(self.tmp_path, f"source {_LIB} && {call}", base_env=self.env(**extra_env), timeout=60)
 
     def run_finalize(self, **extra_env: str):
         result = run_bash(
@@ -262,7 +258,8 @@ def test_finalize_release_pushes_for_registered_project_without_push_key(tmp_pat
     # matters is that the gate let the push through to the remote.
     assert any("main" in line.split() for line in case.pushes()), (
         "expected finalize-release to push main to the stubbed remote; stub log:\n"
-        + "\n".join(case.network_calls()) + f"\n--- output ---\n{output}"
+        + "\n".join(case.network_calls())
+        + f"\n--- output ---\n{output}"
     )
     assert _skip_lines(output) == []
 

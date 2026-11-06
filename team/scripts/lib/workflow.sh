@@ -85,6 +85,11 @@
 #   - read_ini must be available before sourcing this file, or ini_parser.sh
 #     must be locatable at the same directory as this script.
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_WORKFLOW_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _WORKFLOW_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # Bootstrap: ensure read_ini is available.
 # ---------------------------------------------------------------------------
@@ -161,6 +166,8 @@ wf_version_semantics() {
 #   1. Explicit directory argument (when non-empty and exists)
 #   2. $PGAI_AGENT_KANBAN_ROOT_PATH/workflows/
 #   3. team/workflows/ relative to TEAM_ROOT (or this script's location)
+# then a last fallback, workflows/ beside this library's scripts/ directory
+# (<lib>/../../workflows: <root>/workflows in an installed kanban).
 #
 # Prints the resolved path on success; returns 0.
 # Prints an error to stderr and returns 1 when no root can be found.
@@ -193,7 +200,7 @@ _wf_resolve_workflows_root() {
     # Fall back to the directory two levels above this script (team/scripts/lib/ → team/).
     local _team_root="${TEAM_ROOT:-}"
     if [[ -z "$_team_root" ]]; then
-        _team_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+        _team_root="$(cd "${_WORKFLOW_LIB_DIR}/../../.." && pwd)"
     fi
     local _team_dir="${_team_root}/team/workflows"
     if [[ -d "$_team_dir" ]]; then
@@ -201,17 +208,19 @@ _wf_resolve_workflows_root() {
         return 0
     fi
 
-    # Also try team/ directly under the script's grandparent (when BASH_SOURCE
-    # is team/scripts/lib/workflow.sh, two parents up is the repo root and
-    # team/workflows is a sibling of team/scripts).
+    # Last fallback: workflows/ beside this library's scripts/ directory,
+    # i.e. <lib>/../../workflows. In an installed kanban (install.sh
+    # flattens team/ onto the root) that is <root>/workflows, found with no
+    # root variable set; in a dev tree it is team/workflows, which tier 3
+    # has already found.
     local _script_team_dir
-    _script_team_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/workflows"
+    _script_team_dir="$(cd "${_WORKFLOW_LIB_DIR}/../.." && pwd)/workflows"
     if [[ -d "$_script_team_dir" ]]; then
         printf '%s' "$_script_team_dir"
         return 0
     fi
 
-    echo "workflow dispatcher: no workflows root found (checked: PGAI_AGENT_KANBAN_ROOT_PATH/workflows, team/workflows)" >&2
+    echo "workflow dispatcher: no workflows root found (checked: PGAI_AGENT_KANBAN_ROOT_PATH/workflows, team/workflows, workflows/ beside scripts/)" >&2
     return 1
 }
 

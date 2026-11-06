@@ -49,7 +49,8 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
-from typing import Iterator, Optional, TextIO
+from typing import TextIO
+from collections.abc import Iterator
 
 # Run by file path (``python3 .../eligibility.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -83,11 +84,11 @@ __all__ = ["list_eligible_requirements"]
 AUTO_SENTINELS = {"auto", "next-patch", ""}
 
 # Non-requirements intake items (BUG- and PRIORITY- prefixes).
-_NON_REQ_BUNDLE_RE = re.compile(r'^(PRIORITY-[0-9]{4,}-.+|BUG-[0-9]{4,}-.+)\.md$', re.IGNORECASE)
-_EXPLICIT_VER_RE = re.compile(r'^v?\d+\.\d+\.\d+$')
+_NON_REQ_BUNDLE_RE = re.compile(r"^(PRIORITY-[0-9]{4,}-.+|BUG-[0-9]{4,}-.+)\.md$", re.IGNORECASE)
+_EXPLICIT_VER_RE = re.compile(r"^v?\d+\.\d+\.\d+$")
 
 
-def _version_triple(value: str) -> Optional[tuple]:
+def _version_triple(value: str) -> tuple | None:
     """``vX.Y.Z`` (missing parts read 0) as an int triple, or None."""
     parts = value.lstrip("v").split(".")
     while len(parts) < 3:
@@ -137,9 +138,9 @@ def _target_value(text: str) -> str:
 def list_eligible_requirements(
     req_dir: pathlib.Path,
     last_released: str,
-    max_minor: Optional[int] = CEILING_DEFAULTS["max_minor"],
-    max_major: Optional[int] = CEILING_DEFAULTS["max_major"],
-    max_patch: Optional[int] = CEILING_DEFAULTS["max_patch"],
+    max_minor: int | None = CEILING_DEFAULTS["max_minor"],
+    max_major: int | None = CEILING_DEFAULTS["max_major"],
+    max_patch: int | None = CEILING_DEFAULTS["max_patch"],
     version_semantics: str = "semver",
     *,
     err: TextIO = sys.stderr,
@@ -209,12 +210,12 @@ def list_eligible_requirements(
     return lines
 
 
-def _ceiling_arg(key: str, value: str) -> Optional[int]:
+def _ceiling_arg(key: str, value: str) -> int | None:
     """One ceiling argument: a number, ``none`` (None) or empty (the default)."""
     return parse_ceiling(key, value).limit
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("-h", "--help"):

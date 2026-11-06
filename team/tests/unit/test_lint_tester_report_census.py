@@ -150,9 +150,7 @@ def test_inline_python_in_a_shell_heredoc_is_reported(tmp_path: pathlib.Path) ->
     )
     path = _seed(tmp_path, "team/scripts/lib/cm/reader.sh", body)
     findings = _findings(_scan(tmp_path, path))
-    assert [f.split(": matches")[0] for f in findings] == [
-        _PREFIX + "team/scripts/lib/cm/reader.sh:5"
-    ], findings
+    assert [f.split(": matches")[0] for f in findings] == [_PREFIX + "team/scripts/lib/cm/reader.sh:5"], findings
 
 
 # ---------------------------------------------------------------------------

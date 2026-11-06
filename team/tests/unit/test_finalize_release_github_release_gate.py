@@ -70,7 +70,9 @@ def _require_git() -> None:
 def _git(repo: pathlib.Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout
 
 
@@ -79,7 +81,9 @@ def _build_repos(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     origin = tmp_path / "origin.git"
     subprocess.run(
         ["git", "init", "--bare", "--initial-branch=main", str(origin)],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     repo = tmp_path / "dev_repo"
     repo.mkdir()
@@ -97,9 +101,7 @@ def _build_repos(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     return repo, origin
 
 
-def _build_kanban_root(
-    tmp_path: pathlib.Path, repo: pathlib.Path, push_to_remote: str
-) -> pathlib.Path:
+def _build_kanban_root(tmp_path: pathlib.Path, repo: pathlib.Path, push_to_remote: str) -> pathlib.Path:
     """A throwaway kanban root with one project using *push_to_remote*."""
     root = tmp_path / "kanban_root"
     proj = root / "projects" / _PROJECT
@@ -107,9 +109,7 @@ def _build_kanban_root(
     (root / "logs").mkdir()
     (root / "tmp").mkdir()
     (root / "kanban.cfg").write_text("[paths]\n", encoding="utf-8")
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     (proj / "project.cfg").write_text(
         "[project]\n"
         f"project_name = {_PROJECT}\n"
@@ -160,8 +160,14 @@ def _run_finalize(tmp_path: pathlib.Path, push_to_remote: str):
     )
     argv = ["bash", str(_FINALIZE), "--project", _PROJECT, "--yes", _VERSION]
     proc = subprocess.Popen(
-        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(foreign_cwd), start_new_session=True,
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(foreign_cwd),
+        start_new_session=True,
     )
     try:
         stdout, stderr = proc.communicate(timeout=_TIMEOUT_SECONDS)
@@ -178,10 +184,7 @@ def _release_create_calls(calls: list[list[str]]) -> list[list[str]]:
 
 
 def _diagnostic(rc: int, stdout: str, stderr: str, calls: list[list[str]]) -> str:
-    return (
-        f"exit={rc}\ngh calls={calls!r}\n"
-        f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
-    )
+    return f"exit={rc}\ngh calls={calls!r}\n" f"--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -195,18 +198,14 @@ def test_local_only_project_creates_no_github_release(tmp_path: pathlib.Path) ->
     diag = _diagnostic(rc, stdout, stderr, calls)
 
     assert rc == 0, f"finalize-release should complete locally.\n{diag}"
-    assert _release_create_calls(calls) == [], (
-        f"A local-only project must not create a GitHub release.\n{diag}"
-    )
-    assert _SKIP_NARRATION in stdout, (
-        f"The skipped GitHub release step must be narrated with {_SKIP_NARRATION!r}.\n{diag}"
-    )
-    assert "GitHub release: skipped (push_to_remote=false)" in stdout, (
-        f"The summary must report the GitHub release as skipped by push policy.\n{diag}"
-    )
-    assert _git(origin, "for-each-ref").strip() == "", (
-        f"A local-only project must leave origin untouched.\n{diag}"
-    )
+    assert _release_create_calls(calls) == [], f"A local-only project must not create a GitHub release.\n{diag}"
+    assert (
+        _SKIP_NARRATION in stdout
+    ), f"The skipped GitHub release step must be narrated with {_SKIP_NARRATION!r}.\n{diag}"
+    assert (
+        "GitHub release: skipped (push_to_remote=false)" in stdout
+    ), f"The summary must report the GitHub release as skipped by push policy.\n{diag}"
+    assert _git(origin, "for-each-ref").strip() == "", f"A local-only project must leave origin untouched.\n{diag}"
 
 
 def test_pushing_project_creates_exactly_one_github_release(tmp_path: pathlib.Path) -> None:
@@ -216,18 +215,10 @@ def test_pushing_project_creates_exactly_one_github_release(tmp_path: pathlib.Pa
 
     assert rc == 0, f"finalize-release should complete.\n{diag}"
     creates = _release_create_calls(calls)
-    assert len(creates) == 1, (
-        f"A pushing project must create exactly one GitHub release.\n{diag}"
-    )
-    assert creates[0][2] == _VERSION, (
-        f"The GitHub release must be created for {_VERSION}.\n{diag}"
-    )
-    assert _SKIP_NARRATION not in stdout, (
-        f"A pushing project must not narrate the GitHub release as skipped.\n{diag}"
-    )
-    assert "GitHub release: created" in stdout, (
-        f"The summary must report the GitHub release as created.\n{diag}"
-    )
-    assert _git(origin, "tag", "--list", _VERSION).strip() == _VERSION, (
-        f"The release tag must reach the fixture origin.\n{diag}"
-    )
+    assert len(creates) == 1, f"A pushing project must create exactly one GitHub release.\n{diag}"
+    assert creates[0][2] == _VERSION, f"The GitHub release must be created for {_VERSION}.\n{diag}"
+    assert _SKIP_NARRATION not in stdout, f"A pushing project must not narrate the GitHub release as skipped.\n{diag}"
+    assert "GitHub release: created" in stdout, f"The summary must report the GitHub release as created.\n{diag}"
+    assert (
+        _git(origin, "tag", "--list", _VERSION).strip() == _VERSION
+    ), f"The release tag must reach the fixture origin.\n{diag}"

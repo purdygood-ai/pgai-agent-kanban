@@ -2,8 +2,9 @@
 # team/scripts/lib/provider_claude.sh
 # Claude implementation of the five-function wake provider interface.
 #
-# Source this file in wake/claude.sh (after argument parsing, before sourcing
-# wake_driver.sh / wake_common.sh). It defines the provider identity
+# Sourced by lib/wake_entry.sh, which wake/claude.sh names it to (after
+# argument parsing and the active-provider fast-exit check, before sourcing
+# wake_common.sh / wake_driver.sh). It defines the provider identity
 # constants and exactly the five interface functions below — no pipeline
 # logic. The shared pipeline lives in lib/wake_driver.sh and its sibling
 # stage files (wake_driver_prep.sh, wake_driver_worktree.sh,
@@ -226,7 +227,7 @@ claude_refuse_if_cli_too_old() {
 # ---------------------------------------------------------------------------
 # provider_env_preflight
 # Check that the provider CLI is available in PATH.
-# Called by wake/claude.sh before wake_driver.sh / wake_common.sh are sourced.
+# Called by lib/wake_entry.sh before wake_common.sh / wake_driver.sh are sourced.
 # ---------------------------------------------------------------------------
 provider_env_preflight() {
     command -v "$PROVIDER_CLI" >/dev/null 2>&1 || {

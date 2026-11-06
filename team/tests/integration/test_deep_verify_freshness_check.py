@@ -46,7 +46,6 @@ import os
 import pathlib
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path resolution -- anchored to this file's own location.
@@ -70,9 +69,7 @@ def _make_kanban_root(tmp_path: pathlib.Path, *, register_project: str | None = 
     root = tmp_path / "kanban_root"
     (root / "projects").mkdir(parents=True, exist_ok=True)
     if register_project:
-        (root / "projects.cfg").write_text(
-            f"[project:{register_project}]\npriority = 1\n", encoding="utf-8"
-        )
+        (root / "projects.cfg").write_text(f"[project:{register_project}]\npriority = 1\n", encoding="utf-8")
     else:
         (root / "projects.cfg").write_text("", encoding="utf-8")
     return root
@@ -279,15 +276,21 @@ def test_failed_to_build_and_could_not_attempt_carry_different_messages(
 ) -> None:
     kanban_root_a = _make_kanban_root(tmp_path / "a")
     _write_ledger(
-        kanban_root_a, "demo", timestamp="2026-09-01T03:15:00+00:00",
-        version=_TARGET_VERSION, verdict="failed-to-build",
+        kanban_root_a,
+        "demo",
+        timestamp="2026-09-01T03:15:00+00:00",
+        version=_TARGET_VERSION,
+        verdict="failed-to-build",
     )
     result_a = _run_freshness_check(kanban_root_a, "demo")
 
     kanban_root_b = _make_kanban_root(tmp_path / "b")
     _write_ledger(
-        kanban_root_b, "demo", timestamp="2026-09-01T03:15:00+00:00",
-        version=_TARGET_VERSION, verdict="could-not-attempt",
+        kanban_root_b,
+        "demo",
+        timestamp="2026-09-01T03:15:00+00:00",
+        version=_TARGET_VERSION,
+        verdict="could-not-attempt",
     )
     result_b = _run_freshness_check(kanban_root_b, "demo")
 

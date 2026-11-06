@@ -111,6 +111,9 @@ cd ~/develop/pgai-agent-kanban
 pip install -r requirements.txt --break-system-packages
 
 # 3. Install the kanban (default root: $HOME/pgai_agent_kanban).
+#    Pass --add-claude-agents / --add-codex-agents to also deploy the
+#    role wrappers, and --add-claude-skills / --add-codex-skills to install
+#    the staged skills into the Claude Code and Codex skill homes.
 ./install.sh
 
 # 4. Register a project (its repo, dev tree, and workflow type).
@@ -144,9 +147,9 @@ measures.
      generate_measured_pace_docs.py' (from the repo root) and
      commit the result instead. -->
 
-**Per-task wall time (measured):** 5.4–272.3 min, median 16.7 min. Sample: 296 RC(s), 2498 task(s), window = every rollup available at render time (v1.27.1 .. v2.53.10). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
+**Per-task wall time (measured):** 5.4–272.3 min, median 16.2 min. Sample: 334 RC(s), 2768 task(s), window = every rollup available at render time (v1.27.1 .. v3.4.23). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
 
-**Composed RC cost (measured):** ~166 min = 1.0×pm bookend + 4.1×coder + 1.3×writer + 1.0×tester + 1.5×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
+**Composed RC cost (measured):** ~159 min = 1.0×pm bookend + 3.9×coder + 1.3×writer + 1.0×tester + 1.6×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
 
 <!-- MEASURED-PACE-GENERATED:END -->
 
@@ -321,6 +324,14 @@ project — there is no special flag, no special mode:
   ├── cm-release-pre-tag.sh      # before the tag
   └── cm-release-post-tag.sh     # after the tag (best-effort)
   ```
+- **Provider agents and skills.** `install.sh` and `upgrade.sh` deploy
+  the role wrappers with `--add-claude-agents` / `--add-codex-agents`.
+  Skills — the kanban's own and any you add — are staged in
+  `skills/<provider>/<name>/` under the kanban root;
+  `scripts/install-skills.sh` installs them into the provider CLI homes,
+  and `install.sh` and `upgrade.sh` run it after the deposit with
+  `--add-claude-skills` / `--add-codex-skills`. See
+  [docs/operator-commands.md, "install-skills"](docs/operator-commands.md#install-skills--install-staged-skills-into-the-provider-cli-homes).
 
 ---
 

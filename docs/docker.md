@@ -330,9 +330,11 @@ In order, it:
    `pgai-kanban:latest`, or `--image-tag`). **It never builds or pulls.** A
    missing image is refused with exit `1` (`container_up.image_missing`), and
    the remedy is a `docker/build.sh` command.
-3. Runs the image detached under that name, with the same mounts and
-   environment as `container-shell.sh`: `$HOME` and the kanban root at
-   matching paths, plus any `--mount` you add.
+3. Runs the image detached under that name (`run -d -i -t --init`), with the
+   same mounts and environment as `container-shell.sh`: `$HOME` and the kanban
+   root at matching paths, plus any `--mount` you add. `-i -t` keeps the
+   entrypoint's login shell waiting instead of exiting. `--init` gives the
+   container a reaping PID 1 (see [PID 1 must reap](#pid-1-must-reap)).
 4. Starts exactly one scheduler inside it: the tmux session `pseudocron` running
    `scripts/pseudocron.py` and logging to `logs/pseudocron.log`. That is the
    same command as step 7.
@@ -375,6 +377,33 @@ Exit codes: `0` up with a confirmed heartbeat, already up, or skipped; `1`
 refused (host wake lines, missing image, missing kanban root or `$HOME`,
 engine missing or an engine command failed) or no heartbeat within the
 timeout; `2` usage error.
+
+### PID 1 must reap
+
+A container's PID 1 inherits every orphaned process in it, and only a PID 1
+that reaps them keeps them from staying zombies. In a container whose PID 1
+does not reap, every orphan stays a zombie for as long as the container runs,
+and enough of them exhaust the host's process IDs. `container-up.sh` and
+`container-shell.sh` pass `--init` for that reason: the engine's init runs as
+PID 1 and reaps, and the entrypoint's shell runs as its child.
+
+**A container you start by hand needs `--init` too, or an entrypoint that
+reaps.** The image ships no init of its own: its entrypoint ends in
+`exec bash -l`, so without `--init` PID 1 is that shell, or whatever command
+replaces the entrypoint. The detached keep-alive pattern, where you start the
+container in the background and `docker exec` into it, looks like this:
+
+<!-- doc-lint: skip — starts a detached container by hand; requires a built image and a running container engine the harness does not have -->
+```bash
+docker run -d -i -t --init --name kanban-by-hand \
+    -v "$HOME:$HOME" -v "$PGAI_AGENT_KANBAN_ROOT_PATH:$PGAI_AGENT_KANBAN_ROOT_PATH" \
+    -e "HOME=$HOME" -e "PGAI_AGENT_KANBAN_ROOT_PATH=$PGAI_AGENT_KANBAN_ROOT_PATH" \
+    pgai-kanban:latest
+```
+
+A keep-alive command in place of the entrypoint, such as `sleep infinity` or
+`tail -f /dev/null`, reaps nothing at all, so it needs `--init` as well. Under
+podman, also pass `--userns=keep-id` (see [Podman](#podman)).
 
 ### One scheduler, one heartbeat
 
@@ -899,7 +928,8 @@ the mounted install updates in place.
 [`team/scripts/container-shell.sh`](../team/scripts/container-shell.sh) takes one
 flag in the normal case: `--image-tag`, naming the image you built. It resolves its paths from your environment, supplies
 the two standard mounts, exports the environment the entrypoint needs, and runs
-whichever container engine you configured.
+whichever container engine you configured. It passes `--init`, so the container
+has a reaping PID 1; see [PID 1 must reap](#pid-1-must-reap).
 
 The launcher exists at two paths and they are the same script: `team/scripts/container-shell.sh`
 in a repository checkout, and `scripts/container-shell.sh` under the kanban root
@@ -992,15 +1022,16 @@ docker_exe = docker
 ```
 
 RedHat-lineage shops that standardize on podman set `docker_exe = podman`. The
-launcher passes flags both engines share (`run --rm -it -v -e`), with one
+launcher passes flags both engines share (`run --rm -it --init -v -e`), with one
 engine-specific addition. The images run as the unprivileged `kanban` user, and
 rootless podman — the default on Rocky 9 — maps the operator's own files to
 container root rather than to that user, so the in-container user could not
 write the bind-mounted install. When the resolved engine is podman, the mounts
 helper (`team/scripts/lib/container_mounts.sh`) therefore adds a user-namespace
 mapping to the run arguments, so the in-container user owns the operator's
-files. Under docker the arguments carry no mapping and are unchanged. An absent
-`[docker]` section or a blank value falls back
+files. Under docker the arguments carry no mapping and are unchanged. Under
+podman, `--init` also needs the engine's init binary (`catatonit`) on the host.
+An absent `[docker]` section or a blank value falls back
 to `docker` with no error; a configured value that is not an executable on `PATH`
 fails loud, naming both the `docker_exe` key and the offending value. See
 `team/scripts/lib/docker_engine.sh` for the resolution rules. `container-up.sh`,

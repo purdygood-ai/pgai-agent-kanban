@@ -75,6 +75,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="cm-release-worktree-removal-guard")
 
+
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
 
@@ -98,19 +99,14 @@ def _extract_function(source_path: pathlib.Path, function_name: str) -> str:
     header = f"{function_name}() {{"
     start = next((i for i, l in enumerate(lines) if l == header), None)
     assert start is not None, (
-        f"Could not find '{header}' in {source_path}. "
-        "The function may have been renamed or reformatted."
+        f"Could not find '{header}' in {source_path}. " "The function may have been renamed or reformatted."
     )
     end = next((i for i in range(start + 1, len(lines)) if lines[i] == "}"), None)
-    assert end is not None, (
-        f"Could not find the closing brace for {function_name}() in {source_path}."
-    )
+    assert end is not None, f"Could not find the closing brace for {function_name}() in {source_path}."
     return "\n".join(lines[start : end + 1])
 
 
-def _git(
-    *args: str, cwd: pathlib.Path, check: bool = True
-) -> subprocess.CompletedProcess:
+def _git(*args: str, cwd: pathlib.Path, check: bool = True) -> subprocess.CompletedProcess:
     """Run a git command in *cwd* and return the CompletedProcess."""
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
@@ -127,17 +123,13 @@ def _init_repo_with_branch(repo_root: pathlib.Path, branch: str) -> None:
     _git("init", "--initial-branch=main", cwd=repo_root)
     _git("config", "--local", "user.email", "test@pgai.local", cwd=repo_root)
     _git("config", "--local", "user.name", "PGAI Test", cwd=repo_root)
-    (repo_root / "README.md").write_text(
-        "# worktree removal guard test repo\n", encoding="utf-8"
-    )
+    (repo_root / "README.md").write_text("# worktree removal guard test repo\n", encoding="utf-8")
     _git("add", "README.md", cwd=repo_root)
     _git("commit", "-m", "Initial commit", cwd=repo_root)
     _git("branch", branch, cwd=repo_root)
 
 
-def _run_guard(
-    tmp_path: pathlib.Path, repo_root: pathlib.Path, branch: str
-) -> BashResult:
+def _run_guard(tmp_path: pathlib.Path, repo_root: pathlib.Path, branch: str) -> BashResult:
     """Source the real _cm_remove_stale_worktrees_for_branch() and invoke it
     against *repo_root* and *branch*."""
     fn_body = _extract_function(_RELEASE_FINALIZE_SH, _FUNCTION_NAME)
@@ -160,9 +152,7 @@ class TestLeftoverWorktreeRemoved:
     """A linked worktree pinned to the target branch is force-removed by the
     guard, unblocking the branch deletion that fails without it."""
 
-    def test_leftover_worktree_is_removed_and_branch_delete_then_succeeds(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_leftover_worktree_is_removed_and_branch_delete_then_succeeds(self, tmp_path: pathlib.Path) -> None:
         """Seed a leftover linked worktree on the RC branch (simulating a CODER
         task worktree whose teardown did not run to completion), confirm a bare
         `git branch -D` fails first, run the guard, then confirm the worktree
@@ -177,18 +167,14 @@ class TestLeftoverWorktreeRemoved:
         # Document the failure mode the guard exists to prevent: a bare
         # `git branch -D` fails while a linked worktree still pins the
         # branch.
-        pre_guard_delete = _git(
-            "branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False
-        )
+        pre_guard_delete = _git("branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False)
         assert pre_guard_delete.returncode != 0, (
             "git branch -D must fail BEFORE the guard runs, while a linked "
             "worktree still pins the branch -- this is the failure mode "
             "this test guards against.\n"
             f"stdout: {pre_guard_delete.stdout}\nstderr: {pre_guard_delete.stderr}"
         )
-        assert "worktree" in (
-            pre_guard_delete.stdout + pre_guard_delete.stderr
-        ).lower(), (
+        assert "worktree" in (pre_guard_delete.stdout + pre_guard_delete.stderr).lower(), (
             "Expected the pre-guard branch -D failure to mention 'worktree'.\n"
             f"stdout: {pre_guard_delete.stdout}\nstderr: {pre_guard_delete.stderr}"
         )
@@ -200,27 +186,21 @@ class TestLeftoverWorktreeRemoved:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert f"Removed stale worktree: {worktree_path}" in result.stdout, (
-            f"Expected a 'Removed stale worktree' line naming the worktree path.\n"
-            f"stdout: {result.stdout}"
+            f"Expected a 'Removed stale worktree' line naming the worktree path.\n" f"stdout: {result.stdout}"
         )
-        assert "Removed 1 stale worktree(s)" in result.stdout, (
-            f"Expected the removal-count summary line.\nstdout: {result.stdout}"
-        )
+        assert (
+            "Removed 1 stale worktree(s)" in result.stdout
+        ), f"Expected the removal-count summary line.\nstdout: {result.stdout}"
 
         # The worktree directory and its registration are both gone.
-        assert not worktree_path.exists(), (
-            f"Worktree directory {worktree_path} should have been removed from disk."
-        )
+        assert not worktree_path.exists(), f"Worktree directory {worktree_path} should have been removed from disk."
         wt_list_after = _git("worktree", "list", cwd=repo_root).stdout
         assert str(worktree_path) not in wt_list_after, (
-            f"Worktree {worktree_path} should no longer be registered.\n"
-            f"git worktree list output: {wt_list_after}"
+            f"Worktree {worktree_path} should no longer be registered.\n" f"git worktree list output: {wt_list_after}"
         )
 
         # git branch -D now succeeds -- the guard unblocked deletion.
-        post_guard_delete = _git(
-            "branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False
-        )
+        post_guard_delete = _git("branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False)
         assert post_guard_delete.returncode == 0, (
             "git branch -D must succeed after the guard removes the pinning "
             f"worktree.\nstdout: {post_guard_delete.stdout}\n"
@@ -237,9 +217,7 @@ class TestNoOpWhenNoWorktreePinned:
     """The common case: no worktree is pinned to the target branch, so the
     guard is a silent success and does not interfere with normal deletion."""
 
-    def test_no_pinned_worktree_is_silent_success(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_no_pinned_worktree_is_silent_success(self, tmp_path: pathlib.Path) -> None:
         """No leftover worktree exists -> guard returns 0 with no removal
         output, and `git branch -D` succeeds on its own without the guard's
         help."""
@@ -252,17 +230,13 @@ class TestNoOpWhenNoWorktreePinned:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "Removed" not in combined, (
-            f"No-op case must not emit any 'Removed' output.\noutput: {combined}"
-        )
-        assert "Stale worktree detected" not in combined, (
-            f"No-op case must not report a stale worktree.\noutput: {combined}"
-        )
+        assert "Removed" not in combined, f"No-op case must not emit any 'Removed' output.\noutput: {combined}"
+        assert (
+            "Stale worktree detected" not in combined
+        ), f"No-op case must not report a stale worktree.\noutput: {combined}"
 
         # git branch -D succeeds unaided -- confirms nothing was pinning it.
-        delete_result = _git(
-            "branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False
-        )
+        delete_result = _git("branch", "-D", _TEST_BRANCH, cwd=repo_root, check=False)
         assert delete_result.returncode == 0, (
             "git branch -D should succeed unaided when no worktree ever pinned "
             f"the branch.\nstdout: {delete_result.stdout}\n"
@@ -279,9 +253,7 @@ class TestMainWorktreeSkip:
     """When the main worktree itself (repo_root) reports the target branch,
     the guard skips it rather than attempting an unsupported removal."""
 
-    def test_main_worktree_on_target_branch_is_skipped_not_removed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_main_worktree_on_target_branch_is_skipped_not_removed(self, tmp_path: pathlib.Path) -> None:
         """Defensive-only scenario: by the time Step 10.5 normally runs, the
         main worktree should already be back on the prefixed-main branch
         (Step 5 checks it out), but the guard must not attempt `git worktree
@@ -299,21 +271,15 @@ class TestMainWorktreeSkip:
             f"target branch.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "skipping" in combined.lower(), (
-            f"Expected a skip NOTE for the main worktree.\noutput: {combined}"
-        )
-        assert "Removed" not in combined, (
-            f"Main-worktree-skip case must not report any removal.\noutput: {combined}"
-        )
+        assert "skipping" in combined.lower(), f"Expected a skip NOTE for the main worktree.\noutput: {combined}"
+        assert "Removed" not in combined, f"Main-worktree-skip case must not report any removal.\noutput: {combined}"
 
         # The repo_root directory itself was never touched by `git worktree remove`.
         assert repo_root.exists()
         assert (repo_root / "README.md").exists()
 
         # The branch is still checked out -- nothing was force-removed.
-        current_branch = _git(
-            "rev-parse", "--abbrev-ref", "HEAD", cwd=repo_root
-        ).stdout.strip()
+        current_branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo_root).stdout.strip()
         assert current_branch == _TEST_BRANCH, (
             f"Main worktree should still be checked out on {_TEST_BRANCH} "
             f"(unchanged by the skip path); got '{current_branch}'."

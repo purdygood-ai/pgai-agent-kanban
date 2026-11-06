@@ -8,7 +8,9 @@ project.cfg themselves:
   overwatch_registered_projects      projects_cfg_list (lib/projects.sh)
   overwatch_branch_prefix <project>  pp_branch_prefix (lib/project_paths.sh)
 
-The helper tests pin what each reader returns. The per-check tests run every
+The helper tests pin what each reader returns, including when the library
+was sourced by a relative path and the caller has since changed to an
+unrelated directory. The per-check tests run every
 converted check's environment resolver both standalone (only the check
 sourced, so the helper loads its library itself) and as the sweep runs it
 (the libraries already loaded), and pin the messages for an unset
@@ -63,7 +65,7 @@ _CONTEXTS = {"standalone": "", "sweep": _SWEEP_PRELOAD}
 _UNSET = "unset OVERWATCH_PROJECT PGAI_PROJECT_NAME PGAI_DEV_TREE_PATH PGAI_TASKS_DIR PGAI_PROJECT_ROOT\n"
 
 
-def _kanban(tmp_path: pathlib.Path, registry: "str | None", project_cfg: "str | None" = None) -> pathlib.Path:
+def _kanban(tmp_path: pathlib.Path, registry: str | None, project_cfg: str | None = None) -> pathlib.Path:
     """A kanban root with *registry* as projects.cfg and *project_cfg* as alpha's project.cfg."""
     root = tmp_path / "kanban"
     (root / "projects" / "alpha").mkdir(parents=True)
@@ -170,11 +172,22 @@ def test_branch_prefix_requires_a_project_name(tmp_path: pathlib.Path) -> None:
     ],
     ids=["ini-priority-order", "colon-legacy", "empty", "missing"],
 )
+@pytest.mark.parametrize("sourcing", ["absolute", "relative", "relative-then-cd"])
 def test_registered_projects_lists_in_priority_order(
-    tmp_path: pathlib.Path, registry: "str | None", expected: str
+    tmp_path: pathlib.Path, registry: str | None, expected: str, sourcing: str
 ) -> None:
     root = _kanban(tmp_path, registry)
-    result = _run(tmp_path, root, f"source '{_CONFIG}'\noverwatch_registered_projects; echo \"rc=$?\"\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    load = {
+        "absolute": f"source '{_CONFIG}'\n",
+        "relative": f"cd '{_LIB.parent}'\nsource lib/overwatch_config.sh\n",
+        # The library resolves its own directory when sourced, so a relative
+        # name still finds lib/projects.sh after the caller leaves the
+        # directory it was named from.
+        "relative-then-cd": f"cd '{_LIB.parent}'\nsource lib/overwatch_config.sh\ncd '{elsewhere}'\n",
+    }[sourcing]
+    result = _run(tmp_path, root, f'{load}overwatch_registered_projects; echo "rc=$?"\n')
     assert result.stdout == f"{expected}rc=0\n"
 
 

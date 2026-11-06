@@ -31,8 +31,6 @@ import json
 import pathlib
 import subprocess
 import sys
-import textwrap
-from unittest.mock import patch
 
 import pytest
 
@@ -50,9 +48,8 @@ try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
     import sys
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 
@@ -60,8 +57,10 @@ except ImportError:
 # Shared fixture helpers
 # ---------------------------------------------------------------------------
 
-def _minimal_task(seq: int = 1, slug: str = "my-task", role: str = "CODER",
-                  git_repo: str = "git@github.com:org/repo.git") -> dict:
+
+def _minimal_task(
+    seq: int = 1, slug: str = "my-task", role: str = "CODER", git_repo: str = "git@github.com:org/repo.git"
+) -> dict:
     """Return a minimal task dict resembling PM's output."""
     return {
         "sequence": seq,
@@ -107,10 +106,8 @@ def _stamp_ids(tasks: list, date_str: str = "20260101") -> list:
 def test_resolve_prerequisites_converts_sequence_to_task_id() -> None:
     """resolve_prerequisites converts depends_on integers to full task IDs."""
     tasks = [
-        {"sequence": 1, "task_id": "CODER-20260101-001-alpha",
-         "depends_on": [], "prerequisite_ids": []},
-        {"sequence": 2, "task_id": "CODER-20260101-002-beta",
-         "depends_on": [1], "prerequisite_ids": []},
+        {"sequence": 1, "task_id": "CODER-20260101-001-alpha", "depends_on": [], "prerequisite_ids": []},
+        {"sequence": 2, "task_id": "CODER-20260101-002-beta", "depends_on": [1], "prerequisite_ids": []},
     ]
     pm.resolve_prerequisites(tasks)
     assert "CODER-20260101-001-alpha" in tasks[1]["prerequisite_ids"]
@@ -119,8 +116,7 @@ def test_resolve_prerequisites_converts_sequence_to_task_id() -> None:
 def test_resolve_prerequisites_empty_depends_on_leaves_empty_list() -> None:
     """resolve_prerequisites produces an empty prerequisite_ids for tasks with no deps."""
     tasks = [
-        {"sequence": 1, "task_id": "CODER-20260101-001-solo",
-         "depends_on": [], "prerequisite_ids": []},
+        {"sequence": 1, "task_id": "CODER-20260101-001-solo", "depends_on": [], "prerequisite_ids": []},
     ]
     pm.resolve_prerequisites(tasks)
     assert tasks[0]["prerequisite_ids"] == []
@@ -129,10 +125,13 @@ def test_resolve_prerequisites_empty_depends_on_leaves_empty_list() -> None:
 def test_resolve_prerequisites_merges_with_existing_prerequisite_ids() -> None:
     """resolve_prerequisites keeps pre-existing prerequisite_ids alongside new ones."""
     tasks = [
-        {"sequence": 1, "task_id": "CM-20260101-001-open-rc",
-         "depends_on": [], "prerequisite_ids": []},
-        {"sequence": 2, "task_id": "CODER-20260101-002-feat",
-         "depends_on": [1], "prerequisite_ids": ["CM-20260101-001-open-rc"]},
+        {"sequence": 1, "task_id": "CM-20260101-001-open-rc", "depends_on": [], "prerequisite_ids": []},
+        {
+            "sequence": 2,
+            "task_id": "CODER-20260101-002-feat",
+            "depends_on": [1],
+            "prerequisite_ids": ["CM-20260101-001-open-rc"],
+        },
     ]
     pm.resolve_prerequisites(tasks)
     prereqs = tasks[1]["prerequisite_ids"]
@@ -143,12 +142,9 @@ def test_resolve_prerequisites_merges_with_existing_prerequisite_ids() -> None:
 def test_resolve_prerequisites_multi_dep_task_has_all_ids() -> None:
     """resolve_prerequisites resolves multiple depends_on sequences for one task."""
     tasks = [
-        {"sequence": 1, "task_id": "CODER-20260101-001-a",
-         "depends_on": [], "prerequisite_ids": []},
-        {"sequence": 2, "task_id": "CODER-20260101-002-b",
-         "depends_on": [], "prerequisite_ids": []},
-        {"sequence": 3, "task_id": "TESTER-20260101-003-v",
-         "depends_on": [1, 2], "prerequisite_ids": []},
+        {"sequence": 1, "task_id": "CODER-20260101-001-a", "depends_on": [], "prerequisite_ids": []},
+        {"sequence": 2, "task_id": "CODER-20260101-002-b", "depends_on": [], "prerequisite_ids": []},
+        {"sequence": 3, "task_id": "TESTER-20260101-003-v", "depends_on": [1, 2], "prerequisite_ids": []},
     ]
     pm.resolve_prerequisites(tasks)
     prereqs = tasks[2]["prerequisite_ids"]
@@ -232,8 +228,7 @@ def test_inject_cm_bookends_tester_depends_on_all_feature_tasks() -> None:
 def test_inject_cm_bookends_cm_release_depends_on_tester() -> None:
     """The CM-release task depends on the TESTER task when test_required=True."""
     tasks = _stamp_ids(_make_tasks(1))
-    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE",
-                          test_required=True)
+    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE", test_required=True)
     cm_release = tasks[-1]
     tester = next(t for t in tasks if t.get("role") == "TESTER")
     assert tester["task_id"] in cm_release["prerequisite_ids"]
@@ -247,13 +242,10 @@ def test_inject_cm_bookends_cm_release_depends_on_tester() -> None:
         ("invalid-value", 0),  # unrecognized value defaults to 'auto' (no HUMAN gate)
     ],
 )
-def test_inject_cm_bookends_human_approve_count(
-    human_approval_required: str, expected_human_task_count: int
-) -> None:
+def test_inject_cm_bookends_human_approve_count(human_approval_required: str, expected_human_task_count: int) -> None:
     """inject_cm_bookends injects a HUMAN-APPROVE task only when human_approval_required='required'."""
     tasks = _stamp_ids(_make_tasks(1))
-    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE",
-                          human_approval_required=human_approval_required)
+    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE", human_approval_required=human_approval_required)
     human_tasks = [t for t in tasks if t.get("role") == "HUMAN"]
     assert len(human_tasks) == expected_human_task_count
 
@@ -261,8 +253,7 @@ def test_inject_cm_bookends_human_approve_count(
 def test_inject_cm_bookends_no_tester_when_test_not_required() -> None:
     """inject_cm_bookends skips TESTER when test_required=False."""
     tasks = _stamp_ids(_make_tasks(1))
-    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE",
-                          test_required=False)
+    pm.inject_cm_bookends(tasks, "v0.5.0", "20260101", 100, "CLAUDE", test_required=False)
     tester_tasks = [t for t in tasks if t.get("role") == "TESTER"]
     assert len(tester_tasks) == 0
 
@@ -291,9 +282,7 @@ def test_determine_source_branch_returns_rc_version_for_release_tasks(
 ) -> None:
     """determine_source_branch returns rc/<version> for CODER tasks in a release workflow."""
     task = _minimal_task(slug="feat", role="CODER")
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version="v0.5.0")
     assert result == "rc/v0.5.0"
 
 
@@ -308,9 +297,7 @@ def test_determine_source_branch_returns_main_for_cm_open_task(
         "source_branch": "main",
         "cm_operation": "open-rc",
     }
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version="v0.5.0")
     assert result == "main"
 
 
@@ -324,9 +311,7 @@ def test_determine_source_branch_release_tester_gets_rc_branch(
         "assigned_agent": "TESTER",
         "source_branch": "main",
     }
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version="v0.5.0")
     assert result == "rc/v0.5.0"
 
 
@@ -340,9 +325,7 @@ def test_determine_source_branch_release_writer_gets_rc_branch(
         "assigned_agent": "WRITER",
         "source_branch": "main",
     }
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version="v0.5.0")
     assert result == "rc/v0.5.0"
 
 
@@ -352,9 +335,7 @@ def test_determine_source_branch_feature_workflow_honors_task_source_branch(
     """determine_source_branch returns the task's own source_branch for feature workflows."""
     task = _minimal_task(slug="feat", role="CODER")
     task["source_branch"] = "feature/my-shared-branch"
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="feature", target_version=None
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="feature", target_version=None)
     assert result == "feature/my-shared-branch"
 
 
@@ -365,9 +346,7 @@ def test_determine_source_branch_feature_workflow_falls_back_to_main(
     task = _minimal_task(slug="feat", role="CODER")
     task["source_branch"] = ""
     # No release-state.md in tmp_path — get_active_rc returns None.
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="feature", target_version=None
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="feature", target_version=None)
     assert result == "main"
 
 
@@ -375,13 +354,9 @@ def test_determine_source_branch_with_branch_prefix(
     tmp_path: pathlib.Path,
 ) -> None:
     """determine_source_branch prepends branch_prefix when set in project.cfg."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = myorg\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = myorg\n", encoding="utf-8")
     task = _minimal_task(slug="feat", role="CODER")
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version="v0.5.0"
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version="v0.5.0")
     assert result == "myorgrc/v0.5.0"
 
 
@@ -390,9 +365,7 @@ def test_determine_source_branch_no_target_version_returns_main(
 ) -> None:
     """determine_source_branch returns 'main' for release workflow without target_version."""
     task = _minimal_task(slug="feat", role="CODER")
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version=None
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version=None)
     assert result == "main"
 
 
@@ -451,8 +424,7 @@ def test_apply_git_repo_override_no_op_when_canonical_is_empty() -> None:
 
 def test_apply_git_repo_override_skips_synthetic_tasks() -> None:
     """apply_git_repo_override does not modify synthetic CM/TESTER/HUMAN tasks."""
-    cm_open = _minimal_task(slug="open-rc", role="CM",
-                             git_repo="git@github.com:wrong/repo.git")
+    cm_open = _minimal_task(slug="open-rc", role="CM", git_repo="git@github.com:wrong/repo.git")
     cm_open["task_id"] = "CM-20260101-001-open-rc"
     cm_open["_synthetic"] = True
     canonical = "git@github.com:real/repo.git"
@@ -509,8 +481,7 @@ def test_load_project_git_repo_url_returns_empty_when_key_absent(
     tmp_path: pathlib.Path,
 ) -> None:
     """load_project_git_repo_url returns '' when project.cfg has no git_repo_url key."""
-    (tmp_path / "project.cfg").write_text("[project]\nother_key = value\n",
-                                          encoding="utf-8")
+    (tmp_path / "project.cfg").write_text("[project]\nother_key = value\n", encoding="utf-8")
     result = pm.load_project_git_repo_url(str(tmp_path))
     assert result == ""
 
@@ -558,8 +529,7 @@ def test_create_task_folder_initial_state_backlog_when_no_prereqs(
     task["owner"] = "CLAUDE"
     task["feature_branch"] = "feature/CODER-20260101-001-solo"
     task["prerequisite_ids"] = []
-    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root,
-                          release_version="v0.5.0")
+    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root, release_version="v0.5.0")
     status = (tasks_root / "CODER-20260101-001-solo" / "status.md").read_text()
     assert "BACKLOG" in status
 
@@ -575,8 +545,7 @@ def test_create_task_folder_initial_state_waiting_when_prereqs_present(
     task["owner"] = "CLAUDE"
     task["feature_branch"] = "feature/CODER-20260101-002-second"
     task["prerequisite_ids"] = ["CODER-20260101-001-first"]
-    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root,
-                          release_version="v0.5.0")
+    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root, release_version="v0.5.0")
     status = (tasks_root / "CODER-20260101-002-second" / "status.md").read_text()
     assert "WAITING" in status
 
@@ -592,8 +561,7 @@ def test_create_task_folder_readme_contains_task_id(
     task["owner"] = "CLAUDE"
     task["feature_branch"] = "feature/CODER-20260101-001-feat"
     task["prerequisite_ids"] = []
-    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root,
-                          release_version="v0.5.0")
+    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root, release_version="v0.5.0")
     readme = (tasks_root / "CODER-20260101-001-feat" / "README.md").read_text()
     assert "CODER-20260101-001-feat" in readme
 
@@ -609,8 +577,7 @@ def test_create_task_folder_readme_contains_rc_source_branch(
     task["owner"] = "CLAUDE"
     task["feature_branch"] = "feature/CODER-20260101-001-feat"
     task["prerequisite_ids"] = []
-    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root,
-                          workflow_type="release", release_version="v0.5.0")
+    pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root, workflow_type="release", release_version="v0.5.0")
     readme = (tasks_root / "CODER-20260101-001-feat" / "README.md").read_text()
     assert "rc/v0.5.0" in readme
 
@@ -628,8 +595,7 @@ def test_create_task_folder_skips_existing_folder(
     task["owner"] = "CLAUDE"
     task["feature_branch"] = f"feature/{task_id}"
     task["prerequisite_ids"] = []
-    result = pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root,
-                                   release_version="v0.5.0")
+    result = pm.create_task_folder(task, str(tmp_path), tasks_root=tasks_root, release_version="v0.5.0")
     assert result == task_id
 
 
@@ -643,8 +609,7 @@ def test_create_task_folder_raises_when_tasks_root_is_none(
     task["feature_branch"] = "feature/CODER-20260101-001-feat"
     task["prerequisite_ids"] = []
     with pytest.raises(ValueError, match="tasks_root must be explicitly provided"):
-        pm.create_task_folder(task, str(tmp_path), tasks_root=None,
-                              release_version="v0.5.0")
+        pm.create_task_folder(task, str(tmp_path), tasks_root=None, release_version="v0.5.0")
 
 
 # ---------------------------------------------------------------------------
@@ -656,9 +621,13 @@ def test_inject_feature_workflow_prepends_create_shared_branch_task() -> None:
     """inject_feature_workflow_tasks adds a CODER create-shared-branch task at position 0."""
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
-        tasks, source_branch="feature/shared", test_required=True,
-        parent_branch="main", date_str="20260101", base_seq=100,
-        owner="CLAUDE"
+        tasks,
+        source_branch="feature/shared",
+        test_required=True,
+        parent_branch="main",
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
     )
     assert tasks[0].get("_create_shared_branch") is True
     assert tasks[0]["role"] == "CODER"
@@ -668,9 +637,13 @@ def test_inject_feature_workflow_no_cm_tasks_present() -> None:
     """inject_feature_workflow_tasks does NOT inject any CM tasks."""
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
-        tasks, source_branch="feature/shared", test_required=False,
-        parent_branch="main", date_str="20260101", base_seq=100,
-        owner="CLAUDE"
+        tasks,
+        source_branch="feature/shared",
+        test_required=False,
+        parent_branch="main",
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
     )
     cm_tasks = [t for t in tasks if t.get("role") == "CM"]
     assert len(cm_tasks) == 0
@@ -680,9 +653,13 @@ def test_inject_feature_workflow_appends_tester_when_test_required() -> None:
     """inject_feature_workflow_tasks appends a TESTER task when test_required=True."""
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
-        tasks, source_branch="feature/shared", test_required=True,
-        parent_branch="main", date_str="20260101", base_seq=100,
-        owner="CLAUDE"
+        tasks,
+        source_branch="feature/shared",
+        test_required=True,
+        parent_branch="main",
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
     )
     tester_tasks = [t for t in tasks if t.get("role") == "TESTER"]
     assert len(tester_tasks) == 1
@@ -692,9 +669,13 @@ def test_inject_feature_workflow_no_tester_when_test_not_required() -> None:
     """inject_feature_workflow_tasks omits TESTER when test_required=False."""
     tasks = _stamp_ids(_make_tasks(2))
     pm.inject_feature_workflow_tasks(
-        tasks, source_branch="feature/shared", test_required=False,
-        parent_branch="main", date_str="20260101", base_seq=100,
-        owner="CLAUDE"
+        tasks,
+        source_branch="feature/shared",
+        test_required=False,
+        parent_branch="main",
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
     )
     tester_tasks = [t for t in tasks if t.get("role") == "TESTER"]
     assert len(tester_tasks) == 0
@@ -705,9 +686,13 @@ def test_inject_feature_workflow_feature_tasks_depend_on_create_branch() -> None
     tasks = _stamp_ids(_make_tasks(2))
     feature_ids = [t["task_id"] for t in tasks]
     pm.inject_feature_workflow_tasks(
-        tasks, source_branch="feature/shared", test_required=False,
-        parent_branch="main", date_str="20260101", base_seq=100,
-        owner="CLAUDE"
+        tasks,
+        source_branch="feature/shared",
+        test_required=False,
+        parent_branch="main",
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
     )
     create_branch_id = tasks[0]["task_id"]
     # Feature tasks are at positions 1 and 2
@@ -744,8 +729,7 @@ def test_assign_task_ids_skips_tasks_with_existing_task_id(
     tasks_root.mkdir()
     pre_assigned_id = "CM-20260101-001-open-rc-0-5-0"
     tasks = [
-        {"sequence": 0, "slug": "open-rc", "role": "CM",
-         "task_id": pre_assigned_id},
+        {"sequence": 0, "slug": "open-rc", "role": "CM", "task_id": pre_assigned_id},
         _minimal_task(seq=1, slug="feat", role="CODER"),
     ]
     pm.assign_task_ids(tasks, "CLAUDE", tasks_root)
@@ -761,8 +745,7 @@ def test_assign_task_ids_sets_feature_branch_when_git_repo_present(
     """assign_task_ids sets feature_branch = feature/<task_id> when git_repo is non-none."""
     tasks_root = tmp_path / "tasks"
     tasks_root.mkdir()
-    tasks = [_minimal_task(seq=1, slug="feat", role="CODER",
-                           git_repo="git@github.com:org/repo.git")]
+    tasks = [_minimal_task(seq=1, slug="feat", role="CODER", git_repo="git@github.com:org/repo.git")]
     pm.assign_task_ids(tasks, "CLAUDE", tasks_root)
     assert tasks[0]["feature_branch"].startswith("feature/CODER-")
 
@@ -896,9 +879,7 @@ def test_get_active_rc_returns_version_from_release_state(
     tmp_path: pathlib.Path,
 ) -> None:
     """get_active_rc returns the version string from release-state.md Active RC."""
-    (tmp_path / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nv0.5.0\n", encoding="utf-8"
-    )
+    (tmp_path / "release-state.md").write_text("# Release State\n\n## Active RC\nv0.5.0\n", encoding="utf-8")
     result = pm.get_active_rc(str(tmp_path))
     assert result == "v0.5.0"
 
@@ -907,9 +888,7 @@ def test_get_active_rc_returns_none_when_active_rc_is_none(
     tmp_path: pathlib.Path,
 ) -> None:
     """get_active_rc returns None when Active RC field is 'none'."""
-    (tmp_path / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n", encoding="utf-8"
-    )
+    (tmp_path / "release-state.md").write_text("# Release State\n\n## Active RC\nnone\n", encoding="utf-8")
     result = pm.get_active_rc(str(tmp_path))
     assert result is None
 
@@ -947,9 +926,7 @@ def test_is_human_task_returns_false_for_coder_role() -> None:
         ("CODER", "writer", "writer_backlog.md"),  # assigned_agent overrides role
     ],
 )
-def test_get_queue_path(
-    tmp_path: pathlib.Path, role: str, assigned_agent: str, expected_backlog_filename: str
-) -> None:
+def test_get_queue_path(tmp_path: pathlib.Path, role: str, assigned_agent: str, expected_backlog_filename: str) -> None:
     """get_queue_path routes tasks to the backlog matching assigned_agent (falling back to role)."""
     task = {"role": role, "assigned_agent": assigned_agent}
     result = pm.get_queue_path(task, str(tmp_path))
@@ -1011,9 +988,7 @@ def test_update_backlog_coder_entry_byte_identical_with_human_also_present(
     pm.update_backlog([coder_task, human_task], str(tmp_path))
     combined_content = (queues_dir / "coder_backlog.md").read_text()
 
-    assert combined_content == baseline_content, (
-        "coder_backlog.md content changed when HUMAN task was also routed"
-    )
+    assert combined_content == baseline_content, "coder_backlog.md content changed when HUMAN task was also routed"
 
 
 def test_validate_and_normalize_queue_catches_malformed_human_queue_marker(
@@ -1053,8 +1028,8 @@ def test_release_plan_assembly_produces_cm_open_tester_cm_release(
     pm.resolve_prerequisites(tasks)
 
     roles = [t.get("role") for t in tasks]
-    assert roles[0] == "CM"          # CM-open
-    assert roles[-1] == "CM"         # CM-release
+    assert roles[0] == "CM"  # CM-open
+    assert roles[-1] == "CM"  # CM-release
     assert "TESTER" in roles
     # Feature tasks are in between
     feature_roles = [r for r in roles if r == "CODER"]
@@ -1073,8 +1048,9 @@ def test_release_plan_assembly_source_branch_overridden_to_rc(
 
     # feature task is at index 1 (after CM-open at 0)
     feature_task = tasks[1]
-    pm.create_task_folder(feature_task, str(tmp_path), tasks_root=tasks_root,
-                          workflow_type="release", release_version="v0.5.0")
+    pm.create_task_folder(
+        feature_task, str(tmp_path), tasks_root=tasks_root, workflow_type="release", release_version="v0.5.0"
+    )
     readme = (tasks_root / feature_task["task_id"] / "README.md").read_text()
     assert "rc/v0.5.0" in readme
 
@@ -1129,8 +1105,9 @@ def _coverage_sandbox(tmp_path: pathlib.Path) -> tuple:
 
 def _coverage_bug(project_root: pathlib.Path, stem: str, status: str = "open") -> pathlib.Path:
     path = project_root / "bugs" / f"{stem}.md"
-    path.write_text(f"# {stem}\n\n**Severity:** low\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n",
-                    encoding="utf-8")
+    path.write_text(
+        f"# {stem}\n\n**Severity:** low\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n", encoding="utf-8"
+    )
     return path
 
 
@@ -1148,22 +1125,36 @@ def _coverage_requirement(project_root: pathlib.Path, items: list) -> pathlib.Pa
 
 def _coverage_plan(requirement: pathlib.Path, goal: str, **fields) -> dict:
     task = {
-        "sequence": 1, "slug": "uploader-fixes", "title": "Fix the uploader", "role": "CODER",
-        "working_directory": "/dev/null", "git_repo": "none", "source_branch": "rc/v9.9.6",
-        "goal": goal, "inputs": [], "context_paths": [], "required_output": "The fix.",
-        "constraints": [], "acceptance_criteria": ["It works."], "depends_on": [], "notes": "",
+        "sequence": 1,
+        "slug": "uploader-fixes",
+        "title": "Fix the uploader",
+        "role": "CODER",
+        "working_directory": "/dev/null",
+        "git_repo": "none",
+        "source_branch": "rc/v9.9.6",
+        "goal": goal,
+        "inputs": [],
+        "context_paths": [],
+        "required_output": "The fix.",
+        "constraints": [],
+        "acceptance_criteria": ["It works."],
+        "depends_on": [],
+        "notes": "",
     }
     plan = {
-        "project_name": _COVERAGE_PROJECT, "workflow_type": "release", "target_version": "v9.9.6",
-        "test_required": "false", "human_approval_required": "auto",
-        "requirements_path": str(requirement), "tasks": [task],
+        "project_name": _COVERAGE_PROJECT,
+        "workflow_type": "release",
+        "target_version": "v9.9.6",
+        "test_required": "false",
+        "human_approval_required": "auto",
+        "requirements_path": str(requirement),
+        "tasks": [task],
     }
     plan.update(fields)
     return plan
 
 
-def _coverage_materialize(root: pathlib.Path, project_root: pathlib.Path, tmp_path: pathlib.Path,
-                          plan: dict):
+def _coverage_materialize(root: pathlib.Path, project_root: pathlib.Path, tmp_path: pathlib.Path, plan: dict):
     """Run the real materializer CLI on *plan* with all five kanban-root variables set or cleared."""
     plan_dir = tmp_path / "plan"
     plan_dir.mkdir()
@@ -1180,9 +1171,20 @@ def _coverage_materialize(root: pathlib.Path, project_root: pathlib.Path, tmp_pa
         },
     )
     return subprocess.run(
-        [sys.executable, str(_MATERIALIZE_SCRIPT), str(plan_file), "--team-root", str(project_root),
-         "--requirements-path", plan["requirements_path"]],
-        capture_output=True, text=True, env=env, cwd=str(root), timeout=120,
+        [
+            sys.executable,
+            str(_MATERIALIZE_SCRIPT),
+            str(plan_file),
+            "--team-root",
+            str(project_root),
+            "--requirements-path",
+            plan["requirements_path"],
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(root),
+        timeout=120,
     )
 
 
@@ -1210,11 +1212,12 @@ def test_a_bundled_item_no_ticket_names_is_refused_and_nothing_is_written(tmp_pa
     requirement = _coverage_requirement(project_root, [named, omitted])
     before = _coverage_snapshot(project_root)
 
-    result = _coverage_materialize(root, project_root, tmp_path,
-                                   _coverage_plan(requirement, "Fix BUG-9961: the uploader times out."))
+    result = _coverage_materialize(
+        root, project_root, tmp_path, _coverage_plan(requirement, "Fix BUG-9961: the uploader times out.")
+    )
 
     assert result.returncode != 0, result.stdout + result.stderr
-    refusal = parse_error_contract(result.stderr[result.stderr.find("error:"):])
+    refusal = parse_error_contract(result.stderr[result.stderr.find("error:") :])
     assert refusal is not None, result.stderr
     assert refusal["error"] == "materialize.bundled_item_unassigned"
     assert omitted.name in refusal["message"]
@@ -1229,8 +1232,11 @@ def test_the_omitted_item_listed_under_needs_operator_materializes_and_asks(tmp_
     named = _coverage_bug(project_root, "BUG-9961-uploader-timeout")
     omitted = _coverage_bug(project_root, "BUG-9962-uploader-retry")
     requirement = _coverage_requirement(project_root, [named, omitted])
-    plan = _coverage_plan(requirement, "Fix BUG-9961: the uploader times out.",
-                          needs_operator=[{"item": "BUG-9962", "question": _COVERAGE_QUESTION}])
+    plan = _coverage_plan(
+        requirement,
+        "Fix BUG-9961: the uploader times out.",
+        needs_operator=[{"item": "BUG-9962", "question": _COVERAGE_QUESTION}],
+    )
 
     result = _coverage_materialize(root, project_root, tmp_path, plan)
 
@@ -1253,8 +1259,10 @@ def test_the_omitted_item_listed_under_needs_operator_materializes_and_asks(tmp_
 )
 def test_a_plan_with_nothing_unassigned_materializes_as_before(tmp_path, bundled, goal) -> None:
     root, project_root = _coverage_sandbox(tmp_path)
-    bugs = [_coverage_bug(project_root, "BUG-9961-uploader-timeout"),
-            _coverage_bug(project_root, "BUG-9962-uploader-retry")]
+    bugs = [
+        _coverage_bug(project_root, "BUG-9961-uploader-timeout"),
+        _coverage_bug(project_root, "BUG-9962-uploader-retry"),
+    ]
     requirement = _coverage_requirement(project_root, bugs if bundled else [])
     intake_before = {k: v for k, v in _coverage_snapshot(project_root).items() if "/tasks/" not in k}
 
@@ -1287,10 +1295,12 @@ def _plan_naming(*texts: str) -> dict:
 
 def _bundle_file(tmp_path: pathlib.Path, *names: str) -> pathlib.Path:
     path = tmp_path / "bundle.md"
-    path.write_text("# bundle\n\n## Bundled Items\n\n"
-                    + "".join(f"- {n} (`/elsewhere/bugs/{n}`)\n" for n in names)
-                    + "\n## Notes\n\n- BUG-9969-not-an-item.md (`/elsewhere/bugs/BUG-9969-not-an-item.md`)\n",
-                    encoding="utf-8")
+    path.write_text(
+        "# bundle\n\n## Bundled Items\n\n"
+        + "".join(f"- {n} (`/elsewhere/bugs/{n}`)\n" for n in names)
+        + "\n## Notes\n\n- BUG-9969-not-an-item.md (`/elsewhere/bugs/BUG-9969-not-an-item.md`)\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -1312,7 +1322,9 @@ def test_a_longer_shorter_or_other_kind_of_id_does_not_name_the_item(tmp_path, t
 def test_only_the_bundled_items_section_is_read_and_repeats_are_dropped(tmp_path) -> None:
     bundle = _bundle_file(tmp_path, "BUG-9961-a.md", "PRIORITY-9962-b.md", "BUG-9961-a.md", "NOTE-c.md")
     assert pm.uncovered_bundled_items(_plan_naming("nothing"), str(bundle)) == [
-        "BUG-9961-a.md", "PRIORITY-9962-b.md", "NOTE-c.md",
+        "BUG-9961-a.md",
+        "PRIORITY-9962-b.md",
+        "NOTE-c.md",
     ]
     assert pm.uncovered_bundled_items(_plan_naming("PRIORITY-9962 and NOTE-c"), str(bundle)) == ["BUG-9961-a.md"]
 

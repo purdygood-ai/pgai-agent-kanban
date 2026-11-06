@@ -81,8 +81,7 @@ def _script(impl: str, root: pathlib.Path, calls: str) -> str:
     line is expected to print ``RC=<n>`` itself where the code matters.
     """
     reference = f'source "{_REFERENCE_LIB}"\n' if impl == "reference" else ""
-    return (
-        textwrap.dedent(f"""\
+    return textwrap.dedent(f"""\
             #!/usr/bin/env bash
             set -uo pipefail
             BACKLOG="{root / 'coder_backlog.md'}"
@@ -92,11 +91,7 @@ def _script(impl: str, root: pathlib.Path, calls: str) -> str:
             transient_retry_field() {{ printf '%s\\n' "${{3:-}}"; }}
             transient_retry_limit() {{ echo 3; }}
             source "{_WAKE_TASK_STATE_LIB}"
-        """)
-        + reference
-        + calls
-        + "\n"
-    )
+        """) + reference + calls + "\n"
 
 
 def _run(impl: str, root: pathlib.Path, files: dict[str, str], calls: str) -> dict:
@@ -125,9 +120,7 @@ def _run(impl: str, root: pathlib.Path, files: dict[str, str], calls: str) -> di
         env=env,
         cwd=str(root),
     )
-    snapshot = {
-        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
-    }
+    snapshot = {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
     return {"rc": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr, "files": snapshot}
 
 
@@ -306,9 +299,7 @@ def test_mark_backlog_matches_reference(tmp_path: pathlib.Path, variant: str, ma
 # ---------------------------------------------------------------------------
 
 _WAITING_STATUS = _status("## State\nWAITING\n\n")
-_BLOCKED_STATUS = (
-    _status("## State\nBLOCKED\n\n", tail="\n## Blocked By Agent\ncoder\n\n\n")
-)
+_BLOCKED_STATUS = _status("## State\nBLOCKED\n\n", tail="\n## Blocked By Agent\ncoder\n\n\n")
 _BLOCKED_STATUS_SPARSE = "## State\nBLOCKED\n\n## Summary\nstuck\n"
 # A BLOCKED task carrying the durable ## Block Record (the shape
 # pgai_agent_kanban.overwatch.block_record writes): promotion leaves it alone.
@@ -524,6 +515,10 @@ def test_promote_waiting_names_a_missing_section_without_the_file_suffix(tmp_pat
     }
     calls = f'promote_waiting_to_backlog "{_KEY}" "tasks/{_KEY}/status.md"; echo RC=$?'
     module, reference = _both(tmp_path, files, calls)
-    assert (module["rc"], module["stdout"], module["files"]) == (reference["rc"], reference["stdout"], reference["files"])
+    assert (module["rc"], module["stdout"], module["files"]) == (
+        reference["rc"],
+        reference["stdout"],
+        reference["files"],
+    )
     assert module["stderr"] == "Could not update ## Blockers block\n"
     assert reference["stderr"] == "Could not update ## Blockers block in status.md\n"

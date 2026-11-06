@@ -44,7 +44,7 @@
 # script runs from a fresh shell without manual pre-sourcing.  Explicit
 # operator exports win via env_bootstrap.sh's idempotency guard.
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # A thin wrapper over pgai_agent_kanban.ops.read.get_status (reached through
 # pp_run_ops) -- the function GET /status calls too. It reads the version,
@@ -52,7 +52,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
 # resolved ship posture for one project and prints the summary above.
 # Nothing is written.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/pp_run_ops.sh
 source "${SCRIPT_DIR}/lib/pp_run_ops.sh"
 # shellcheck source=lib/header_help.sh

@@ -121,7 +121,7 @@ def test_runner_scrub_statement_precedes_pytest_invocation(script: pathlib.Path)
     pytest_match = _PYTEST_INVOCATION_RE.search(text)
     assert scrub_match is not None, f"{script.name}: no guard-var scrub statement found"
     assert pytest_match is not None, (
-        f"{script.name}: no bare `python3 -m pytest \"${{GATED_RUNNER_LANE_ARGS[@]}}\"` "
+        f'{script.name}: no bare `python3 -m pytest "${{GATED_RUNNER_LANE_ARGS[@]}}"` '
         "invocation found -- pattern may need updating if the launch line "
         "changed shape"
     )
@@ -132,9 +132,7 @@ def test_runner_scrub_statement_precedes_pytest_invocation(script: pathlib.Path)
 
 
 @pytest.mark.parametrize("script", _RUNNERS, ids=lambda p: p.name)
-def test_runner_scrub_statement_actually_clears_guard_vars(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_runner_scrub_statement_actually_clears_guard_vars(script: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """Executing the runner's own extracted scrub statement, seeded with
     both guard variables exported beforehand (the wake layer's effect on
     a dispatched agent's session), must leave neither variable visible to
@@ -143,13 +141,13 @@ def test_runner_scrub_statement_actually_clears_guard_vars(
     """
     scrub_line = _extract_scrub_line(script)
     fake_real_git = tmp_path / "fake-real-git"
-    probe_script = f'''
+    probe_script = f"""
 set -euo pipefail
 export GIT_GUARD_REAL_GIT="{fake_real_git}"
 export PGAI_GIT_GUARD_DEPTH=1
 {scrub_line}
 python3 -c "import os; print(repr((os.environ.get('GIT_GUARD_REAL_GIT'), os.environ.get('PGAI_GIT_GUARD_DEPTH'))))"
-'''
+"""
     result = subprocess.run(
         ["bash", "-c", probe_script],
         capture_output=True,
@@ -194,8 +192,7 @@ def test_both_runners_scrub_the_identical_guard_variable_set() -> None:
         f"{sorted(integration_names)}"
     )
     assert _GUARD_VAR_NAMES <= unit_names, (
-        f"expected both {sorted(_GUARD_VAR_NAMES)} in the scrub set; "
-        f"got {sorted(unit_names)}"
+        f"expected both {sorted(_GUARD_VAR_NAMES)} in the scrub set; " f"got {sorted(unit_names)}"
     )
 
 
@@ -211,12 +208,12 @@ def test_gated_runner_replay_command_forces_guard_vars_absent(tmp_path: pathlib.
     which may ambiently export either name from having sourced a guarded
     wake session's environment, leak into the replayed pytest invocation.
     """
-    stage1_script = f'''
+    stage1_script = f"""
 set -euo pipefail
 unset GIT_GUARD_REAL_GIT PGAI_GIT_GUARD_DEPTH 2>/dev/null || true
 source "{_GATED_RUNNER_LINT_SH}"
 gated_runner_replay_command "python3 -c \\"import os,sys; sys.stdout.write(repr((os.environ.get('GIT_GUARD_REAL_GIT'), os.environ.get('PGAI_GIT_GUARD_DEPTH'))))\\""
-'''
+"""
     stage1 = subprocess.run(
         ["bash", "-c", stage1_script],
         capture_output=True,
@@ -230,12 +227,12 @@ gated_runner_replay_command "python3 -c \\"import os,sys; sys.stdout.write(repr(
     )
     replay_command = stage1.stdout.strip()
     assert replay_command, "gated_runner_replay_command printed an empty command"
-    assert "-u GIT_GUARD_REAL_GIT" in replay_command, (
-        f"replay command must force GIT_GUARD_REAL_GIT absent; got: {replay_command!r}"
-    )
-    assert "-u PGAI_GIT_GUARD_DEPTH" in replay_command, (
-        f"replay command must force PGAI_GIT_GUARD_DEPTH absent; got: {replay_command!r}"
-    )
+    assert (
+        "-u GIT_GUARD_REAL_GIT" in replay_command
+    ), f"replay command must force GIT_GUARD_REAL_GIT absent; got: {replay_command!r}"
+    assert (
+        "-u PGAI_GIT_GUARD_DEPTH" in replay_command
+    ), f"replay command must force PGAI_GIT_GUARD_DEPTH absent; got: {replay_command!r}"
 
     operator_env = dict(os.environ)
     operator_env["PATH"] = os.environ.get("PATH", "")

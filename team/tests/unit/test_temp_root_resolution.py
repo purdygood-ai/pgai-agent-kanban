@@ -69,9 +69,7 @@ _LAST_RESORT = "/tmp/pgai_kanban_tmp"
 
 def _write_cfg(root: pathlib.Path, tmp_root: str, tmp_subdir: str) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "kanban.cfg").write_text(
-        f"[paths]\ntmp_root = {tmp_root}\ntmp_subdir = {tmp_subdir}\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text(f"[paths]\ntmp_root = {tmp_root}\ntmp_subdir = {tmp_subdir}\n", encoding="utf-8")
 
 
 def _scratch_install(tmp_path: pathlib.Path, name: str) -> tuple[pathlib.Path, pathlib.Path]:
@@ -109,9 +107,9 @@ def _resolve(
     lines.append(f'source "{temp_sh}"')
     lines.append(f'printf "%s" "$({call})"')
     result = run_bash(tmp_path, "\n".join(lines))
-    assert result.returncode == 0, (
-        f"{call} exited {result.returncode}\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"{call} exited {result.returncode}\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     assert result.stderr == "", f"{call} must be silent on stderr; got {result.stderr!r}"
     return result.stdout
 
@@ -130,9 +128,7 @@ def test_configured_root_ignores_the_override_while_temp_dir_honours_it(
     override.mkdir(parents=True)
 
     configured = _resolve(tmp_path, root_path=str(cfg_root), override=str(override))
-    effective = _resolve(
-        tmp_path, root_path=str(cfg_root), override=str(override), call="pgai_temp_dir"
-    )
+    effective = _resolve(tmp_path, root_path=str(cfg_root), override=str(override), call="pgai_temp_dir")
 
     assert configured == str(tmp_path / "configured" / "scratch"), (
         "pgai_configured_temp_root must return the kanban.cfg-derived root and "
@@ -156,9 +152,7 @@ def test_configured_root_ignores_the_override_while_temp_dir_honours_it(
 def test_tier_2a_reads_kanban_cfg_at_the_root_path(tmp_path: pathlib.Path) -> None:
     cfg_root = tmp_path / "cfg"
     _write_cfg(cfg_root, str(tmp_path / "root-a"), "sub-a")
-    assert _resolve(tmp_path, root_path=str(cfg_root), override=None) == str(
-        tmp_path / "root-a" / "sub-a"
-    )
+    assert _resolve(tmp_path, root_path=str(cfg_root), override=None) == str(tmp_path / "root-a" / "sub-a")
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +288,6 @@ def test_header_states_the_filesystem_root_decision(tmp_path: pathlib.Path) -> N
         "temp.sh's header must state that a resolved value canonicalising to '/' "
         "is rejected -- the decision this module's filesystem-root tests pin"
     )
-    assert "_pgai_temp_root_names_filesystem_root" in header, (
-        "temp.sh must name the single helper that implements the invariant"
-    )
+    assert (
+        "_pgai_temp_root_names_filesystem_root" in header
+    ), "temp.sh must name the single helper that implements the invariant"

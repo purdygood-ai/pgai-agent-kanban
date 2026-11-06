@@ -49,7 +49,6 @@ import os
 import pathlib
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Script paths (relative to this file: team/tests/unit/ → team/)
@@ -72,6 +71,7 @@ _DEFAULT_GLYPH = "■"  # ■
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_glyph_test_root(tmp_path: pathlib.Path) -> pathlib.Path:
     """Build a minimal multi-project kanban root under tmp_path.
 
@@ -83,10 +83,7 @@ def _make_glyph_test_root(tmp_path: pathlib.Path) -> pathlib.Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     projects_cfg = tmp_path / "projects.cfg"
     projects_cfg.write_text(
-        "[project:glyph-test]\n"
-        "priority=1\n"
-        "enabled=true\n"
-        "dashboard_color=#378ADD\n",
+        "[project:glyph-test]\n" "priority=1\n" "enabled=true\n" "dashboard_color=#378ADD\n",
         encoding="utf-8",
     )
 
@@ -102,8 +99,7 @@ def _make_glyph_test_root(tmp_path: pathlib.Path) -> pathlib.Path:
     queue_dir = tmp_path / "projects" / "glyph-test" / "tasks" / "queues"
     queue_dir.mkdir(parents=True, exist_ok=True)
     (queue_dir / "coder_backlog.md").write_text(
-        "# CODER Backlog\n\n"
-        "- [A] CODER-20260721-001-test\n",
+        "# CODER Backlog\n\n" "- [A] CODER-20260721-001-test\n",
         encoding="utf-8",
     )
 
@@ -139,11 +135,17 @@ def _run_column_render(
         [
             "bash",
             str(_COLUMN_RENDER),
-            "queue", "none", "5", "38",
-            "--label", "CODER",
-            "--kanban-root", str(kanban_root),
+            "queue",
+            "none",
+            "5",
+            "38",
+            "--label",
+            "CODER",
+            "--kanban-root",
+            str(kanban_root),
             "--all-projects",
-            "--column-type", "coder",
+            "--column-type",
+            "coder",
         ],
         capture_output=True,
         text=True,
@@ -155,6 +157,7 @@ def _run_column_render(
 # ---------------------------------------------------------------------------
 # Test 1 — default render: absent key produces byte-identical output to "■"
 # ---------------------------------------------------------------------------
+
 
 def test_default_glyph_absent_key_byte_identical(tmp_path: pathlib.Path) -> None:
     """Absent dashboard_status_glyph key renders "■" byte-identical to explicit "■" cfg.
@@ -171,25 +174,21 @@ def test_default_glyph_absent_key_byte_identical(tmp_path: pathlib.Path) -> None
     # Fixture B: kanban.cfg with explicit dashboard_status_glyph = ■
     root_explicit = _make_glyph_test_root(tmp_path / "explicit")
     (root_explicit / "kanban.cfg").write_text(
-        "[dashboard]\n"
-        f"dashboard_status_glyph = {_DEFAULT_GLYPH}\n",
+        "[dashboard]\n" f"dashboard_status_glyph = {_DEFAULT_GLYPH}\n",
         encoding="utf-8",
     )
 
     result_absent = _run_column_render(root_absent)
     result_explicit = _run_column_render(root_explicit)
 
-    assert result_absent.returncode == 0, (
-        f"column-render.sh failed with absent key; stderr: {result_absent.stderr!r}"
-    )
-    assert result_explicit.returncode == 0, (
-        f"column-render.sh failed with explicit '■'; stderr: {result_explicit.stderr!r}"
-    )
+    assert result_absent.returncode == 0, f"column-render.sh failed with absent key; stderr: {result_absent.stderr!r}"
+    assert (
+        result_explicit.returncode == 0
+    ), f"column-render.sh failed with explicit '■'; stderr: {result_explicit.stderr!r}"
 
     # Verify the default glyph "■" appears in the absent-key output
     assert _DEFAULT_GLYPH in result_absent.stdout, (
-        f"Expected default glyph {_DEFAULT_GLYPH!r} in absent-key output; "
-        f"stdout: {result_absent.stdout!r}"
+        f"Expected default glyph {_DEFAULT_GLYPH!r} in absent-key output; " f"stdout: {result_absent.stdout!r}"
     )
 
     # Verify byte-identical output
@@ -203,6 +202,7 @@ def test_default_glyph_absent_key_byte_identical(tmp_path: pathlib.Path) -> None
 # ---------------------------------------------------------------------------
 # Test 2 — ASCII override: glyph swaps, column widths stay aligned
 # ---------------------------------------------------------------------------
+
 
 def test_ascii_override_swaps_glyph_and_widths_remain_aligned(
     tmp_path: pathlib.Path,
@@ -227,26 +227,23 @@ def test_ascii_override_swaps_glyph_and_widths_remain_aligned(
     # Fixture B: ASCII glyph '#' via kanban.cfg
     root_ascii = _make_glyph_test_root(tmp_path / "ascii")
     (root_ascii / "kanban.cfg").write_text(
-        "[dashboard]\n"
-        f"dashboard_status_glyph = {ascii_glyph}\n",
+        "[dashboard]\n" f"dashboard_status_glyph = {ascii_glyph}\n",
         encoding="utf-8",
     )
 
     result_default = _run_column_render(root_default)
     result_ascii = _run_column_render(root_ascii)
 
-    assert result_default.returncode == 0, (
-        f"column-render.sh failed with default glyph; stderr: {result_default.stderr!r}"
-    )
+    assert (
+        result_default.returncode == 0
+    ), f"column-render.sh failed with default glyph; stderr: {result_default.stderr!r}"
     assert result_ascii.returncode == 0, (
-        f"column-render.sh failed with ASCII glyph '{ascii_glyph}'; "
-        f"stderr: {result_ascii.stderr!r}"
+        f"column-render.sh failed with ASCII glyph '{ascii_glyph}'; " f"stderr: {result_ascii.stderr!r}"
     )
 
     # The ASCII glyph '#' must appear in the override output
     assert ascii_glyph in result_ascii.stdout, (
-        f"Expected ASCII glyph '{ascii_glyph}' in override output; "
-        f"stdout: {result_ascii.stdout!r}"
+        f"Expected ASCII glyph '{ascii_glyph}' in override output; " f"stdout: {result_ascii.stdout!r}"
     )
 
     # The default glyph '■' must NOT appear in the override output
@@ -259,15 +256,12 @@ def test_ascii_override_swaps_glyph_and_widths_remain_aligned(
     # Both single-char glyphs yield TAG_VIS_LEN = 2, so rendered lines should
     # have the same visible character count.
     import re
-    _ansi_re = re.compile(r'\x1b\[[0-9;]*m')
+
+    _ansi_re = re.compile(r"\x1b\[[0-9;]*m")
 
     def _visible_lines(text: str) -> list[str]:
         """Return non-header, non-empty lines with ANSI codes stripped."""
-        return [
-            _ansi_re.sub("", line)
-            for line in text.splitlines()
-            if line and not line.startswith("===")
-        ]
+        return [_ansi_re.sub("", line) for line in text.splitlines() if line and not line.startswith("===")]
 
     default_lines = _visible_lines(result_default.stdout)
     ascii_lines = _visible_lines(result_ascii.stdout)
@@ -292,6 +286,7 @@ def test_ascii_override_swaps_glyph_and_widths_remain_aligned(
 # Test 3 — multi-char rejection: config loader exits non-zero, names the key
 # ---------------------------------------------------------------------------
 
+
 def test_multichar_glyph_rejected_with_error_naming_key(tmp_path: pathlib.Path) -> None:
     """Multi-character dashboard_status_glyph causes config loader to exit non-zero.
 
@@ -307,8 +302,7 @@ def test_multichar_glyph_rejected_with_error_naming_key(tmp_path: pathlib.Path) 
     # Write a kanban.cfg with a two-character glyph value
     cfg_file = tmp_path / "kanban.cfg"
     cfg_file.write_text(
-        "[dashboard]\n"
-        "dashboard_status_glyph = ##\n",
+        "[dashboard]\n" "dashboard_status_glyph = ##\n",
         encoding="utf-8",
     )
 
@@ -318,7 +312,8 @@ def test_multichar_glyph_rejected_with_error_naming_key(tmp_path: pathlib.Path) 
 
     result = subprocess.run(
         [
-            "bash", "-c",
+            "bash",
+            "-c",
             f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r}",
         ],
         capture_output=True,
@@ -335,6 +330,5 @@ def test_multichar_glyph_rejected_with_error_naming_key(tmp_path: pathlib.Path) 
 
     # Error message must name the key
     assert "dashboard_status_glyph" in result.stderr, (
-        f"Expected 'dashboard_status_glyph' in error message; "
-        f"stderr: {result.stderr!r}"
+        f"Expected 'dashboard_status_glyph' in error message; " f"stderr: {result.stderr!r}"
     )

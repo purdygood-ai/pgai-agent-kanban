@@ -2,12 +2,15 @@
 push_decision.py — decide whether an out-of-band push site may publish a
 project's refs to its remote.
 
-Out-of-band push sites (the OVERWATCH push-lag check, the CM push watchdog)
-push whatever a dev tree holds that its remote lacks. They act only on a
-real, registered project's own configuration, so a sandbox root, a
-half-built config, or an inherited ``PGAI_DEV_TREE_PATH`` can never steer
-them at a real checkout. Every such site asks this module, so all of them
-apply one rule.
+Out-of-band push sites (the CM push watchdog, OVERWATCH's
+check-orphan-rc-branches and check-push-lag checks) push to a project's
+remote outside a release. They act only on a real, registered project's own
+configuration, so a sandbox root, a half-built config, or an inherited
+``PGAI_DEV_TREE_PATH`` can never steer them at a real checkout. Every such
+site asks this module whether the project resolves. The CM push watchdog and
+check-orphan-rc-branches act on the answer as given; check-push-lag is
+stricter and pushes only on an explicit ``push_to_remote = true``, treating
+an absent or any other value like ``false``.
 
 The rule
 --------
@@ -23,8 +26,9 @@ A project resolves only when all three hold:
 A resolved project then reads ``[project] push_to_remote``: the exact value
 ``false`` (one surrounding double quote stripped from each side) is
 ``no-push``; absent, blank, ``true`` or any other value is ``push``. The
-default for a resolved project is therefore unchanged — a missing key means
-push.
+resolver's answer for a missing key is therefore ``push``, which the CM push
+watchdog and check-orphan-rc-branches act on; check-push-lag does not (see
+above).
 
 The answer
 ----------
@@ -61,7 +65,7 @@ import argparse
 import dataclasses
 import pathlib
 import sys
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
 
 # Run by file path (``python3 .../push_decision.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -88,7 +92,7 @@ __all__ = [
     "main",
 ]
 
-PathLike = Union[str, pathlib.Path]
+PathLike = str | pathlib.Path
 
 #: The site may push.
 PUSH = "push"
@@ -104,6 +108,7 @@ SKIP_STATUS = "skipped-unresolved-project"
 MISSING_REGISTRATION = "registration"
 MISSING_PROJECT_CFG = "project-cfg"
 MISSING_DEV_TREE_PATH = "dev-tree-path"
+
 
 @dataclasses.dataclass(frozen=True)
 class PushDecision:
@@ -147,10 +152,7 @@ class PushDecision:
 
 
 def _unresolved(project: str, missing: str, detail: str, cfg_file: str = "") -> PushDecision:
-    line = (
-        f"{SKIP_STATUS}: project '{project}': missing {missing}: {detail}; "
-        "nothing pushed and no remote contacted"
-    )
+    line = f"{SKIP_STATUS}: project '{project}': missing {missing}: {detail}; " "nothing pushed and no remote contacted"
     return PushDecision(
         decision=UNRESOLVED,
         project=project,
@@ -160,7 +162,7 @@ def _unresolved(project: str, missing: str, detail: str, cfg_file: str = "") -> 
     )
 
 
-def _registration_gap(root: pathlib.Path, project: str) -> Optional[str]:
+def _registration_gap(root: pathlib.Path, project: str) -> str | None:
     """Why *project* is not registered under *root*, or None when it is."""
     registry = root / "projects.cfg"
     if not registry.is_file():
@@ -225,9 +227,7 @@ def resolve_push_decision(kanban_root: PathLike, project: str) -> PushDecision:
             cfg_file=str(cfg_path),
         )
 
-    raw = project_cfg.strip_one_quote_each_side(
-        project_cfg.read_cfg_key(cfg_path, "project", "push_to_remote"), '"'
-    )
+    raw = project_cfg.strip_one_quote_each_side(project_cfg.read_cfg_key(cfg_path, "project", "push_to_remote"), '"')
     return PushDecision(
         decision=NO_PUSH if raw == "false" else PUSH,
         project=name,
@@ -262,7 +262,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point: print the decision's key=value lines; exit 0."""
     args = _parser().parse_args(argv)
     decision = resolve_push_decision(args.kanban_root, args.project)

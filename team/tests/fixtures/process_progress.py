@@ -40,18 +40,29 @@ pane_process_death() reads a pane process's state directly from /proc, so
 a process that was fatally signalled is reported dead before tmux gets to
 reap it and drop or flag its pane.
 
+REAPING
+-------
+A fixture that runs a script starting processes outside the tree it can
+stop -- a loop backgrounded with nohup next to a tmux server, say -- marks
+every one of them by putting one environment variable, with a value unique
+to the test, in the environment it launches the script under; every
+descendant inherits it. processes_carrying_env() lists the live processes
+that carry it, and reap_processes_carrying_env() kills them until none is
+left, so teardown can end with no process the test started still alive.
+
 Everything here reads /proc; require_procfs() narrates a skip (never a
 silent one) on a host without it.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import signal
 import subprocess
 import time
-from typing import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 import pytest
 
@@ -202,6 +213,53 @@ def wait_while_progressing(
             )
 
 
+def processes_carrying_env(name: str, value: str) -> list[tuple[int, str]]:
+    """(pid, command line) of every live process whose environment holds
+    exactly <name>=<value>, sorted by pid. A zombie has already exited and
+    is left out; so is any process this user cannot read. Empty on a host
+    without /proc."""
+    if not (_PROC / "self" / "environ").exists():
+        return []
+    needle = f"{name}={value}".encode()
+    found = []
+    for entry in _PROC.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if needle not in (entry / "environ").read_bytes().split(b"\0"):
+                continue
+            cmdline = (entry / "cmdline").read_bytes()
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        fields = proc_stat_fields(int(entry.name))
+        if fields is None or fields[0] in ("Z", "X", "x"):
+            continue
+        found.append((int(entry.name), cmdline.replace(b"\0", b" ").decode(errors="replace").strip()))
+    return sorted(found)
+
+
+def reap_processes_carrying_env(name: str, value: str) -> None:
+    """SIGKILL every live process carrying <name>=<value> in its environment,
+    rescanning until none is left, so a process that forked between a scan
+    and its kill is caught by the next scan. Ends on the processes being
+    gone; fails only when the set of survivors stops changing for
+    STALL_SECONDS."""
+
+    def _none_left() -> bool:
+        survivors = processes_carrying_env(name, value)
+        for pid, _cmdline in survivors:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
+        return not survivors
+
+    wait_while_progressing(
+        _none_left,
+        lambda: processes_carrying_env(name, value),
+        what=f"reaping the processes carrying {name}={value}",
+        on_stall="a process survived SIGKILL; it is stuck in the kernel, not slow",
+    )
+
+
 def run_until_exit(
     argv: Sequence[str],
     *,
@@ -259,8 +317,7 @@ def run_until_exit(
                 last, last_change = current, time.monotonic()
             elif time.monotonic() - last_change >= STALL_SECONDS:
                 pytest.fail(
-                    f"{' '.join(argv)} made no observable progress for "
-                    f"{STALL_SECONDS}s -- it is hung, not slow"
+                    f"{' '.join(argv)} made no observable progress for " f"{STALL_SECONDS}s -- it is hung, not slow"
                 )
     finally:
         if proc.poll() is None:

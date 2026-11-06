@@ -89,7 +89,9 @@ def _env_for(kanban_root: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def _make_client(sandbox_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, *, kanban_root_for_scripts: pathlib.Path | None = None):
+def _make_client(
+    sandbox_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, *, kanban_root_for_scripts: pathlib.Path | None = None
+):
     """Create a TestClient whose scripts resolve to the real team/ dev tree
     (unless overridden) while data resolves against sandbox_root -- the split
     test_rest_twins_read_verbs.py's own docstring documents."""
@@ -136,7 +138,10 @@ class TestDeferArmsSameCampaignFileAsCli:
 
         cli = subprocess.run(
             ["bash", str(_DEFER_SH), "--project", "proj", "--until", "v2.20.0"],
-            capture_output=True, text=True, env=_env_for(cli_root), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(cli_root),
+            timeout=15,
         )
         assert cli.returncode == 0, cli.stdout + cli.stderr
 
@@ -162,13 +167,9 @@ class TestDeferArmsSameCampaignFileAsCli:
         _register_project(root, "proj")
 
         with _make_client(root, monkeypatch, kanban_root_for_scripts=root) as client:
-            first = client.post(
-                "/operations/defer", json={"project": "proj", "until": "v2.20.0"}
-            )
+            first = client.post("/operations/defer", json={"project": "proj", "until": "v2.20.0"})
             assert first.status_code == 200
-            second = client.post(
-                "/operations/defer", json={"project": "proj", "until": "v2.20.0"}
-            )
+            second = client.post("/operations/defer", json={"project": "proj", "until": "v2.20.0"})
         assert second.status_code == 200
         assert "already armed" in second.json()["stdout"], second.json()
 
@@ -192,7 +193,10 @@ class TestUndeferAgainstUnarmedProjectMatchesCliIdempotence:
 
         cli = subprocess.run(
             ["bash", str(_UNDEFER_SH), "--project", "proj"],
-            capture_output=True, text=True, env=_env_for(root), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(root),
+            timeout=15,
         )
         assert cli.returncode == 0, cli.stdout + cli.stderr
         assert "nothing to clear" in cli.stdout
@@ -203,8 +207,7 @@ class TestUndeferAgainstUnarmedProjectMatchesCliIdempotence:
         body = resp.json()
         assert "nothing to clear" in body["stdout"], body
         assert body["stdout"] == cli.stdout, (
-            "HTTP stdout must match undefer.sh's own idempotent-clear wording "
-            "byte-for-byte."
+            "HTTP stdout must match undefer.sh's own idempotent-clear wording " "byte-for-byte."
         )
         assert not _campaign_file(root, "proj").exists()
 
@@ -215,9 +218,7 @@ class TestUndeferAgainstUnarmedProjectMatchesCliIdempotence:
         _register_project(root, "proj")
 
         with _make_client(root, monkeypatch, kanban_root_for_scripts=root) as client:
-            armed = client.post(
-                "/operations/defer", json={"project": "proj", "until": "v2.20.0"}
-            )
+            armed = client.post("/operations/defer", json={"project": "proj", "until": "v2.20.0"})
             assert armed.status_code == 200
             assert _campaign_file(root, "proj").exists()
 
@@ -234,9 +235,7 @@ class TestUndeferAgainstUnarmedProjectMatchesCliIdempotence:
 
 
 class TestDeferUntilRefusalMachineKeyParityAcrossSurfaces:
-    def test_malformed_until_key_matches_cli(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_malformed_until_key_matches_cli(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cli_root = tmp_path / "cli_root"
         http_root = tmp_path / "http_root"
         _register_project(cli_root, "proj")
@@ -244,15 +243,16 @@ class TestDeferUntilRefusalMachineKeyParityAcrossSurfaces:
 
         cli = subprocess.run(
             ["bash", str(_DEFER_SH), "--project", "proj", "--until", "2.14"],
-            capture_output=True, text=True, env=_env_for(cli_root), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(cli_root),
+            timeout=15,
         )
         assert cli.returncode != 0
         assert "defer.until_malformed" in cli.stderr, cli.stderr
 
         with _make_client(http_root, monkeypatch, kanban_root_for_scripts=http_root) as client:
-            resp = client.post(
-                "/operations/defer", json={"project": "proj", "until": "2.14"}
-            )
+            resp = client.post("/operations/defer", json={"project": "proj", "until": "2.14"})
         body = resp.json()
         assert resp.status_code == 422
         assert "defer.until_malformed" in body["stderr"], body
@@ -262,9 +262,7 @@ class TestDeferUntilRefusalMachineKeyParityAcrossSurfaces:
         )
         assert not _campaign_file(http_root, "proj").exists()
 
-    def test_missing_until_key_matches_cli(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_until_key_matches_cli(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cli_root = tmp_path / "cli_root"
         http_root = tmp_path / "http_root"
         _register_project(cli_root, "proj")
@@ -272,7 +270,10 @@ class TestDeferUntilRefusalMachineKeyParityAcrossSurfaces:
 
         cli = subprocess.run(
             ["bash", str(_DEFER_SH), "--project", "proj"],
-            capture_output=True, text=True, env=_env_for(cli_root), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(cli_root),
+            timeout=15,
         )
         assert cli.returncode != 0
         assert "defer.until_required" in cli.stderr, cli.stderr
@@ -341,8 +342,7 @@ class TestDeepVerifyReturnsPromptlyWithoutAssertingAVerdict:
         assert body["exit_code"] == 0
         assert "not completed" in body["stdout"] or "no verdict" in body["stdout"], body
         assert "Verdict: built" not in body["stdout"], (
-            "The response must never assert a verdict the backgrounded lane "
-            f"has not produced yet: {body!r}"
+            "The response must never assert a verdict the backgrounded lane " f"has not produced yet: {body!r}"
         )
 
         # The backgrounded run genuinely happens: poll the ledger for the
@@ -422,21 +422,15 @@ class TestWakeNowBackgroundDoesNotBlockOnASlowFire:
         (stub_kanban_root / "scripts").mkdir(parents=True, exist_ok=True)
         marker = tmp_path / "child_ran_marker.txt"
         stub_script = stub_kanban_root / "scripts" / "wake-now.sh"
-        stub_script.write_text(
-            _STUB_WAKE_NOW_SLOW_BG.format(marker=marker), encoding="utf-8"
-        )
+        stub_script.write_text(_STUB_WAKE_NOW_SLOW_BG.format(marker=marker), encoding="utf-8")
         stub_script.chmod(0o755)
 
         data_root = tmp_path / "data_root"
         data_root.mkdir(parents=True, exist_ok=True)
 
-        with _make_client(
-            data_root, monkeypatch, kanban_root_for_scripts=stub_kanban_root
-        ) as client:
+        with _make_client(data_root, monkeypatch, kanban_root_for_scripts=stub_kanban_root) as client:
             started = time.monotonic()
-            resp = client.post(
-                "/operations/wake-now", json={"agent": "coder", "bg": True}
-            )
+            resp = client.post("/operations/wake-now", json={"agent": "coder", "bg": True})
             elapsed = time.monotonic() - started
 
         assert resp.status_code == 200, resp.json()

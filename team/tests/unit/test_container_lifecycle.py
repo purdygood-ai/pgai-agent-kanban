@@ -74,7 +74,7 @@ _DOCKER_USE = _TEAM_DIR / "scripts" / "lib" / "docker_use.sh"
 _TEMPLATES = _TEAM_DIR / "templates" / "install"
 _NAME = "pgai-kanban"
 _IMAGE = "pgai-kanban:latest"
-_NOW = datetime.datetime(2026, 10, 11, 8, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 10, 11, 8, 0, 0, tzinfo=datetime.UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +89,14 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 def _run(argv: list[str], *, env: dict, cwd: pathlib.Path, input_text: str = "") -> subprocess.CompletedProcess:
     """Run *argv* in its own process group; a timeout kills the whole group."""
     proc = subprocess.Popen(
-        argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(cwd), start_new_session=True,
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         stdout, stderr = proc.communicate(input=input_text, timeout=60)
@@ -124,7 +130,9 @@ def _env(tmp_path: pathlib.Path, kanban_root: pathlib.Path, *path_dirs: pathlib.
     )
 
 
-def _engine_call(engine: FakeEngine, tmp_path: pathlib.Path, kanban_root: pathlib.Path, *engine_args: str) -> subprocess.CompletedProcess:
+def _engine_call(
+    engine: FakeEngine, tmp_path: pathlib.Path, kanban_root: pathlib.Path, *engine_args: str
+) -> subprocess.CompletedProcess:
     """Run one engine command through the real pgai_docker helper."""
     script = f'source "{_DOCKER_USE}"; pgai_docker {engine.name} "$@"'
     return _run(
@@ -134,7 +142,9 @@ def _engine_call(engine: FakeEngine, tmp_path: pathlib.Path, kanban_root: pathli
     )
 
 
-def _lifecycle_cli(tmp_path: pathlib.Path, kanban_root: pathlib.Path, *args: str, input_text: str = "") -> subprocess.CompletedProcess:
+def _lifecycle_cli(
+    tmp_path: pathlib.Path, kanban_root: pathlib.Path, *args: str, input_text: str = ""
+) -> subprocess.CompletedProcess:
     return _run(
         [sys.executable, "-m", "pgai_agent_kanban.container.lifecycle", *args],
         env=_env(tmp_path, kanban_root),
@@ -194,11 +204,15 @@ def test_running_container_from_fake_engine_reads_image_and_uptime(tmp_path, kan
 
 
 def test_engine_nanosecond_start_time_and_podman_image_field_are_read():
-    podman_like = json.dumps([{
-        "Name": _NAME,
-        "ImageName": "localhost/pgai-kanban:latest",
-        "State": {"Status": "running", "Running": True, "StartedAt": "2026-10-11T07:59:00.123456789+00:00"},
-    }])
+    podman_like = json.dumps(
+        [
+            {
+                "Name": _NAME,
+                "ImageName": "localhost/pgai-kanban:latest",
+                "State": {"Status": "running", "Running": True, "StartedAt": "2026-10-11T07:59:00.123456789+00:00"},
+            }
+        ]
+    )
     state = parse_container_state(podman_like, now=_NOW)
     assert state.name == _NAME
     assert state.image == "localhost/pgai-kanban:latest"
@@ -224,8 +238,12 @@ def test_engine_failure_other_than_no_such_container_is_refused():
 
 
 def test_container_state_verb_exit_codes_follow_the_state(tmp_path, kanban_root):
-    running = json.dumps([{"State": {"Status": "running", "StartedAt": "2026-10-11T07:00:00Z"}, "Config": {"Image": _IMAGE}}])
-    result = _lifecycle_cli(tmp_path, kanban_root, "container-state", "--name", _NAME, "--now", "2026-10-11T08:00:00Z", input_text=running)
+    running = json.dumps(
+        [{"State": {"Status": "running", "StartedAt": "2026-10-11T07:00:00Z"}, "Config": {"Image": _IMAGE}}]
+    )
+    result = _lifecycle_cli(
+        tmp_path, kanban_root, "container-state", "--name", _NAME, "--now", "2026-10-11T08:00:00Z", input_text=running
+    )
     assert result.returncode == 0, _diagnostic(result)
     assert "state=running" in result.stdout.splitlines(), _diagnostic(result)
     assert "uptime_seconds=3600" in result.stdout.splitlines(), _diagnostic(result)
@@ -235,8 +253,12 @@ def test_container_state_verb_exit_codes_follow_the_state(tmp_path, kanban_root)
     assert "state=absent" in result.stdout.splitlines(), _diagnostic(result)
 
     stderr_file = tmp_path / "inspect.err"
-    stderr_file.write_text("Error response from daemon: dial unix docker.sock: connect: permission denied\n", encoding="utf-8")
-    result = _lifecycle_cli(tmp_path, kanban_root, "container-state", "--exit-code", "1", "--stderr-file", str(stderr_file))
+    stderr_file.write_text(
+        "Error response from daemon: dial unix docker.sock: connect: permission denied\n", encoding="utf-8"
+    )
+    result = _lifecycle_cli(
+        tmp_path, kanban_root, "container-state", "--exit-code", "1", "--stderr-file", str(stderr_file)
+    )
     assert result.returncode == 1, _diagnostic(result)
     assert "permission denied" in result.stderr, _diagnostic(result)
 
@@ -288,7 +310,7 @@ def test_fired_lines_yield_the_last_heartbeat_age(kanban_root):
     )
     heartbeat = read_heartbeat(log, now=_NOW)
     assert heartbeat.found
-    assert heartbeat.last_fired_at == datetime.datetime(2026, 10, 11, 7, 58, tzinfo=datetime.timezone.utc)
+    assert heartbeat.last_fired_at == datetime.datetime(2026, 10, 11, 7, 58, tzinfo=datetime.UTC)
     assert heartbeat.age_seconds == 120
 
 
@@ -306,7 +328,7 @@ def test_missing_log_has_no_heartbeat(kanban_root):
 
 def test_heartbeat_before_since_does_not_count():
     text = _BANNER + "2026-10-11T07:58:00Z fired (minute=58): scripts/wake-batch.sh\n"
-    since = datetime.datetime(2026, 10, 11, 7, 59, tzinfo=datetime.timezone.utc)
+    since = datetime.datetime(2026, 10, 11, 7, 59, tzinfo=datetime.UTC)
     assert not parse_heartbeat(text, now=_NOW, since=since).found
     assert parse_heartbeat(text, now=_NOW, since=since - datetime.timedelta(minutes=5)).found
 
@@ -315,25 +337,33 @@ def test_backward_scan_finds_a_fired_line_split_across_read_chunks(kanban_root, 
     log = kanban_root / "logs" / "pseudocron.log"
     log.write_text(
         _BANNER
-        + "".join(f"2026-10-11T07:{m:02d}:00Z fired (minute={m:02d}): scripts/wake-batch.sh --agent=pm\n" for m in range(40, 50))
-        + "pseudocron shutting down (signal 15)\n" + _BANNER,
+        + "".join(
+            f"2026-10-11T07:{m:02d}:00Z fired (minute={m:02d}): scripts/wake-batch.sh --agent=pm\n"
+            for m in range(40, 50)
+        )
+        + "pseudocron shutting down (signal 15)\n"
+        + _BANNER,
         encoding="utf-8",
     )
     # Chunks far smaller than one line force every line across a boundary.
     monkeypatch.setattr(lifecycle, "_TAIL_CHUNK_BYTES", 7)
     heartbeat = read_heartbeat(log, now=_NOW)
-    assert heartbeat.last_fired_at == datetime.datetime(2026, 10, 11, 7, 49, tzinfo=datetime.timezone.utc)
+    assert heartbeat.last_fired_at == datetime.datetime(2026, 10, 11, 7, 49, tzinfo=datetime.UTC)
 
 
 def test_heartbeat_verb_reads_the_kanban_root_log(tmp_path, kanban_root):
     (kanban_root / "logs" / "pseudocron.log").write_text(
         _BANNER + "2026-10-11T07:59:30Z fired (minute=59): scripts/wake-batch.sh\n", encoding="utf-8"
     )
-    result = _lifecycle_cli(tmp_path, kanban_root, "heartbeat", "--kanban-root", str(kanban_root), "--now", "2026-10-11T08:00:00Z")
+    result = _lifecycle_cli(
+        tmp_path, kanban_root, "heartbeat", "--kanban-root", str(kanban_root), "--now", "2026-10-11T08:00:00Z"
+    )
     assert result.returncode == 0, _diagnostic(result)
     assert "age_seconds=30" in result.stdout.splitlines(), _diagnostic(result)
 
-    result = _lifecycle_cli(tmp_path, kanban_root, "heartbeat", "--kanban-root", str(kanban_root), "--since", "2026-10-11T08:00:00Z")
+    result = _lifecycle_cli(
+        tmp_path, kanban_root, "heartbeat", "--kanban-root", str(kanban_root), "--since", "2026-10-11T08:00:00Z"
+    )
     assert result.returncode == 3, _diagnostic(result)
     assert "heartbeat=no" in result.stdout.splitlines(), _diagnostic(result)
 
@@ -359,7 +389,8 @@ def test_root_needing_verbs_without_a_kanban_root_are_usage_errors(tmp_path, kan
     ):
         result = _run(
             [sys.executable, "-m", "pgai_agent_kanban.container.lifecycle", verb],
-            env=env, cwd=tmp_path,
+            env=env,
+            cwd=tmp_path,
         )
         assert result.returncode == 2, _diagnostic(result)
         assert message in result.stderr, _diagnostic(result)
@@ -378,7 +409,8 @@ def test_root_needing_verbs_without_a_kanban_root_are_usage_errors(tmp_path, kan
 def test_shipped_template_wake_lines_are_detected(template):
     text = _template_crontab(template)
     expected = [
-        line.strip() for line in text.splitlines()
+        line.strip()
+        for line in text.splitlines()
         if line.strip() and not line.lstrip().startswith("#") and "/scripts/wake-batch.sh " in line
     ]
     assert expected, f"{template} carries no wake-batch.sh job line to detect"
@@ -415,7 +447,9 @@ def test_wake_line_forms_beyond_the_template_are_detected():
 
 
 def test_crontab_verb_prints_wake_lines_and_exits_zero_only_when_present(tmp_path, kanban_root):
-    result = _lifecycle_cli(tmp_path, kanban_root, "crontab-wake-lines", input_text=_template_crontab("crontab-small.example"))
+    result = _lifecycle_cli(
+        tmp_path, kanban_root, "crontab-wake-lines", input_text=_template_crontab("crontab-small.example")
+    )
     assert result.returncode == 0, _diagnostic(result)
     assert all("/scripts/wake-batch.sh " in line for line in result.stdout.splitlines()), _diagnostic(result)
 
@@ -453,15 +487,24 @@ def test_no_records_means_no_sessions(kanban_root):
 
 def test_one_running_session_reports_role_and_task(kanban_root):
     _write_record(kanban_root, _TASK, 77)
-    sessions = list_agent_sessions(kanban_root, parse_process_table(f"  1 bash -l\n 77 claude -p process the kanban task at /k/tasks/{_TASK}\n"))
+    sessions = list_agent_sessions(
+        kanban_root, parse_process_table(f"  1 bash -l\n 77 claude -p process the kanban task at /k/tasks/{_TASK}\n")
+    )
     assert len(sessions) == 1
-    assert (sessions[0].role, sessions[0].task_id, sessions[0].pid, sessions[0].provider) == ("CODER", _TASK, 77, "claude")
+    assert (sessions[0].role, sessions[0].task_id, sessions[0].pid, sessions[0].provider) == (
+        "CODER",
+        _TASK,
+        77,
+        "claude",
+    )
 
 
 def test_records_whose_process_is_gone_or_unrelated_are_not_sessions(kanban_root):
-    _write_record(kanban_root, _TASK, 77)                         # pid no longer in the table
-    _write_record(kanban_root, "WRITER-20261011-002-docs", 88)    # pid reused by an unrelated process
-    (kanban_root / "locks" / "task-liveness" / "TESTER-20261011-003-x.record").write_text("holder=claude\npid=\n", encoding="utf-8")
+    _write_record(kanban_root, _TASK, 77)  # pid no longer in the table
+    _write_record(kanban_root, "WRITER-20261011-002-docs", 88)  # pid reused by an unrelated process
+    (kanban_root / "locks" / "task-liveness" / "TESTER-20261011-003-x.record").write_text(
+        "holder=claude\npid=\n", encoding="utf-8"
+    )
     table = [Process(1, "bash -l"), Process(88, "sleep 30")]
     assert list_agent_sessions(kanban_root, table) == []
 
@@ -473,13 +516,19 @@ def test_session_matches_on_provider_when_command_line_omits_the_task(kanban_roo
 
 
 def test_sessions_verb_lists_role_and_task(tmp_path, kanban_root):
-    result = _lifecycle_cli(tmp_path, kanban_root, "sessions", "--kanban-root", str(kanban_root), input_text="  1 bash -l\n")
+    result = _lifecycle_cli(
+        tmp_path, kanban_root, "sessions", "--kanban-root", str(kanban_root), input_text="  1 bash -l\n"
+    )
     assert result.returncode == 3, _diagnostic(result)
     assert result.stdout == "", _diagnostic(result)
 
     _write_record(kanban_root, _TASK, 77)
     result = _lifecycle_cli(
-        tmp_path, kanban_root, "sessions", "--kanban-root", str(kanban_root),
+        tmp_path,
+        kanban_root,
+        "sessions",
+        "--kanban-root",
+        str(kanban_root),
         input_text=f"  1 bash -l\n 77 claude -p task {_TASK}\n",
     )
     assert result.returncode == 0, _diagnostic(result)
@@ -538,7 +587,14 @@ def test_sessions_verb_reports_busy_for_a_wake_driver_with_no_provider_pid(tmp_p
     assert result.stdout.splitlines() == ["driver=wake-batch.sh pid=50"], _diagnostic(result)
 
     as_json = _lifecycle_cli(
-        tmp_path, kanban_root, "sessions", "--kanban-root", str(kanban_root), "--format", "json", input_text=table,
+        tmp_path,
+        kanban_root,
+        "sessions",
+        "--kanban-root",
+        str(kanban_root),
+        "--format",
+        "json",
+        input_text=table,
     )
     assert as_json.returncode == 0, _diagnostic(as_json)
     assert json.loads(as_json.stdout) == {
@@ -549,7 +605,9 @@ def test_sessions_verb_reports_busy_for_a_wake_driver_with_no_provider_pid(tmp_p
 
 
 def test_sessions_verb_reports_idle_with_no_session_and_no_wake_driver(tmp_path, kanban_root):
-    table = f"  1 bash -l\n 40 python3 {kanban_root}/scripts/pseudocron.py\n 61 tail -f {kanban_root}/logs/wake.sh.log\n"
+    table = (
+        f"  1 bash -l\n 40 python3 {kanban_root}/scripts/pseudocron.py\n 61 tail -f {kanban_root}/logs/wake.sh.log\n"
+    )
     result = _lifecycle_cli(tmp_path, kanban_root, "sessions", "--kanban-root", str(kanban_root), input_text=table)
     assert result.returncode == 3, _diagnostic(result)
     assert result.stdout == "", _diagnostic(result)
@@ -598,7 +656,14 @@ def test_sessions_verb_reports_busy_for_a_running_overwatch_sweep(tmp_path, kanb
     assert result.stdout.splitlines() == ["sweep=overwatch-sweep.sh pid=90"], _diagnostic(result)
 
     as_json = _lifecycle_cli(
-        tmp_path, kanban_root, "sessions", "--kanban-root", str(kanban_root), "--format", "json", input_text=table,
+        tmp_path,
+        kanban_root,
+        "sessions",
+        "--kanban-root",
+        str(kanban_root),
+        "--format",
+        "json",
+        input_text=table,
     )
     assert json.loads(as_json.stdout) == {
         "sessions": [],
@@ -618,10 +683,13 @@ def test_fake_engine_wake_driver_is_read_as_a_driver(kanban_root):
 
 
 def test_fake_engine_logs_each_invocation_and_answers_from_its_scenario(tmp_path, kanban_root):
-    engine = FakeEngine(tmp_path / "engine", scenario={
-        "images": [_IMAGE],
-        "containers": {_NAME: container(processes=[scheduler_process(40, kanban_root)])},
-    })
+    engine = FakeEngine(
+        tmp_path / "engine",
+        scenario={
+            "images": [_IMAGE],
+            "containers": {_NAME: container(processes=[scheduler_process(40, kanban_root)])},
+        },
+    )
     result = _engine_call(engine, tmp_path, kanban_root, "exec", _NAME, "ps", "-eo", "pid=,args=")
     assert result.returncode == 0, _diagnostic(result)
     assert [p.pid for p in scheduler_processes(parse_process_table(result.stdout))] == [40], _diagnostic(result)
@@ -638,25 +706,41 @@ def test_fake_engine_logs_each_invocation_and_answers_from_its_scenario(tmp_path
 
 def test_fake_engine_keeps_state_across_run_scheduler_start_stop_and_rm(tmp_path, kanban_root):
     log = kanban_root / "logs" / "pseudocron.log"
-    engine = FakeEngine(tmp_path / "engine", scenario={
-        "images": [_IMAGE],
-        "scheduler": {"log": str(log), "fires": True},
-    })
+    engine = FakeEngine(
+        tmp_path / "engine",
+        scenario={
+            "images": [_IMAGE],
+            "scheduler": {"log": str(log), "fires": True},
+        },
+    )
     run = _engine_call(engine, tmp_path, kanban_root, "run", "-d", "--name", _NAME, "-v", "/a:/a", _IMAGE)
     assert run.returncode == 0, _diagnostic(run)
     inspect = _engine_call(engine, tmp_path, kanban_root, "container", "inspect", _NAME)
     assert parse_container_state(inspect.stdout).state == STATE_RUNNING, _diagnostic(inspect)
 
     start = _engine_call(
-        engine, tmp_path, kanban_root, "exec", _NAME, "tmux", "new", "-d", "-s", "pseudocron",
+        engine,
+        tmp_path,
+        kanban_root,
+        "exec",
+        _NAME,
+        "tmux",
+        "new",
+        "-d",
+        "-s",
+        "pseudocron",
         f"python3 {kanban_root}/scripts/pseudocron.py >> {log} 2>&1",
     )
     assert start.returncode == 0, _diagnostic(start)
     assert read_heartbeat(log).found, "a scheduler start with fires=true writes a heartbeat"
-    second = _engine_call(engine, tmp_path, kanban_root, "exec", _NAME, "tmux", "new", "-d", "-s", "pseudocron", "python3 x/pseudocron.py")
+    second = _engine_call(
+        engine, tmp_path, kanban_root, "exec", _NAME, "tmux", "new", "-d", "-s", "pseudocron", "python3 x/pseudocron.py"
+    )
     assert second.returncode == 1, _diagnostic(second)
 
-    assert _engine_call(engine, tmp_path, kanban_root, "rm", _NAME).returncode == 1, "a running container is not removed without -f"
+    assert (
+        _engine_call(engine, tmp_path, kanban_root, "rm", _NAME).returncode == 1
+    ), "a running container is not removed without -f"
     assert _engine_call(engine, tmp_path, kanban_root, "stop", _NAME).returncode == 0
     assert _engine_call(engine, tmp_path, kanban_root, "rm", _NAME).returncode == 0
     gone = _engine_call(engine, tmp_path, kanban_root, "container", "inspect", _NAME)
@@ -668,9 +752,12 @@ def test_fake_engine_keeps_state_across_run_scheduler_start_stop_and_rm(tmp_path
 
 def test_fake_agent_session_leaves_after_its_polls(tmp_path, kanban_root):
     _write_record(kanban_root, _TASK, 77)
-    engine = FakeEngine(tmp_path / "engine", scenario={
-        "containers": {_NAME: container(processes=[agent_process(77, _TASK, exits_after_polls=2)])},
-    })
+    engine = FakeEngine(
+        tmp_path / "engine",
+        scenario={
+            "containers": {_NAME: container(processes=[agent_process(77, _TASK, exits_after_polls=2)])},
+        },
+    )
     seen = []
     for _ in range(3):
         result = _engine_call(engine, tmp_path, kanban_root, "exec", _NAME, "ps", "-eo", "pid=,args=")
@@ -680,10 +767,13 @@ def test_fake_agent_session_leaves_after_its_polls(tmp_path, kanban_root):
 
 
 def test_fake_engine_forced_failure_answers_before_doing_anything(tmp_path, kanban_root):
-    engine = FakeEngine(tmp_path / "engine", scenario={
-        "containers": {_NAME: container()},
-        "failures": {"inspect": {"exit": 1, "stderr": "Cannot connect to the Docker daemon"}},
-    })
+    engine = FakeEngine(
+        tmp_path / "engine",
+        scenario={
+            "containers": {_NAME: container()},
+            "failures": {"inspect": {"exit": 1, "stderr": "Cannot connect to the Docker daemon"}},
+        },
+    )
     result = _engine_call(engine, tmp_path, kanban_root, "container", "inspect", _NAME)
     assert result.returncode == 1, _diagnostic(result)
     with pytest.raises(ContainerQueryError):
@@ -696,14 +786,30 @@ def test_fake_engine_forced_failure_answers_before_doing_anything(tmp_path, kanb
 
 
 def test_status_report_running_with_scheduler_session_and_cron_conflict(kanban_root):
-    (kanban_root / "logs" / "pseudocron.log").write_text(_BANNER + "2026-10-11T07:59:00Z fired (minute=59): x\n", encoding="utf-8")
+    (kanban_root / "logs" / "pseudocron.log").write_text(
+        _BANNER + "2026-10-11T07:59:00Z fired (minute=59): x\n", encoding="utf-8"
+    )
     _write_record(kanban_root, _TASK, 77)
-    state = parse_container_state(json.dumps([{
-        "Name": "/" + _NAME, "State": {"Status": "running", "StartedAt": "2026-10-11T07:00:00Z"}, "Config": {"Image": _IMAGE},
-    }]), now=_NOW)
+    state = parse_container_state(
+        json.dumps(
+            [
+                {
+                    "Name": "/" + _NAME,
+                    "State": {"Status": "running", "StartedAt": "2026-10-11T07:00:00Z"},
+                    "Config": {"Image": _IMAGE},
+                }
+            ]
+        ),
+        now=_NOW,
+    )
     table = [Process(1, "bash -l"), Process(40, "python3 /k/scripts/pseudocron.py"), Process(77, f"claude -p {_TASK}")]
-    report = build_status_report(state, processes=table, kanban_root=kanban_root,
-                                 crontab_text=_template_crontab("crontab-small.example"), now=_NOW)
+    report = build_status_report(
+        state,
+        processes=table,
+        kanban_root=kanban_root,
+        crontab_text=_template_crontab("crontab-small.example"),
+        now=_NOW,
+    )
     assert report.exit_code == 0
     data = report.to_dict()
     assert data["container"]["state"] == "running" and data["container"]["image"] == _IMAGE
@@ -725,18 +831,37 @@ def test_status_report_running_with_scheduler_session_and_cron_conflict(kanban_r
         ("with-scheduler", "running", 0),
     ],
 )
-def test_status_verb_exit_code_per_state_from_fake_engine(tmp_path, kanban_root, scenario_container, expected_state, expected_exit):
+def test_status_verb_exit_code_per_state_from_fake_engine(
+    tmp_path, kanban_root, scenario_container, expected_state, expected_exit
+):
     if scenario_container == "with-scheduler":
         scenario_container = container(processes=[scheduler_process(40, kanban_root)])
-    engine = FakeEngine(tmp_path / "engine", scenario={
-        "images": [_IMAGE], "containers": {_NAME: scenario_container} if scenario_container else {},
-    })
+    engine = FakeEngine(
+        tmp_path / "engine",
+        scenario={
+            "images": [_IMAGE],
+            "containers": {_NAME: scenario_container} if scenario_container else {},
+        },
+    )
     inspect = _engine_call(engine, tmp_path, kanban_root, "container", "inspect", _NAME)
     inspect_file, stderr_file, ps_file = tmp_path / "inspect.json", tmp_path / "inspect.err", tmp_path / "ps.txt"
     inspect_file.write_text(inspect.stdout, encoding="utf-8")
     stderr_file.write_text(inspect.stderr, encoding="utf-8")
-    args = ["status", "--format", "json", "--name", _NAME, "--kanban-root", str(kanban_root),
-            "--input", str(inspect_file), "--exit-code", str(inspect.returncode), "--stderr-file", str(stderr_file)]
+    args = [
+        "status",
+        "--format",
+        "json",
+        "--name",
+        _NAME,
+        "--kanban-root",
+        str(kanban_root),
+        "--input",
+        str(inspect_file),
+        "--exit-code",
+        str(inspect.returncode),
+        "--stderr-file",
+        str(stderr_file),
+    ]
     if expected_state == "running":
         ps = _engine_call(engine, tmp_path, kanban_root, "exec", _NAME, "ps", "-eo", "pid=,args=")
         ps_file.write_text(ps.stdout, encoding="utf-8")

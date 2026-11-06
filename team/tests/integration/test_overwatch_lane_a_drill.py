@@ -56,7 +56,7 @@ import subprocess
 
 import pytest
 
-from pgai_agent_kanban.overwatch.ledger import ledger_path_for_project, parse_entries
+from pgai_agent_kanban.overwatch.ledger import parse_entries
 from pgai_agent_kanban.overwatch.resolution_stage import (
     DECLINED,
     EXECUTED,
@@ -85,7 +85,7 @@ _KANBAN_PY_CM_DIR = _TEAM_DIR / "pgai_agent_kanban" / "cm"
 
 
 def _short_bug_id(bug_id: str) -> str:
-    """"BUG-NNNN-some-slug" -> "BUG-NNNN" — classify_lane()'s
+    """ "BUG-NNNN-some-slug" -> "BUG-NNNN" — classify_lane()'s
     LaneClassification.regression_bug_id (and this drill's ledger
     findings) carry the short BUG-NNNN form, not the full file-slug id."""
     parts = bug_id.split("-")
@@ -93,9 +93,7 @@ def _short_bug_id(bug_id: str) -> str:
 
 
 def _run_git(repo_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(repo_path), *args], capture_output=True, text=True, check=True
-    )
+    return subprocess.run(["git", "-C", str(repo_path), *args], capture_output=True, text=True, check=True)
 
 
 # ---------------------------------------------------------------------------
@@ -120,9 +118,7 @@ _DEFAULT_CORRECT_DIRECTION = (
     "Compare column_count using the original comparison direction against the "
     "configured max_width, per the layout spec."
 )
-_DEFAULT_GROUND_TRUTH_REF = (
-    "the bug's own original ## Fix section, applied verbatim in this RC's bundle"
-)
+_DEFAULT_GROUND_TRUTH_REF = "the bug's own original ## Fix section, applied verbatim in this RC's bundle"
 
 
 def _attach_fix_rewrite_via_cli(
@@ -138,18 +134,25 @@ def _attach_fix_rewrite_via_cli(
     result = subprocess.run(
         [
             str(script),
-            "--project", project_name,
-            "--kanban-root", str(kanban_root),
-            "--bug-id", _short_bug_id(bug_id),
-            "--forbidden-approach", forbidden_approach,
-            "--correct-direction", correct_direction,
-            "--ground-truth-ref", ground_truth_ref,
+            "--project",
+            project_name,
+            "--kanban-root",
+            str(kanban_root),
+            "--bug-id",
+            _short_bug_id(bug_id),
+            "--forbidden-approach",
+            forbidden_approach,
+            "--correct-direction",
+            correct_direction,
+            "--ground-truth-ref",
+            ground_truth_ref,
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert result.returncode == 0, (
-        f"overwatch-attach-fix-rewrite.sh failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"overwatch-attach-fix-rewrite.sh failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
 
 def _init_git_repo_with_direct_commit(repo_path: pathlib.Path, main_branch: str, rc_branch: str) -> None:
@@ -161,7 +164,8 @@ def _init_git_repo_with_direct_commit(repo_path: pathlib.Path, main_branch: str,
     repo_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "init", f"--initial-branch={main_branch}", str(repo_path)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     _run_git(repo_path, "config", "--local", "user.email", "test@pgai.local")
     _run_git(repo_path, "config", "--local", "user.name", "PGAI Test")
@@ -261,7 +265,8 @@ def _build_kanban_root(
         # documents for its own full-copy requirement.
         shutil.rmtree(root / "pgai_agent_kanban")
         shutil.copytree(
-            _TEAM_DIR / "pgai_agent_kanban", root / "pgai_agent_kanban",
+            _TEAM_DIR / "pgai_agent_kanban",
+            root / "pgai_agent_kanban",
             ignore=shutil.ignore_patterns("__pycache__"),
         )
         shutil.copytree(_TEAM_DIR / "workflows", root / "workflows")
@@ -345,9 +350,7 @@ def _write_task(
     )
 
 
-def _write_lane_a_tester_report(
-    tasks_dir: pathlib.Path, tester_task_id: str, version: str, bug_id: str
-) -> None:
+def _write_lane_a_tester_report(tasks_dir: pathlib.Path, tester_task_id: str, version: str, bug_id: str) -> None:
     """A TESTER report carrying a Regression=yes finding that traces (by
     textual BUG-NNNN reference in the finding body) to *bug_id* — the
     Lane A shape classify_lane()'s find_regression_source_finding() looks
@@ -377,7 +380,9 @@ def _write_bug(bugs_dir: pathlib.Path, bug_id: str, status: str = "assigned") ->
     return path
 
 
-def _write_bundle(requirements_dir: pathlib.Path, version: str, bug_basenames: list, bugs_dir: pathlib.Path) -> pathlib.Path:
+def _write_bundle(
+    requirements_dir: pathlib.Path, version: str, bug_basenames: list, bugs_dir: pathlib.Path
+) -> pathlib.Path:
     bundle_path = requirements_dir / f"{version}-bugfix-bundle-20260905.md"
     lines = [
         f"# Requirements: {version} — BUG bundle\n\n",
@@ -453,16 +458,12 @@ def _build_lane_a_fixture(
 
 
 class TestLaneAGoldenPath:
-    def test_lane_a_drill_unwinds_cancels_deletes_bundle_and_clears_halt(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_lane_a_drill_unwinds_cancels_deletes_bundle_and_clears_halt(self, tmp_path: pathlib.Path) -> None:
         project_name = "lanea_project"
         version = "v2.23.0"
         bug_id = "BUG-0055-inverted-column"
 
-        kanban_root, proj, repo_path, halt_path = _build_lane_a_fixture(
-            tmp_path, project_name, version, bug_id
-        )
+        kanban_root, proj, repo_path, halt_path = _build_lane_a_fixture(tmp_path, project_name, version, bug_id)
 
         outcome = run_resolution_stage(project_name, str(kanban_root))
 
@@ -491,7 +492,9 @@ class TestLaneAGoldenPath:
         # RC branch deleted locally (unwind-rc.sh's own git-unwind step).
         branches = subprocess.run(
             ["git", "-C", str(repo_path), "branch", "--list", f"ai_rc/{version}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         assert branches.strip() == ""
 
@@ -529,18 +532,14 @@ class TestLaneAGoldenPath:
         version = "v2.23.1"
         bug_id = "BUG-0056-inverted-column"
 
-        kanban_root, proj, repo_path, halt_path = _build_lane_a_fixture(
-            tmp_path, project_name, version, bug_id
-        )
+        kanban_root, proj, repo_path, halt_path = _build_lane_a_fixture(tmp_path, project_name, version, bug_id)
 
         outcome = run_resolution_stage(project_name, str(kanban_root))
         assert outcome.status == EXECUTED, outcome.reason
 
         import re
 
-        source = (
-            _TEAM_DIR / "pgai_agent_kanban" / "overwatch" / "resolution_stage.py"
-        ).read_text(encoding="utf-8")
+        source = (_TEAM_DIR / "pgai_agent_kanban" / "overwatch" / "resolution_stage.py").read_text(encoding="utf-8")
         start = source.index("def _run_unwind_rc")
         end = source.index("def _run_lane_classification")
         lane_a_source = source[start:end]
@@ -559,16 +558,12 @@ class TestLaneAGoldenPath:
 
 
 class TestLaneASingleAttemptGuard:
-    def test_second_halt_on_same_finding_class_escalates_to_lane_c(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_second_halt_on_same_finding_class_escalates_to_lane_c(self, tmp_path: pathlib.Path) -> None:
         project_name = "lanea_guard_project"
         bug_id = "BUG-0077-inverted-column"
 
         version1 = "v2.23.0"
-        kanban_root, proj, repo_path1, halt_path1 = _build_lane_a_fixture(
-            tmp_path, project_name, version1, bug_id
-        )
+        kanban_root, proj, repo_path1, halt_path1 = _build_lane_a_fixture(tmp_path, project_name, version1, bug_id)
 
         first = run_resolution_stage(project_name, str(kanban_root))
         assert first.status == EXECUTED, first.reason
@@ -672,9 +667,7 @@ class TestLaneAOperatorHaltInviolability:
         version = "v2.23.0"
         bug_id = "BUG-0088-inverted-column"
 
-        kanban_root, proj, repo_path, halt_path = _build_lane_a_fixture(
-            tmp_path, project_name, version, bug_id
-        )
+        kanban_root, proj, repo_path, halt_path = _build_lane_a_fixture(tmp_path, project_name, version, bug_id)
 
         global_halt = kanban_root / "HALT"
         _write_operator_halt(global_halt)
@@ -708,9 +701,7 @@ class TestLaneAOperatorHaltInviolability:
 
 
 class TestLaneARewritePrecondition:
-    def test_steps_b_through_e_do_not_run_without_an_attributed_rewrite(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_steps_b_through_e_do_not_run_without_an_attributed_rewrite(self, tmp_path: pathlib.Path) -> None:
         project_name = "lanea_no_rewrite_project"
         version = "v2.23.5"
         bug_id = "BUG-0111-inverted-column"
@@ -721,9 +712,9 @@ class TestLaneARewritePrecondition:
 
         bug_path = proj / "bugs" / f"{bug_id}.md"
         bug_text_before = bug_path.read_text(encoding="utf-8")
-        assert "## Fix (OVERWATCH rewrite)" not in bug_text_before, (
-            "fixture precondition: no rewrite should be present yet"
-        )
+        assert (
+            "## Fix (OVERWATCH rewrite)" not in bug_text_before
+        ), "fixture precondition: no rewrite should be present yet"
         release_state_before = (proj / "release-state.md").read_text(encoding="utf-8")
 
         outcome = run_resolution_stage(project_name, str(kanban_root))
@@ -734,7 +725,9 @@ class TestLaneARewritePrecondition:
         # RC not unwound: the local RC branch still exists.
         branches = subprocess.run(
             ["git", "-C", str(repo_path), "branch", "--list", f"ai_rc/{version}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         assert f"ai_rc/{version}" in branches, f"RC branch must still exist — nothing was unwound.\n{branches}"
 
@@ -790,9 +783,7 @@ class TestLaneARewritePrecondition:
 
 
 class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
-    def test_all_six_lane_a_outcomes_including_fix_rewrite_and_redecompose(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_all_six_lane_a_outcomes_including_fix_rewrite_and_redecompose(self, tmp_path: pathlib.Path) -> None:
         project_name = "lanea-full-playbook-project"
         version = "v2.23.2"
         bug_id = "BUG-0099-inverted-column"
@@ -814,16 +805,15 @@ class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
             "Inverting the column-count comparison (using '>' where the layout "
             "spec requires '<') to silence the dashboard width check."
         )
-        correct_direction = (
-            "Compare column_count using '<' against the configured max_width, "
-            "per the layout spec."
-        )
+        correct_direction = "Compare column_count using '<' against the configured max_width, " "per the layout spec."
         ground_truth_ref = (
-            "commit 9f2a3c1: \"fix: correct dashboard column width check\" "
+            'commit 9f2a3c1: "fix: correct dashboard column width check" '
             "(the exact diff this RC's own bundle shipped)"
         )
         _attach_fix_rewrite_via_cli(
-            kanban_root, project_name, bug_id,
+            kanban_root,
+            project_name,
+            bug_id,
             forbidden_approach=forbidden_approach,
             correct_direction=correct_direction,
             ground_truth_ref=ground_truth_ref,
@@ -833,9 +823,9 @@ class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
         assert "FORBIDDEN" in bug_text_after_rewrite
         assert forbidden_approach in bug_text_after_rewrite
         assert ground_truth_ref in bug_text_after_rewrite
-        assert "## Fix\nOriginal (ambiguous) fix direction." in bug_text_after_rewrite, (
-            "the original Fix section must be preserved unchanged, not edited in place"
-        )
+        assert (
+            "## Fix\nOriginal (ambiguous) fix direction." in bug_text_after_rewrite
+        ), "the original Fix section must be preserved unchanged, not edited in place"
 
         # Steps (b)-(e) — the deterministic drill, driven through
         # run_resolution_stage() ALONE: no test-supplied rewrite call here,
@@ -864,7 +854,9 @@ class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
         # Local RC branch actually gone (unwind-rc.sh's own git-unwind step).
         branches = subprocess.run(
             ["git", "-C", str(repo_path), "branch", "--list", f"ai_rc/{version}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         assert branches.strip() == ""
 
@@ -902,9 +894,9 @@ class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
             f"rewritten bug. pm wake stdout:\n{pm_result.stdout}\nstderr:\n{pm_result.stderr}"
         )
         new_bundle_text = "\n".join(p.read_text(encoding="utf-8") for p in new_files)
-        assert bug_id in new_bundle_text, (
-            f"rewritten bug {bug_id} not present in the newly bundled requirements file(s): {new_files}"
-        )
+        assert (
+            bug_id in new_bundle_text
+        ), f"rewritten bug {bug_id} not present in the newly bundled requirements file(s): {new_files}"
 
 
 # ---------------------------------------------------------------------------
@@ -915,9 +907,7 @@ class TestLaneAFullPlaybookWithFixRewriteAndRedecompose:
 
 
 class TestLaneAOverwatchResolveFalse:
-    def test_lane_a_shaped_block_resolves_nothing_when_overwatch_resolve_false(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_lane_a_shaped_block_resolves_nothing_when_overwatch_resolve_false(self, tmp_path: pathlib.Path) -> None:
         project_name = "lanea_resolve_off_project"
         version = "v2.23.3"
         bug_id = "BUG-0100-inverted-column"
@@ -953,11 +943,11 @@ class TestLaneAOverwatchResolveFalse:
         assert not (proj / "auto-resolutions.md").exists()
         branches = subprocess.run(
             ["git", "-C", str(repo_path), "branch", "--list", f"ai_rc/{version}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
-        assert f"ai_rc/{version}" in branches, (
-            f"the RC branch must still exist — nothing was unwound.\n{branches}"
-        )
+        assert f"ai_rc/{version}" in branches, f"the RC branch must still exist — nothing was unwound.\n{branches}"
 
 
 # ---------------------------------------------------------------------------
@@ -993,9 +983,7 @@ def _write_plain_tester_report(tasks_dir: pathlib.Path, tester_task_id: str, ver
 
 
 class TestFlagOffAppliesRegardlessOfLane:
-    def test_lane_c_shaped_block_resolves_nothing_when_overwatch_resolve_false(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_lane_c_shaped_block_resolves_nothing_when_overwatch_resolve_false(self, tmp_path: pathlib.Path) -> None:
         project_name = "lanec_resolve_off_project"
         version = "v2.23.4"
 

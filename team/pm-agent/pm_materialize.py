@@ -72,7 +72,11 @@ Top-level plan fields:
     needs_operator          list[obj] — items the plan leaves out of every ticket because a
                                         human must answer first: {"item": KEY, "question": TEXT}.
                                         Each is set needs-operator with its question in the
-                                        operator inbox (ops.write.set_needs_operator).
+                                        operator inbox (ops.write.set_needs_operator). An item
+                                        whose file already carries an ## Operator Answers
+                                        section (the operator answered an earlier question)
+                                        is refused (materialize.needs_operator_answered):
+                                        ticket it with that answer instead.
     ride_along              list[str] — deferred bugs ticketed inside this requirement RC.
                                         Checked by lib/ride_along_lint.py (bundle_mixing must be
                                         ride-along, at most ride_along_max, none high or critical,
@@ -197,7 +201,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 # lib.config provides get_config() for config-driven directory defaults.
 # Insert the pm-agent directory onto sys.path so the import works regardless
@@ -210,7 +214,8 @@ from lib.workflow_loader import load_workflow, WorkflowError
 # Insert team/ onto sys.path so the import works from any caller working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.acceptance_policy import RunnerConfig, apply_acceptance_policy, format_policy_notes
-from lib.ride_along_lint import describe as _describe_lint, error_key as _lint_error_key, lint_ride_along
+from lib.ride_along_lint import error_key as _lint_error_key, lint_ride_along
+from pgai_agent_kanban.lib import dev_tree as _dev_tree
 from pgai_agent_kanban.lib import ini as _ini
 from pgai_agent_kanban.lib import project_cfg as _project_cfg
 from pgai_agent_kanban.lib.branch_prefix import (
@@ -233,6 +238,7 @@ from pgai_agent_kanban.ops.context import OpsContext as _OpsContext
 from pgai_agent_kanban.ops.errors import ContractError as _ContractError, OpsError as _OpsError
 from pgai_agent_kanban.ops.write import (
     check_needs_operator as _check_needs_operator,
+    recorded_operator_answers as _recorded_operator_answers,
     ride_along_item as _ride_along_item,
     set_needs_operator as _set_needs_operator,
 )
@@ -241,7 +247,6 @@ from pgai_agent_kanban.task_status import (
     read_section as _read_section,
     section_value as _section_value,
 )
-
 
 # ---------------------------------------------------------------------------
 # Dev tree path resolution
@@ -284,51 +289,17 @@ def _resolve_dev_tree_path(team_root: str) -> str:
         When the path cannot be resolved from any source.
     """
 
-    # --- 1. project.cfg / PROJECT.cfg (highest precedence) ---------------------
+    # --- 1-3. The shared resolver (pgai_agent_kanban.lib.dev_tree) ------------
+    # The project's own value, then PGAI_DEV_TREE_PATH, then kanban.cfg
+    # [paths] dev_tree_path under team_root (single-project layout) or under
+    # PGAI_AGENT_KANBAN_ROOT_PATH (multi-project layout).
     root = Path(team_root)
-    _new_cfg = root / "project.cfg"
-    _old_cfg = root / "PROJECT.cfg"
-    proj_cfg = _new_cfg if _new_cfg.is_file() else (_old_cfg if _old_cfg.is_file() else None)
-    if proj_cfg is not None:
-        for line in proj_cfg.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if "=" in stripped and stripped.split("=", 1)[0].strip() == "dev_tree_path":
-                val = stripped.split("=", 1)[1].strip().strip("'\"").strip()
-                if val:
-                    return val
-
-    # --- 2. Environment variable ----------------------------------------------
-    env_val = (os.environ.get("PGAI_DEV_TREE_PATH") or "").strip()
-    if env_val:
-        return env_val
-
-    # --- 3. kanban.cfg [paths] dev_tree_path ----------------------------------
-    # Try team_root/kanban.cfg first (single-project layout), then the
-    # PGAI_AGENT_KANBAN_ROOT_PATH location (multi-project layout).
-    _kanban_cfg_candidates = [root / "kanban.cfg"]
+    value = _dev_tree.project_dev_tree(root) or _dev_tree.global_dev_tree(root)
     _kanban_root_env = (os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH") or "").strip()
-    if _kanban_root_env:
-        _kanban_cfg_candidates.append(Path(_kanban_root_env) / "kanban.cfg")
-
-    for kanban_cfg_path in _kanban_cfg_candidates:
-        if not kanban_cfg_path.is_file():
-            continue
-        in_paths_section = False
-        for line in kanban_cfg_path.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if stripped.startswith("["):
-                in_paths_section = stripped.lower() == "[paths]"
-                continue
-            if in_paths_section and "=" in stripped:
-                key, _, raw_val = stripped.partition("=")
-                if key.strip() == "dev_tree_path":
-                    val = raw_val.strip().strip("'\"").strip()
-                    if val:
-                        return val
+    if not value and _kanban_root_env:
+        value = _dev_tree.global_dev_tree(Path(_kanban_root_env))
+    if value:
+        return value
 
     # --- 4. Fail loudly -------------------------------------------------------
     print(
@@ -369,9 +340,9 @@ def _is_auto_sentinel(declared: str) -> bool:
     return declared.strip().lower() in _AUTO_VERSION_SENTINELS
 
 
-def refuse_non_explicit_target_version(raw: str, release_shaped: bool,
-                                       plan_path: str, team_root: str,
-                                       requirements_path: str = "none") -> str:
+def refuse_non_explicit_target_version(
+    raw: str, release_shaped: bool, plan_path: str, team_root: str, requirements_path: str = "none"
+) -> str:
     """Return the plan's effective target version, or refuse a non-explicit one.
 
     The version is resolved once, by discovery, which writes it into the
@@ -425,8 +396,7 @@ def refuse_non_explicit_target_version(raw: str, release_shaped: bool,
         )
     else:
         remedy = (
-            f"Set target_version in {plan_path} to an explicit version, for "
-            f"example v1.0.1, then re-run: {rerun}"
+            f"Set target_version in {plan_path} to an explicit version, for " f"example v1.0.1, then re-run: {rerun}"
         )
     # BLOCK-WORTHY: a release plan without an explicit version would write an
     # RC whose bookends name a version open-rc refuses, so the chain could
@@ -472,8 +442,7 @@ def _derive_artifact_name(requirements_path_str: str) -> str:
     return stripped if stripped else stem
 
 
-def _resolve_source_documents(source_slugs: list, artifacts_dir: "Path | None",
-                               project_name: str = "") -> tuple:
+def _resolve_source_documents(source_slugs: list, artifacts_dir: "Path | None", project_name: str = "") -> tuple:
     """Resolve a list of artifact slugs to absolute file paths.
 
     Each slug is matched against files in *artifacts_dir* using a glob
@@ -811,7 +780,7 @@ def assign_task_ids(tasks, owner, tasks_root):
     Returns the (date_str, start_seq) tuple used so callers can avoid
     sequence number conflicts when generating additional synthetic IDs.
     """
-    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    date_str = datetime.now(UTC).strftime("%Y%m%d")
     start_seq = get_next_sequence(tasks_root, owner, date_str)
 
     seq_offset = 0
@@ -873,8 +842,7 @@ def resolve_prerequisites(tasks):
         ``(task_id, depends_on_entry)`` for every unresolvable entry, in task
         order; empty when every entry resolved.
     """
-    seq_to_id = {_sequence_key(t.get("sequence")): t.get("task_id") for t in tasks
-                 if t.get("sequence") is not None}
+    seq_to_id = {_sequence_key(t.get("sequence")): t.get("task_id") for t in tasks if t.get("sequence") is not None}
     unresolved = []
 
     for task in tasks:
@@ -995,9 +963,7 @@ def render_git_repo_field(team_root):
     url = _project_cfg.strip_one_quote_each_side(
         _project_cfg.read_cfg_key(cfg_file, "project", "git_repo_url").strip(), "\"'"
     ).strip()
-    push = _project_cfg.strip_one_quote_each_side(
-        _project_cfg.read_cfg_key(cfg_file, "project", "push_to_remote"), '"'
-    )
+    push = _project_cfg.strip_one_quote_each_side(_project_cfg.read_cfg_key(cfg_file, "project", "push_to_remote"), '"')
     if url and push != "false":
         return url
     return LOCAL_GIT_REPO
@@ -1063,9 +1029,7 @@ def get_active_rc(team_root):
     ``ReleaseStateValidationError`` rather than naming a branch from a value
     that is not a version.
     """
-    active = _read_release_state_field(
-        str(Path(team_root) / "release-state.md"), "Active RC"
-    )
+    active = _read_release_state_field(str(Path(team_root) / "release-state.md"), "Active RC")
     return None if active == "none" else active
 
 
@@ -1258,9 +1222,7 @@ def _validate_and_normalize_release_source_branches(tasks, team_root, target_ver
                 f"release RC branch — given: {given!r}, expected: {canonical!r}"
             )
         elif changed:
-            narrations.append(
-                f"task {task_label!r}: normalized source_branch {given!r} -> {resolved!r}"
-            )
+            narrations.append(f"task {task_label!r}: normalized source_branch {given!r} -> {resolved!r}")
 
     for line in narrations:
         print(f"[pm-materialize] BRANCH NORMALIZATION: {line}", file=sys.stderr)
@@ -1269,8 +1231,7 @@ def _validate_and_normalize_release_source_branches(tasks, team_root, target_ver
         print(
             "[pm-materialize] ERROR: fail-closed branch guard triggered — one or "
             "more task(s) carry a source_branch that does not resolve to the "
-            f"canonical release RC branch {canonical!r} for target_version {tv!r}:\n"
-            + "\n".join(errors) + "\n"
+            f"canonical release RC branch {canonical!r} for target_version {tv!r}:\n" + "\n".join(errors) + "\n"
             "No task folders have been written.",
             file=sys.stderr,
         )
@@ -1306,8 +1267,7 @@ def _validate_and_normalize_parent_branch(parent_branch, team_root):
         sys.exit(1)
     if changed:
         print(
-            f"[pm-materialize] BRANCH NORMALIZATION: normalized parent_branch "
-            f"{parent_branch!r} -> {resolved!r}",
+            f"[pm-materialize] BRANCH NORMALIZATION: normalized parent_branch " f"{parent_branch!r} -> {resolved!r}",
             file=sys.stderr,
         )
     return resolved
@@ -1473,9 +1433,7 @@ def _propagate_plan_source_branch(tasks: list, plan_source_branch: str) -> int:
     return updated
 
 
-def _validate_source_ref_for_worktree_roles(
-    tasks: list, wf_caps: dict, workflow_type: str
-) -> None:
+def _validate_source_ref_for_worktree_roles(tasks: list, wf_caps: dict, workflow_type: str) -> None:
     """Fail-closed guard: refuse to continue when a worktree-requiring task lacks a source ref.
 
     For every task whose role is in ``_WORKTREE_REQUIRING_ROLES`` (currently
@@ -1532,17 +1490,13 @@ def _validate_source_ref_for_worktree_roles(
         sb = (task.get("source_branch") or "").strip()
         if not sb or sb.lower() == "none":
             task_id = task.get("task_id") or task.get("slug") or "<unknown>"
-            errors.append(
-                f"  task {task_id!r} (role={role!r}): "
-                f"'## Source Branch' is absent or 'none'"
-            )
+            errors.append(f"  task {task_id!r} (role={role!r}): " f"'## Source Branch' is absent or 'none'")
 
     if errors:
         print(
             "[pm-materialize] ERROR: fail-closed source-ref guard triggered.\n"
             "The following task(s) require a source branch for worktree dispatch "
-            "but none is resolvable (neither the plan nor the ticket carries one):\n"
-            + "\n".join(errors) + "\n"
+            "but none is resolvable (neither the plan nor the ticket carries one):\n" + "\n".join(errors) + "\n"
             "Ensure the plan JSON or the requirements document carries a "
             "'source_branch' / '## Source Branch' value.  "
             "No task folders have been written.",
@@ -1629,7 +1583,7 @@ def write_marker_file(plan_dir: Path, plan_hash: str, task_ids: list) -> Path:
     Returns the Path of the written marker file.
     """
     marker_path = plan_dir / f".materialized.{plan_hash}"
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     lines = [f"timestamp: {timestamp}", "task_ids:"]
     for tid in task_ids:
         lines.append(f"  {tid}")
@@ -1695,6 +1649,7 @@ def check_role_slug_duplicate(role: str, slug: str, existing_role_slugs: set) ->
 # ---------------------------------------------------------------------------
 # Collision recycling helpers
 # ---------------------------------------------------------------------------
+
 
 def find_collision_folder(tasks_root: Path, role: str, slug: str):
     """Return the Path of an existing task folder matching (role, slug), or None.
@@ -1803,8 +1758,7 @@ def _is_strictly_older_version(candidate: str, current: str) -> bool:
     return c_tuple < cur_tuple
 
 
-def _apply_rename_map_to_prerequisites(text: str, rename_map: dict,
-                                       known_old_ids: set = None) -> str:
+def _apply_rename_map_to_prerequisites(text: str, rename_map: dict, known_old_ids: set = None) -> str:
     """Rewrite task-ID references in prerequisite-style sections of *text*.
 
     Scans each line.  When inside a ## Prerequisites, ## Blocked By Task, or
@@ -1969,13 +1923,13 @@ def recycle_cancelled_folder(
                 artifact.unlink()
             elif artifact.is_dir():
                 import shutil
+
                 shutil.rmtree(artifact)
 
     return new_dir
 
 
-def apply_rename_map_globally(tasks_root: Path, rename_map: dict,
-                              known_old_ids: set = None) -> None:
+def apply_rename_map_globally(tasks_root: Path, rename_map: dict, known_old_ids: set = None) -> None:
     """Apply a full rename map to prerequisite references across ALL task folders.
 
     For each task folder in *tasks_root*, rewrites ## Prerequisites, ## Blocked By
@@ -2017,14 +1971,11 @@ def apply_rename_map_globally(tasks_root: Path, rename_map: dict,
                 continue
             try:
                 original = fpath.read_text(encoding="utf-8")
-                rewritten = _apply_rename_map_to_prerequisites(
-                    original, rename_map, known_old_ids=known_old_ids
-                )
+                rewritten = _apply_rename_map_to_prerequisites(original, rename_map, known_old_ids=known_old_ids)
                 if rewritten != original:
                     fpath.write_text(rewritten, encoding="utf-8")
                     print(
-                        f"[pm-materialize] INFO: updated cross-task references in "
-                        f"{task_dir.name}/{fname}",
+                        f"[pm-materialize] INFO: updated cross-task references in " f"{task_dir.name}/{fname}",
                         file=sys.stderr,
                     )
             except OSError as exc:
@@ -2046,7 +1997,7 @@ def validate_team_root(team_root_path):
     """
     parts = Path(team_root_path).resolve().parts
     # Current format: ROLE-YYYYMMDD-NNN-
-    _task_dir_pattern = re.compile(r'^[A-Z]+-\d{8}-\d{3}-')
+    _task_dir_pattern = re.compile(r"^[A-Z]+-\d{8}-\d{3}-")
     for part in parts:
         if _task_dir_pattern.match(part):
             return False
@@ -2074,8 +2025,7 @@ def resolve_test_runner_config(team_root):
     )
 
 
-def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constraints, notes,
-                               runner_config=None):
+def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constraints, notes, runner_config=None):
     """Apply the targeted-test acceptance policy to one ticket being emitted.
 
     Returns ``(acceptance_criteria, constraints, notes)`` to render.
@@ -2098,13 +2048,13 @@ def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constra
         return acceptance_criteria, constraints, notes
 
     result = apply_acceptance_policy(
-        role, acceptance_criteria, constraints, runner_config=runner_config,
+        role,
+        acceptance_criteria,
+        constraints,
+        runner_config=runner_config,
     )
     for rw in result.rewrites:
-        action = (
-            "dropped a duplicate full-runner" if rw.merged
-            else "rewrote full-runner"
-        )
+        action = "dropped a duplicate full-runner" if rw.merged else "rewrote full-runner"
         print(
             f"[pm-materialize] acceptance-policy: {task_id}: {action} {rw.field} "
             f"to the targeted run: {rw.original!r}",
@@ -2122,9 +2072,18 @@ def apply_targeted_test_policy(task, task_id, role, acceptance_criteria, constra
     return result.acceptance_criteria, result.constraints, notes
 
 
-def create_task_folder(task, team_root, dry_run=False, release_version="none", requirements_path="none",
-                       existing_role_slugs=None, workflow_type="release", tasks_root=None,
-                       recycle_map=None, wf_caps=None):
+def create_task_folder(
+    task,
+    team_root,
+    dry_run=False,
+    release_version="none",
+    requirements_path="none",
+    existing_role_slugs=None,
+    workflow_type="release",
+    tasks_root=None,
+    recycle_map=None,
+    wf_caps=None,
+):
     """Create a single task folder with README.md and status.md.
 
     requirements_path: absolute path of the plan's requirements doc. When set
@@ -2164,8 +2123,7 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     # tasks_root is required — no environment variable fallback is used.
     if tasks_root is None:
         raise ValueError(
-            "tasks_root must be explicitly provided (no env var fallback). "
-            "Pass tasks_root=<path> explicitly."
+            "tasks_root must be explicitly provided (no env var fallback). " "Pass tasks_root=<path> explicitly."
         )
     task_id = task["task_id"]
     owner = task.get("owner", "CLAUDE")
@@ -2181,7 +2139,12 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     notes = task.get("notes", "none")
 
     acceptance_criteria, constraints, notes = apply_targeted_test_policy(
-        task, task_id, role, acceptance_criteria, constraints, notes,
+        task,
+        task_id,
+        role,
+        acceptance_criteria,
+        constraints,
+        notes,
         runner_config=resolve_test_runner_config(team_root),
     )
 
@@ -2191,9 +2154,7 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     goal = prefix_bare_rc_branches(goal, _branch_prefix)
     required_output = prefix_bare_rc_branches(required_output, _branch_prefix)
     constraints = [prefix_bare_rc_branches(c, _branch_prefix) for c in (constraints or [])]
-    acceptance_criteria = [
-        prefix_bare_rc_branches(c, _branch_prefix) for c in (acceptance_criteria or [])
-    ]
+    acceptance_criteria = [prefix_bare_rc_branches(c, _branch_prefix) for c in (acceptance_criteria or [])]
     notes = prefix_bare_rc_branches(notes, _branch_prefix)
 
     # Prepend requirements_path to inputs when provided, so every task knows
@@ -2278,7 +2239,8 @@ def create_task_folder(task, team_root, dry_run=False, release_version="none", r
     _wt_lower = (workflow_type or "").strip().lower()
     if _wt_lower == "release" or git_repo.lower() != "none":
         source_branch = determine_source_branch(
-            task, team_root,
+            task,
+            team_root,
             workflow_type=workflow_type,
             target_version=release_version,
         )
@@ -2531,11 +2493,11 @@ def validate_and_normalize_queue(queue_path):
     # Matches both canonical ('- [ ] TASK-ID') and non-canonical ('[ ] TASK-ID')
     # forms, with an optional trailing description after whitespace.
     _MARKER_RE = re.compile(
-        r"^(?P<dash>-\s+)?"         # optional leading dash + whitespace
-        r"\[(?P<marker>[^\]]*)\]"   # [marker] — captures anything inside brackets
-        r"\s+"                      # whitespace after marker
-        r"(?P<task_id>\S+)"         # task ID — first non-whitespace token
-        r"(?P<trail>.*)?$"          # optional trailing text
+        r"^(?P<dash>-\s+)?"  # optional leading dash + whitespace
+        r"\[(?P<marker>[^\]]*)\]"  # [marker] — captures anything inside brackets
+        r"\s+"  # whitespace after marker
+        r"(?P<task_id>\S+)"  # task ID — first non-whitespace token
+        r"(?P<trail>.*)?$"  # optional trailing text
     )
 
     lines = queue_path.read_text().splitlines()
@@ -2645,9 +2607,7 @@ def update_backlog(tasks, team_root, dry_run=False):
         if dry_run:
             # In dry-run mode, show which entries would be added (skipping already-present ones)
             existing_content = queue_path.read_text() if queue_path.is_file() else ""
-            new_entries_list = [
-                (tid, m) for tid, m in task_entries if tid not in existing_content
-            ]
+            new_entries_list = [(tid, m) for tid, m in task_entries if tid not in existing_content]
             skipped = len(task_entries) - len(new_entries_list)
             if new_entries_list:
                 new_entries = "\n".join(f"- [{m}] {tid}" for tid, m in new_entries_list)
@@ -2718,7 +2678,10 @@ def topological_order(tasks):
     if remaining:
         print(f"[pm-materialize] WARNING: {len(remaining)} tasks have unresolvable dependencies:", file=sys.stderr)
         for t in remaining:
-            print(f"  - seq={t.get('sequence')} slug={t.get('slug', '?')} depends_on={t.get('depends_on', [])}", file=sys.stderr)
+            print(
+                f"  - seq={t.get('sequence')} slug={t.get('slug', '?')} depends_on={t.get('depends_on', [])}",
+                file=sys.stderr,
+            )
         ordered.extend(remaining)
 
     return ordered
@@ -2736,9 +2699,9 @@ def _dependency_cycles(tasks):
     ids = [t.get("task_id") for t in tasks if t.get("task_id")]
     known = set(ids)
     edges = {
-        t["task_id"]: [p for p in (t.get("prerequisite_ids") or [])
-                       if p in known and p != t["task_id"]]
-        for t in tasks if t.get("task_id")
+        t["task_id"]: [p for p in (t.get("prerequisite_ids") or []) if p in known and p != t["task_id"]]
+        for t in tasks
+        if t.get("task_id")
     }
     position = {tid: i for i, tid in enumerate(ids)}
 
@@ -2808,13 +2771,10 @@ def validate_task_graph(tasks, unresolved_depends_on=()):
         if tid and tid in (task.get("prerequisite_ids") or []):
             problems.append(f"self-reference: {tid} lists itself as a prerequisite")
     for cycle in _dependency_cycles(tasks):
-        problems.append(
-            "cycle: " + ", ".join(cycle) + " wait on each other, so none can start"
-        )
+        problems.append("cycle: " + ", ".join(cycle) + " wait on each other, so none can start")
     for tid, dep in unresolved_depends_on:
         problems.append(
-            f"unresolved depends_on: {tid} depends on sequence {dep!r}, "
-            f"which no task in the plan carries"
+            f"unresolved depends_on: {tid} depends on sequence {dep!r}, " f"which no task in the plan carries"
         )
     return problems
 
@@ -2845,9 +2805,18 @@ def build_cm_task_ids(version, start_seq, date_str):
     }
 
 
-def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_branch,
-                                   date_str, base_seq, owner, git_repo="none",
-                                   git_remote=_DEFAULT_REMOTE_NAME, branch_prefix=""):
+def inject_feature_workflow_tasks(
+    tasks,
+    source_branch,
+    test_required,
+    parent_branch,
+    date_str,
+    base_seq,
+    owner,
+    git_repo="none",
+    git_remote=_DEFAULT_REMOTE_NAME,
+    branch_prefix="",
+):
     """Inject a CODER create-shared-branch ticket as ticket 1 for the shared-branch
     decomposition mode (workflow_type="feature").
 
@@ -2899,8 +2868,7 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
         "inputs": [],
         "context_paths": [],
         "required_output": (
-            f"Branch '{source_branch}' exists on {git_remote} and is up to date with "
-            f"'{parent_branch}'."
+            f"Branch '{source_branch}' exists on {git_remote} and is up to date with " f"'{parent_branch}'."
         ),
         "constraints": [
             f"Branch from '{parent_branch}', not from {branch_prefix}main.",
@@ -2950,10 +2918,7 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
             "acceptance_criteria": list(_TESTER_PATH_C_ACCEPTANCE_CRITERIA),
             "depends_on": [],
             "prerequisite_ids": list(feature_task_ids),
-            "notes": (
-                "Automated TESTER task for feature workflow. "
-                + _TESTER_PATH_C_NOTES_SUFFIX
-            ),
+            "notes": ("Automated TESTER task for feature workflow. " + _TESTER_PATH_C_NOTES_SUFFIX),
             "_synthetic": True,
             "_tester": True,
         }
@@ -2973,9 +2938,17 @@ def inject_feature_workflow_tasks(tasks, source_branch, test_required, parent_br
     return synthetic_added
 
 
-def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_repo="none",
-                       human_approval_required="auto", test_required=True,
-                       git_remote=_DEFAULT_REMOTE_NAME):
+def inject_cm_bookends(
+    tasks,
+    target_version,
+    date_str,
+    base_seq,
+    owner,
+    git_repo="none",
+    human_approval_required="auto",
+    test_required=True,
+    git_remote=_DEFAULT_REMOTE_NAME,
+):
     """Inject CM-open, optional TESTER, optional HUMAN-APPROVE, and CM-release tasks.
 
     Must be called AFTER assign_task_ids() so that work tasks already have
@@ -3116,7 +3089,7 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
             "source_branch": "none",
             "feature_branch": "none",
             "goal": f"Verify the release candidate {target_version} against its requirements document "
-                    f"and write the verification report; file any gaps or bugs found via Path C.",
+            f"and write the verification report; file any gaps or bugs found via Path C.",
             "inputs": list(feature_task_ids),
             "context_paths": [],
             "required_output": (
@@ -3202,7 +3175,9 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
         "context_paths": [],
         "required_output": f"Release {target_version} published.",
         "constraints": ["cm_operation: release"],
-        "acceptance_criteria": [f"Release {target_version} has been tagged on the prefixed main branch, and pushed to {git_remote} when the project's push_to_remote is true."],
+        "acceptance_criteria": [
+            f"Release {target_version} has been tagged on the prefixed main branch, and pushed to {git_remote} when the project's push_to_remote is true."
+        ],
         "depends_on": [],
         "prerequisite_ids": cm_release_prereqs,
         "notes": f"Automated CM task. cm_operation=release target_version={target_version}",
@@ -3233,8 +3208,7 @@ def inject_cm_bookends(tasks, target_version, date_str, base_seq, owner, git_rep
     return synthetic_added
 
 
-def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
-                                    git_repo="none", target_version="none"):
+def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner, git_repo="none", target_version="none"):
     """Inject the document pipeline tasks around any PM-supplied tasks.
 
     Section strategy (operator-defined sections fallback):
@@ -3362,7 +3336,7 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
     section_draft_ids = []
     section_draft_tasks = []
     for section_name in sections:
-        slug_section = re.sub(r'[^a-z0-9]+', '-', section_name.lower()).strip('-')
+        slug_section = re.sub(r"[^a-z0-9]+", "-", section_name.lower()).strip("-")
         slug_section = slug_section[:25]  # keep slug short
         # New format: WRITER-DATE-NNN-slug (no owner prefix)
         section_id = f"WRITER-{date_str}-{seq:03d}-section-draft-{slug_section}"
@@ -3387,8 +3361,7 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
             "depends_on": [],
             "prerequisite_ids": [outline_id],
             "notes": (
-                f"Automated WRITER section-draft task for section '{section_name}'. "
-                f"target_version={target_version}"
+                f"Automated WRITER section-draft task for section '{section_name}'. " f"target_version={target_version}"
             ),
             "target_version": target_version,
             "_synthetic": True,
@@ -3401,8 +3374,7 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
     integrate_id = f"WRITER-{date_str}-{seq:03d}-integrate"
     seq += 1
     # Inputs: all section deliverables
-    section_deliverables = [f"section-{re.sub(r'[^a-z0-9]+', '-', s.lower()).strip('-')[:25]}.md"
-                            for s in sections]
+    section_deliverables = [f"section-{re.sub(r'[^a-z0-9]+', '-', s.lower()).strip('-')[:25]}.md" for s in sections]
     integrate_task = {
         "task_id": integrate_id,
         "slug": "integrate",
@@ -3478,10 +3450,7 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
         "acceptance_criteria": list(_TESTER_DOC_REVIEW_PATH_C_ACCEPTANCE_CRITERIA),
         "depends_on": [],
         "prerequisite_ids": [polish_id],
-        "notes": (
-            f"Automated TESTER review task for document workflow. "
-            f"target_version={target_version}"
-        ),
+        "notes": (f"Automated TESTER review task for document workflow. " f"target_version={target_version}"),
         "target_version": target_version,
         "_synthetic": True,
         "_doc_review": True,
@@ -3533,7 +3502,7 @@ def inject_document_workflow_tasks(tasks, sections, date_str, base_seq, owner,
     all_synthetic = (
         [cm_open_doc, outline_task]
         + section_draft_tasks
-        + list(tasks)           # PM-supplied tasks (typically empty)
+        + list(tasks)  # PM-supplied tasks (typically empty)
         + [integrate_task, polish_task, review_task, cm_finalize]
     )
 
@@ -3585,10 +3554,7 @@ def load_workflow_capabilities(workflow_type: str, kanban_root=None) -> dict:
         Empty dict when the manifest cannot be read.
     """
     if kanban_root is None:
-        kanban_root = (
-            os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-            or str(Path.home() / "pgai_agent_kanban")
-        )
+        kanban_root = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH") or str(Path.home() / "pgai_agent_kanban")
     root = Path(kanban_root)
     # Search order mirrors workflow_loader._find_workflow_file:
     #   1. flat install layout:  $KANBAN_ROOT/workflows/<type>/workflow.cfg
@@ -3680,8 +3646,7 @@ def _parse_manifest_roster(caps: dict) -> list:
     return [a.strip().upper() for a in raw.split(",") if a.strip()]
 
 
-def _check_plan_roster_against_manifest(tasks: list, manifest_roster: list,
-                                         workflow_type: str) -> None:
+def _check_plan_roster_against_manifest(tasks: list, manifest_roster: list, workflow_type: str) -> None:
     """Fail loudly when a plan task requests an agent outside the plugin roster.
 
     Iterates over the plan tasks and checks each task's role against the
@@ -3732,10 +3697,15 @@ def _check_plan_roster_against_manifest(tasks: list, manifest_roster: list,
             sys.exit(1)
 
 
-def inject_simple_tester_task(tasks: list, date_str: str, base_seq: int,
-                               owner: str, git_repo: str = "none",
-                               target_version: str = "none",
-                               finalize_mode: str = "report") -> list:
+def inject_simple_tester_task(
+    tasks: list,
+    date_str: str,
+    base_seq: int,
+    owner: str,
+    git_repo: str = "none",
+    target_version: str = "none",
+    finalize_mode: str = "report",
+) -> list:
     """Inject a standalone TESTER task for workflows without CM bookends.
 
     Used by non-CM workflow types (e.g. testing-only) where the workflow
@@ -3807,8 +3777,7 @@ def inject_simple_tester_task(tasks: list, date_str: str, base_seq: int,
         "notes": (
             f"Standalone TESTER task for a non-CM workflow (finalize={finalize_mode}). "
             "Write the report artifact to the finalize location (projects/<project>/artifacts/). "
-            "No CM release task follows — this task IS the final step in the pipeline. "
-            + _TESTER_PATH_C_NOTES_SUFFIX
+            "No CM release task follows — this task IS the final step in the pipeline. " + _TESTER_PATH_C_NOTES_SUFFIX
         ),
         "_synthetic": True,
         "_tester": True,
@@ -3890,9 +3859,17 @@ def apply_git_repo_override(tasks, canonical_url, dry_run=False):
         return 0
 
     overridden = 0
-    _SYNTHETIC_MARKERS = ("_synthetic", "_tester", "_human_approve",
-                          "_create_shared_branch", "_doc_open", "_doc_finalize",
-                          "_prose_open_doc", "_prose_finalize", "_doc_review")
+    _SYNTHETIC_MARKERS = (
+        "_synthetic",
+        "_tester",
+        "_human_approve",
+        "_create_shared_branch",
+        "_doc_open",
+        "_doc_finalize",
+        "_prose_open_doc",
+        "_prose_finalize",
+        "_doc_review",
+    )
     for task in tasks:
         # Skip tasks that have synthetic-injection markers
         if any(task.get(m) for m in _SYNTHETIC_MARKERS):
@@ -3922,8 +3899,7 @@ def apply_git_repo_override(tasks, canonical_url, dry_run=False):
     return overridden
 
 
-def evaluate_when_predicate(predicate, foreach_produced_items, workflow_agents,
-                            project_cfg_path=None):
+def evaluate_when_predicate(predicate, foreach_produced_items, workflow_agents, project_cfg_path=None):
     """Evaluate a when: predicate against runtime pipeline state.
 
     Parameters
@@ -3975,8 +3951,7 @@ def evaluate_when_predicate(predicate, foreach_produced_items, workflow_agents,
         return bool(_project_cfg.read_first_assignment(project_cfg_path, "review_agent").strip())
 
     raise ValueError(
-        f"Unknown when predicate '{predicate}'. "
-        f"Valid predicates: foreach_was_used, review_agent_configured"
+        f"Unknown when predicate '{predicate}'. " f"Valid predicates: foreach_was_used, review_agent_configured"
     )
 
 
@@ -4102,11 +4077,19 @@ def _resolve_step_input_templates(inputs: list, step_deliverables: dict) -> list
     return resolved
 
 
-def inject_document_workflow_tasks(tasks, workflow_def, sections, date_str, base_seq, owner,
-                                 git_repo="none", target_version="none",
-                                 project_cfg_path=None,
-                                 artifact_name="",
-                                 resolved_source_paths=None):
+def inject_document_workflow_tasks(
+    tasks,
+    workflow_def,
+    sections,
+    date_str,
+    base_seq,
+    owner,
+    git_repo="none",
+    target_version="none",
+    project_cfg_path=None,
+    artifact_name="",
+    resolved_source_paths=None,
+):
     """Inject the document pipeline tasks, evaluating when: predicates.
 
     This function drives the ``document`` workflow YAML pipeline through the
@@ -4253,7 +4236,7 @@ def inject_document_workflow_tasks(tasks, workflow_def, sections, date_str, base
             batch_ids = []
             batch_deliverables = []
             for section_name in sections:
-                slug_section = re.sub(r'[^a-z0-9]+', '-', section_name.lower()).strip('-')
+                slug_section = re.sub(r"[^a-z0-9]+", "-", section_name.lower()).strip("-")
                 slug_section = slug_section[:25]
                 section_deliverable = f"section-{slug_section}.md"
                 # New format: WRITER-DATE-NNN-slug (no owner prefix)
@@ -4357,9 +4340,7 @@ def inject_document_workflow_tasks(tasks, workflow_def, sections, date_str, base
         _base_step_inputs = list(step.inputs) if step.inputs else []
         # D2: resolve template strings from YAML (e.g. "section-{section_name}.md")
         # into the actual section-draft deliverable filenames collected earlier.
-        _base_step_inputs = _resolve_step_input_templates(
-            _base_step_inputs, step_deliverables
-        )
+        _base_step_inputs = _resolve_step_input_templates(_base_step_inputs, step_deliverables)
         # D2: prepend accumulated prior deliverables for WRITER content steps.
         _accumulated = _d2_accumulated_inputs(step_name, step_deliverables)
         _base_step_inputs = _merge_inputs(_accumulated, _base_step_inputs)
@@ -4390,14 +4371,10 @@ def inject_document_workflow_tasks(tasks, workflow_def, sections, date_str, base
             "context_paths": [],
             "required_output": step.deliverable if step.deliverable else f"{step_name}.md",
             "constraints": extra_constraints,
-            "acceptance_criteria": [
-                f"{step.deliverable if step.deliverable else step_name + '.md'} exists."
-            ],
+            "acceptance_criteria": [f"{step.deliverable if step.deliverable else step_name + '.md'} exists."],
             "depends_on": [],
             "prerequisite_ids": prereq_ids,
-            "notes": (
-                f"Document pipeline step '{step_name}'. target_version={target_version}"
-            ),
+            "notes": (f"Document pipeline step '{step_name}'. target_version={target_version}"),
             "target_version": target_version,
             "_synthetic": True,
             "_prose_step": step_name,
@@ -4449,8 +4426,7 @@ def create_human_approve_folder(task, team_root, dry_run=False, tasks_root=None)
     # tasks_root is required — no environment variable fallback is used.
     if tasks_root is None:
         raise ValueError(
-            "tasks_root must be explicitly provided (no env var fallback). "
-            "Pass tasks_root=<path> explicitly."
+            "tasks_root must be explicitly provided (no env var fallback). " "Pass tasks_root=<path> explicitly."
         )
     task_id = task["task_id"]
     target_version = task.get("target_version", "unknown")
@@ -4562,16 +4538,12 @@ def ensure_default_workspace(team_root, project_name, tasks):
     # Prefer the project's dev tree when it is a git checkout.
     dev_tree = _resolve_dev_tree_path(team_root)
     dev_tree_path = Path(dev_tree)
-    use_dev_tree = (
-        dev_tree_path.is_dir()
-        and (dev_tree_path / ".git").exists()
-    )
+    use_dev_tree = dev_tree_path.is_dir() and (dev_tree_path / ".git").exists()
 
     if use_dev_tree:
         default_workspace = dev_tree_path
         print(
-            f"[pm-materialize] Default workspace "
-            f"({default_workspace_label(dev_tree_path)}): {default_workspace}",
+            f"[pm-materialize] Default workspace " f"({default_workspace_label(dev_tree_path)}): {default_workspace}",
             file=sys.stderr,
         )
     else:
@@ -4803,8 +4775,8 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
         format ``"dedupe: skipped duplicate <key-slug> (matches
         <existing-key>)"``, and the total count of skipped tasks.
     """
-    closer_groups: dict = {}   # purpose_key -> [task, ...] in emission order
-    worker_groups: dict = {}   # (role, identity) -> [task, ...] in emission order
+    closer_groups: dict = {}  # purpose_key -> [task, ...] in emission order
+    worker_groups: dict = {}  # (role, identity) -> [task, ...] in emission order
 
     for task in tasks:
         purpose_key = _closer_purpose_key(task, emit_cm_bookends)
@@ -4813,7 +4785,7 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
         else:
             worker_groups.setdefault(_worker_dedup_key(task), []).append(task)
 
-    skip_ids = set()   # id(task) for python-object-identity skip lookup
+    skip_ids = set()  # id(task) for python-object-identity skip lookup
     id_remap: dict = {}  # skipped task_id -> surviving (winner) task_id
     closer_dup_ids = set()  # skipped task_ids that duplicated a chain closer
     narrations: list = []
@@ -4824,9 +4796,7 @@ def dedupe_materialization_tasks(tasks: list, emit_cm_bookends: bool = True) -> 
                 continue
             dup_slug = task.get("slug") or task.get("task_id") or "?"
             existing_key = winner.get("task_id") or winner.get("slug") or "?"
-            narrations.append(
-                f"dedupe: skipped duplicate {dup_slug} (matches {existing_key})"
-            )
+            narrations.append(f"dedupe: skipped duplicate {dup_slug} (matches {existing_key})")
             skip_ids.add(id(task))
             dup_id = task.get("task_id")
             if dup_id:
@@ -4944,16 +4914,18 @@ def _needs_operator_entries(raw) -> tuple:
     read the same way) and the operator ``question``.
     """
     if not isinstance(raw, list):
-        return [], [f"needs_operator must be a list of {{\"item\", \"question\"}} objects, "
-                    f"not {type(raw).__name__}"]
+        return [], [f'needs_operator must be a list of {{"item", "question"}} objects, ' f"not {type(raw).__name__}"]
     entries, problems = [], []
     for entry in raw:
         item = ""
         question = ""
         if isinstance(entry, dict):
             item = next(
-                (entry[k].strip() for k in _NEEDS_OPERATOR_ITEM_KEYS
-                 if isinstance(entry.get(k), str) and entry[k].strip()),
+                (
+                    entry[k].strip()
+                    for k in _NEEDS_OPERATOR_ITEM_KEYS
+                    if isinstance(entry.get(k), str) and entry[k].strip()
+                ),
                 "",
             )
             question = entry.get("question") if isinstance(entry.get("question"), str) else ""
@@ -4971,8 +4943,11 @@ def check_plan_intake_fields(plan: dict, team_root: str, requirements_path: str)
     :func:`uncovered_bundled_items` still checks that every bundled item is
     ticketed). Otherwise
     every needs_operator entry is checked as the ops verb checks it
-    (``ops.write.check_needs_operator``) and the ride_along list is run
-    through the plan lint (``lib/ride_along_lint.py``).
+    (``ops.write.check_needs_operator``), an entry naming an item that
+    already carries an operator answer (``## Operator Answers``,
+    ``ops.write.recorded_operator_answers``) is refused so the plan tickets
+    it with that answer instead, and the ride_along list is run through the
+    plan lint (``lib/ride_along_lint.py``).
 
     Returns:
         A :class:`PlanIntake`.
@@ -4989,10 +4964,13 @@ def check_plan_intake_fields(plan: dict, team_root: str, requirements_path: str)
 
     located = _plan_intake_project(team_root)
     if located is None:
-        raise PlanIntakeRefused("materialize.plan_intake_layout", [
-            f"needs_operator and ride_along are recorded through the ops verbs, which need a "
-            f"project root of the form KANBAN_ROOT/projects/NAME; {team_root} is not one",
-        ])
+        raise PlanIntakeRefused(
+            "materialize.plan_intake_layout",
+            [
+                f"needs_operator and ride_along are recorded through the ops verbs, which need a "
+                f"project root of the form KANBAN_ROOT/projects/NAME; {team_root} is not one",
+            ],
+        )
     kanban_root, project = located
     ctx = _OpsContext(kanban_root=kanban_root)
 
@@ -5004,23 +4982,47 @@ def check_plan_intake_fields(plan: dict, team_root: str, requirements_path: str)
         keyed += [("materialize.needs_operator_malformed", p) for p in shape_problems]
         for item, question in needs_entries:
             try:
-                parked.append(_check_needs_operator(ctx, project, item, question).resolve())
+                item_path = _check_needs_operator(ctx, project, item, question).resolve()
             except _ContractError as exc:
                 keyed.append((exc.error, f"needs_operator {item}: {exc.message}"))
+                continue
             except _OpsError as exc:
                 keyed.append(("materialize.needs_operator_unreadable", f"needs_operator {item}: {exc}"))
+                continue
+            # An item the operator already answered is planned with that
+            # answer, never asked again: re-asking parks it on the same
+            # question bundle after bundle.
+            answers = _recorded_operator_answers(item_path)
+            if answers:
+                keyed.append(
+                    (
+                        "materialize.needs_operator_answered",
+                        f"needs_operator {item}: the operator already answered it (latest: "
+                        f"{answers[-1].lstrip('- ')}) in the ## Operator Answers section of "
+                        f"{item_path}; ticket the item using that answer instead of asking again",
+                    )
+                )
+                continue
+            parked.append(item_path)
 
     lint = lint_ride_along(
-        raw_ride, kanban_root=kanban_root, project=project, requirements_path=requirements_path,
+        raw_ride,
+        kanban_root=kanban_root,
+        project=project,
+        requirements_path=requirements_path,
     )
     keyed += [(_lint_error_key(lint.findings), f"ride_along {f.describe()}") for f in lint.findings]
 
     parked_paths = set(parked)
     for bug in lint.accepted:
         if bug.path.resolve() in parked_paths:
-            keyed.append(("materialize.plan_intake_conflict",
-                          f"{bug.path.name} is in both needs_operator and ride_along; an item is "
-                          f"either parked on an operator question or ticketed, never both"))
+            keyed.append(
+                (
+                    "materialize.plan_intake_conflict",
+                    f"{bug.path.name} is in both needs_operator and ride_along; an item is "
+                    f"either parked on an operator question or ticketed, never both",
+                )
+            )
 
     if keyed:
         raise PlanIntakeRefused(keyed[0][0], [problem for _, problem in keyed])
@@ -5142,7 +5144,8 @@ def uncovered_bundled_items(plan: dict, requirements_path: str, intake=None) -> 
         covered.update(bug.path.name for bug in intake.ride_along)
     tickets = [_ticket_text(task) for task in plan.get("tasks") or [] if isinstance(task, dict)]
     return [
-        name for name in listed
+        name
+        for name in listed
         if name not in covered and not any(_item_citation_re(name).search(ticket) for ticket in tickets)
     ]
 
@@ -5366,8 +5369,7 @@ def main():
                 _req_status_raw = _status_tokens[0]
                 if _bundle_is_terminal(_req_status_raw):
                     print(
-                        f"[pm-materialize] skipping {_req_path.name}: "
-                        f"terminal state '{_req_status_raw.lower()}'",
+                        f"[pm-materialize] skipping {_req_path.name}: " f"terminal state '{_req_status_raw.lower()}'",
                         file=sys.stderr,
                     )
                     sys.exit(0)
@@ -5426,8 +5428,7 @@ def main():
         else:
             # Pipeline file exists but is malformed or invalid — hard error.
             print(
-                f"[pm-materialize] ERROR: invalid pipeline for workflow_type "
-                f"'{workflow_type}': {_wf_err}",
+                f"[pm-materialize] ERROR: invalid pipeline for workflow_type " f"'{workflow_type}': {_wf_err}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -5466,10 +5467,7 @@ def main():
     # explicit value; refuse_non_explicit_target_version refuses a sentinel
     # before anything is written. Release-shaped means the bookend branch
     # below will inject CM-open/CM-release, which are named after the version.
-    _release_shaped = (
-        workflow_type not in ("document", "feature")
-        and _workflow_requires_cm_bookends(_wf_caps)
-    )
+    _release_shaped = workflow_type not in ("document", "feature") and _workflow_requires_cm_bookends(_wf_caps)
     target_version = refuse_non_explicit_target_version(
         plan.get("target_version") or "",
         release_shaped=_release_shaped,
@@ -5593,14 +5591,9 @@ def main():
         # ensure_default_workspace() uses, without creating directories.
         _dry_dev_tree = _resolve_dev_tree_path(team_root)
         _dry_dev_tree_path = Path(_dry_dev_tree)
-        _dry_use_dev_tree = (
-            _dry_dev_tree_path.is_dir()
-            and (_dry_dev_tree_path / ".git").exists()
-        )
+        _dry_use_dev_tree = _dry_dev_tree_path.is_dir() and (_dry_dev_tree_path / ".git").exists()
         _dry_default = (
-            _dry_dev_tree_path
-            if _dry_use_dev_tree
-            else Path(team_root) / "workspaces" / "projects" / project_name
+            _dry_dev_tree_path if _dry_use_dev_tree else Path(team_root) / "workspaces" / "projects" / project_name
         )
         for task in tasks:
             wd = normalize_workspace_value(task.get("working_directory"))
@@ -5619,9 +5612,7 @@ def main():
     # (CM bookends, TESTER) created with git_repo='none' are never affected.
     _canonical_git_repo = load_project_git_repo_url(team_root)
     if _canonical_git_repo:
-        _n_overridden = apply_git_repo_override(
-            tasks, _canonical_git_repo, dry_run=args.dry_run
-        )
+        _n_overridden = apply_git_repo_override(tasks, _canonical_git_repo, dry_run=args.dry_run)
         if _n_overridden:
             print(
                 f"[pm-materialize] GIT-REPO-URL GUARD: applied git_repo override to "
@@ -5738,8 +5729,7 @@ def main():
                 sys.exit(1)
             print(
                 f"[pm-materialize] Source documents resolved "
-                f"({len(_doc_resolved_sources)}): "
-                + ", ".join(_doc_resolved_sources),
+                f"({len(_doc_resolved_sources)}): " + ", ".join(_doc_resolved_sources),
                 file=sys.stderr,
             )
         else:
@@ -5769,8 +5759,7 @@ def main():
         if synthetic:
             _labels = [t["task_id"] for t in synthetic]
             print(
-                f"[pm-materialize] Injected {len(synthetic)} {workflow_type} workflow tasks: "
-                f"{', '.join(_labels)}",
+                f"[pm-materialize] Injected {len(synthetic)} {workflow_type} workflow tasks: " f"{', '.join(_labels)}",
                 file=sys.stderr,
             )
 
@@ -5811,8 +5800,7 @@ def main():
         if synthetic:
             _labels = [t["task_id"] for t in synthetic]
             print(
-                f"[pm-materialize] Injected {len(synthetic)} feature workflow tasks: "
-                f"{', '.join(_labels)}",
+                f"[pm-materialize] Injected {len(synthetic)} feature workflow tasks: " f"{', '.join(_labels)}",
                 file=sys.stderr,
             )
     else:
@@ -5885,20 +5873,15 @@ def main():
                 else:
                     _bookend_label = "CM-open, TESTER, CM-release"
                 print(
-                    f"[pm-materialize] Injected {len(synthetic)} bookend tasks"
-                    f" ({_bookend_label})",
+                    f"[pm-materialize] Injected {len(synthetic)} bookend tasks" f" ({_bookend_label})",
                     file=sys.stderr,
                 )
 
             # Invariant assertion: verify bookends were actually injected.
             # This catches any future regression where inject_cm_bookends silently
             # returns without adding the required tasks.
-            _cm_open_present = any(
-                t.get("_synthetic") and t.get("cm_operation") == "open-rc" for t in tasks
-            )
-            _cm_release_present = any(
-                t.get("_synthetic") and t.get("cm_operation") == "release" for t in tasks
-            )
+            _cm_open_present = any(t.get("_synthetic") and t.get("cm_operation") == "open-rc" for t in tasks)
+            _cm_release_present = any(t.get("_synthetic") and t.get("cm_operation") == "release" for t in tasks)
             if not _cm_open_present or not _cm_release_present:
                 print(
                     "[pm-materialize] ERROR: release-lifecycle bookend invariant violated — "
@@ -6019,8 +6002,7 @@ def main():
         _emit_error_contract(
             "materialize.task-graph-invalid",
             f"pm_materialize refused {_plan_abs}: the task graph has "
-            f"{len(_graph_problems)} defect(s) — " + "; ".join(_graph_problems)
-            + ". No task folder was written.",
+            f"{len(_graph_problems)} defect(s) — " + "; ".join(_graph_problems) + ". No task folder was written.",
             f"Fix depends_on in {_plan_abs} so every entry names another task's "
             f"sequence and no tasks wait on each other, then re-run: python3 "
             f"{Path(__file__).resolve()} {_plan_abs} --team-root {team_root}",
@@ -6133,9 +6115,7 @@ def main():
     for task in ordered_tasks:
         # HUMAN-APPROVE tasks get a specialized README explaining the gate mechanism
         if task.get("_human_approve"):
-            task_id = create_human_approve_folder(
-                task, team_root, dry_run=args.dry_run, tasks_root=str(tasks_root)
-            )
+            task_id = create_human_approve_folder(task, team_root, dry_run=args.dry_run, tasks_root=str(tasks_root))
             created_tasks.append(task)
         else:
             task_id = create_task_folder(

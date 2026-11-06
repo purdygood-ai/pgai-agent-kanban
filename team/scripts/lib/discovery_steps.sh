@@ -318,15 +318,10 @@ discovery_compute_next_patch() {
     # the same git worktree is used here as in pp_last_released_version, so
     # bump-around works even when invoked from the live install (which has no
     # .git/ directory).
-    local _dev_tree=""
-    local _cfg_file
-    # Source: project.cfg [project] dev_tree_path (falls back to PROJECT.cfg)
-    _cfg_file="$(_pp_project_cfg_file "$(pp_project_root "$project_name" 2>/dev/null)")"
-    if [[ -n "$_cfg_file" ]]; then
-        _dev_tree="$(_pp_read_cfg_key "$_cfg_file" project dev_tree_path "")"
-    fi
-    # Fall back to PGAI_DEV_TREE_PATH if project cfg did not yield a path
-    [[ -z "$_dev_tree" ]] && _dev_tree="${PGAI_DEV_TREE_PATH:-}"
+    # The documented dev_tree_path chain (pp_resolve_dev_tree): project.cfg
+    # (or PROJECT.cfg), then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    local _dev_tree
+    _dev_tree="$(pp_resolve_dev_tree "$project_name" 2>/dev/null)" || _dev_tree=""
 
     # Release tags carry the project's branch_prefix (pp_prefix_tag's rule).
     local _tag_prefix

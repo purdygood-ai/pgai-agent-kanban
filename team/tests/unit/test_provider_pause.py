@@ -43,7 +43,7 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _REPO_ROOT = _TEAM_DIR.parent
 _LIB = _TEAM_DIR / "scripts" / "lib"
 _INI_PARSER = _LIB / "ini_parser.sh"
-_UTC = datetime.timezone.utc
+_UTC = datetime.UTC
 _NOW = datetime.datetime(2026, 10, 11, 12, 0, tzinfo=_UTC)
 
 
@@ -95,7 +95,7 @@ _AGENT_PROSE = (
     "I updated docs/overwatch.md to describe the usage-limit pause and the\n"
     "[wake] usage_limit_pause_seconds key. Remaining: run the pre-merge check.\n"
     "The wake now pauses on a usage limit only when the CLI prints\n"
-    "`Claude AI usage limit reached|<epoch>` or \"5-hour limit reached\" itself.\n"
+    '`Claude AI usage limit reached|<epoch>` or "5-hour limit reached" itself.\n'
     "- usage limit reached is no longer matched mid-sentence\n"
     "usage_limit_pause_seconds = 3600\n"
 )
@@ -110,8 +110,21 @@ def test_agent_prose_records_no_pause(tmp_path):
     log = tmp_path / "agent.log"
     log.write_text(_AGENT_PROSE, encoding="utf-8")
 
-    result = _cli("record", str(tmp_path), "claude", str(log), "--default-seconds", "3600",
-                  "--task", "WRITER-20261011-001-x", "--project", "p", "--now", _iso(_NOW), cwd=tmp_path)
+    result = _cli(
+        "record",
+        str(tmp_path),
+        "claude",
+        str(log),
+        "--default-seconds",
+        "3600",
+        "--task",
+        "WRITER-20261011-001-x",
+        "--project",
+        "p",
+        "--now",
+        _iso(_NOW),
+        cwd=tmp_path,
+    )
 
     assert result.returncode == 1 and result.stdout == "", result.stdout + result.stderr
     assert not marker_path(tmp_path, "claude").exists()
@@ -134,7 +147,9 @@ def test_only_the_log_tail_is_read():
     "text, expected",
     [
         pytest.param("Claude AI usage limit reached|1791730800", _NOW + datetime.timedelta(hours=3), id="epoch"),
-        pytest.param("usage limit; resets 2026-10-11T15:30:00Z", _NOW + datetime.timedelta(hours=3, minutes=30), id="iso"),
+        pytest.param(
+            "usage limit; resets 2026-10-11T15:30:00Z", _NOW + datetime.timedelta(hours=3, minutes=30), id="iso"
+        ),
         pytest.param("usage limit. Try again in 2h 30m", _NOW + datetime.timedelta(hours=2, minutes=30), id="relative"),
         pytest.param("usage limit, resets in 45 minutes", _NOW + datetime.timedelta(minutes=45), id="relative-words"),
         pytest.param(
@@ -142,7 +157,9 @@ def test_only_the_log_tail_is_read():
             datetime.datetime(2026, 10, 11, 19, 0, tzinfo=_UTC),
             id="clock-zone",
         ),
-        pytest.param("limit resets 11am (UTC)", datetime.datetime(2026, 10, 12, 11, 0, tzinfo=_UTC), id="clock-next-day"),
+        pytest.param(
+            "limit resets 11am (UTC)", datetime.datetime(2026, 10, 12, 11, 0, tzinfo=_UTC), id="clock-next-day"
+        ),
         pytest.param("resets Oct 14, 9am (UTC)", datetime.datetime(2026, 10, 14, 9, 0, tzinfo=_UTC), id="date-clock"),
     ],
 )
@@ -204,7 +221,10 @@ def test_check_reports_paused_then_ended_once_then_clear(tmp_path):
 def _cli(*args: str, cwd: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.provider_pause", *args],
-        capture_output=True, text=True, timeout=60, cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=cwd,
         env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(_TEAM_DIR), "HOME": str(cwd)},
     )
 
@@ -234,9 +254,16 @@ def test_cli_refuses_a_provider_name_that_could_escape_the_directory(tmp_path):
 
 def test_kanban_cfg_example_states_the_default_pause():
     result = subprocess.run(
-        ["bash", "-c", f"source {str(_INI_PARSER)!r} && read_ini "
-         f"{str(_REPO_ROOT / 'kanban.cfg_example')!r} wake usage_limit_pause_seconds ''"],
-        capture_output=True, text=True, timeout=15, cwd=_TEAM_DIR,
+        [
+            "bash",
+            "-c",
+            f"source {str(_INI_PARSER)!r} && read_ini "
+            f"{str(_REPO_ROOT / 'kanban.cfg_example')!r} wake usage_limit_pause_seconds ''",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        cwd=_TEAM_DIR,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(DEFAULT_PAUSE_S)
@@ -275,8 +302,12 @@ _CLASSIFY = (
 def _extract(func_names: list[str]) -> str:
     alternation = "|".join(re.escape(n) for n in func_names)
     files = " ".join(
-        f"'{_LIB / name}'" for name in (
-            "wake_task_state.sh", "wake_task_transition.sh", "wake_lifecycle.sh", "wake_provider_pause.sh",
+        f"'{_LIB / name}'"
+        for name in (
+            "wake_task_state.sh",
+            "wake_task_transition.sh",
+            "wake_lifecycle.sh",
+            "wake_provider_pause.sh",
         )
     )
     return textwrap.dedent(f"""\
@@ -342,7 +373,9 @@ class _Wake:
         return dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
 
     def section(self, heading: str) -> str:
-        m = re.search(rf"^## {re.escape(heading)}\s*\n(.*?)(?=\n##|\Z)", self.status.read_text(encoding="utf-8"), re.S | re.M)
+        m = re.search(
+            rf"^## {re.escape(heading)}\s*\n(.*?)(?=\n##|\Z)", self.status.read_text(encoding="utf-8"), re.S | re.M
+        )
         return m.group(1).strip() if m else ""
 
 
@@ -401,7 +434,9 @@ def test_the_gate_holds_dispatch_while_paused_and_narrates_the_end(tmp_path):
     wake.run(f'wake_record_usage_limit_pause "{wake.task_id}" "{wake.status}" "{log}" >/dev/null\n')
     until = wake.marker()["resumes_at"]
 
-    held = wake.run('if wake_provider_pause_gate demo; then echo "gate=open"; else echo "gate=held until=${WAKE_PROVIDER_PAUSED_UNTIL}"; fi\n')
+    held = wake.run(
+        'if wake_provider_pause_gate demo; then echo "gate=open"; else echo "gate=held until=${WAKE_PROVIDER_PAUSED_UNTIL}"; fi\n'
+    )
     other = wake.run('ACTIVE_PROVIDER=codex; wake_provider_pause_gate demo && echo "gate=open"\n')
 
     assert f"gate=held until={until}" in held.stdout, held.stdout + held.stderr
@@ -412,7 +447,10 @@ def test_the_gate_holds_dispatch_while_paused_and_narrates_the_end(tmp_path):
     # Once the reset time has passed the gate opens, narrates the end once,
     # and removes the marker.
     path = wake.root / "provider-pause" / "claude.pause"
-    path.write_text(path.read_text(encoding="utf-8").replace(f"resumes_at={until}", "resumes_at=2026-01-01T00:00:00+00:00"), encoding="utf-8")
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"resumes_at={until}", "resumes_at=2026-01-01T00:00:00+00:00"),
+        encoding="utf-8",
+    )
     opened = wake.run('wake_provider_pause_gate demo && echo "gate=open"\n')
     again = wake.run('wake_provider_pause_gate demo && echo "gate=open"\n')
 
@@ -433,7 +471,7 @@ def test_agent_prose_in_the_log_leaves_the_task_to_the_normal_classifier(tmp_pat
     assert wake.section("Usage Limit Requeue") == ""
 
 
-def _redispatch(wake: "_Wake") -> None:
+def _redispatch(wake: _Wake) -> None:
     """Put the task back in WORKING, as the next wake's dispatch does."""
     text = re.sub(r"^## State\s*\n\S+", "## State\nWORKING", wake.status.read_text(encoding="utf-8"), flags=re.M)
     wake.status.write_text(text, encoding="utf-8")

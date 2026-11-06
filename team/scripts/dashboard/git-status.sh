@@ -2,7 +2,7 @@
 # git-status.sh
 # Prints a multi-section git status view for all registered release-workflow projects.
 #
-# Designed to run under `watch -n 10 git-status.sh` in the
+# Designed to run under `cadence-loop.sh --interval 10 -- git-status.sh` in the
 # tmux `git` window created by dashboard/create.sh.
 #
 # For each registered project whose workflow_type is "release" (or "feature"),
@@ -42,11 +42,16 @@
 #
 # When a project's dev tree path does not exist or is not a git repository, the
 # script prints a clear degraded section for that project and continues to the
-# next project.  The overall exit code is always 0 so `watch` does not spin.
+# next project.  The overall exit code is always 0, even for a degraded project.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -64,12 +69,6 @@ while [[ $# -gt 0 ]]; do
       PROJECT_FILTER="${2:-}"
       shift 2
       ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2
       echo "Usage: $0 [--kanban-root <path>] [--project <name>]" >&2
@@ -81,7 +80,7 @@ done
 # ---------------------------------------------------------------------------
 # Resolve kanban root and load project_paths + projects helpers
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/../lib"
 
 KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
@@ -344,7 +343,7 @@ else
 fi
 
 # If no projects found at all (empty registry or no projects.cfg), emit a
-# single informational message and exit 0 so watch does not spin on error.
+# single informational message and exit 0 rather than fail the render.
 if [[ ${#_PROJECTS[@]} -eq 0 ]]; then
   printf '%s%s%s\n' "${YELLOW}${BOLD}" "=== Git Status ===" "$RESET"
   printf '\n'
@@ -372,11 +371,10 @@ for _proj in "${_PROJECTS[@]}"; do
     continue
   fi
 
-  # Resolve dev_tree_path from project config.
-  _dev_tree=""
-  if [[ -n "$_proj_cfg_file" && -f "$_proj_cfg_file" ]]; then
-    _dev_tree="$(_pp_read_cfg_key "$_proj_cfg_file" project dev_tree_path "" 2>/dev/null || true)"
-  fi
+  # The repository the wake works this project in: the documented
+  # dev_tree_path chain (pp_resolve_dev_tree) -- project.cfg, then
+  # PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+  _dev_tree="$(pp_resolve_dev_tree "$_proj" 2>/dev/null)" || _dev_tree=""
 
   # Resolve branch_prefix for this project (pp_branch_prefix). An invalid
   # value, which pp_branch_prefix refuses, renders with no prefix -- a

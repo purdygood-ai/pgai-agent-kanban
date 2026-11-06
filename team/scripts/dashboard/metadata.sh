@@ -2,7 +2,7 @@
 # metadata.sh
 # Emits a formatted metadata overview for the pgai kanban dashboard.
 #
-# Designed to run under `watch -n 10 metadata.sh` in the
+# Designed to run under `cadence-loop.sh --interval 10 -- metadata.sh` in the
 # tmux `metadata` window created by dashboard/create.sh.
 #
 # Output sections:
@@ -29,13 +29,18 @@
 # Read-only: this script never modifies any kanban state.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -52,12 +57,6 @@ while [[ $# -gt 0 ]]; do
     --no-color)
       NO_COLOR_ARG=true
       shift
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2
@@ -104,7 +103,7 @@ config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
 # Source: kanban.cfg [paths/dashboard] — INI format replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "${KANBAN_ROOT}/kanban.cfg")"
     export DASHBOARD_ROWS_PER_COLUMN
 fi
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"

@@ -78,9 +78,7 @@ def _field(stdout: str, key: str) -> str:
     return ""
 
 
-def _counting_waiter_script(
-    lock_file: pathlib.Path, wait: str, holder: str = "waiter"
-) -> str:
+def _counting_waiter_script(lock_file: pathlib.Path, wait: str, holder: str = "waiter") -> str:
     """A waiter that counts the retry machinery instead of timing it.
 
     Every retry of a contended attempt is preceded by one keep-waiting hook
@@ -126,7 +124,10 @@ def test_lock_released_during_the_wait_is_acquired(tmp_path):
     holder = _Holder(tmp_path, lock_file)
     waiter = subprocess.Popen(
         ["bash", "-c", _waiter_script(lock_file, "20")],
-        cwd=str(_TEAM_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        cwd=str(_TEAM_DIR),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     time.sleep(2)
     holder.release()
@@ -153,9 +154,7 @@ def test_lock_held_for_the_whole_wait_gives_up_after_the_wait(tmp_path):
 
 def test_refusal_is_not_retried(tmp_path):
     lock_file = tmp_path / "locks" / "probe.lock"
-    result = run_bash(
-        tmp_path, _counting_waiter_script(lock_file, "10", holder=""), timeout=30
-    )
+    result = run_bash(tmp_path, _counting_waiter_script(lock_file, "10", holder=""), timeout=30)
     diagnostics = result.stdout + result.stderr
     assert _field(result.stdout, "RC") == "2", diagnostics
     assert _field(result.stdout, "HOOK_CALLS") == "0", diagnostics

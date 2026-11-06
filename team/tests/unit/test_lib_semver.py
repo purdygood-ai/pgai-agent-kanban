@@ -46,7 +46,11 @@ def test_v0_9_7_orders_below_v0_17_1() -> None:
 def test_sorting_with_the_sort_key_is_numeric() -> None:
     versions = ["v0.17.1", "v0.9.7", "v0.10.0", "v1.0.0", "v0.9.10"]
     assert sorted(versions, key=semver.version_sort_key) == [
-        "v0.9.7", "v0.9.10", "v0.10.0", "v0.17.1", "v1.0.0",
+        "v0.9.7",
+        "v0.9.10",
+        "v0.10.0",
+        "v0.17.1",
+        "v1.0.0",
     ]
 
 

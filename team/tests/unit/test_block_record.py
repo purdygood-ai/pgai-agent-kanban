@@ -114,9 +114,7 @@ def _bash(tmp_path: pathlib.Path, script: str) -> subprocess.CompletedProcess:
     )
     (tmp_path / "kanban-temp").mkdir(exist_ok=True)
     full = f'set -uo pipefail\nsource "{_BLOCK_RECORD_LIB}"\n' + script
-    return subprocess.run(
-        ["bash", "-c", full], capture_output=True, text=True, timeout=60, env=env, cwd=str(cwd)
-    )
+    return subprocess.run(["bash", "-c", full], capture_output=True, text=True, timeout=60, env=env, cwd=str(cwd))
 
 
 # ---------------------------------------------------------------------------
@@ -155,10 +153,10 @@ def test_first_write_appends_every_field_in_order_and_reads_back(tmp_path: pathl
 
 def test_first_write_without_now_stamps_the_current_utc_time(tmp_path: pathlib.Path) -> None:
     path = _status_file(tmp_path)
-    start = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    start = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
     record = write_block_record(path, "agent_unclassified", "WRITER")
     stamp = datetime.datetime.fromisoformat(record.first_blocked_at)
-    assert start <= stamp <= datetime.datetime.now(datetime.timezone.utc)
+    assert start <= stamp <= datetime.datetime.now(datetime.UTC)
     assert record.evidence == "none"
 
 
@@ -359,7 +357,10 @@ def test_restart_epoch_cli_flag_is_accepted(tmp_path: pathlib.Path) -> None:
     write_block_record(path, "zero_progress", "CODER", now=_T2)
     result = subprocess.run(
         ["python3", "-m", "pgai_agent_kanban.overwatch.block_record", "update", str(path), "--restart-epoch"],
-        capture_output=True, text=True, timeout=60, cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(_TEAM_DIR),
         env=build_scrubbed_env(home_dir=tmp_path, extra_env={"PYTHONPATH": str(_TEAM_DIR)}),
     )
     assert result.returncode == 0, result.stderr

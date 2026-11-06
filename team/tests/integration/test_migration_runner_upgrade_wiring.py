@@ -108,9 +108,7 @@ def _build_kanban_root_with_project(
     for name, template in all_projects.items():
         proj_dir = root / "projects" / name
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "project.cfg").write_text(
-            template.format(name=name), encoding="utf-8"
-        )
+        (proj_dir / "project.cfg").write_text(template.format(name=name), encoding="utf-8")
 
     return root
 
@@ -144,20 +142,14 @@ def _run_runner(
         cmd.extend(["--project", project])
     if dry_run:
         cmd.append("--dry-run")
-    return subprocess.run(
-        cmd, capture_output=True, text=True, env=env, cwd=str(kanban_root), timeout=timeout
-    )
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=str(kanban_root), timeout=timeout)
 
 
 def _count_key_occurrences(cfg_text: str) -> int:
-    return len(
-        re.findall(r"^\s*#?\s*overwatch_resolve\s*=", cfg_text, re.MULTILINE)
-    )
+    return len(re.findall(r"^\s*#?\s*overwatch_resolve\s*=", cfg_text, re.MULTILINE))
 
 
-def _run_upgrade_phase2(
-    kanban_root: pathlib.Path, *, timeout: int = 120
-) -> subprocess.CompletedProcess:
+def _run_upgrade_phase2(kanban_root: pathlib.Path, *, timeout: int = 120) -> subprocess.CompletedProcess:
     """Invoke upgrade.sh's phase-2 body directly (the actual upgrade work:
     deposit, VERSION stamp, migrations, retired-file sweep), bypassing the
     phase-1 wrapper's backup creation and bash -n / --phase2-support probes
@@ -178,9 +170,7 @@ def _run_upgrade_phase2(
         str(kanban_root),
         "--no-backup",
     ]
-    return subprocess.run(
-        cmd, capture_output=True, text=True, env=env, cwd=str(kanban_root), timeout=timeout
-    )
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=str(kanban_root), timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -189,38 +179,30 @@ def _run_upgrade_phase2(
 
 
 class TestRunnerSeedsMissingKey:
-    def test_first_application_seeds_the_commented_key(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_first_application_seeds_the_commented_key(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "runner-proj", _CFG_MISSING_KEY)
         cfg_path = _cfg_path(root, "runner-proj")
         assert _count_key_occurrences(cfg_path.read_text(encoding="utf-8")) == 0
 
         result = _run_runner(root, from_version="v2.22.5", to_version="v2.23.0")
-        assert result.returncode == 0, (
-            f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after_text = cfg_path.read_text(encoding="utf-8")
         assert _count_key_occurrences(after_text) == 1, after_text
-        assert "\noverwatch_resolve = " not in after_text, (
-            f"The seeded key must be commented, never live.\n{after_text}"
-        )
+        assert (
+            "\noverwatch_resolve = " not in after_text
+        ), f"The seeded key must be commented, never live.\n{after_text}"
 
     def test_second_application_is_byte_identical(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "runner-proj-2", _CFG_MISSING_KEY)
         cfg_path = _cfg_path(root, "runner-proj-2")
 
         first = _run_runner(root, from_version="v2.22.5", to_version="v2.23.0")
-        assert first.returncode == 0, (
-            f"first run failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
-        )
+        assert first.returncode == 0, f"first run failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
         after_first = cfg_path.read_text(encoding="utf-8")
 
         second = _run_runner(root, from_version="v2.22.5", to_version="v2.23.0")
-        assert second.returncode == 0, (
-            f"second run failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
-        )
+        assert second.returncode == 0, f"second run failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
         after_second = cfg_path.read_text(encoding="utf-8")
 
         assert after_first == after_second, (
@@ -231,16 +213,12 @@ class TestRunnerSeedsMissingKey:
 
 class TestRunnerPreservesOperatorValue:
     def test_operator_set_true_survives_the_runner(self, tmp_path: pathlib.Path) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "runner-operator-proj", _CFG_WITH_OPERATOR_SET_TRUE
-        )
+        root = _build_kanban_root_with_project(tmp_path, "runner-operator-proj", _CFG_WITH_OPERATOR_SET_TRUE)
         cfg_path = _cfg_path(root, "runner-operator-proj")
         original = cfg_path.read_text(encoding="utf-8")
 
         result = _run_runner(root, from_version="v2.22.5", to_version="v2.23.0")
-        assert result.returncode == 0, (
-            f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after = cfg_path.read_text(encoding="utf-8")
         assert after == original, (
@@ -251,9 +229,7 @@ class TestRunnerPreservesOperatorValue:
 
 
 class TestRunnerSelectionRule:
-    def test_destination_outside_the_range_selects_nothing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_destination_outside_the_range_selects_nothing(self, tmp_path: pathlib.Path) -> None:
         """The sparse case: a (from, to] range that does not cover v2.23.0's
         destination must apply nothing and still exit 0 (README.md "Sparse
         rule" -- absence of a needed migration is the normal case)."""
@@ -262,9 +238,7 @@ class TestRunnerSelectionRule:
         original = cfg_path.read_text(encoding="utf-8")
 
         result = _run_runner(root, from_version="v2.20.0", to_version="v2.20.5")
-        assert result.returncode == 0, (
-            f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert "nothing to apply" in result.stdout
 
         after = cfg_path.read_text(encoding="utf-8")
@@ -276,9 +250,7 @@ class TestRunnerSelectionRule:
         result = _run_runner(root, from_version="v2.23.0", to_version="v2.23.0")
         assert result.returncode == 0
         assert "nothing to apply" in result.stdout
-        assert _count_key_occurrences(
-            _cfg_path(root, "runner-equal-proj").read_text(encoding="utf-8")
-        ) == 0
+        assert _count_key_occurrences(_cfg_path(root, "runner-equal-proj").read_text(encoding="utf-8")) == 0
 
 
 class TestRunnerFanOutRespectsExplicitProjectOnly:
@@ -289,22 +261,14 @@ class TestRunnerFanOutRespectsExplicitProjectOnly:
             _CFG_MISSING_KEY,
             extra_projects={"runner-fanout-b": _CFG_MISSING_KEY},
         )
-        result = _run_runner(
-            root, from_version="v2.22.5", to_version="v2.23.0", project="runner-fanout-a"
-        )
-        assert result.returncode == 0, (
-            f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert _count_key_occurrences(
-            _cfg_path(root, "runner-fanout-a").read_text(encoding="utf-8")
-        ) == 1
-        assert _count_key_occurrences(
-            _cfg_path(root, "runner-fanout-b").read_text(encoding="utf-8")
-        ) == 0, "Explicit --project must not touch other registered projects."
+        result = _run_runner(root, from_version="v2.22.5", to_version="v2.23.0", project="runner-fanout-a")
+        assert result.returncode == 0, f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert _count_key_occurrences(_cfg_path(root, "runner-fanout-a").read_text(encoding="utf-8")) == 1
+        assert (
+            _count_key_occurrences(_cfg_path(root, "runner-fanout-b").read_text(encoding="utf-8")) == 0
+        ), "Explicit --project must not touch other registered projects."
 
-    def test_no_project_flag_seeds_every_registered_project(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_no_project_flag_seeds_every_registered_project(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(
             tmp_path,
             "runner-fanout-c",
@@ -312,13 +276,11 @@ class TestRunnerFanOutRespectsExplicitProjectOnly:
             extra_projects={"runner-fanout-d": _CFG_MISSING_KEY},
         )
         result = _run_runner(root, from_version="v2.22.5", to_version="v2.23.0")
-        assert result.returncode == 0, (
-            f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"runner failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         for name in ("runner-fanout-c", "runner-fanout-d"):
-            assert _count_key_occurrences(
-                _cfg_path(root, name).read_text(encoding="utf-8")
-            ) == 1, f"expected {name} to be seeded by the no-flag fan-out run"
+            assert (
+                _count_key_occurrences(_cfg_path(root, name).read_text(encoding="utf-8")) == 1
+            ), f"expected {name} to be seeded by the no-flag fan-out run"
 
 
 class TestRunnerUsageErrors:
@@ -349,9 +311,7 @@ class TestRunnerUsageErrors:
 
 
 class TestUpgradePhase2AppliesMigrationsAutomatically:
-    def test_upgrade_seeds_the_key_with_no_operator_action(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_upgrade_seeds_the_key_with_no_operator_action(self, tmp_path: pathlib.Path) -> None:
         """An existing install upgraded from v2.22.5 to whatever this dev
         tree's own committed VERSION is ends up with the seeded key, purely
         by running the documented upgrade path -- no separate operator
@@ -360,12 +320,9 @@ class TestUpgradePhase2AppliesMigrationsAutomatically:
         (root / "VERSION").write_text("v2.22.5\n", encoding="utf-8")
 
         result = _run_upgrade_phase2(root)
-        assert result.returncode == 0, (
-            f"upgrade phase 2 failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"upgrade phase 2 failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert (root / "scripts" / "migrations" / "run-migrations.sh").is_file(), (
-            "upgrade.sh's own deposit loop must populate scripts/migrations/ "
-            "before the migration step runs."
+            "upgrade.sh's own deposit loop must populate scripts/migrations/ " "before the migration step runs."
         )
 
         after_text = _cfg_path(root, "upgrade-proj").read_text(encoding="utf-8")
@@ -375,16 +332,12 @@ class TestUpgradePhase2AppliesMigrationsAutomatically:
         )
         assert "\noverwatch_resolve = " not in after_text
 
-    def test_running_the_upgrade_path_twice_is_byte_identical(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_running_the_upgrade_path_twice_is_byte_identical(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "upgrade-proj-2", _CFG_MISSING_KEY)
         (root / "VERSION").write_text("v2.22.5\n", encoding="utf-8")
 
         first = _run_upgrade_phase2(root)
-        assert first.returncode == 0, (
-            f"first upgrade failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
-        )
+        assert first.returncode == 0, f"first upgrade failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
         cfg_path = _cfg_path(root, "upgrade-proj-2")
         after_first = cfg_path.read_text(encoding="utf-8")
 
@@ -396,9 +349,7 @@ class TestUpgradePhase2AppliesMigrationsAutomatically:
         (root / "VERSION").write_text("v2.22.5\n", encoding="utf-8")
 
         second = _run_upgrade_phase2(root)
-        assert second.returncode == 0, (
-            f"second upgrade failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
-        )
+        assert second.returncode == 0, f"second upgrade failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
         after_second = cfg_path.read_text(encoding="utf-8")
 
         assert after_first == after_second, (
@@ -407,20 +358,14 @@ class TestUpgradePhase2AppliesMigrationsAutomatically:
             f"after second:\n{after_second}"
         )
 
-    def test_operator_set_value_survives_the_upgrade_path(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "upgrade-operator-proj", _CFG_WITH_OPERATOR_SET_TRUE
-        )
+    def test_operator_set_value_survives_the_upgrade_path(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "upgrade-operator-proj", _CFG_WITH_OPERATOR_SET_TRUE)
         (root / "VERSION").write_text("v2.22.5\n", encoding="utf-8")
         cfg_path = _cfg_path(root, "upgrade-operator-proj")
         original = cfg_path.read_text(encoding="utf-8")
 
         result = _run_upgrade_phase2(root)
-        assert result.returncode == 0, (
-            f"upgrade phase 2 failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"upgrade phase 2 failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after = cfg_path.read_text(encoding="utf-8")
         assert after == original, (
@@ -428,16 +373,12 @@ class TestUpgradePhase2AppliesMigrationsAutomatically:
             f"path byte-for-byte.\nbefore:\n{original}\nafter:\n{after}"
         )
 
-    def test_seeded_key_resolves_false_through_the_shared_accessor(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_seeded_key_resolves_false_through_the_shared_accessor(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(tmp_path, "upgrade-resolve-proj", _CFG_MISSING_KEY)
         (root / "VERSION").write_text("v2.22.5\n", encoding="utf-8")
 
         result = _run_upgrade_phase2(root)
-        assert result.returncode == 0, (
-            f"upgrade phase 2 failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"upgrade phase 2 failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
@@ -453,8 +394,7 @@ class TestUpgradePhase2AppliesMigrationsAutomatically:
             timeout=30,
         )
         assert resolve_result.returncode == 0, (
-            f"pp_overwatch_resolve failed.\nstdout: {resolve_result.stdout}\n"
-            f"stderr: {resolve_result.stderr}"
+            f"pp_overwatch_resolve failed.\nstdout: {resolve_result.stdout}\n" f"stderr: {resolve_result.stderr}"
         )
         assert resolve_result.stdout.strip() == "false", (
             f"Expected pp_overwatch_resolve to resolve to 'false' after the "

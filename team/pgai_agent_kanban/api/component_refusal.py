@@ -25,7 +25,6 @@ Public API:
 from __future__ import annotations
 
 import shlex
-from typing import Optional
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -51,10 +50,7 @@ def example_body_curl(request: Request, example_body: str) -> str:
     server the caller actually reached (never a placeholder host).
     *example_body* is a literal JSON string the caller can paste as-is.
     """
-    return (
-        f"curl -sS -X POST {request.url} -H 'Content-Type: application/json' "
-        f"-d '{example_body}'"
-    )
+    return f"curl -sS -X POST {request.url} -H 'Content-Type: application/json' " f"-d '{example_body}'"
 
 
 def _resend_with_example(request: Request, field: str) -> str:
@@ -73,9 +69,9 @@ def _component_refusal(
     request: Request,
     verb: str,
     fields: dict[str, object],
-    example_body: Optional[str],
+    example_body: str | None,
     warnings: list[str],
-) -> Optional[JSONResponse]:
+) -> JSONResponse | None:
     """Refuse a request whose project, key or selector value is not one plain name.
 
     The one place every route's confinement check lands (see

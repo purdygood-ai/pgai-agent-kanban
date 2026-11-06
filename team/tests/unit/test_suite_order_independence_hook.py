@@ -127,8 +127,7 @@ def test_shuffle_with_same_seed_is_reproducible(monkeypatch, order_hook) -> None
     order_hook(config=None, items=items_b)
 
     assert items_a == items_b, (
-        "The same shuffle seed must produce the same collection order on "
-        "independent invocations."
+        "The same shuffle seed must produce the same collection order on " "independent invocations."
     )
 
 

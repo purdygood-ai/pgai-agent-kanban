@@ -34,7 +34,8 @@ import pathlib
 import shutil
 import subprocess
 import sys
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import pytest
 
@@ -79,17 +80,23 @@ def _write(path: pathlib.Path, text: str) -> None:
 def _fill_project(project_dir: pathlib.Path, *, active_rc: str) -> None:
     """Give one project items in every board column, more than a block holds in some."""
     for number, status in enumerate(("open", "running", "blocked", "done", "wont-do", "open", "open"), start=2):
-        _write(project_dir / "bugs" / f"BUG-00{number:02d}-pane-{status}.md",
-               f"# BUG\n\n**Severity:** low\n\n## Status\n{status}\n")
+        _write(
+            project_dir / "bugs" / f"BUG-00{number:02d}-pane-{status}.md",
+            f"# BUG\n\n**Severity:** low\n\n## Status\n{status}\n",
+        )
     for number, status in ((1, "open"), (2, "running"), (3, "done")):
         _write(project_dir / "priority" / f"PRIORITY-00{number}-pane.md", f"# PRIORITY\n\n## Status\n{status}\n")
     _write(project_dir / "priority" / "README.md", "# Priorities\n")
     for version in ("v1.0.0", "v1.1.0", "v1.2.0", "v1.3.0", "v1.4.0", "v1.5.0", "v1.6.0"):
-        _write(project_dir / "requirements" / f"{version}-pane.md",
-               f"# {version}\n\n## Target Version\n{version}\n\n## Status\nopen\n")
-    _write(project_dir / "release-state.md",
-           f"# Release State\n\n## Active RC\n{active_rc}\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
-           "## RC Opened By Task\npane-fixture\n\n## Last Released\nv1.1.0\n")
+        _write(
+            project_dir / "requirements" / f"{version}-pane.md",
+            f"# {version}\n\n## Target Version\n{version}\n\n## Status\nopen\n",
+        )
+    _write(
+        project_dir / "release-state.md",
+        f"# Release State\n\n## Active RC\n{active_rc}\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
+        "## RC Opened By Task\npane-fixture\n\n## Last Released\nv1.1.0\n",
+    )
     states = ("BACKLOG", "WORKING", "BLOCKED", "DONE", "WONT-DO", "WAITING", "BACKLOG", "BACKLOG", "DONE")
     markers = {"BACKLOG": " ", "WAITING": "W", "WORKING": "A", "BLOCKED": "B", "DONE": "x", "WONT-DO": "x"}
     for agent in ("pm", "coder", "writer", "tester", "cm"):
@@ -158,6 +165,7 @@ def no_process(monkeypatch: pytest.MonkeyPatch):
         def _refused(*args: Any, **kwargs: Any) -> Any:
             attempts.append(f"{label}: {args!r}")
             raise AssertionError(f"{label} called: the column pane must start no process")
+
         return _refused
 
     monkeypatch.setattr(subprocess, "run", _refuse("subprocess.run"))
@@ -176,8 +184,12 @@ def no_process(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.parametrize("pane, column_type", [("input", "bugs"), ("queue", "coder")])
 def test_column_pane_renders_without_starting_a_process(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
-    no_process: list, pane: str, column_type: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    no_process: list,
+    pane: str,
+    column_type: str,
 ) -> None:
     _use_env(monkeypatch, _pane_env(board_root, tmp_path, colour=False))
     with build_api_client(board_root) as client:
@@ -209,8 +221,11 @@ def git_board_root(board_root: pathlib.Path, tmp_path: pathlib.Path) -> pathlib.
     dev_tree = tmp_path / "dev-tree"
     dev_tree.mkdir()
     git = ["git", "-C", str(dev_tree), "-c", "user.name=pane-fixture", "-c", "user.email=pane@fixture.invalid"]
-    for args in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "fixture"],
-                 ["tag", _DEV_TREE_TAG]):
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["commit", "-q", "--allow-empty", "-m", "fixture"],
+        ["tag", _DEV_TREE_TAG],
+    ):
         subprocess.run([*git, *args], check=True, capture_output=True, stdin=subprocess.DEVNULL)
     _write(board_root / "projects" / PROJECT_NAME / "project.cfg", f"[project]\ndev_tree_path = {dev_tree}\n")
     return board_root
@@ -235,6 +250,7 @@ def git_only(monkeypatch: pytest.MonkeyPatch):
         def _refused(*args: Any, **kwargs: Any) -> Any:
             refused.append(f"{label}: {args!r}")
             raise AssertionError(f"{label} called: the requirements column runs no script")
+
         return _refused
 
     class _GitOnlyPopen(real_popen):  # type: ignore[misc,valid-type]
@@ -256,7 +272,9 @@ def git_only(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_requirements_column_on_a_git_dev_tree_starts_only_git(
-    git_board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    git_board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
     git_only: tuple,
 ) -> None:
     """The requirements column reads the last release with git against the dev tree, and nothing else."""
@@ -285,8 +303,12 @@ def test_requirements_column_on_a_git_dev_tree_starts_only_git(
     ids=[c for p, c in BOARD_COLUMNS if (p, c) != ("input", "requirements")],
 )
 def test_other_columns_on_a_git_dev_tree_start_no_process(
-    git_board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
-    no_process: list, pane: str, column_type: str,
+    git_board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    no_process: list,
+    pane: str,
+    column_type: str,
 ) -> None:
     _use_env(monkeypatch, _pane_env(git_board_root, tmp_path, colour=False))
     with build_api_client(git_board_root) as client:
@@ -311,15 +333,28 @@ def test_column_panes_name_no_script() -> None:
 @pytest.mark.parametrize("colour", [False, True], ids=["colour-off", "colour-on"])
 @pytest.mark.parametrize("pane, column_type", BOARD_COLUMNS, ids=[c for _p, c in BOARD_COLUMNS])
 def test_column_pane_stdout_equals_column_render_output(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
-    pane: str, column_type: str, colour: bool,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pane: str,
+    column_type: str,
+    colour: bool,
 ) -> None:
     env = _pane_env(board_root, tmp_path, colour=colour)
     cli_temp = tmp_path / "cli-temp"
     cli_temp.mkdir()
     cli = run_dashboard_script(
-        ["bash", str(board_root / "scripts" / "dashboard" / "column-render.sh"),
-         pane, "none", "--kanban-root", str(board_root), "--all-projects", "--column-type", column_type],
+        [
+            "bash",
+            str(board_root / "scripts" / "dashboard" / "column-render.sh"),
+            pane,
+            "none",
+            "--kanban-root",
+            str(board_root),
+            "--all-projects",
+            "--column-type",
+            column_type,
+        ],
         env={**env, "PGAI_AGENT_KANBAN_TEMP_DIR": str(cli_temp)},
         timeout=60,
     )
@@ -336,7 +371,9 @@ def test_column_pane_stdout_equals_column_render_output(
 
 
 def test_board_fixture_windows_rows_and_draws_the_deferral_glyph(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The comparison above covers windowed blocks and the colour-only glyph, not just plain rows."""
     _use_env(monkeypatch, _pane_env(board_root, tmp_path, colour=True))
@@ -371,8 +408,13 @@ def _assert_gather_unavailable(resp: Any, pane: str, cause: str) -> None:
 @pytest.mark.parametrize("registry", ["absent", "colon-format"])
 @pytest.mark.parametrize("pane, column_type", [("input", "bugs"), ("queue", "coder")])
 def test_tree_the_gather_does_not_read_is_reported_without_a_fallback(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
-    no_process: list, pane: str, column_type: str, registry: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    no_process: list,
+    pane: str,
+    column_type: str,
+    registry: str,
 ) -> None:
     cfg = board_root / "projects.cfg"
     if registry == "absent":
@@ -389,8 +431,12 @@ def test_tree_the_gather_does_not_read_is_reported_without_a_fallback(
 
 @pytest.mark.parametrize("pane, column_type", [("input", "bugs"), ("queue", "coder")])
 def test_error_while_gathering_is_reported_without_a_fallback(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
-    no_process: list, pane: str, column_type: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    no_process: list,
+    pane: str,
+    column_type: str,
 ) -> None:
     def _failing_gather(*args: Any, **kwargs: Any) -> dict:
         raise OSError(f"cannot read {board_root / 'projects'}")
@@ -427,8 +473,11 @@ def _tree_state(root: pathlib.Path) -> dict:
 
 @pytest.mark.parametrize("pane, column_type", BOARD_COLUMNS, ids=[c for _p, c in BOARD_COLUMNS])
 def test_column_pane_writes_nothing(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
-    pane: str, column_type: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pane: str,
+    column_type: str,
 ) -> None:
     env = _pane_env(board_root, tmp_path, colour=False)
     temp_root = pathlib.Path(env["PGAI_AGENT_KANBAN_TEMP_DIR"])

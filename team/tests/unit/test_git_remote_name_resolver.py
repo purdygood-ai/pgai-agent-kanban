@@ -73,7 +73,9 @@ _CASES = [
 ]
 
 
-def _root(tmp_path: pathlib.Path, line, *, dev_tree: str = "/srv/dev/remote-rule", legacy: bool = False) -> pathlib.Path:
+def _root(
+    tmp_path: pathlib.Path, line, *, dev_tree: str = "/srv/dev/remote-rule", legacy: bool = False
+) -> pathlib.Path:
     root = tmp_path / "kanban"
     project = root / "projects" / _PROJECT
     project.mkdir(parents=True)
@@ -143,8 +145,16 @@ def test_validators_agree_on_the_rule() -> None:
     values = ["origin", "upstream", "a.b", "A_1-x", "", "-x", "a/b", "a b", "..", "a..b", "a.", "a.lock", ".a", "_a"]
     script = 'for v in "$@"; do if validate_git_remote_name "$v"; then echo 1; else echo 0; fi; done'
     bash = subprocess.run(
-        ["bash", "-c", f'source "{_LIB / "ini_parser.sh"}"; source "{_LIB / "project_paths.sh"}"; {script}', "_", *values],
-        capture_output=True, text=True, timeout=60,
+        [
+            "bash",
+            "-c",
+            f'source "{_LIB / "ini_parser.sh"}"; source "{_LIB / "project_paths.sh"}"; {script}',
+            "_",
+            *values,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert bash.stdout.split() == ["1" if git_remote.is_valid_remote_name(v) else "0" for v in values]
     assert [git_remote.is_valid_remote_name(v) for v in values[:4]] == [True] * 4
@@ -171,7 +181,9 @@ def test_quiet_refusal_prints_nothing(tmp_path: pathlib.Path) -> None:
     assert quiet.stderr == ""
 
 
-@pytest.mark.parametrize(("line", "exported"), [("git_remote_name = upstream", "upstream"), (None, "origin"), ("git_remote_name = -x", "")])
+@pytest.mark.parametrize(
+    ("line", "exported"), [("git_remote_name = upstream", "upstream"), (None, "origin"), ("git_remote_name = -x", "")]
+)
 def test_load_config_exports_the_resolved_remote(tmp_path: pathlib.Path, line, exported) -> None:
     root = _root(tmp_path, line)
     loaded = _bash(tmp_path, root, f'pp_load_config "{_PROJECT}" && printf "[%s]\\n" "$PP_git_remote_name"')
@@ -229,7 +241,5 @@ def test_ship_rc_refuses_an_invalid_remote_name(_invalid_root: pathlib.Path) -> 
 
 def test_unwind_rc_refuses_an_invalid_remote_name(_invalid_root: pathlib.Path) -> None:
     with pytest.raises(unwind.UnwindRcError) as caught:
-        unwind.unwind_rc(
-            OpsContext(kanban_root=_invalid_root), _PROJECT, "v1.2.3", dry_run=True, out=lambda _t: None
-        )
+        unwind.unwind_rc(OpsContext(kanban_root=_invalid_root), _PROJECT, "v1.2.3", dry_run=True, out=lambda _t: None)
     _assert_remote_refusal(caught.value)

@@ -54,7 +54,7 @@ import os
 import pathlib
 import shlex
 import sys
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 # Started by file path (python3 .../lib/cfg_default_upgrade.py) there is no
 # parent package: put the package root this file sits in -- the directory
@@ -148,7 +148,7 @@ class ChangeOutcome:
 
     change: DefaultChange
     status: str
-    found: Optional[str]
+    found: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -172,7 +172,7 @@ class ProjectValue:
     source: str
 
 
-def plan_changes(cfg_path: "str | os.PathLike[str]", changes: Iterable[DefaultChange]) -> list[ChangeOutcome]:
+def plan_changes(cfg_path: str | os.PathLike[str], changes: Iterable[DefaultChange]) -> list[ChangeOutcome]:
     """Classify each change against *cfg_path* without writing anything.
 
     A key holding exactly ``change.previous`` is :data:`WOULD_CHANGE`; the
@@ -195,7 +195,7 @@ def plan_changes(cfg_path: "str | os.PathLike[str]", changes: Iterable[DefaultCh
 
 
 def upgrade_cfg_defaults(
-    cfg_path: "str | os.PathLike[str]",
+    cfg_path: str | os.PathLike[str],
     changes: Iterable[DefaultChange],
     *,
     dry_run: bool = False,
@@ -245,7 +245,7 @@ def upgrade_cfg_defaults(
 
 
 def project_values(
-    kanban_root: "str | os.PathLike[str]",
+    kanban_root: str | os.PathLike[str],
     projects: Iterable[str],
     section: str,
     key: str,
@@ -273,7 +273,7 @@ def _change_line(tag: str, outcome: ChangeOutcome) -> str:
 
 
 def render_outcomes(
-    cfg_path: "str | os.PathLike[str]",
+    cfg_path: str | os.PathLike[str],
     outcomes: Sequence[ChangeOutcome],
     *,
     dry_run: bool = False,
@@ -297,13 +297,10 @@ def render_outcomes(
         if outcome.status in (CHANGED, WOULD_CHANGE):
             changed += 1
             lines.append(_change_line(outcome.status, outcome))
-            lines.append(
-                f"      revert: put this line under [{change.section}] in {cfg}: {change.revert_line}"
-            )
+            lines.append(f"      revert: put this line under [{change.section}] in {cfg}: {change.revert_line}")
         elif outcome.status == ALREADY:
             lines.append(
-                f"  [already]  [{change.section}] {change.key} = {change.current}"
-                " -- already applied, no change"
+                f"  [already]  [{change.section}] {change.key} = {change.current}" " -- already applied, no change"
             )
         elif outcome.status == ABSENT:
             lines.append(
@@ -388,7 +385,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point; returns the exit code."""
     try:
         args = _build_parser().parse_args(argv)

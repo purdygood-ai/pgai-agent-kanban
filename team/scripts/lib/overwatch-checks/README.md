@@ -19,12 +19,12 @@ module-level view.
 | # | Module | Projects | Scope | Auto-fix path |
 |---|---|---|---|---|
 | 1 | `check-bare-tmp-litter.sh` | every project | Bare `/tmp` top-level entries owned by the framework user, created within a known task-session window, not yet reported by the wake bracket | **REPORT-ONLY** — never deletes; snapshot-dedup so each entry is flagged once |
-| 2 | `check-empty-files.sh` | every project | Zero-byte **report** files in `bugs/` or `priority/`. Dotfiles are never scanned at any size — a leading `.` marks protocol machinery (claim-lock sentinels, the claim ledger, similar in-flight state), not a report | Rename to `.empty.orphan`; separately prunes claim-lock-shaped `.empty.orphan` residue. Every other `.empty.orphan` stays put as evidence |
+| 2 | `check-empty-files.sh` | every project | Zero-byte **report** files in `bugs/` or `priority/`. Dotfiles are never scanned at any size — a leading `.` marks protocol machinery (claim-lock sentinels, the claim ledger, similar in-flight state), not a report | Rename to `.empty.orphan` and file one bug naming the files; when that bug cannot be filed, the renames are undone. Separately prunes claim-lock-shaped `.empty.orphan` residue. Every other `.empty.orphan` stays put as evidence |
 | 3 | `check-stale-active-rc.sh` | every project | `release-state.md` Active RC after tag shipped | Reset RC fields to `none` |
 | 4 | `check-blocked-tasks.sh` | every project | `BLOCKED` tasks that carry no `## Block Record`, so block triage cannot see them | **REPORT-ONLY** — narrates each one with its `Needs Human` value; never writes |
 | 5 | `check-tester-orphan-files.sh` | every project | Bug-shaped `vX.Y.Z-*.md` files in `priority/` | Copy to `bugs/BUG-NNNN`, rename original to `.orphan` |
 | 6 | `check-cache-marker-drift.sh` | every project | `[x]` markers in backlog caches whose file is `open` | Flip marker to `[ ]` |
-| 7 | `check-orphan-rc-branches.sh` | every project | Local `rc/vX.Y.Z` branches whose tag shipped | `git branch -d` local branch |
+| 7 | `check-orphan-rc-branches.sh` | every project | Local `rc/vX.Y.Z` branches whose tag shipped | `git branch -D` local branch once the shipped tag is proven to hold its work, and delete it on the remote too only when the project's push decision is `push`; otherwise keep the branch and file one bug |
 | 8 | `check-push-lag.sh` | every project | Local `main`/tags ahead of origin | **See gate below** |
 | 9 | `check-readme-bundled.sh` | every project | PM tasks with README-shaped inputs | Mark `WONT-DO`, file bug |
 | 10 | `check-transient-api-error.sh` | every project | `BLOCKED` tasks with transient-error log tails; a block whose `## Block Record` `reason_code` is `agent_unclassified` is classed on the provider's own error lines only (`API Error:` lines, JSON error events: the wake's `agent_block_provider_lines`), so signature words in the agent's own reply requeue nothing | Requeue to `BACKLOG` once the backoff window has passed (5, 10, then 20 min after the block, `transient_backoff_due`; inside it the task is left as found and a `transient-requeue-backoff` row is logged), below the shared `[wake] transient_retry_cap` ceiling; at the ceiling bug-file and escalate; residue companion prunes empty per-task worktrees |
@@ -216,18 +216,31 @@ block is skipped, at it the block escalates.
 
 ## check-push-lag: the `push_to_remote` gate
 
-`check-push-lag` is the only check in this directory that touches origin, and
-it is gated on the per-project `push_to_remote` key from `project.cfg`. This
-gate is the reactivation prerequisite for the OVERWATCH surface.
+Two checks in this directory touch origin: `check-push-lag` pushes `main` and
+tags, and `check-orphan-rc-branches` deletes a proven orphan RC branch on the
+remote. Both are gated on the project's push decision, which reads the
+per-project `push_to_remote` key from `project.cfg`. With
+`push_to_remote = false` neither contacts a remote, so neither writes to one:
+`check-push-lag` measures no tag lag against origin and pushes nothing. The
+push-lag gate below is the reactivation prerequisite for the OVERWATCH
+surface.
 
 - **`push_to_remote = false`** (local-first posture) — local-ahead state on
-  `main` and unpushed tags are by design. The check logs `staged-by-design` to
-  the action log, changes nothing, and never pushes. Without this gate the
-  pre-modernization behavior would force-push deliberately staged work to the
-  public repo.
-- **`push_to_remote = true`** (remote-mode posture, the default) — the legacy
-  path is intact: after the HALT-first protocol and the per-repo flock check,
-  OVERWATCH pushes `main` and tags to origin.
+  `main` and unpushed tags are by design. The check contacts no remote: no
+  `ls-remote`, `fetch` or `push`, and tag lag against origin is not measured.
+  It compares local `main` with its remote-tracking ref (two local refs) and,
+  when `main` is ahead, logs `staged-by-design` to the action log. It changes
+  nothing and never pushes. Without this gate the pre-modernization behavior
+  would force-push deliberately staged work to the public repo.
+- **`push_to_remote` absent** (or any value other than `true`) — the same as
+  `false` for this check: no remote is contacted and nothing is pushed.
+- **`push_to_remote = true`** (remote-mode posture) — the only setting under
+  which this check contacts origin or pushes: it reads origin's tags with
+  `ls-remote`, and when it finds lag, after the HALT-first protocol and the
+  per-repo flock check, OVERWATCH pushes `main` and missing tags to origin.
+  When the remote cannot be listed (`ls-remote` exits non-zero), the check
+  logs one `remote-unreachable` row naming the remote and the git error,
+  measures no tag lag and pushes nothing, neither `main` nor any tag.
 - **Unresolved project** — the project is not registered in `projects.cfg`,
   has no `project.cfg` of its own, or that file names no `dev_tree_path` (a
   no-git project, a half-built config, or a sandbox root a test builds). The
@@ -240,18 +253,23 @@ gate is the reactivation prerequisite for the OVERWATCH surface.
 
 The decision comes from the shared push-decision resolver
 (`pp_push_decision` in `scripts/lib/push_decision.sh`, over
-`pgai_agent_kanban.lib.push_decision`), which the CM push watchdog
-(`scripts/cm/push-watchdog.sh`) also uses, so both out-of-band push sites
-apply one rule.
+`pgai_agent_kanban.lib.push_decision`), which `check-orphan-rc-branches` and
+the CM push watchdog (`scripts/cm/push-watchdog.sh`) also use. The resolver
+answers `push` for an absent `push_to_remote` key, and the watchdog and
+`check-orphan-rc-branches` act on that answer. `check-push-lag` is stricter:
+it pushes only on an explicit `push_to_remote = true`.
 
 Behavioral fixtures cover both modes. `staged-by-design` is a first-class
 action-log outcome distinct from a successful push — the log is the operator's
 audit trail for telling the local-first pattern from a real replay of CM's
 work.
 
-Every other check in this directory is safe to run regardless of
-`push_to_remote`; the push-lag gate is the only origin-touching decision the
-sweep can make.
+Every check other than `check-push-lag` and `check-orphan-rc-branches` is safe
+to run regardless of `push_to_remote` and never contacts a remote. Those two
+write to origin only when the project's push decision is `push`
+(`check-push-lag` only on an explicit `push_to_remote = true`); with
+`push_to_remote = false` neither contacts a remote, so neither writes to one:
+`check-push-lag` measures no tag lag against origin and pushes nothing.
 
 ## Module Naming Convention
 

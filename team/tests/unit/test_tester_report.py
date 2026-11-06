@@ -53,7 +53,7 @@ _MODULE = "pgai_agent_kanban.reports.tester_report"
 _SCENARIO_FILES = sorted(_SCENARIOS.glob("*.md"))
 
 
-def _parse(text: str) -> "tester_report.TesterReport":
+def _parse(text: str) -> tester_report.TesterReport:
     return parse_report_text(textwrap.dedent(text))
 
 
@@ -63,7 +63,7 @@ def _only(text: str) -> Finding:
     return report.findings[0]
 
 
-def _scenario(name: str) -> "tester_report.TesterReport":
+def _scenario(name: str) -> tester_report.TesterReport:
     return parse_report(_SCENARIOS / name)
 
 
@@ -81,8 +81,14 @@ def test_finding_heading_at_levels_two_to_six_opens_a_finding(hashes: str) -> No
 
 @pytest.mark.parametrize(
     "heading",
-    ["## Findings", "### Findings summary", "# Finding 1: report-title level",
-     "####### Finding 1: seven hashes", "### Step 7", "### A Finding 1"],
+    [
+        "## Findings",
+        "### Findings summary",
+        "# Finding 1: report-title level",
+        "####### Finding 1: seven hashes",
+        "### Step 7",
+        "### A Finding 1",
+    ],
 )
 def test_heading_that_is_not_a_singular_finding_word_at_levels_two_to_six_opens_nothing(
     heading: str,
@@ -93,14 +99,12 @@ def test_heading_that_is_not_a_singular_finding_word_at_levels_two_to_six_opens_
 
 
 def test_missing_space_after_hashes_is_allowed_only_for_a_finding_heading() -> None:
-    report = _parse(
-        """\
+    report = _parse("""\
         ###Finding 1: no space
         **Category:** bug
         ###Step 7 is not a heading, so finding 1 continues
         **Fix Effort:** large
-        """
-    )
+        """)
 
     assert len(report.findings) == 1
     assert (report.findings[0].category, report.findings[0].fix_effort) == ("bug", "large")
@@ -123,9 +127,7 @@ def test_missing_space_after_hashes_is_allowed_only_for_a_finding_heading() -> N
         ("### Finding about a defect", None, None, "about a defect"),
     ],
 )
-def test_number_label_and_title_are_read_from_the_finding_heading(
-    heading: str, number, label, title: str
-) -> None:
+def test_number_label_and_title_are_read_from_the_finding_heading(heading: str, number, label, title: str) -> None:
     finding = _only(f"{heading}\nbody\n")
 
     assert (finding.number, finding.label, finding.title) == (number, label, title)
@@ -137,8 +139,7 @@ def test_number_label_and_title_are_read_from_the_finding_heading(
 
 
 def test_finding_ends_at_the_next_heading_no_deeper_than_its_own() -> None:
-    report = _parse(
-        """\
+    report = _parse("""\
         ### Finding 1: a
         **Filed As:** BUG-0001
 
@@ -148,8 +149,7 @@ def test_finding_ends_at_the_next_heading_no_deeper_than_its_own() -> None:
 
         ## Lint Findings (non-blocking)
         **Category:** bug
-        """
-    )
+        """)
 
     (finding,) = report.findings
     assert finding.filed_as == "BUG-0001"
@@ -158,23 +158,20 @@ def test_finding_ends_at_the_next_heading_no_deeper_than_its_own() -> None:
 
 
 def test_deeper_non_finding_heading_stays_inside_the_finding() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a
         **Category:** gap
 
         ##### Evidence
         **Systemic Risk:** medium
-        """
-    )
+        """)
 
     assert (finding.category, finding.systemic_risk) == ("gap", "medium")
     assert "##### Evidence" in finding.body
 
 
 def test_thematic_break_and_setext_underline_end_nothing() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a
         **Category:** bug
         Some text
@@ -183,8 +180,7 @@ def test_thematic_break_and_setext_underline_end_nothing() -> None:
 
         ***
         **Systemic Risk:** low
-        """
-    )
+        """)
 
     assert (finding.category, finding.fix_effort, finding.systemic_risk) == ("bug", "small", "low")
 
@@ -205,26 +201,21 @@ def test_nested_finding_is_a_sub_block_that_keeps_the_outer_finding_fields() -> 
 
 
 def test_outer_finding_without_a_field_does_not_take_it_from_a_sub_block() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a grouping finding
         Two parts follow.
 
         #### Finding 1a: part one
         **Category:** pass
         **Systemic Risk:** high
-        """
-    )
+        """)
 
     assert finding.category is None and finding.systemic_risk is None
-    assert [(s.label, s.category, s.systemic_risk) for s in finding.sub_findings] == [
-        ("1a", "pass", "high")
-    ]
+    assert [(s.label, s.category, s.systemic_risk) for s in finding.sub_findings] == [("1a", "pass", "high")]
 
 
 def test_outer_finding_lines_after_its_sub_block_are_its_own() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: outer
         **Category:** bug
 
@@ -233,8 +224,7 @@ def test_outer_finding_lines_after_its_sub_block_are_its_own() -> None:
 
         #### Notes
         **Filed As:** BUG-0007
-        """
-    )
+        """)
 
     assert (finding.category, finding.filed_as) == ("bug", "BUG-0007")
     assert finding.sub_findings[0].filed_as is None
@@ -282,8 +272,14 @@ def test_field_line_variants_read_the_same_values() -> None:
 
     assert len(report.findings) == 7
     for finding in report.findings:
-        got = (finding.category, finding.fix_effort, finding.systemic_risk,
-               finding.regression, finding.integrity, finding.filed_as)
+        got = (
+            finding.category,
+            finding.fix_effort,
+            finding.systemic_risk,
+            finding.regression,
+            finding.integrity,
+            finding.filed_as,
+        )
         assert got == ("bug", "small", "high", "no", "none", "BUG-0003"), finding.heading
 
 
@@ -320,8 +316,7 @@ def test_quoted_table_and_colonless_lines_are_not_field_lines(line: str) -> None
 
 
 def test_other_bold_labels_land_in_extra_and_plain_ones_are_prose() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a
         **Category:** bug
         **Integrity Damage:** no
@@ -329,8 +324,7 @@ def test_other_bold_labels_land_in_extra_and_plain_ones_are_prose() -> None:
         **RC branch / commit:** ai_rc/v9.9.9 at abc1234
         Note: a plain sentence with a colon.
         **Empty label:**
-        """
-    )
+        """)
 
     assert finding.extra == {
         "integrity_damage": "no",
@@ -341,8 +335,7 @@ def test_other_bold_labels_land_in_extra_and_plain_ones_are_prose() -> None:
 
 
 def test_first_field_line_with_a_value_decides_the_field() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a
         **Filed As:**
         **Filed As:** BUG-0004
@@ -351,8 +344,7 @@ def test_first_field_line_with_a_value_decides_the_field() -> None:
         **Category:** bug
         **Traces to:** first
         **Traces to:** second
-        """
-    )
+        """)
 
     assert finding.filed_as == "BUG-0004"
     assert finding.category == "pre-existing-bug" and finding.raw["category"] == "pre-existing-bug"
@@ -449,13 +441,23 @@ def test_category_vocabulary_is_every_category_the_tester_role_defines() -> None
 def test_absent_enumerated_fields_are_none() -> None:
     finding = _only("### Finding 1: a\nNo fields at all.\n")
 
-    for attr in ("filed_as", "filed_by", "severity", "category", "regression",
-                 "integrity", "fix_effort", "systemic_risk"):
+    for attr in (
+        "filed_as",
+        "filed_by",
+        "severity",
+        "category",
+        "regression",
+        "integrity",
+        "fix_effort",
+        "systemic_risk",
+    ):
         assert getattr(finding, attr) is None, attr
     assert finding.raw == {} and finding.extra == {}
 
 
-@pytest.mark.parametrize("label", ["Fix Effort", "fix effort", "FIX  EFFORT", "fix_effort", "Fix-Effort", "Fix\tEffort"])
+@pytest.mark.parametrize(
+    "label", ["Fix Effort", "fix effort", "FIX  EFFORT", "fix_effort", "Fix-Effort", "Fix\tEffort"]
+)
 def test_label_case_and_separators_do_not_matter(label: str) -> None:
     assert _only(f"### Finding 1: a\n**{label}:** large\n").fix_effort == "large"
 
@@ -466,15 +468,13 @@ def test_label_case_and_separators_do_not_matter(label: str) -> None:
 
 
 def test_value_ends_at_the_line_break() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a
         **Filed By:** TESTER
         continued prose directly under the field line
         **Traces to:** one line
         and not this one
-        """
-    )
+        """)
 
     assert finding.filed_by == "TESTER"
     assert finding.extra == {"traces_to": "one line"}
@@ -505,8 +505,7 @@ def test_quoted_or_inline_code_comment_opener_hides_no_finding_or_field() -> Non
 
 
 def test_fenced_code_hides_headings_and_field_lines() -> None:
-    finding = _only(
-        """\
+    finding = _only("""\
         ### Finding 1: a
         **Category:** gap
 
@@ -514,16 +513,14 @@ def test_fenced_code_hides_headings_and_field_lines() -> None:
         ### Finding 2: an example inside a fence
         **Systemic Risk:** high
         ```
-        """
-    )
+        """)
 
     assert finding.category == "gap" and finding.systemic_risk is None
     assert finding.sub_findings == []
 
 
 def test_unclosed_fence_or_comment_opener_hides_nothing() -> None:
-    report = _parse(
-        """\
+    report = _parse("""\
         ### Finding 1: after a stray fence
         ```
         **Category:** bug
@@ -531,8 +528,7 @@ def test_unclosed_fence_or_comment_opener_hides_nothing() -> None:
         <!-- a comment opener that is never closed
         ### Finding 2: still read
         **Category:** gap
-        """
-    )
+        """)
 
     assert [(f.number, f.category) for f in report.findings] == [(1, "bug"), (2, "gap")]
 
@@ -569,8 +565,7 @@ def test_report_systemic_risk_comes_from_its_section_never_from_findings() -> No
 
 
 def test_summary_keeps_a_fenced_heading_and_reads_an_inline_value() -> None:
-    report = _parse(
-        """\
+    report = _parse("""\
         # Verification Report
 
         ## Summary: Shipped clean.
@@ -580,8 +575,7 @@ def test_summary_keeps_a_fenced_heading_and_reads_an_inline_value() -> None:
         ```
 
         ## Findings
-        """
-    )
+        """)
     assert report.summary == "Shipped clean.\n```\n## not a heading\n```"
 
 
@@ -589,7 +583,7 @@ def test_summary_is_read_through_the_shared_section_reader(monkeypatch: pytest.M
     """The Summary body comes from task_status.read_section, never a private reader."""
     seen: list[str] = []
 
-    def fake_read_section(text: str, heading: str, **kwargs: object) -> "str | None":
+    def fake_read_section(text: str, heading: str, **kwargs: object) -> str | None:
         seen.append(heading)
         return "from the shared reader" if heading == "Summary" else None
 
@@ -600,8 +594,7 @@ def test_summary_is_read_through_the_shared_section_reader(monkeypatch: pytest.M
 
 
 def test_summary_is_the_summary_section_text() -> None:
-    report = _parse(
-        """\
+    report = _parse("""\
         # Verification Report
 
         ## Executive Summary
@@ -610,8 +603,7 @@ def test_summary_is_the_summary_section_text() -> None:
         Second line.
 
         ## Findings
-        """
-    )
+        """)
 
     assert report.summary == "First line.\nSecond line."
     assert _parse("## Findings\n").summary is None
@@ -624,7 +616,10 @@ def test_report_template_placeholders_read_as_no_value() -> None:
     assert report.findings, "the template's example findings are findings"
     for finding in report.findings:
         assert (finding.category, finding.fix_effort, finding.systemic_risk, finding.filed_as) == (
-            None, None, None, None
+            None,
+            None,
+            None,
+            None,
         ), finding.heading
 
 
@@ -656,7 +651,7 @@ def test_parse_report_raises_for_a_missing_path_and_a_wrong_type(tmp_path: pathl
 # ---------------------------------------------------------------------------
 
 
-def _env(tmp_path: pathlib.Path, *, pythonpath: "str | None" = None) -> dict:
+def _env(tmp_path: pathlib.Path, *, pythonpath: str | None = None) -> dict:
     kanban_root = tmp_path / "kanban"
     temp_dir = tmp_path / "tmp"
     kanban_root.mkdir(exist_ok=True)
@@ -675,8 +670,14 @@ def _run(argv: list, tmp_path: pathlib.Path, env: dict, stdin: str = "") -> subp
     workdir = tmp_path / "elsewhere"
     workdir.mkdir(exist_ok=True)
     return subprocess.run(
-        argv, cwd=str(workdir), env=env, input=stdin,
-        capture_output=True, text=True, timeout=60, check=False,
+        argv,
+        cwd=str(workdir),
+        env=env,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
 
 
@@ -689,16 +690,25 @@ def test_scenario_fixtures_exist() -> None:
 
 
 @pytest.mark.parametrize("report", _SCENARIO_FILES, ids=lambda p: p.stem)
-def test_cli_json_and_shell_wrapper_json_equal_the_parse_result(
-    report: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_cli_json_and_shell_wrapper_json_equal_the_parse_result(report: pathlib.Path, tmp_path: pathlib.Path) -> None:
     expected = parse_report(report)
 
-    module = _run([sys.executable, "-m", _MODULE, str(report), "--json"], tmp_path,
-                  _env(tmp_path, pythonpath=str(_TEAM_DIR)))
+    module = _run(
+        [sys.executable, "-m", _MODULE, str(report), "--json"], tmp_path, _env(tmp_path, pythonpath=str(_TEAM_DIR))
+    )
     direct = _run([str(_WRAPPER), str(report), "--json"], tmp_path, _env(tmp_path))
-    sourced = _run(["bash", "-c", 'set -euo pipefail; source "$1"; tester_report_json "$2"',
-                    "tester_report_json", str(_WRAPPER), str(report)], tmp_path, _env(tmp_path))
+    sourced = _run(
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; tester_report_json "$2"',
+            "tester_report_json",
+            str(_WRAPPER),
+            str(report),
+        ],
+        tmp_path,
+        _env(tmp_path),
+    )
 
     assert module.returncode == 0, _diagnostic(module)
     assert json.loads(module.stdout) == expected.to_dict(), _diagnostic(module)
@@ -714,7 +724,9 @@ def test_cli_reads_standard_input_and_prints_a_text_summary(tmp_path: pathlib.Pa
 
     assert result.returncode == 0, _diagnostic(result)
     assert result.stdout.splitlines()[:3] == [
-        "recommendation: none", "systemic_risk: high", "findings: 2",
+        "recommendation: none",
+        "systemic_risk: high",
+        "findings: 2",
     ], _diagnostic(result)
     assert "finding 1 [category=bug systemic_risk=high fix_effort=small filed_as=BUG-0003]: outer" in result.stdout
 
@@ -729,8 +741,9 @@ def test_cli_exits_one_naming_an_unreadable_report(tmp_path: pathlib.Path) -> No
 
 
 def test_wrapper_json_function_requires_a_report_path(tmp_path: pathlib.Path) -> None:
-    result = _run(["bash", "-c", 'source "$1"; tester_report_json', "tester_report_json", str(_WRAPPER)],
-                  tmp_path, _env(tmp_path))
+    result = _run(
+        ["bash", "-c", 'source "$1"; tester_report_json', "tester_report_json", str(_WRAPPER)], tmp_path, _env(tmp_path)
+    )
 
     assert result.returncode == 2, _diagnostic(result)
     assert "report path is required" in result.stderr, _diagnostic(result)

@@ -17,12 +17,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable, Sequence
+from collections.abc import Callable, Sequence
 
 
-def run_main(
-    main: Callable[[list[str]], int], argv: Sequence[str], findings_path: Path
-) -> tuple[int, list[dict]]:
+def run_main(main: Callable[[list[str]], int], argv: Sequence[str], findings_path: Path) -> tuple[int, list[dict]]:
     """Call ``main(argv + ["--findings-file", findings_path])``.
 
     Returns:

@@ -33,7 +33,9 @@ Covered:
      would do.
   9. ``overwatch-sweep.sh`` discovers and runs the check; the overwatch wake
      hook runs it only for the overwatch agent.
- 10. ``check-blocked-tasks.sh`` no longer promotes an "Active RC" block.
+ 10. ``check-blocked-tasks.sh`` no longer promotes an "Active RC" block, and
+     behaves the same when sourced by a relative path and run after the
+     caller changes to an unrelated directory.
 
 Every fixture builds a sandbox kanban root under pytest's tmp_path; nothing
 reads or writes the live install or a real provider.
@@ -57,6 +59,7 @@ from tests.unit.shell_harness import run_bash
 
 _CHECK = "scripts/lib/overwatch-checks/check-block-triage.sh"
 _CHECK_BLOCKED = "scripts/lib/overwatch-checks/check-blocked-tasks.sh"
+_TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _SWEEP = "scripts/overwatch-sweep.sh"
 _WAKE_PROJECT = "scripts/lib/wake_project.sh"
 _LOCK_PROVENANCE = "scripts/lib/lock_provenance.sh"
@@ -73,8 +76,15 @@ _README = "# Task: example\n\n## Role\nCODER\n\n## Goal\nDo the thing.\n"
 # ---------------------------------------------------------------------------
 
 
-def _record(reason_code: str = "missing_readme", *, attempts: int = 0, cooldown: str = "none",
-            first: str = _EPOCH, evidence: str = _EVIDENCE, owner: str = "CODER") -> str:
+def _record(
+    reason_code: str = "missing_readme",
+    *,
+    attempts: int = 0,
+    cooldown: str = "none",
+    first: str = _EPOCH,
+    evidence: str = _EVIDENCE,
+    owner: str = "CODER",
+) -> str:
     return (
         f"reason_code: {reason_code}\nowner_role: {owner}\nattempts: {attempts}\n"
         f"first_blocked_at: {first}\nlast_blocked_at: {first}\ncooldown_until: {cooldown}\n"
@@ -85,15 +95,20 @@ def _record(reason_code: str = "missing_readme", *, attempts: int = 0, cooldown:
 def _status(record: str, *, needs_human: str = "no", state: str = "BLOCKED", extra: str = "") -> str:
     return (
         "# Status\n\n## Task\n" + _TASK + "\n\n## State\n" + state + "\n\n## Summary\nBlocked.\n\n"
-        "## Blockers\nsomething blocked\n\n## Needs Human\n" + needs_human + "\n\n" + extra
-        + "## Block Record\n" + record + "\n"
+        "## Blockers\nsomething blocked\n\n## Needs Human\n"
+        + needs_human
+        + "\n\n"
+        + extra
+        + "## Block Record\n"
+        + record
+        + "\n"
     )
 
 
 class Sandbox:
     """A throwaway kanban root with one project and one blocked task."""
 
-    def __init__(self, root: pathlib.Path, *, block_triage: "str | None" = None) -> None:
+    def __init__(self, root: pathlib.Path, *, block_triage: str | None = None) -> None:
         self.root = root
         self.project_root = root / "projects" / _PROJECT
         self.task_dir = self.project_root / "tasks" / _TASK
@@ -105,9 +120,7 @@ class Sandbox:
         self.queue.parent.mkdir(parents=True)
         (root / "locks").mkdir()
         (root / "logs").mkdir()
-        (self.project_root / "project.cfg").write_text(
-            f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8"
-        )
+        (self.project_root / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8")
         (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8")
         cfg = "[wake]\n"
         if block_triage is not None:
@@ -122,8 +135,11 @@ class Sandbox:
         dev_tree = self.root / "dev-tree"
         git = ["git", "-c", "user.name=sandbox", "-c", "user.email=sandbox@example.invalid"]
         subprocess.run([*git, "init", "-q", "-b", "main", str(dev_tree)], check=True, capture_output=True)
-        subprocess.run([*git, "-C", str(dev_tree), "commit", "-q", "--allow-empty", "-m", "initial"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            [*git, "-C", str(dev_tree), "commit", "-q", "--allow-empty", "-m", "initial"],
+            check=True,
+            capture_output=True,
+        )
         cfg = self.project_root / "project.cfg"
         cfg.write_text(
             cfg.read_text(encoding="utf-8") + f"dev_tree_path = {dev_tree}\npush_to_remote = false\n",
@@ -143,7 +159,7 @@ class Sandbox:
     def actions(self) -> str:
         return (self.project_root / "overwatch" / "actions.log").read_text(encoding="utf-8")
 
-    def seed(self, status_text: str, *, readme: "str | None" = _README, marker: str = "B") -> None:
+    def seed(self, status_text: str, *, readme: str | None = _README, marker: str = "B") -> None:
         self.status.write_text(status_text, encoding="utf-8")
         if readme is not None:
             self.readme.write_text(readme, encoding="utf-8")
@@ -392,8 +408,9 @@ def test_unperformed_action_escalates_when_needs_human_is_yes(sandbox):
     # Every shipped action has a handler; an empty handler map stands in for
     # a table action this executor does not perform.
     sandbox.seed(_status(_record("zero_progress"), needs_human="yes"))
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           handlers={})
+    result = bt.apply_task(
+        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW, handlers={}
+    )
     assert result.outcome == bt.OUTCOME_ESCALATE and result.mutation == bt.MUTATION_NONE
     text = sandbox.status.read_text(encoding="utf-8")
     assert _section(text, "State") == "BLOCKED" and _section(text, "Needs Human") == "yes"
@@ -412,7 +429,7 @@ def test_unperformed_action_is_left_to_its_handler_when_needs_human_is_no(sandbo
 
 
 def test_task_inside_its_cool_down_is_left_alone(sandbox, tmp_path):
-    future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)).isoformat()
+    future = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)).isoformat()
     sandbox.seed(_status(_record("zero_progress", cooldown=future), needs_human="yes"))
     before = sandbox.snapshot()
     result = _run_check(sandbox, tmp_path)
@@ -429,7 +446,7 @@ def test_task_without_a_block_record_is_not_a_candidate(sandbox):
 # 6. The action envelope (in-process handler)
 # ---------------------------------------------------------------------------
 
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
 
 def test_action_writes_note_bumps_attempts_and_sets_cool_down(sandbox):
@@ -442,7 +459,11 @@ def test_action_writes_note_bumps_attempts_and_sets_cool_down(sandbox):
         return bt.HandlerResult(mutation=bt.MUTATION_PROMOTE, evidence=("artifacts/block-evidence/commits.txt",))
 
     result = bt.apply_task(
-        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
+        sandbox.status,
+        sandbox.queue,
+        project=_PROJECT,
+        kanban_root=sandbox.root,
+        now=_NOW,
         backups={"status.md": "b/status.md", "queue": "b/coder_backlog.md"},
         handlers={"requeue_owner": handler},
     )
@@ -465,17 +486,20 @@ def test_action_writes_note_bumps_attempts_and_sets_cool_down(sandbox):
 def test_second_action_appends_to_the_triage_note(sandbox):
     sandbox.seed(_status(_record("provider_refusal", cooldown="2026-01-01T11:00:00+00:00"), needs_human="yes"))
     handlers = {"requeue_owner": lambda ctx: bt.HandlerResult()}
-    bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                  handlers=handlers)
+    bt.apply_task(
+        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW, handlers=handlers
+    )
     # The requeued attempt is refused again: it re-blocks at the Zero
     # Progress ceiling (a new block write, the count re-advanced).
     with sandbox.status.open("a", encoding="utf-8") as fh:
         fh.write("\n## Zero Progress\nreason_code: clean_exit_no_progress\ncount: 3\nlimit: 3\ndetail: x\n")
-    write_block_record(sandbox.status, "provider_refusal", "CODER", [_EVIDENCE],
-                       now=_NOW + datetime.timedelta(minutes=10))
+    write_block_record(
+        sandbox.status, "provider_refusal", "CODER", [_EVIDENCE], now=_NOW + datetime.timedelta(minutes=10)
+    )
     later = _NOW + datetime.timedelta(hours=2)
-    bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=later,
-                  handlers=handlers)
+    bt.apply_task(
+        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=later, handlers=handlers
+    )
     note = _section(sandbox.readme.read_text(encoding="utf-8"), "Triage Note")
     assert note.count("\n") == 1 and "attempt 1 of 3" in note and "attempt 2 of 3" in note
     assert load_block_record(sandbox.status).attempts == 2
@@ -487,8 +511,14 @@ def test_handler_refusal_escalates_instead(sandbox):
     def refusing(ctx):
         raise bt.HandlerRefused("the branch holds commits found nowhere else")
 
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           handlers={"requeue_owner": refusing})
+    result = bt.apply_task(
+        sandbox.status,
+        sandbox.queue,
+        project=_PROJECT,
+        kanban_root=sandbox.root,
+        now=_NOW,
+        handlers={"requeue_owner": refusing},
+    )
     assert result.outcome == bt.OUTCOME_ESCALATE and result.mutation == bt.MUTATION_NONE
     text = sandbox.status.read_text(encoding="utf-8")
     assert "commits found nowhere else" in _section(text, "OVERWATCH Diagnosis")
@@ -553,8 +583,10 @@ def test_reverting_a_triage_firing_restores_both_status_and_queue(sandbox, tmp_p
     assert backup_column[1].endswith("tasks/queues/coder_backlog.md")
 
     revert = run_bash(
-        tmp_path, f"bash scripts/overwatch-revert.sh --project {_PROJECT} {firing}",
-        extra_env=sandbox.env(), timeout=120,
+        tmp_path,
+        f"bash scripts/overwatch-revert.sh --project {_PROJECT} {firing}",
+        extra_env=sandbox.env(),
+        timeout=120,
     )
 
     assert revert.returncode == 0, revert.stdout + revert.stderr
@@ -694,9 +726,12 @@ class _FiringLockHolder:
             overwatch_release_firing_lock
         """)
         self.proc = subprocess.Popen(
-            ["bash", "-c", script], cwd=pathlib.Path(__file__).resolve().parents[2],
+            ["bash", "-c", script],
+            cwd=pathlib.Path(__file__).resolve().parents[2],
             env={**__import__("os").environ, **sb.env()},
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         deadline = time.monotonic() + 30
         while not self.ready.exists():
@@ -717,8 +752,9 @@ def test_sweep_and_nudge_skip_a_project_whose_firing_lock_is_held(sandbox, tmp_p
     holder = _FiringLockHolder(sandbox, tmp_path)
     try:
         sweep = run_bash(tmp_path, f"bash {_SWEEP}", extra_env=sandbox.env(), timeout=300)
-        nudge = run_bash(tmp_path, f"bash {_SWEEP} --only block-triage --lock-wait 60",
-                         extra_env=sandbox.env(), timeout=300)
+        nudge = run_bash(
+            tmp_path, f"bash {_SWEEP} --only block-triage --lock-wait 60", extra_env=sandbox.env(), timeout=300
+        )
     finally:
         holder.release()
 
@@ -735,9 +771,9 @@ def test_sweep_and_nudge_skip_a_project_whose_firing_lock_is_held(sandbox, tmp_p
     assert after.returncode == 0, after.stderr
     assert "block-triage:plugin_load_failed:escalate" in sandbox.actions
     lock = sandbox.root / "locks" / f"overwatch-{_PROJECT}.lock"
-    assert not lock.exists() or not lock.read_text(encoding="utf-8").strip(), (
-        "the sweep released the lock and cleared its provenance"
-    )
+    assert (
+        not lock.exists() or not lock.read_text(encoding="utf-8").strip()
+    ), "the sweep released the lock and cleared its provenance"
 
 
 def test_overwatch_wake_skips_block_triage_while_another_firing_holds_the_lock(sandbox, tmp_path):
@@ -762,16 +798,28 @@ def test_overwatch_wake_skips_block_triage_while_another_firing_holds_the_lock(s
 # ---------------------------------------------------------------------------
 
 
-def test_blocked_tasks_check_no_longer_promotes_active_rc_blocks(sandbox, tmp_path):
-    sandbox.seed(
-        "# Status\n\n## State\nBLOCKED\n\n## Blocked Reason\nWaiting for Active RC.\n\n## Needs Human\nno\n"
-    )
+@pytest.mark.parametrize(
+    "source_path, cd_elsewhere",
+    [
+        (_CHECK_BLOCKED, False),
+        (str(_TEAM_DIR / _CHECK_BLOCKED), True),
+        # The library resolves its own directory when sourced, so a relative
+        # name stays good after the caller leaves the directory it was named from.
+        (_CHECK_BLOCKED, True),
+    ],
+    ids=["relative", "absolute-then-cd", "relative-then-cd"],
+)
+def test_blocked_tasks_check_no_longer_promotes_active_rc_blocks(sandbox, tmp_path, source_path, cd_elsewhere):
+    sandbox.seed("# Status\n\n## State\nBLOCKED\n\n## Blocked Reason\nWaiting for Active RC.\n\n## Needs Human\nno\n")
     (sandbox.project_root / "release-state.md").write_text("# Release State\n\n## Active RC\nnone\n", encoding="utf-8")
     before = sandbox.snapshot()
     (sandbox.root / "tmp").mkdir(exist_ok=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    cd_line = f"cd {elsewhere}\n" if cd_elsewhere else ""
     result = run_bash(
         tmp_path,
-        f"set -euo pipefail\nsource {_CHECK_BLOCKED}\noverwatch_check_blocked_tasks\necho DONE",
+        f"set -euo pipefail\nsource {source_path}\n{cd_line}overwatch_check_blocked_tasks\necho DONE",
         extra_env=sandbox.env(),
     )
     assert "DONE" in result.stdout, result.stderr

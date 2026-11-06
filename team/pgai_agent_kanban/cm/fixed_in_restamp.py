@@ -149,9 +149,7 @@ def _restamp_command(kanban_root: KanbanRoot, project: str | None, *args: str) -
     (``PGAI_AGENT_KANBAN_ROOT_PATH``), read only when a remedy is built.
     """
     root = resolve_kanban_root() if kanban_root is None else kanban_root
-    return installed_script_command(
-        os.path.abspath(root), _SCRIPT, "--project", project or _DEFAULT_PROJECT, *args
-    )
+    return installed_script_command(os.path.abspath(root), _SCRIPT, "--project", project or _DEFAULT_PROJECT, *args)
 
 
 def _example(project: str | None, kanban_root: KanbanRoot = None) -> str:
@@ -159,12 +157,12 @@ def _example(project: str | None, kanban_root: KanbanRoot = None) -> str:
     return _restamp_command(kanban_root, project, "--version", "v1.4.0", "BUG-0101", "BUG-0102")  # example invocation
 
 
+_EXAMPLE_BUG_IDS = ("BUG-0101", "BUG-0102")  # example invocation only
+
+
 def _correction_example(project: str | None, kanban_root: KanbanRoot = None) -> str:
     """A runnable correction-mode invocation for a remedy."""
-    return _restamp_command(
-        kanban_root, project,
-        "--version", "v1.4.0", "--replace-from", "v1.5.0", "BUG-0101", "BUG-0102",  # example invocation
-    )
+    return _restamp_command(kanban_root, project, "--version", "v1.4.0", "--replace-from", "v1.5.0", *_EXAMPLE_BUG_IDS)
 
 
 class RestampRefused(Exception):
@@ -313,9 +311,7 @@ def _name_candidates(bugs_dir: pathlib.Path, raw: str) -> list[pathlib.Path]:
         return [exact]
     if _BUG_ID_RE.match(stem):
         prefix = stem.upper() + "-"
-        return sorted(
-            p for p in bugs_dir.glob("BUG-*.md") if p.name.upper().startswith(prefix)
-        )
+        return sorted(p for p in bugs_dir.glob("BUG-*.md") if p.name.upper().startswith(prefix))
     return []
 
 
@@ -441,9 +437,7 @@ def _restamp_one(path: pathlib.Path, version: str, replace_from: str | None) -> 
         return BugOutcome(path.name, "failed", str(exc))
 
 
-def summary_line(
-    version: str, outcomes: list[BugOutcome], replace_from: str | None = None
-) -> str:
+def summary_line(version: str, outcomes: list[BugOutcome], replace_from: str | None = None) -> str:
     """The closing result line, e.g. 'Fixed-In restamp v1.2.3: 1 stamped, 2 skipped.'
 
     In correction mode the replaced count follows the stamped count.
@@ -469,22 +463,28 @@ def _build_parser() -> argparse.ArgumentParser:
             "is not named."
         ),
     )
-    parser.add_argument("--bugs-dir", type=pathlib.Path, required=True,
-                        help="The project's live bugs/ directory. For "
-                             "<kanban_root>/projects/<project>/bugs, a name with no "
-                             "live match is looked up in "
-                             "<kanban_root>/archive/<project>/bugs.")
-    parser.add_argument("--version", default=None,
-                        help="The release version to record, e.g. v1.4.0.")
-    parser.add_argument("--replace-from", default=None, metavar="VERSION",
-                        help="Correction mode: also overwrite a '## Fixed In' exactly "
-                             "equal to this version; refuse the run if a named bug "
-                             "carries any other set value.")
-    parser.add_argument("--project", default=None,
-                        help="Project name, used only to scope a refusal record.")
-    parser.add_argument("bugs", nargs="*",
-                        help="Bug ids or file names inside --bugs-dir (or its archive), "
-                             "e.g. BUG-0123.")
+    parser.add_argument(
+        "--bugs-dir",
+        type=pathlib.Path,
+        required=True,
+        help="The project's live bugs/ directory. For "
+        "<kanban_root>/projects/<project>/bugs, a name with no "
+        "live match is looked up in "
+        "<kanban_root>/archive/<project>/bugs.",
+    )
+    parser.add_argument("--version", default=None, help="The release version to record, e.g. v1.4.0.")
+    parser.add_argument(
+        "--replace-from",
+        default=None,
+        metavar="VERSION",
+        help="Correction mode: also overwrite a '## Fixed In' exactly "
+        "equal to this version; refuse the run if a named bug "
+        "carries any other set value.",
+    )
+    parser.add_argument("--project", default=None, help="Project name, used only to scope a refusal record.")
+    parser.add_argument(
+        "bugs", nargs="*", help="Bug ids or file names inside --bugs-dir (or its archive), " "e.g. BUG-0123."
+    )
     return parser
 
 

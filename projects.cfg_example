@@ -33,13 +33,6 @@
 #     dashboards) order such a project last, identically.
 #     Example: priority=1
 #
-#   description
-#     Free-text note about the project, for whoever reads this file. It is
-#     parsed but no dashboard, report or REST response displays it, and it
-#     has no effect on runtime behavior.
-#     Optional. Default: empty.
-#     Example: description=Self-build kanban framework
-#
 #   enabled
 #     Boolean (true|false). When false, the project is excluded from the
 #     wake-script iteration loop entirely, equivalent to halting without
@@ -97,13 +90,12 @@
 # Example 1: Full-featured project with all fields specified.
 # [project:my-app]
 # priority=1
-# description=Release-workflow application
 # enabled=true
 # dashboard_color=#378ADD
 # dashboard_max_rows=20
 
 # Example 2: Minimal project — only priority set; all other fields use
-# defaults: enabled=true, description empty, dashboard_max_rows from the
+# defaults: enabled=true, dashboard_max_rows from the
 # fallback above, and dashboard_color assigned from the palette by
 # registration order.
 # [project:my-docs]

@@ -338,8 +338,10 @@ _projects_cfg_parse_ini() {
         [[ "$_line" =~ ^[[:space:]]*# ]] && continue
         [[ "$_line" =~ ^[[:space:]]*$ ]] && continue
 
-        # Section header?
-        if [[ "${_line:0:1}" == "[" ]]; then
+        # Section header? An indented one is a header too, as every other
+        # registry reader (and ini.projects_registry) reads it.
+        if [[ "$_line" =~ ^[[:space:]]*\[ ]]; then
+            _line="${_line#"${_line%%[![:space:]]*}"}"
             # A [project:NAME] header whose NAME the project-name rule accepts.
             _cur_name=""
             if [[ "$_line" =~ ^\[project:(.*)\]$ ]]; then
@@ -652,114 +654,6 @@ projects_cfg_colon_to_ini() {
 }
 
 # ---------------------------------------------------------------------------
-# projects_cfg_migrate_comment_block <cfg_path>
-# Detects the legacy two-field-only comment header in projects.cfg and replaces
-# it with the canonical header that projects_cfg_ensure writes for fresh installs.
-#
-# Detection: at least one comment line contains the literal text
-# "<project_name>:<priority>" but NO comment line contains "<display_color>".
-# This matches the pattern produced by older installs that predated the
-# color extension.
-#
-# Replacement: strips the leading comment block (all lines before the first
-# non-comment, non-blank data line) and prepends the canonical header.
-#
-# Idempotent: if the file already contains "<display_color>" in any comment
-# line, the function returns immediately without modifying the file.
-#
-# Operator-customized headers (ones that do not match the legacy pattern) are
-# left untouched — the function checks for the specific legacy string before
-# touching anything.
-#
-# Emits one "[migration] projects.cfg: updated comment block to document
-# optional display_color field" line when a rewrite occurs.
-#
-# Arguments:
-#   $1  — absolute path to projects.cfg to check/migrate
-# ---------------------------------------------------------------------------
-projects_cfg_migrate_comment_block() {
-    local cfg="$1"
-    [[ -f "$cfg" ]] || return 0
-
-    # Idempotency check: if canonical header already present, nothing to do.
-    if grep -qF '<display_color>' "$cfg"; then
-        return 0
-    fi
-
-    # Legacy detection: must contain the old two-field-only format description.
-    if ! grep -qF '<project_name>:<priority>' "$cfg"; then
-        # Not a legacy header and not canonical — operator-customized, leave alone.
-        return 0
-    fi
-
-    # We have a legacy header. Build the canonical header (same text as the
-    # heredoc in projects_cfg_ensure — single source of truth for the content).
-    local canonical_header
-    canonical_header='# projects.cfg — Registry of projects this kanban installation manages.
-#
-# Format (one project per line):
-#   <project_name>:<priority>[:<display_color>]
-#
-# Fields:
-#   project_name   — must match a directory under projects/<name>/
-#   priority       — integer; lower = higher priority for wake-script iteration
-#   display_color  — optional; HTML hex color (#RRGGBB, e.g. #378ADD).
-#                    When absent, a deterministic palette fallback is used.
-#                    NOT 0xRRGGBB and NOT short-form #RGB.
-#
-# Examples:
-#   pgai-chomp-man:1:#378ADD
-#   pgai-three-bears:2
-#   marketing-site:3:#D85A30
-#
-# Lines starting with '"'"'#'"'"' are comments; blank lines are ignored.
-# Two-field lines (name:priority) are fully supported.
-#
-# Edit by hand or via the operator scripts:
-#   scripts/create-project.sh <name>          — bootstraps a new project
-#   scripts/remove-project.sh <name>          — unregisters and (with --force) deletes
-#   scripts/add-project.sh <name>             — registers an existing project directory
-#
-# Dashboard color conventions
-# ---------------------------
-# The optional third field, display_color, controls the project'"'"'s color tag
-# on the unified visibility dashboard (the small square at the left edge of
-# each row). After editing this file, restart the tmux dashboard session to
-# pick up new colors — dashboard.sh re-reads projects.cfg only on startup.
-# See docs/OPERATIONS.md "Dashboard Color Conventions" for the palette source, the
-# status-color mapping, and the full override flow.'
-
-    # Strip leading comment block (all lines that are comments or blank, before
-    # the first data line) then prepend the canonical header.
-    local tmp_out
-    tmp_out="$(pgai_mktemp projects_tmp)"
-
-    awk -v header="$canonical_header" '
-        BEGIN {
-            in_header = 1
-            printed_header = 0
-        }
-        in_header && (/^[[:space:]]*#/ || /^[[:space:]]*$/) {
-            # Skip legacy comment/blank lines at the top of the file.
-            next
-        }
-        {
-            if (!printed_header) {
-                print header
-                print ""
-                printed_header = 1
-            }
-            in_header = 0
-            print
-        }
-    ' "$cfg" > "$tmp_out"
-
-    mv "$tmp_out" "$cfg"
-    echo "[migration] projects.cfg: updated comment block to document optional display_color field"
-    return 0
-}
-
-# ---------------------------------------------------------------------------
 # _projects_cfg_list_order <priority|registration>
 # Internal filter for projects_cfg_list. Reads "<line>\t<priority>\t<name>"
 # rows in file order and writes them sorted by priority then file line
@@ -779,9 +673,10 @@ _projects_cfg_list_order() {
 #
 # Works with both INI and colon-legacy formats (format detected automatically).
 # An INI name registered by more than one [project:NAME] section is listed
-# once, at its first section's position, with the last priority set. A
-# [project:...] section whose name the registry rejects ([project:bad.name])
-# ends the section before it, so a priority under it is no project's.
+# once, at its first section's position, with the last priority set. Any
+# other section -- a [project:...] one whose name the registry rejects
+# ([project:bad.name]) or one of another kind ([defaults]) -- ends the
+# section before it, so a priority under it is no project's.
 #
 # Sort order:
 #   Primary key:   priority (ascending, numeric). An absent or non-integer
@@ -827,10 +722,10 @@ projects_cfg_list() {
                     }
                     next
                 }
-                # A [project:...] section with a rejected name is no
+                # Any other section -- a [project:...] one with a rejected
+                # name, or one of another kind such as [defaults] -- is no
                 # project: its keys belong to none.
-                project_section($0) { cur = ""; next }
-                /^[[:space:]]*\[/ { next }   # other section types — skip
+                /^[[:space:]]*\[/ { cur = ""; next }
                 /^[a-z_]+[[:space:]]*=/ && cur != "" {
                     eq = index($0, "=")
                     key = substr($0, 1, eq - 1)
@@ -1520,11 +1415,10 @@ projects_resolve_release_hook_path() {
                 return 0
             fi
 
-            # Relative path: resolve against dev_tree_path from project.cfg.
+            # Relative path: resolve against the project's own repository
+            # (pp_dev_tree_path; a hook lives in no other).
             local dev_tree
-            dev_tree="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "$cfg_file" \
-                | head -n1 \
-                | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+            dev_tree="$(KANBAN_ROOT="$_krp_kanban_root" pp_dev_tree_path "$name" 2>/dev/null)" || dev_tree=""
 
             if [[ -z "$dev_tree" ]]; then
                 echo "projects_resolve_release_hook_path: cannot resolve relative hook path '${raw_value}': dev_tree_path not set in ${cfg_file}" >&2
@@ -1554,9 +1448,7 @@ projects_resolve_release_hook_path() {
     # ---------------------------------------------------------------------------
     local dev_tree_for_inrepo=""
     if [[ -n "$cfg_file" && -f "$cfg_file" ]]; then
-        dev_tree_for_inrepo="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "$cfg_file" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
+        dev_tree_for_inrepo="$(KANBAN_ROOT="$_krp_kanban_root" pp_dev_tree_path "$name" 2>/dev/null)" || dev_tree_for_inrepo=""
     fi
 
     if [[ -n "$dev_tree_for_inrepo" ]]; then
@@ -1574,35 +1466,3 @@ projects_resolve_release_hook_path() {
     return 0
 }
 
-# ---------------------------------------------------------------------------
-# _require_flag_value <flagname> <count-remaining>
-#
-# Shared guard: call before dereferencing $2 for any value-taking flag.
-# Uses a count-based check so the guard itself does not trip set -u
-# (never references $2 directly).
-#
-# Arguments:
-#   $1  — flag name as written on the command line (e.g. "--color")
-#   $2  — the count of remaining positional parameters at the call site
-#          (pass $# from the caller's while-loop body, after shifting to $1)
-#
-# Exits 1 when $# -lt 2 (flag was the last argument — no value follows).
-# The --color flag also prints a quoting tip (shell treats bare '#' as a
-# comment, which silently truncates hex color values).
-#
-# Usage:
-#   --someflag)
-#       _require_flag_value "--someflag" "$#"
-#       VALUE="$2"; shift 2 ;;
-# ---------------------------------------------------------------------------
-_require_flag_value() {
-    if [[ "${2:-0}" -lt 2 ]]; then
-        echo "ERROR: ${1} requires a value." >&2
-        case "$1" in
-            --color)
-                echo "  Tip: quote hex colors so the shell does not treat '#' as a comment (e.g. --color '#378ADD')." >&2
-                ;;
-        esac
-        exit 1
-    fi
-}

@@ -35,7 +35,6 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-from typing import Optional
 import pytest
 from tests.fixtures.binary_guard import require_binary
 
@@ -49,6 +48,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="halt-after-rc-close-gate")
+
 
 # ---------------------------------------------------------------------------
 # Path helpers -- resolve from this file's own location, matching
@@ -85,9 +85,7 @@ def _write_release_state(
 def _write_task_status(project_root: pathlib.Path, task_id: str, state: str, role: str) -> None:
     task_dir = project_root / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "status.md").write_text(
-        f"## State\n{state}\n\n## Role\n{role}\n", encoding="utf-8"
-    )
+    (task_dir / "status.md").write_text(f"## State\n{state}\n\n## Role\n{role}\n", encoding="utf-8")
 
 
 def _run_halt_after_cli(project_root: pathlib.Path) -> subprocess.CompletedProcess:
@@ -102,7 +100,11 @@ def _run_halt_after_cli(project_root: pathlib.Path) -> subprocess.CompletedProce
     env["PYTHONPATH"] = str(_TEAM_DIR) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     return subprocess.run(
         ["python3", "-m", "halt_after", str(project_root)],
-        capture_output=True, text=True, env=env, cwd=str(_TEAM_DIR), timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=30,
     )
 
 
@@ -160,12 +162,10 @@ def test_role_token_drain_defers_through_rc_close_then_promotes(tmp_path: pathli
         f"got {result_2.returncode}. stderr: {result_2.stderr}"
     )
     assert not (project_root / "HALT").exists(), (
-        "HALT must not appear while the RC is still open, even though the "
-        "coder drain condition is now satisfied"
+        "HALT must not appear while the RC is still open, even though the " "coder drain condition is now satisfied"
     )
     assert (project_root / "HALT-AFTER.rc-gate").exists(), (
-        "a latch recording the satisfied drain must be written so a later "
-        "re-check cannot lose it"
+        "a latch recording the satisfied drain must be written so a later " "re-check cannot lose it"
     )
 
     # --- The RC ships: Active RC -> none (what cm-release.sh Step 12 does). ---
@@ -174,8 +174,7 @@ def test_role_token_drain_defers_through_rc_close_then_promotes(tmp_path: pathli
     # --- Evaluation 3: RC closed — the latched drain now promotes. ---
     result_3 = _run_halt_after_cli(project_root)
     assert result_3.returncode == 0, (
-        f"expected exit 0 (promoted) once the RC has closed; "
-        f"got {result_3.returncode}. stderr: {result_3.stderr}"
+        f"expected exit 0 (promoted) once the RC has closed; " f"got {result_3.returncode}. stderr: {result_3.stderr}"
     )
     assert (project_root / "HALT").exists(), "HALT must appear only after the RC closes"
     assert not (project_root / "HALT-AFTER").exists()
@@ -183,9 +182,9 @@ def test_role_token_drain_defers_through_rc_close_then_promotes(tmp_path: pathli
 
     release_state_text = (project_root / "release-state.md").read_text(encoding="utf-8")
     assert "## HALT Event" in release_state_text
-    assert "Trigger: HALT-AFTER coder auto-promotion" in release_state_text, (
-        f"Trigger must name the token verbatim; got:\n{release_state_text}"
-    )
+    assert (
+        "Trigger: HALT-AFTER coder auto-promotion" in release_state_text
+    ), f"Trigger must name the token verbatim; got:\n{release_state_text}"
 
 
 def test_latched_drain_is_not_undone_by_a_later_unsatisfied_recheck(tmp_path: pathlib.Path) -> None:
@@ -236,15 +235,18 @@ def _init_git_repo_with_remote(repo_path: pathlib.Path, bare_remote: pathlib.Pat
     subprocess.run(["git", "init", "--bare", str(bare_remote)], capture_output=True, check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "init", "--initial-branch=main"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     (repo_path / "README.md").write_text("# Synthetic release test repo\n", encoding="utf-8")
     (repo_path / "release-notes").mkdir(parents=True, exist_ok=True)
@@ -252,18 +254,18 @@ def _init_git_repo_with_remote(repo_path: pathlib.Path, bare_remote: pathlib.Pat
     subprocess.run(["git", "-C", str(repo_path), "add", "-A"], capture_output=True, check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(["git", "-C", str(repo_path), "push", "origin", "main"], capture_output=True, check=True)
 
 
-def _build_kanban_root(
-    parent: pathlib.Path, project_name: str, repo_path: pathlib.Path
-) -> pathlib.Path:
+def _build_kanban_root(parent: pathlib.Path, project_name: str, repo_path: pathlib.Path) -> pathlib.Path:
     """Minimal kanban root for release-lifecycle testing.
 
     Carries the whole pgai_agent_kanban package (as install.sh ships it,
@@ -355,7 +357,7 @@ def _run_cm_script(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    repo_root: Optional[pathlib.Path] = None,
+    repo_root: pathlib.Path | None = None,
     timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
@@ -368,7 +370,11 @@ def _run_cm_script(
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=base_env, cwd=str(kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=timeout,
     )
 
 
@@ -380,9 +386,7 @@ def _commit_on_branch(repo_path: pathlib.Path, branch: str, filename: str, conte
     subprocess.run(["git", "-C", str(repo_path), "checkout", "main"], capture_output=True, check=True)
 
 
-def _ship_one_release(
-    tmp_path: pathlib.Path, project_name: str, version: str, *, halt_after_token: str
-) -> tuple:
+def _ship_one_release(tmp_path: pathlib.Path, project_name: str, version: str, *, halt_after_token: str) -> tuple:
     """Open an RC at *version*, commit a feature, arm HALT-AFTER, then ship.
 
     Returns (kanban_root, project_root, repo_path, release_result).
@@ -394,9 +398,9 @@ def _ship_one_release(
     project_root = kanban_root / "projects" / project_name
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
     _commit_on_branch(repo_path, f"rc/{version}", "feature.txt", "feature content\n", "feat: add feature")
 
@@ -427,29 +431,29 @@ def test_cm_release_spends_versioned_sentinel_when_shipped_version_matches_targe
         tmp_path, project_name, version, halt_after_token=f"rc:{version}"
     )
 
-    assert result_release.returncode == 0, (
-        f"cm-release.sh failed.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
-    )
+    assert (
+        result_release.returncode == 0
+    ), f"cm-release.sh failed.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
     combined = result_release.stdout + result_release.stderr
 
-    assert "HALT-AFTER sentinel spent at RC close" in combined, (
-        f"expected the ship-time spend narration in release output:\n{combined}"
-    )
-    assert f"until {version}" in combined, (
-        f"expected the target rendered via describe_token ('until {version}'):\n{combined}"
-    )
+    assert (
+        "HALT-AFTER sentinel spent at RC close" in combined
+    ), f"expected the ship-time spend narration in release output:\n{combined}"
+    assert (
+        f"until {version}" in combined
+    ), f"expected the target rendered via describe_token ('until {version}'):\n{combined}"
 
     assert (project_root / "HALT").exists(), "HALT must exist once the target version has shipped"
     assert not (project_root / "HALT-AFTER").exists(), "HALT-AFTER must be removed once spent"
 
     release_state_text = (project_root / "release-state.md").read_text(encoding="utf-8")
     assert "## HALT Event" in release_state_text
-    assert f"Trigger: HALT-AFTER rc:{version} auto-promotion" in release_state_text, (
-        f"Trigger must name the versioned token verbatim; got:\n{release_state_text}"
-    )
-    assert f"until {version} shipped" in release_state_text, (
-        f"Event drained must use describe_token's phrase, not a locally composed one; got:\n{release_state_text}"
-    )
+    assert (
+        f"Trigger: HALT-AFTER rc:{version} auto-promotion" in release_state_text
+    ), f"Trigger must name the versioned token verbatim; got:\n{release_state_text}"
+    assert (
+        f"until {version} shipped" in release_state_text
+    ), f"Event drained must use describe_token's phrase, not a locally composed one; got:\n{release_state_text}"
 
 
 def test_cm_release_spends_versioned_sentinel_when_shipped_version_skips_past_target(
@@ -468,14 +472,14 @@ def test_cm_release_spends_versioned_sentinel_when_shipped_version_skips_past_ta
         tmp_path, project_name, shipped_version, halt_after_token=f"rc:{target_version}"
     )
 
-    assert result_release.returncode == 0, (
-        f"cm-release.sh failed.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
-    )
+    assert (
+        result_release.returncode == 0
+    ), f"cm-release.sh failed.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
     combined = result_release.stdout + result_release.stderr
 
-    assert "HALT-AFTER sentinel spent at RC close" in combined, (
-        f"a shipped version past the target must still spend the sentinel:\n{combined}"
-    )
+    assert (
+        "HALT-AFTER sentinel spent at RC close" in combined
+    ), f"a shipped version past the target must still spend the sentinel:\n{combined}"
     assert f"until {target_version}" in combined
 
     assert (project_root / "HALT").exists()
@@ -506,23 +510,23 @@ def test_cm_release_leaves_versioned_sentinel_armed_when_target_not_yet_shipped(
     )
     diagnostic = f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
 
-    assert result_release.returncode == 0, (
-        f"cm-release.sh must exit 0 when the HALT-AFTER target is not yet due.\n{diagnostic}"
-    )
+    assert (
+        result_release.returncode == 0
+    ), f"cm-release.sh must exit 0 when the HALT-AFTER target is not yet due.\n{diagnostic}"
     combined = result_release.stdout + result_release.stderr
-    assert "[Step 13c]" in combined, (
-        f"the release must run on past the HALT-AFTER spend step to [Step 13c].\n{diagnostic}"
-    )
-    assert "HALT-AFTER sentinel spent at RC close" not in combined, (
-        f"a sentinel for a later version must not be reported as spent.\n{diagnostic}"
-    )
+    assert (
+        "[Step 13c]" in combined
+    ), f"the release must run on past the HALT-AFTER spend step to [Step 13c].\n{diagnostic}"
+    assert (
+        "HALT-AFTER sentinel spent at RC close" not in combined
+    ), f"a sentinel for a later version must not be reported as spent.\n{diagnostic}"
 
-    assert (project_root / "HALT-AFTER").exists(), (
-        f"HALT-AFTER must stay armed until {target_version} ships.\n{diagnostic}"
-    )
-    assert not (project_root / "HALT").exists(), (
-        f"no project-scope HALT may be created before the target ships.\n{diagnostic}"
-    )
-    assert not (kanban_root / "HALT").exists(), (
-        f"no root-scope HALT may be created by a project's release.\n{diagnostic}"
-    )
+    assert (
+        project_root / "HALT-AFTER"
+    ).exists(), f"HALT-AFTER must stay armed until {target_version} ships.\n{diagnostic}"
+    assert not (
+        project_root / "HALT"
+    ).exists(), f"no project-scope HALT may be created before the target ships.\n{diagnostic}"
+    assert not (
+        kanban_root / "HALT"
+    ).exists(), f"no root-scope HALT may be created by a project's release.\n{diagnostic}"

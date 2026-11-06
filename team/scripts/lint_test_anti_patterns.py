@@ -81,6 +81,25 @@ prevents regressions of the bare-/tmp and hardcoded-temp-path anti-pattern class
       the tree (hundreds of them, checking captured stdout/stderr text
       against expected substrings) is untouched.
 
+  AP9 — Fixed sleep over 10 seconds in a test
+      A Python test calls ``time.sleep``, ``asyncio.sleep`` or a bare
+      ``sleep`` with a fixed number of seconds over 10 -- a literal, or a
+      module-level name bound to one.  A long fixed wait makes the suite slow
+      on every run and still races on a loaded host; poll for the condition
+      with a bounded deadline instead.  Only real calls are seen (the module
+      is parsed), so a ``sleep 600`` stand-in process written inside a string
+      is not a finding.
+
+  AP10 — Silent broad exception handler in a package module
+      A non-test module under the package directories catches ``Exception``,
+      ``BaseException`` or everything (a bare ``except:``) and does nothing
+      but ``pass`` or ``continue``, with no comment on the ``except`` line or
+      the body line saying why the failure is safe to drop.  A bare
+      ``# noqa`` marker is not a justification.  Fix: log or count the
+      failure, narrow the exception, or say on that line why dropping it is
+      safe (``except Exception:  # a closed stderr must not fail the
+      caller``).
+
 Scope: Anti-patterns 3, 4, 5 (order-dependent state, production-coupling, and
 side-effect-leaking tests) require semantic judgment that static analysis cannot
 reliably provide and are explicitly out of scope for this linter.
@@ -92,7 +111,8 @@ anti-pattern is a test-authoring defect with zero runtime-failure risk, so
 it is reported and the run continues.  Each finding prints in full and,
 with --findings-file, is written as one object of a JSON array (the shape
 pgai_agent_kanban.lint.findings defines: lint, severity, summary, cause,
-remedy, file, line, plus ``code`` -- AP1, AP2, AP3, AP6, AP7 or AP8, or
+remedy, file, line, plus ``code`` -- AP1, AP2, AP3, AP6, AP7, AP8, AP9 or
+AP10, or
 ``read-error`` for a file that could not be read).  The gated runners merge
 that array per instance with gated_runner_merge_findings_file; a targeted
 ``--files`` run fails on any entry in it.
@@ -112,6 +132,7 @@ following marker comments within 5 lines BEFORE the flagged line:
   # anti-pattern-allowlist: 1 (justification: ...)
   # anti-pattern-allowlist: 2 (justification: ...)
   # anti-pattern-allowlist: 8 (justification: ...)
+  # anti-pattern-allowlist: 9 (justification: ...)
   # Intentional pattern-scan: <reason>
   # allowlist: <description>
   # scoped-scan: <description>
@@ -143,12 +164,13 @@ Usage
                             team/verification/ relative to repo root).  Pass
                             an empty string to disable runtime scanning.
   --package-dirs PATH ...   Python package directories to scan, recursively,
-                            for AP3 only (default: team/pgai_agent_kanban/
+                            for AP3, and their non-test modules for AP10
+                            (default: team/pgai_agent_kanban/
                             beside this script's directory).  Pass no paths
                             to disable package scanning.
   --files PATH ...          Named-file mode: scan exactly these test files
                             with every test-file check (AP1, AP2, AP3, AP6,
-                            AP7, AP8) and nothing else -- no tests-directory
+                            AP7, AP8, AP9) and nothing else -- no tests-directory
                             walk, no runtime-script scan and no package
                             scan.  A named file is
                             scanned even if it sits under a fixtures/
@@ -187,6 +209,7 @@ Examples
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import shlex
 import sys
@@ -229,7 +252,7 @@ _TEMP_ROOT_BASENAME: str = Path(resolve_temp_root()).name
 # ---------------------------------------------------------------------------
 
 _OPT_OUT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"#\s*anti-pattern-allowlist\s*:\s*[12678]", re.IGNORECASE),
+    re.compile(r"#\s*anti-pattern-allowlist\s*:\s*[126789]", re.IGNORECASE),
     re.compile(r"#\s*Intentional pattern-scan\s*:", re.IGNORECASE),
     re.compile(r"#\s*allowlist\s*:", re.IGNORECASE),
     re.compile(r"#\s*scoped-scan\s*:", re.IGNORECASE),
@@ -253,16 +276,16 @@ _AP1_FOR_LINE: re.Pattern[str] = re.compile(
     r"(?:"
     r"[^#\n]*\.\s*(?:glob|find|matching)\s*\("  # .glob(  .find(  .matching(
     r"|[^#\n]*re\.\s*(?:finditer|findall)\s*\("  # re.finditer(  re.findall(
-    r"|[^#\n]*find_\w+\s*\("                    # find_variables(  find_cmds(
-    r"|\$\s*\(\s*(?:find|glob)\s"               # $(find ...  $(glob ...
+    r"|[^#\n]*find_\w+\s*\("  # find_variables(  find_cmds(
+    r"|\$\s*\(\s*(?:find|glob)\s"  # $(find ...  $(glob ...
     r")"
 )
 
 # Matches an assert statement in the loop body (Python or bash-style)
 _ASSERT_PATTERN: re.Pattern[str] = re.compile(
-    r"(?:^\s*assert\b"           # Python assert
-    r"|^\s*\[\[?\s*"             # bash [ or [[
-    r"|^\s*test\s+"              # bash test builtin
+    r"(?:^\s*assert\b"  # Python assert
+    r"|^\s*\[\[?\s*"  # bash [ or [[
+    r"|^\s*test\s+"  # bash test builtin
     r")"
 )
 
@@ -285,16 +308,12 @@ _AP1_BODY_WINDOW = 10  # lines after the for-line to search for assert
 # f-string previously slipped past this check entirely because the prefix
 # letter sat between the opening paren and the quote the old pattern
 # required immediately after "\(\s*".
-_AP2_PY_PATH_CONSTRUCTOR: re.Pattern[str] = re.compile(
-    r"""Path\s*\(\s*[a-zA-Z]{0,2}["']/tmp/"""
-)
+_AP2_PY_PATH_CONSTRUCTOR: re.Pattern[str] = re.compile(r"""Path\s*\(\s*[a-zA-Z]{0,2}["']/tmp/""")
 
 # os.makedirs("/tmp/...) or os.mkdir("/tmp/...)
 # Same zero-exemption policy: any /tmp path is flagged regardless of name.
 # Same f-string-prefix coverage as _AP2_PY_PATH_CONSTRUCTOR above.
-_AP2_PY_MAKEDIRS: re.Pattern[str] = re.compile(
-    r"""os\s*\.\s*make?dirs?\s*\(\s*[a-zA-Z]{0,2}["']/tmp/"""
-)
+_AP2_PY_MAKEDIRS: re.Pattern[str] = re.compile(r"""os\s*\.\s*make?dirs?\s*\(\s*[a-zA-Z]{0,2}["']/tmp/""")
 
 # Direct assignment of a /tmp path to a variable (Python or embedded shell):
 #   TMPDIR = "/tmp/my_specific_dir"
@@ -312,9 +331,7 @@ _AP2_PY_MAKEDIRS: re.Pattern[str] = re.compile(
 # matched — without it, the very first character after "/tmp/" is "{", which
 # neither the negative lookahead nor a bare word-class character would reach.
 _AP2_PY_VAR_ASSIGN: re.Pattern[str] = re.compile(
-    r"""^\s*\w+\s*=\s*[a-zA-Z]{0,2}["']/tmp/(?!"""
-    + re.escape(_TEMP_ROOT_BASENAME)
-    + r"""["'])[\w/.{_-]"""
+    r"""^\s*\w+\s*=\s*[a-zA-Z]{0,2}["']/tmp/(?!""" + re.escape(_TEMP_ROOT_BASENAME) + r"""["'])[\w/.{_-]"""
 )
 
 # Shell redirect to a bare /tmp path: > /tmp/..., 2> /tmp/..., >> /tmp/...,
@@ -337,9 +354,7 @@ _AP2_PY_VAR_ASSIGN: re.Pattern[str] = re.compile(
 # The pattern matches the redirect operator optionally preceded by a file
 # descriptor digit (1, 2) or & for the combined form, followed by optional
 # whitespace, then the literal string /tmp/.
-_AP2_SH_REDIRECT: re.Pattern[str] = re.compile(
-    r"""[12&]?>>?\s*/tmp/[\w._-]"""
-)
+_AP2_SH_REDIRECT: re.Pattern[str] = re.compile(r"""[12&]?>>?\s*/tmp/[\w._-]""")
 
 # Python open() call writing to a bare /tmp path — the Python equivalent of a
 # shell redirect.  Catches forms like open("/tmp/foo", "w") or
@@ -364,9 +379,7 @@ _AP2_SH_REDIRECT: re.Pattern[str] = re.compile(
 # _AP2_PY_VAR_ASSIGN — an f-string interpolation that starts immediately after
 # the literal segment (open(f"/tmp/{name}", "w")) must still be reachable.
 _AP2_PY_OPEN_TMP: re.Pattern[str] = re.compile(
-    r"""open\s*\(\s*[a-zA-Z]{0,2}["']/tmp/(?!"""
-    + re.escape(_TEMP_ROOT_BASENAME)
-    + r"""["'])[\w/.{_-]"""
+    r"""open\s*\(\s*[a-zA-Z]{0,2}["']/tmp/(?!""" + re.escape(_TEMP_ROOT_BASENAME) + r"""["'])[\w/.{_-]"""
 )
 
 # Bare $(mktemp) inside an embedded shell string in a Python test file.
@@ -378,9 +391,7 @@ _AP2_PY_OPEN_TMP: re.Pattern[str] = re.compile(
 # The negative lookahead (?!\s+-) prevents flagging $(mktemp -p ...) or
 # $(mktemp -d ...) — those have a flag that may route to a specific path.
 # See _AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP_D for the bare $(mktemp -d) variant.
-_AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP: re.Pattern[str] = re.compile(
-    r"""\$\(mktemp\b(?!\s+-)"""
-)
+_AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP: re.Pattern[str] = re.compile(r"""\$\(mktemp\b(?!\s+-)""")
 
 # Bare $(mktemp -d) inside an embedded shell string in a Python test file.
 # The -d flag requests a temporary DIRECTORY.  When no path argument or -p
@@ -396,9 +407,7 @@ _AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP: re.Pattern[str] = re.compile(
 #
 # The negative lookahead (?!\s+[-"'/\$\w]) prevents matching when -d is
 # followed by another flag (-) or an explicit path argument.
-_AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP_D: re.Pattern[str] = re.compile(
-    r"""\$\(mktemp\s+-d\b(?!\s+[-"'/\$\w])"""
-)
+_AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP_D: re.Pattern[str] = re.compile(r"""\$\(mktemp\s+-d\b(?!\s+[-"'/\$\w])""")
 
 # tempfile.mkdtemp() without a ``dir=`` keyword argument in Python test code.
 # When called without ``dir=``, mkdtemp() lands directly in /tmp rather than
@@ -416,9 +425,7 @@ _AP2_PY_EMBEDDED_SHELL_BARE_MKTEMP_D: re.Pattern[str] = re.compile(
 # The pattern matches `tempfile.mkdtemp(` where the rest of the argument list
 # (up to the end of the line) does NOT contain `dir=`.  We use a negative
 # lookahead that scans to the end of the line for `dir\s*=`.
-_AP2_PY_MKDTEMP_NO_DIR: re.Pattern[str] = re.compile(
-    r"""tempfile\s*\.\s*mkdtemp\s*\((?![^)]*\bdir\s*=)"""
-)
+_AP2_PY_MKDTEMP_NO_DIR: re.Pattern[str] = re.compile(r"""tempfile\s*\.\s*mkdtemp\s*\((?![^)]*\bdir\s*=)""")
 
 # Bare mkdtemp() without a ``dir=`` keyword argument, used when mkdtemp is
 # imported directly via ``from tempfile import mkdtemp``.  Without ``dir=``,
@@ -436,9 +443,7 @@ _AP2_PY_MKDTEMP_NO_DIR: re.Pattern[str] = re.compile(
 # The negative lookbehind ``(?<!tempfile\s*\.\s*)`` ensures this pattern does
 # not double-flag lines already covered by _AP2_PY_MKDTEMP_NO_DIR.  The word
 # boundary ``\bmkdtemp`` prevents matching substrings like ``pgai_mkdtemp``.
-_AP2_PY_BARE_MKDTEMP_NO_DIR: re.Pattern[str] = re.compile(
-    r"""(?<!\.)\bmkdtemp\s*\((?![^)]*\bdir\s*=)"""
-)
+_AP2_PY_BARE_MKDTEMP_NO_DIR: re.Pattern[str] = re.compile(r"""(?<!\.)\bmkdtemp\s*\((?![^)]*\bdir\s*=)""")
 
 # tempfile.TemporaryDirectory() without a ``dir=`` keyword argument in Python
 # test code.  Without ``dir=``, TemporaryDirectory() uses Python's default
@@ -455,9 +460,7 @@ _AP2_PY_BARE_MKDTEMP_NO_DIR: re.Pattern[str] = re.compile(
 # end of line or closing paren) does NOT contain `dir=`.  Single-line calls
 # are the common case; multi-line calls with dir= on a continuation line are
 # out of scope for this simple scan (add an opt-out comment if needed).
-_AP2_PY_TMPDIR_NO_DIR: re.Pattern[str] = re.compile(
-    r"""TemporaryDirectory\s*\((?![^)]*\bdir\s*=)"""
-)
+_AP2_PY_TMPDIR_NO_DIR: re.Pattern[str] = re.compile(r"""TemporaryDirectory\s*\((?![^)]*\bdir\s*=)""")
 
 # ---------------------------------------------------------------------------
 # Conftest whitelist — files that define the wrapper, not callers of it
@@ -499,9 +502,11 @@ _AP2_CONFTEST_WHITELIST: frozenset[str] = frozenset({"conftest.py"})
 # added to a whitelisted file outside its bare-tmp-probe helper is a genuine
 # finding; keep this set to the fewest files possible and re-justify here
 # before adding another.
-_AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST: frozenset[str] = frozenset({
-    "test_wake_bracket_litter_check.py",
-})
+_AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST: frozenset[str] = frozenset(
+    {
+        "test_wake_bracket_litter_check.py",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Anti-pattern 2 detection patterns — Bash (.sh files)
@@ -512,20 +517,14 @@ _AP2_BARE_TMP_SUBJECT_MATTER_WHITELIST: frozenset[str] = frozenset({
 # carve-out.  Fixtures must route through pgai_mktemp_d (rooted under
 # PGAI_AGENT_KANBAN_TEMP_DIR); naming a fixture directory "fake*" or "stub*"
 # does not exempt it from the bare-/tmp contract.
-_AP2_SH_MKDIR: re.Pattern[str] = re.compile(
-    r"""mkdir\s+(?:-p\s+)?["']?/tmp/[\w._-]+"""
-)
+_AP2_SH_MKDIR: re.Pattern[str] = re.compile(r"""mkdir\s+(?:-p\s+)?["']?/tmp/[\w._-]+""")
 
 # Variable assignment: VAR=/tmp/WORD (without mktemp)
 # Same policy: any bare-/tmp assignment is flagged regardless of name prefix.
-_AP2_SH_VAR_ASSIGN: re.Pattern[str] = re.compile(
-    r"""^\s*\w+=['"]?/tmp/[\w._-]+['"]?"""
-)
+_AP2_SH_VAR_ASSIGN: re.Pattern[str] = re.compile(r"""^\s*\w+=['"]?/tmp/[\w._-]+['"]?""")
 
 # $HOME/WORD or /home/USERNAME/WORD used in mkdir context
-_AP2_SH_HOME_MKDIR: re.Pattern[str] = re.compile(
-    r"""mkdir\s+(?:-p\s+)?["']?(?:\$HOME|/home/[a-z][a-z0-9_-]*)"""
-)
+_AP2_SH_HOME_MKDIR: re.Pattern[str] = re.compile(r"""mkdir\s+(?:-p\s+)?["']?(?:\$HOME|/home/[a-z][a-z0-9_-]*)""")
 
 # Bare $(mktemp) in a shell script — no flags, no path argument.
 # "Bare" means mktemp is called with neither a -p flag nor an explicit path
@@ -538,9 +537,7 @@ _AP2_SH_HOME_MKDIR: re.Pattern[str] = re.compile(
 #
 # The negative lookahead (?!\s+[-"'/\$\w]) prevents matching when mktemp is
 # followed by a flag (- ...) or a quoted/unquoted path argument.
-_AP2_SH_BARE_MKTEMP: re.Pattern[str] = re.compile(
-    r"""\$\(mktemp\b(?!\s+[-"'/\$\w])"""
-)
+_AP2_SH_BARE_MKTEMP: re.Pattern[str] = re.compile(r"""\$\(mktemp\b(?!\s+[-"'/\$\w])""")
 
 # Bare $(mktemp -d) in a shell script — directory flag only, no -p flag,
 # no explicit path argument.  The directory still lands in /tmp.
@@ -551,9 +548,7 @@ _AP2_SH_BARE_MKTEMP: re.Pattern[str] = re.compile(
 #
 # The negative lookahead (?!\s+[-"'/\$\w]) prevents matching when -d is
 # followed by another flag or an explicit path argument.
-_AP2_SH_BARE_MKTEMP_D: re.Pattern[str] = re.compile(
-    r"""\$\(mktemp\s+-d\b(?!\s+[-"'/\$\w])"""
-)
+_AP2_SH_BARE_MKTEMP_D: re.Pattern[str] = re.compile(r"""\$\(mktemp\s+-d\b(?!\s+[-"'/\$\w])""")
 
 # ---------------------------------------------------------------------------
 # Anti-pattern 3 detection — hardcoded /tmp/pgai_kanban_tmp literal
@@ -592,25 +587,25 @@ _AP2_SH_BARE_MKTEMP_D: re.Pattern[str] = re.compile(
 #
 # Stable error code: AP3
 
-_AP3_LITERAL_PATTERN: re.Pattern[str] = re.compile(
-    r"/tmp/pgai_kanban_tmp"
-)
+_AP3_LITERAL_PATTERN: re.Pattern[str] = re.compile(r"/tmp/pgai_kanban_tmp")
 
 # Files whitelisted from AP3 — they ARE a resolver or the lint rule itself.
 # A test that needs the literal as data assembles it from fragments instead
 # ("/tmp/" + "pgai_kanban_tmp"), so no test file is named here.
-_AP3_FILE_WHITELIST: frozenset[str] = frozenset({
-    # The bash temp root wrapper; its last-resort fallback is the literal.
-    "temp.sh",
-    # The Python temp root resolver; FALLBACK_TEMP_ROOT is the literal, and
-    # every other Python caller imports it from there.
-    "temp_root.py",
-    "lint_test_anti_patterns.py",
-    # conftest.py defines _PGAI_DEFAULT_TEMP_ROOT — the test suite's own
-    # fallback that mirrors the resolver's.  Both serve the identical purpose
-    # (ensuring the no-env-var branch never lands in bare /tmp).
-    "conftest.py",
-})
+_AP3_FILE_WHITELIST: frozenset[str] = frozenset(
+    {
+        # The bash temp root wrapper; its last-resort fallback is the literal.
+        "temp.sh",
+        # The Python temp root resolver; FALLBACK_TEMP_ROOT is the literal, and
+        # every other Python caller imports it from there.
+        "temp_root.py",
+        "lint_test_anti_patterns.py",
+        # conftest.py defines _PGAI_DEFAULT_TEMP_ROOT — the test suite's own
+        # fallback that mirrors the resolver's.  Both serve the identical purpose
+        # (ensuring the no-env-var branch never lands in bare /tmp).
+        "conftest.py",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Anti-pattern 6 detection — bug-provenance test function names
@@ -684,9 +679,7 @@ _AP7_GOLDEN_PATH_LITERAL: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 
-_AP7_ENV_INHERIT: re.Pattern[str] = re.compile(
-    r"""dict\(\s*os\.environ\s*\)|os\.environ\.copy\(\)"""
-)
+_AP7_ENV_INHERIT: re.Pattern[str] = re.compile(r"""dict\(\s*os\.environ\s*\)|os\.environ\.copy\(\)""")
 
 # ---------------------------------------------------------------------------
 # Anti-pattern 8 detection — uncontrolled absolute-path substring assertion
@@ -732,10 +725,7 @@ _AP8_ABS_PATH_SUBSTRING: re.Pattern[str] = re.compile(
 # Shared utility
 # ---------------------------------------------------------------------------
 
-SOP_CITATION = (
-    "See roles/TESTER.md 'Test Authoring Guidelines' for the preferred "
-    "pattern and opt-out instructions."
-)
+SOP_CITATION = "See roles/TESTER.md 'Test Authoring Guidelines' for the preferred " "pattern and opt-out instructions."
 
 
 def _has_opt_out(lines: list[str], flagged_lineno: int) -> bool:
@@ -754,10 +744,7 @@ def _has_opt_out(lines: list[str], flagged_lineno: int) -> bool:
 
 def _finding(filepath: Path, lineno: int, category: str, detail: str) -> str:
     """Format a single lint finding message."""
-    return (
-        f"{filepath}:{lineno}: [{category}] {detail}\n"
-        f"    {SOP_CITATION}"
-    )
+    return f"{filepath}:{lineno}: [{category}] {detail}\n" f"    {SOP_CITATION}"
 
 
 # ---------------------------------------------------------------------------
@@ -913,7 +900,7 @@ def _check_ap2_py(filepath: Path, lines: list[str]) -> list[str]:
             "This creates a temp file directly in /tmp rather than under "
             "PGAI_AGENT_KANBAN_TEMP_DIR. "
             "Fix: source team/scripts/lib/temp.sh and use $(pgai_mktemp PREFIX) "
-            "or $(mktemp -p \"<sandboxed-dir>\"). "
+            'or $(mktemp -p "<sandboxed-dir>"). '
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
@@ -1011,20 +998,20 @@ def _check_ap2_sh(filepath: Path, lines: list[str]) -> list[str]:
         (
             _AP2_SH_MKDIR,
             "Hardcoded /tmp path in mkdir. "
-            "Source scripts/lib/temp.sh and use d=\"$(pgai_mktemp_d test)\" (a directory "
+            'Source scripts/lib/temp.sh and use d="$(pgai_mktemp_d test)" (a directory '
             "under the framework temp root) plus a trap EXIT for cleanup. "
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
             _AP2_SH_VAR_ASSIGN,
             "Hardcoded /tmp path in variable assignment. "
-            "Source scripts/lib/temp.sh and use TMPDIR=\"$(pgai_mktemp_d test)\". "
+            'Source scripts/lib/temp.sh and use TMPDIR="$(pgai_mktemp_d test)". '
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
             _AP2_SH_HOME_MKDIR,
             "Hardcoded $HOME or /home/user path in mkdir. "
-            "Source scripts/lib/temp.sh and use \"$(pgai_mktemp_d test)\". "
+            'Source scripts/lib/temp.sh and use "$(pgai_mktemp_d test)". '
             "Opt out with: '# anti-pattern-allowlist: 2 (justification: ...)'",
         ),
         (
@@ -1170,9 +1157,7 @@ def _has_golden_comparison_marker(lines: list[str]) -> bool:
     count.
     """
     for line in lines:
-        if _AP7_GOLDEN_NAME_ASSIGN.search(line) or _AP7_GOLDEN_PATH_LITERAL.search(
-            line
-        ):
+        if _AP7_GOLDEN_NAME_ASSIGN.search(line) or _AP7_GOLDEN_PATH_LITERAL.search(line):
             return True
     return False
 
@@ -1263,6 +1248,130 @@ def _check_ap8(filepath: Path, lines: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# AP9 — fixed sleep over 10 seconds in a test
+# ---------------------------------------------------------------------------
+
+# Longest fixed sleep a test may take, in seconds.
+_AP9_MAX_FIXED_SLEEP = 10
+_AP9_SLEEP_CALLEES = frozenset({"sleep"})
+
+
+def _module_numeric_constants(tree: ast.Module) -> dict[str, float]:
+    """Module-level ``NAME = <number>`` bindings of *tree*."""
+    constants: dict[str, float] = {}
+    for node in tree.body:
+        targets = (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else ([node.target] if isinstance(node, ast.AnnAssign) and node.value is not None else [])
+        )
+        value = getattr(node, "value", None)
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, (int, float))):
+            continue
+        if isinstance(value.value, bool):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                constants[target.id] = float(value.value)
+    return constants
+
+
+def _sleep_seconds(call: ast.Call, constants: dict[str, float]) -> float | None:
+    """The fixed seconds a sleep call waits, or None when it is not fixed."""
+    if not call.args:
+        return None
+    arg = call.args[0]
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, (int, float)) and not isinstance(arg.value, bool):
+        return float(arg.value)
+    if isinstance(arg, ast.Name):
+        return constants.get(arg.id)
+    return None
+
+
+def _check_ap9(filepath: Path, lines: list[str]) -> list[str]:
+    """Detect AP9: a Python test sleeps a fixed number of seconds over the limit."""
+    try:
+        tree = ast.parse("".join(lines), filename=str(filepath))
+    except (SyntaxError, ValueError):
+        return []
+    constants = _module_numeric_constants(tree)
+    findings: list[str] = []
+    for node in sorted(ast.walk(tree), key=lambda n: getattr(n, "lineno", 0)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name not in _AP9_SLEEP_CALLEES:
+            continue
+        seconds = _sleep_seconds(node, constants)
+        if seconds is None or seconds <= _AP9_MAX_FIXED_SLEEP:
+            continue
+        if _has_opt_out(lines, node.lineno):
+            continue
+        detail = (
+            f"A fixed sleep of {seconds:g}s (over {_AP9_MAX_FIXED_SLEEP}s): the suite waits that "
+            "long on every run and still races on a loaded host. "
+            "Fix: poll for the condition the sleep waits on, with a bounded deadline "
+            "(while time.monotonic() < deadline: ... time.sleep(0.2)). "
+            "Opt out with: '# anti-pattern-allowlist: 9 (justification: ...)'"
+        )
+        findings.append(_finding(filepath, node.lineno, "AP9", detail))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# AP10 — silent broad exception handler in a package module
+# ---------------------------------------------------------------------------
+
+_AP10_BROAD_NAMES = frozenset({"Exception", "BaseException"})
+# A "# noqa" or "# noqa: CODE[,CODE]" marker, which says nothing about why.
+_AP10_NOQA = re.compile(r"noqa(?:\s*:\s*[A-Z]+[0-9]+(?:\s*,\s*[A-Z]+[0-9]+)*)?", re.IGNORECASE)
+
+
+def _is_broad_handler(handler: ast.ExceptHandler) -> bool:
+    kind = handler.type
+    if kind is None:
+        return True
+    names = kind.elts if isinstance(kind, ast.Tuple) else [kind]
+    return any(isinstance(n, ast.Name) and n.id in _AP10_BROAD_NAMES for n in names)
+
+
+def _has_justification(line: str) -> bool:
+    """True when *line* carries a comment with words beyond a bare noqa marker."""
+    hash_at = line.find("#")
+    if hash_at < 0:
+        return False
+    comment = _AP10_NOQA.sub("", line[hash_at + 1 :])
+    return re.search(r"[A-Za-z]{2,}", comment) is not None
+
+
+def _check_ap10(filepath: Path, lines: list[str]) -> list[str]:
+    """Detect AP10: a broad handler whose whole body is pass/continue, unexplained."""
+    try:
+        tree = ast.parse("".join(lines), filename=str(filepath))
+    except (SyntaxError, ValueError):
+        return []
+    findings: list[str] = []
+    for node in sorted(ast.walk(tree), key=lambda n: getattr(n, "lineno", 0)):
+        if not isinstance(node, ast.ExceptHandler) or not _is_broad_handler(node):
+            continue
+        if len(node.body) != 1 or not isinstance(node.body[0], (ast.Pass, ast.Continue)):
+            continue
+        body_line = node.body[0].lineno
+        if any(_has_justification(lines[n - 1]) for n in {node.lineno, body_line} if n <= len(lines)):
+            continue
+        detail = (
+            "A broad exception handler drops the failure silently (its whole body is "
+            f"'{lines[body_line - 1].strip()}'), so an error here looks like success. "
+            "Fix: log or count the failure, narrow the exception, or say on the except "
+            "line why dropping it is safe, e.g. "
+            "'except Exception:  # a closed stderr must not fail the caller'."
+        )
+        findings.append(_finding(filepath, node.lineno, "AP10", detail))
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # File scanner
 # ---------------------------------------------------------------------------
 
@@ -1327,16 +1436,21 @@ def _scan_file(
     if not runtime_only and filepath.suffix == ".py":
         findings.extend(_check_ap8(filepath, lines))
 
+    # AP9 — fixed sleep over the limit — only applies to Python test files.
+    if not runtime_only and filepath.suffix == ".py":
+        findings.extend(_check_ap9(filepath, lines))
+
     return findings
 
 
-def _scan_package_file(filepath: Path, verbose: bool = False) -> list[str]:
-    """Scan one Python package module for AP3 alone and return its findings.
+def _scan_package_file(filepath: Path, verbose: bool = False, runtime_module: bool = True) -> list[str]:
+    """Scan one Python package module for AP3, and AP10 when it is not a test.
 
     Package modules are runtime code, not tests, and the test-file checks do
-    not apply to them; AP3 is the one check whose subject (a literal temp
-    root outside the resolver) is the same in a package module as anywhere
-    else.
+    not apply to them; AP3 (a literal temp root outside the resolver) has the
+    same subject in a package module as anywhere else, and AP10 (a silent
+    broad exception handler) is a runtime-code check, so a test module the
+    package carries (*runtime_module* False) is not checked for it.
     """
     if verbose:
         print(f"  scanning: {filepath}", flush=True)
@@ -1346,7 +1460,11 @@ def _scan_package_file(filepath: Path, verbose: bool = False) -> list[str]:
     except OSError as exc:
         return [f"{filepath}: ERROR reading file: {exc}"]
 
-    return _check_ap3(filepath, text.splitlines(keepends=True))
+    lines = text.splitlines(keepends=True)
+    findings = _check_ap3(filepath, lines)
+    if runtime_module:
+        findings.extend(_check_ap10(filepath, lines))
+    return findings
 
 
 def _collect_package_files(package_dirs: list[Path]) -> list[Path]:
@@ -1362,11 +1480,23 @@ def _collect_package_files(package_dirs: list[Path]) -> list[Path]:
         found.update(
             p
             for p in package_dir.rglob("*.py")
-            if p.is_file()
-            and "__pycache__" not in p.parts
-            and "fixtures" not in p.parts
+            if p.is_file() and "__pycache__" not in p.parts and "fixtures" not in p.parts
         )
     return sorted(found)
+
+
+def _is_package_test_module(filepath: Path, package_dirs: list[Path]) -> bool:
+    """True when *filepath* is a test module: ``test_*.py`` or under a ``tests``
+    directory inside the package directory that holds it."""
+    if filepath.name.startswith("test_"):
+        return True
+    for package_dir in package_dirs:
+        try:
+            relative = filepath.relative_to(package_dir)
+        except ValueError:
+            continue
+        return "tests" in relative.parts[:-1]
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1383,9 +1513,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "AP3 (literal temp root outside the resolver), "
             "anti-pattern 6 (bug-provenance test names), anti-pattern 7 "
             "(golden comparison + inherited subprocess environment), and "
-            "anti-pattern 8 (uncontrolled absolute-path substring assertion). "
+            "anti-pattern 8 (uncontrolled absolute-path substring assertion), and "
+            "AP9 (a fixed sleep over 10 seconds in a test). "
             "Also scans runtime script directories for AP2 and AP3 violations "
-            "and the Python package directories for AP3. "
+            "and the Python package directories for AP3 and AP10 (a silent "
+            "broad exception handler in a non-test module). "
             "With --files, scans only the named test files instead. "
             "Quality class: each finding is printed (and written with "
             "--findings-file) and the lint exits 0 whatever it finds; a usage "
@@ -1422,7 +1554,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Python package directories to scan, recursively, for AP3 "
-            "(literal temp root outside the resolver) only. "
+            "(literal temp root outside the resolver) and, in non-test "
+            "modules, AP10 (silent broad exception handler). "
             "Default: team/pgai_agent_kanban/ beside this script's "
             "directory. Pass no paths (--package-dirs with no arguments) to "
             "disable package scanning."
@@ -1435,7 +1568,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Named-file mode: scan exactly these test files with every "
-            "test-file check (AP1, AP2, AP3, AP6, AP7, AP8) and nothing else "
+            "test-file check (AP1, AP2, AP3, AP6, AP7, AP8, AP9) and nothing else "
             "-- no tests-directory walk and no runtime-script scan. A named "
             "file is scanned even under a fixtures/ directory. Each path must "
             "be an existing file (a missing one exits 2). Cannot be combined "
@@ -1569,8 +1702,7 @@ def _report(
         # runtime-failure risk -- reported per instance; returns 0.
         emit_error_contract(
             "lint.test-anti-patterns",
-            f"{len(all_findings)} test anti-pattern finding(s); each is listed "
-            "above with its file and line.",
+            f"{len(all_findings)} test anti-pattern finding(s); each is listed " "above with its file and line.",
             records[0]["remedy"],
         )
         return 0
@@ -1580,8 +1712,7 @@ def _report(
     if package_count is not None:
         breakdown += f", {package_count} package"
     print(
-        f"lint_test_anti_patterns: OK — 0 findings across "
-        f"{total} file(s) ({breakdown}).",
+        f"lint_test_anti_patterns: OK — 0 findings across " f"{total} file(s) ({breakdown}).",
         flush=True,
     )
     return 0
@@ -1597,17 +1728,12 @@ def _main_named_files(args: argparse.Namespace) -> int:
     a caller that names a file wants that file checked.
     """
     script = str(Path(__file__).resolve())
-    if (
-        args.tests_dir
-        or args.scripts_dirs is not None
-        or args.package_dirs is not None
-    ):
+    if args.tests_dir or args.scripts_dirs is not None or args.package_dirs is not None:
         print(
             "ERROR: --files cannot be combined with --tests-dir, "
             "--scripts-dirs or --package-dirs: named-file mode scans exactly "
             "the named files and never walks a directory.\n"
-            f"Run with --files alone: python3 {shlex.quote(script)} --files "
-            + shlex.join(args.files),
+            f"Run with --files alone: python3 {shlex.quote(script)} --files " + shlex.join(args.files),
             file=sys.stderr,
         )
         return 2
@@ -1636,9 +1762,7 @@ def _main_named_files(args: argparse.Namespace) -> int:
         all_findings.extend(found)
         records.extend(_finding_record(text, recheck) for text in found)
 
-    return _report(
-        all_findings, records, len(named_files), 0, findings_file=args.findings_file
-    )
+    return _report(all_findings, records, len(named_files), 0, findings_file=args.findings_file)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1656,7 +1780,7 @@ def main(argv: list[str] | None = None) -> int:
     # Infer the repo root as the grandparent of this script
     # (team/scripts/lint_test_anti_patterns.py → repo root = parent of team/).
     script_dir = Path(__file__).resolve().parent  # team/scripts/
-    repo_root = script_dir.parent.parent           # repo root
+    repo_root = script_dir.parent.parent  # repo root
 
     # -----------------------------------------------------------------------
     # Resolve the tests directory (AP1 + AP2 scan).
@@ -1669,8 +1793,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not tests_dir.is_dir():
         print(
-            f"ERROR: tests directory not found: {tests_dir}\n"
-            "Use --tests-dir to specify an alternative path.",
+            f"ERROR: tests directory not found: {tests_dir}\n" "Use --tests-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
@@ -1683,10 +1806,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.scripts_dirs is None:
         # Default runtime script directories to scan.
         _default_scripts_dirs = [
-            script_dir,                              # team/scripts/
-            script_dir / "lib",                      # team/scripts/lib/
+            script_dir,  # team/scripts/
+            script_dir / "lib",  # team/scripts/lib/
             script_dir / "lib" / "overwatch-checks",  # team/scripts/lib/overwatch-checks/
-            script_dir.parent / "verification",      # team/verification/
+            script_dir.parent / "verification",  # team/verification/
         ]
         scripts_dirs: list[Path] = [d for d in _default_scripts_dirs if d.is_dir()]
     else:
@@ -1699,9 +1822,7 @@ def main(argv: list[str] | None = None) -> int:
     # -----------------------------------------------------------------------
     if args.package_dirs is None:
         _default_package_dir = script_dir.parent / "pgai_agent_kanban"
-        package_dirs: list[Path] = (
-            [_default_package_dir] if _default_package_dir.is_dir() else []
-        )
+        package_dirs: list[Path] = [_default_package_dir] if _default_package_dir.is_dir() else []
     else:
         package_dirs = [Path(d).resolve() for d in args.package_dirs if d]
 
@@ -1719,9 +1840,7 @@ def main(argv: list[str] | None = None) -> int:
     test_files: list[Path] = []
     for suffix in (".py", ".sh"):
         test_files.extend(
-            p
-            for p in tests_dir.rglob(f"*{suffix}")
-            if "__pycache__" not in p.parts and "fixtures" not in p.parts
+            p for p in tests_dir.rglob(f"*{suffix}") if "__pycache__" not in p.parts and "fixtures" not in p.parts
         )
     test_files.sort()
 
@@ -1754,9 +1873,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_files.extend(
                 p
                 for p in scripts_dir.glob(f"*{suffix}")
-                if p.is_file()
-                and "__pycache__" not in p.parts
-                and "fixtures" not in p.parts
+                if p.is_file() and "__pycache__" not in p.parts and "fixtures" not in p.parts
             )
 
     runtime_files.sort()
@@ -1772,26 +1889,28 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
     for filepath in runtime_files:
-        all_findings.extend(
-            _scan_file(filepath, verbose=args.verbose, runtime_only=True)
-        )
+        all_findings.extend(_scan_file(filepath, verbose=args.verbose, runtime_only=True))
 
     # -----------------------------------------------------------------------
     # Scan Python package directories (AP3 only), recursively.  A module the
     # test or runtime scan already covered is not scanned twice.
     # -----------------------------------------------------------------------
     already_scanned = test_file_set | set(runtime_files)
-    package_files = [
-        f for f in _collect_package_files(package_dirs) if f not in already_scanned
-    ]
+    package_files = [f for f in _collect_package_files(package_dirs) if f not in already_scanned]
     if package_dirs:
         dirs_str = ", ".join(str(d) for d in package_dirs)
         print(
-            f"lint_test_anti_patterns: scanning package modules (AP3) in {dirs_str}",
+            f"lint_test_anti_patterns: scanning package modules (AP3, AP10) in {dirs_str}",
             flush=True,
         )
     for filepath in package_files:
-        all_findings.extend(_scan_package_file(filepath, verbose=args.verbose))
+        all_findings.extend(
+            _scan_package_file(
+                filepath,
+                verbose=args.verbose,
+                runtime_module=not _is_package_test_module(filepath, package_dirs),
+            )
+        )
 
     records = [_finding_record(text, recheck) for text in all_findings]
     return _report(

@@ -63,13 +63,7 @@ def _governance_script(call: str, log_file: pathlib.Path) -> str:
     stub injected first, as wake_driver_invoke.sh documents log() as a
     dependency it expects already sourced) and then runs *call*."""
     stub = make_log_stub_fragment(log_file)
-    return (
-        stub
-        + "\n"
-        + f"source {_READ_ORDER_LIB}\n"
-        + f"source {_WAKE_DRIVER_INVOKE_LIB}\n"
-        + textwrap.dedent(call)
-    )
+    return stub + "\n" + f"source {_READ_ORDER_LIB}\n" + f"source {_WAKE_DRIVER_INVOKE_LIB}\n" + textwrap.dedent(call)
 
 
 def _mirror_root(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -145,12 +139,10 @@ def test_tree_present_manifest_absent_document_excluded_from_assembled_prompt(
     disk (via the mirror root's symlink) but must never appear in the
     assembled CODER governance line -- the manifest is the only door."""
     root = _mirror_root(tmp_path)
-    (root / "read-order" / "coder.txt").write_text(
-        _REAL_CODER_MANIFEST.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    assert (root / _ISOLATION_DOC_REL).is_file(), (
-        "Mirror root did not symlink TESTING.md; fixture construction is broken."
-    )
+    (root / "read-order" / "coder.txt").write_text(_REAL_CODER_MANIFEST.read_text(encoding="utf-8"), encoding="utf-8")
+    assert (
+        root / _ISOLATION_DOC_REL
+    ).is_file(), "Mirror root did not symlink TESTING.md; fixture construction is broken."
 
     line = _assemble_coder_governance_line(root, tmp_path)
     assert _ISOLATION_DOC_REL not in line, (
@@ -179,9 +171,7 @@ def test_adding_document_to_manifest_makes_it_appear_in_assembled_prompt(
     # last, preserving the "your role file at" phrasing _wd_build_governance_line
     # applies to the final manifest entry.
     modified_lines = lines[:-1] + [_ISOLATION_DOC_REL] + lines[-1:]
-    (root / "read-order" / "coder.txt").write_text(
-        "\n".join(modified_lines) + "\n", encoding="utf-8"
-    )
+    (root / "read-order" / "coder.txt").write_text("\n".join(modified_lines) + "\n", encoding="utf-8")
 
     line = _assemble_coder_governance_line(root, tmp_path)
     assert _ISOLATION_DOC_REL in line, (

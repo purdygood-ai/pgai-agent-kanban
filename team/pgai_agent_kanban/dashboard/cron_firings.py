@@ -99,7 +99,7 @@ def _seconds_to_label(val: int) -> str:
 def cron_firings(
     crontab_text: str,
     cron_parser_path: str,
-    now_ts: "float | None" = None,
+    now_ts: float | None = None,
 ) -> dict:
     """Return agent -> human-label mapping for next cron firings.
 
@@ -120,7 +120,7 @@ def cron_firings(
     if not parser_path.is_file():
         return {}
 
-    now: "datetime | None" = None
+    now: datetime | None = None
     if now_ts is not None:
         now = datetime.fromtimestamp(now_ts)
 
@@ -183,7 +183,7 @@ def _line_label(val: object) -> str:
 def next_firings_line(
     crontab_text: str,
     cron_parser_path: str,
-    now: "datetime | None" = None,
+    now: datetime | None = None,
 ) -> str:
     """Return the multi-project header's next-firing entries as one line.
 
@@ -253,15 +253,13 @@ def main() -> None:
     if count_only:
         del sys.argv[1]
     if len(sys.argv) < 3:
-        sys.stderr.write(
-            "Usage: cron_firings.py <crontab_text> <cron_parser_path> [<now_ts>]\n"
-        )
+        sys.stderr.write("Usage: cron_firings.py <crontab_text> <cron_parser_path> [<now_ts>]\n")
         print(0 if count_only else json.dumps({}))
         return
 
     crontab_text = sys.argv[1]
     cron_parser_path = sys.argv[2]
-    now_ts: "float | None" = None
+    now_ts: float | None = None
     if len(sys.argv) > 3 and sys.argv[3]:
         try:
             now_ts = float(sys.argv[3])

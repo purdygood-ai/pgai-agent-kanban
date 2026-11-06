@@ -67,8 +67,7 @@ _spec.loader.exec_module(lint_section_parsers)
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-PY_PARSER = textwrap.dedent(
-    '''\
+PY_PARSER = textwrap.dedent("""\
     def state(text):
         found = False
         for line in text.splitlines():
@@ -80,26 +79,21 @@ PY_PARSER = textwrap.dedent(
             if found and line.strip():
                 return line.strip()
         return ""
-    '''
-)
+    """)
 
-AWK_PARSER = textwrap.dedent(
-    """\
+AWK_PARSER = textwrap.dedent("""\
     #!/usr/bin/env bash
     state="$(awk '/^## State/{f=1;next} f&&/^## /{exit} f&&NF{print;exit}' "$1")"
     echo "$state"
-    """
-)
+    """)
 
-READER_CALL = textwrap.dedent(
-    """\
+READER_CALL = textwrap.dedent("""\
     from pgai_agent_kanban.task_status import read_section
 
 
     def state(text):
         return read_section(text, "State") or ""
-    """
-)
+    """)
 
 
 def _make_tree(tmp_path: Path, files: dict[str, str], allowlist: str | None = "") -> Path:
@@ -169,8 +163,7 @@ def test_seeded_awk_parser_is_reported(tmp_path):
     assert "read_md_field" in findings[0]["remedy"]
 
 
-_CLI_READS = textwrap.dedent(
-    """\
+_CLI_READS = textwrap.dedent("""\
     #!/usr/bin/env bash
     model="$(pp_run_ops pgai_agent_kanban.task_status read "$f" \\
         --section=Model --raw 2>/dev/null)" || model=""
@@ -179,8 +172,7 @@ _CLI_READS = textwrap.dedent(
     count="$(pp_run_ops pgai_agent_kanban.task_status read "$f" \\
         --section="Usage Limit Requeue" --field=count --default=0)"
     state="$(read_md_field --value "$f" State)"
-    """
-)
+    """)
 
 
 def test_seeded_direct_cli_section_reads_are_reported_and_field_reads_are_not(tmp_path):
@@ -197,16 +189,14 @@ def test_seeded_direct_cli_section_reads_are_reported_and_field_reads_are_not(tm
 
 
 def test_seeded_heading_variable_reader_is_reported_at_its_comparison(tmp_path):
-    body = textwrap.dedent(
-        '''\
+    body = textwrap.dedent("""\
         def field(text, heading):
             target = f"## {heading}"
             for line in text.splitlines():
                 if line.strip() == target:
                     return line
             return None
-        '''
-    )
+        """)
     root = _make_tree(tmp_path, {"team/pm-agent/new.py": body})
     rc, _out, findings = _run(root, tmp_path)
     assert rc == 0
@@ -227,10 +217,18 @@ def test_seeded_heading_variable_reader_is_reported_at_its_comparison(tmp_path):
         pytest.param('if [[ "$line" == "## "* ]]; then', "equals", id="bash_glob_test"),
         pytest.param("sed -n '/^## State/,/^## /p' \"$f\"", "anchored", id="sed_range"),
         pytest.param("grep -A1 '^## Status' \"$f\"", "anchored", id="grep_address"),
-        pytest.param('target = f"## {heading}"\nif line.strip() == target:', "variable", id="py_equals_heading_variable"),
+        pytest.param(
+            'target = f"## {heading}"\nif line.strip() == target:', "variable", id="py_equals_heading_variable"
+        ),
         pytest.param('head = "## " + name\nif line.startswith(head):', "variable", id="py_startswith_heading_variable"),
-        pytest.param('target="## $heading"\nif [[ "$line" == "$target" ]]; then', "variable", id="bash_equals_heading_variable"),
-        pytest.param('pattern = re.compile(r"^#{1,3}\\s+" + re.escape(field) + r"\\s*$", re.M)', "anchored", id="py_quantified_hashes"),
+        pytest.param(
+            'target="## $heading"\nif [[ "$line" == "$target" ]]; then', "variable", id="bash_equals_heading_variable"
+        ),
+        pytest.param(
+            'pattern = re.compile(r"^#{1,3}\\s+" + re.escape(field) + r"\\s*$", re.M)',
+            "anchored",
+            id="py_quantified_hashes",
+        ),
         pytest.param('_END_RE = re.compile(r"^ {0,3}(#{2,6})\\s")', "anchored", id="py_indented_group_quantified"),
         pytest.param('m = re.match(r"#+\\s+Symptom", line)', "re-match", id="py_re_match_hash_run"),
         pytest.param('x=$(grep -A1 "## State" "$1" | tail -1)', "unanchored", id="grep_unanchored"),
@@ -254,7 +252,7 @@ def test_each_heading_detection_shape_is_a_site(line, shape):
         pytest.param('_RE = re.compile(r"^#{3}\\s")', id="quantified_level_three"),
         pytest.param('_RE = re.compile(r"^(#{3,6})\\s+Finding")', id="quantified_level_three_up"),
         pytest.param('target = f"## {heading}"', id="heading_variable_assignment"),
-        pytest.param('if line.strip() == target:', id="comparison_with_unknown_variable"),
+        pytest.param("if line.strip() == target:", id="comparison_with_unknown_variable"),
         pytest.param('n=$(grep -c "Status" "$f")', id="grep_without_hashes"),
     ],
 )
@@ -268,8 +266,7 @@ def test_lines_that_detect_no_level_two_heading_are_not_sites(line):
 
 
 def test_comments_and_docstrings_are_not_scanned(tmp_path):
-    body = textwrap.dedent(
-        '''\
+    body = textwrap.dedent('''\
         """Module docstring: the old code did line.startswith("## ")."""
 
 
@@ -277,9 +274,8 @@ def test_comments_and_docstrings_are_not_scanned(tmp_path):
             """Find '^## State' the way the reader does."""
             # a comment quoting startswith("## ")
             return text
-        '''
-    )
-    sh = '#!/usr/bin/env bash\n# awk \'/^## State/{f=1}\' was the old reader\necho ok\n'
+        ''')
+    sh = "#!/usr/bin/env bash\n# awk '/^## State/{f=1}' was the old reader\necho ok\n"
     root = _make_tree(tmp_path, {"team/pm-agent/doc.py": body, "team/scripts/doc.sh": sh})
     rc, _out, findings = _run(root, tmp_path)
     assert rc == 0
@@ -378,9 +374,15 @@ def test_two_identical_lines_need_two_entries(tmp_path):
 @pytest.mark.parametrize(
     "line, why",
     [
-        pytest.param("team/scripts/a.sh\tpresence-check\tno code field\n", "with every field filled", id="three_fields"),
-        pytest.param("team/scripts/a.sh\tvalue-reader\treads State\tgrep '^## State' f\n", "not one of", id="unknown_class"),
-        pytest.param("team/scripts/a.sh\tpresence-check\t\t\tgrep '^## State' f\n", "with every field filled", id="empty_reason"),
+        pytest.param(
+            "team/scripts/a.sh\tpresence-check\tno code field\n", "with every field filled", id="three_fields"
+        ),
+        pytest.param(
+            "team/scripts/a.sh\tvalue-reader\treads State\tgrep '^## State' f\n", "not one of", id="unknown_class"
+        ),
+        pytest.param(
+            "team/scripts/a.sh\tpresence-check\t\t\tgrep '^## State' f\n", "with every field filled", id="empty_reason"
+        ),
     ],
 )
 def test_malformed_allowlist_lines_are_reported_and_ignored(tmp_path, line, why):
@@ -408,7 +410,9 @@ def test_list_sites_prints_every_site_and_whether_it_is_listed(tmp_path):
     )
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--root", str(root), "--list-sites"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert proc.returncode == 0
     rows = [line.split("\t") for line in proc.stdout.splitlines()]
@@ -440,9 +444,7 @@ def test_a_missing_scan_directory_is_reported_and_exits_zero(tmp_path):
 
 
 def test_help_prints_usage_and_exits_zero():
-    proc = subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), "--help"], capture_output=True, text=True, timeout=60
-    )
+    proc = subprocess.run([sys.executable, str(_LINT_SCRIPT), "--help"], capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0
     assert proc.stdout.startswith("usage: lint_section_parsers")
     assert "--findings-file" in proc.stdout and "--list-sites" in proc.stdout
@@ -452,7 +454,9 @@ def test_the_tree_as_it_stands_is_clean(tmp_path):
     findings_file = tmp_path / "tree.json"
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--findings-file", str(findings_file)],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     assert proc.returncode == 0
     assert json.loads(findings_file.read_text(encoding="utf-8")) == [], proc.stdout

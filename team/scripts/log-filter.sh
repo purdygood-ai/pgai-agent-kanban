@@ -37,11 +37,11 @@
 #   PGAI_LOG_FILTER_VERBOSE=1 — disable noise filtering (show all lines)
 
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 # shellcheck source=lib/header_help.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/header_help.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/header_help.sh"
 # shellcheck source=lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/error_contract.sh"
 
 # --- Argument parsing: strip --* flags before passing args to awk ---
 # Recognized flags:
@@ -87,7 +87,7 @@ if [[ -n "$_KANBAN_ROOT_OVERRIDE" ]]; then
 fi
 # Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh for read_ini; dev_tree.sh for resolve/require helpers.
-_LF_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LF_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 [[ -f "${_LF_SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${_LF_SCRIPT_DIR}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_LF_SCRIPT_DIR}/lib/dev_tree.sh"
@@ -102,7 +102,7 @@ export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
 # --- Centralized temp dir helpers ---
 # Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load).
-_TEMP_SH="$(dirname "${BASH_SOURCE[0]}")/lib/temp.sh"
+_TEMP_SH="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/temp.sh"
 if [[ ! -f "$_TEMP_SH" ]]; then
   echo "ERROR: temp.sh not found: $_TEMP_SH" >&2
   exit 1
@@ -123,26 +123,16 @@ fi
 # --- Noise filter toggle ---
 VERBOSE="${PGAI_LOG_FILTER_VERBOSE:-0}"
 
-# --- ANSI codes ---
-if [[ "$USE_COLOR" == "true" ]]; then
-  C_RED=$'\033[0;31m'
-  C_RED_BOLD=$'\033[1;31m'
-  C_YELLOW=$'\033[0;33m'
-  C_GREEN=$'\033[0;32m'
-  C_CYAN=$'\033[0;36m'
-  C_DIM=$'\033[2m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-else
-  C_RED=""
-  C_RED_BOLD=""
-  C_YELLOW=""
-  C_GREEN=""
-  C_CYAN=""
-  C_DIM=""
-  C_BOLD=""
-  C_RESET=""
+# --- ANSI codes: the shared colour table, on or off by the rule above ---
+_SCRIPT_COMMON_SH="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
+if [[ ! -f "$_SCRIPT_COMMON_SH" ]]; then
+  echo "ERROR: script_common.sh not found: $_SCRIPT_COMMON_SH" >&2
+  exit 1
 fi
+# shellcheck source=lib/script_common.sh
+source "$_SCRIPT_COMMON_SH"
+unset _SCRIPT_COMMON_SH
+script_colour_table "$USE_COLOR"
 
 # --- Default noise patterns (lines to suppress) ---
 # These are extended-grep patterns. One per entry in the array.

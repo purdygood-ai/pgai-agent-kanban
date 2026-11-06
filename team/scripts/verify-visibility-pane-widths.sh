@@ -49,13 +49,13 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Centralized temp dir helpers
 # ---------------------------------------------------------------------------
 # Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load).
-_TEMP_SH="$(dirname "${BASH_SOURCE[0]}")/lib/temp.sh"
+_TEMP_SH="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/temp.sh"
 if [[ ! -f "$_TEMP_SH" ]]; then
   echo "ERROR: temp.sh not found: $_TEMP_SH" >&2
   exit 1
@@ -107,7 +107,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       # shellcheck source=lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/lib/header_help.sh"
+      source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/header_help.sh"
       header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;

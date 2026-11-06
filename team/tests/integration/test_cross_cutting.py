@@ -38,9 +38,7 @@ import os
 import pathlib
 import subprocess
 import textwrap
-from typing import Optional
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path to the dev tree (three levels up from team/tests/integration/).
@@ -53,11 +51,12 @@ _SCRIPTS_LIB = _TEAM_DIR / "scripts" / "lib"
 # Internal helpers (scoped to this file; same shape as test_discovery_pipeline.py)
 # ---------------------------------------------------------------------------
 
+
 def _run_discovery(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
     threshold: int = 3,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
@@ -123,9 +122,7 @@ def _add_bug_file(
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -184,9 +181,7 @@ def _add_requirements_file(
 class TestMultiProjectIsolation:
     """Work in one project does not affect state in another project."""
 
-    def test_bug_bundle_for_project_a_leaves_project_b_requirements_empty(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_bug_bundle_for_project_a_leaves_project_b_requirements_empty(self, two_project_root: pathlib.Path) -> None:
         """A bug bundled in project-a does not create any file in project-b.
 
         The discovery pipeline runs per-project.  Bundling a bug in project-a
@@ -198,9 +193,7 @@ class TestMultiProjectIsolation:
 
         result = _run_discovery(root, "project-a")
 
-        assert result.returncode == 0, (
-            f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # project-a must have a bundle
         req_a = _requirements_dir(root, "project-a")
@@ -219,9 +212,7 @@ class TestMultiProjectIsolation:
             f"Found in project-b/requirements/: {files_in_b}"
         )
 
-    def test_release_state_mutations_are_scoped_per_project(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_release_state_mutations_are_scoped_per_project(self, two_project_root: pathlib.Path) -> None:
         """Setting an Active RC in project-a does not affect project-b's release state.
 
         Each project has its own release-state.md.  Writing an Active RC to
@@ -230,26 +221,20 @@ class TestMultiProjectIsolation:
         root = two_project_root
 
         # Record project-b's initial release state content.
-        release_b_before = (
-            root / "projects" / "project-b" / "release-state.md"
-        ).read_text(encoding="utf-8")
+        release_b_before = (root / "projects" / "project-b" / "release-state.md").read_text(encoding="utf-8")
 
         # Mutate project-a's release state.
         _set_active_rc(root, "project-a", "v0.1.0")
 
         # project-b's release state must be unchanged.
-        release_b_after = (
-            root / "projects" / "project-b" / "release-state.md"
-        ).read_text(encoding="utf-8")
+        release_b_after = (root / "projects" / "project-b" / "release-state.md").read_text(encoding="utf-8")
 
         assert release_b_after == release_b_before, (
             "Setting Active RC in project-a must not alter project-b's release-state.md.\n"
             f"Before:\n{release_b_before}\nAfter:\n{release_b_after}"
         )
 
-    def test_each_project_maintains_independent_version_namespace(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_each_project_maintains_independent_version_namespace(self, two_project_root: pathlib.Path) -> None:
         """Both projects bundle bugs independently, each into its own requirements/.
 
         Running discovery for project-a and project-b in sequence produces
@@ -274,16 +259,10 @@ class TestMultiProjectIsolation:
         assert req_b, "Expected project-b to produce a bundle"
 
         # The bundle paths must be under different project directories.
-        assert "project-a" in str(req_a[0]), (
-            f"Expected project-a bundle under project-a dir, got: {req_a[0]}"
-        )
-        assert "project-b" in str(req_b[0]), (
-            f"Expected project-b bundle under project-b dir, got: {req_b[0]}"
-        )
+        assert "project-a" in str(req_a[0]), f"Expected project-a bundle under project-a dir, got: {req_a[0]}"
+        assert "project-b" in str(req_b[0]), f"Expected project-b bundle under project-b dir, got: {req_b[0]}"
 
-    def test_halt_in_project_a_does_not_affect_project_b_bundling(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_in_project_a_does_not_affect_project_b_bundling(self, two_project_root: pathlib.Path) -> None:
         """Halting project-a leaves project-b's pipeline operational.
 
         A per-project HALT file under project-a/HALT halts only project-a.
@@ -292,9 +271,7 @@ class TestMultiProjectIsolation:
         root = two_project_root
 
         # Halt project-a.
-        (root / "projects" / "project-a" / "HALT").write_text(
-            "halted for isolation test\n", encoding="utf-8"
-        )
+        (root / "projects" / "project-a" / "HALT").write_text("halted for isolation test\n", encoding="utf-8")
         _add_bug_file(root, "project-b", bug_id="BUG-0073", slug="b-unaffected-by-a-halt")
 
         result_b = _run_discovery(root, "project-b")
@@ -328,9 +305,7 @@ class TestPerRepoLockContention:
     (contention detected, work skipped or operation aborted).
     """
 
-    def test_lock_file_is_created_in_locks_directory(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_lock_file_is_created_in_locks_directory(self, two_project_root: pathlib.Path) -> None:
         """The kanban root's locks/ directory exists and is created by the fixture.
 
         The per-repo lock mechanism requires a locks/ directory under the
@@ -339,13 +314,9 @@ class TestPerRepoLockContention:
         """
         root = two_project_root
         locks_dir = root / "locks"
-        assert locks_dir.is_dir(), (
-            f"Expected locks/ directory at {locks_dir} to be created by two_project fixture."
-        )
+        assert locks_dir.is_dir(), f"Expected locks/ directory at {locks_dir} to be created by two_project fixture."
 
-    def test_second_flock_acquisition_is_rejected_while_first_holds(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_second_flock_acquisition_is_rejected_while_first_holds(self, two_project_root: pathlib.Path) -> None:
         """A second exclusive flock attempt on a held lock file returns non-zero.
 
         The real behavior: flock -n (non-blocking) on a file descriptor that
@@ -390,13 +361,12 @@ class TestPerRepoLockContention:
             # Wait until the holder has acquired the lock.
             ready_file = root / "locks" / "holder-ready"
             import time
+
             deadline = time.time() + 5.0
             while not ready_file.exists() and time.time() < deadline:
                 time.sleep(0.05)
 
-            assert ready_file.exists(), (
-                "Holder subprocess did not signal readiness within 5 seconds."
-            )
+            assert ready_file.exists(), "Holder subprocess did not signal readiness within 5 seconds."
 
             # Now attempt a non-blocking exclusive flock on the same file.
             # flock -n exits 1 when it cannot acquire the lock.
@@ -424,18 +394,16 @@ class TestPerRepoLockContention:
                 f"Expected 'CONTENDED' when second process attempts non-blocking flock "
                 f"on a held lock.\nstdout: {contender.stdout}\nstderr: {contender.stderr}"
             )
-            assert "ACQUIRED" not in contender.stdout, (
-                "Second flock acquisition must not succeed while first process holds the lock."
-            )
+            assert (
+                "ACQUIRED" not in contender.stdout
+            ), "Second flock acquisition must not succeed while first process holds the lock."
 
         finally:
             # Signal holder to release.
             (root / "locks" / "holder-done").touch()
             holder_result.wait(timeout=5)
 
-    def test_lock_is_released_and_reacquirable_after_holder_exits(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_lock_is_released_and_reacquirable_after_holder_exits(self, two_project_root: pathlib.Path) -> None:
         """After the lock-holding process exits, the lock can be re-acquired.
 
         Advisory flocks are released when all file descriptors to the lock
@@ -485,9 +453,7 @@ class TestPerRepoLockContention:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_overwatch_protocol_declines_when_repo_lock_is_held(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_overwatch_protocol_declines_when_repo_lock_is_held(self, two_project_root: pathlib.Path) -> None:
         """overwatch_halt_first_fix returns sentinel 4 when the per-repo lock is held.
 
         The OVERWATCH protocol checks the per-repo flock before applying state
@@ -533,8 +499,7 @@ class TestPerRepoLockContention:
         )
         lock_file = pathlib.Path(resolve_result.stdout.strip())
         assert lock_file == root / "locks" / f"repo-wake-{project_name}.lock", (
-            f"pp_repo_lock_path resolved an unexpected path for project "
-            f"'{project_name}': {lock_file}"
+            f"pp_repo_lock_path resolved an unexpected path for project " f"'{project_name}': {lock_file}"
         )
         lock_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -564,14 +529,13 @@ class TestPerRepoLockContention:
 
         try:
             import time
+
             ready_file = root / "locks" / "ow-holder-ready"
             deadline = time.time() + 5.0
             while not ready_file.exists() and time.time() < deadline:
                 time.sleep(0.05)
 
-            assert ready_file.exists(), (
-                "OVERWATCH holder subprocess did not signal readiness within 5 seconds."
-            )
+            assert ready_file.exists(), "OVERWATCH holder subprocess did not signal readiness within 5 seconds."
 
             # Run the overwatch_protocol's overwatch_halt_first_fix function.
             # When the per-repo lock is held, it must emit the sentinel-4 message
@@ -636,9 +600,7 @@ class TestActiveRCGateBlocksPMDecomposition:
     RC N+1's PM from waking while RC N is still open.
     """
 
-    def test_pm_is_not_queued_when_active_rc_is_set(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_pm_is_not_queued_when_active_rc_is_set(self, two_project_root: pathlib.Path) -> None:
         """discovery_step_requirements does not queue PM when an RC is in flight.
 
         When Active RC is set in release-state.md, the requirements pipeline
@@ -649,9 +611,7 @@ class TestActiveRCGateBlocksPMDecomposition:
         root = two_project_root
 
         # Place a requirements bundle ready for PM pickup.
-        req_file = _add_requirements_file(
-            root, "project-a", version="v0.0.2", slug="blocked-by-active-rc"
-        )
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.2", slug="blocked-by-active-rc")
 
         # Set an active RC — this triggers the gate.
         _set_active_rc(root, "project-a", "v0.1.0")
@@ -659,9 +619,7 @@ class TestActiveRCGateBlocksPMDecomposition:
         # Run the full pipeline.  With an Active RC set, Step 3 must not fire.
         result = _run_discovery(root, "project-a")
 
-        assert result.returncode == 0, (
-            f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"Pipeline exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # The requirements file must still be in 'open' state (PM not queued).
         req_text = req_file.read_text(encoding="utf-8")
@@ -677,13 +635,12 @@ class TestActiveRCGateBlocksPMDecomposition:
         # '- [ ] TASK-ID'; a real pending entry looks like '- [ ] PM-<id>'.  We
         # check for a PM-prefixed task entry rather than the bare marker so we
         # do not false-positive on the template comment line.
-        pm_backlog = (
-            root / "projects" / "project-a" / "tasks" / "queues" / "pm_backlog.md"
-        )
+        pm_backlog = root / "projects" / "project-a" / "tasks" / "queues" / "pm_backlog.md"
         if pm_backlog.exists():
             backlog_text = pm_backlog.read_text(encoding="utf-8")
             # A real queued-and-pending PM task looks like '- [ ] PM-<date>-...'
             import re as _re
+
             pending_tasks = _re.findall(r"^- \[ \] PM-", backlog_text, _re.MULTILINE)
             assert not pending_tasks, (
                 f"Expected PM backlog to have no pending PM task entry while Active RC is set.\n"
@@ -692,9 +649,7 @@ class TestActiveRCGateBlocksPMDecomposition:
                 f"stdout: {result.stdout}\nstderr: {result.stderr}"
             )
 
-    def test_pm_queue_is_unblocked_after_active_rc_clears(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_pm_queue_is_unblocked_after_active_rc_clears(self, two_project_root: pathlib.Path) -> None:
         """After the Active RC clears to 'none', PM can be queued for the next RC.
 
         This verifies the end-to-end gate cycle: RC N ships → Active RC resets
@@ -729,22 +684,17 @@ class TestActiveRCGateBlocksPMDecomposition:
         )
         stub_pm.chmod(0o755)
 
-        req_file = _add_requirements_file(
-            root, "project-a", version="v0.0.2", slug="unblocked-after-rc"
-        )
+        req_file = _add_requirements_file(root, "project-a", version="v0.0.2", slug="unblocked-after-rc")
 
         # Phase 1: RC in flight — PM must NOT be queued.
         _set_active_rc(root, "project-a", "v0.1.0")
         _run_discovery(root, "project-a")
         req_text_while_active = req_file.read_text(encoding="utf-8")
-        assert "running" not in req_text_while_active.lower(), (
-            "PM must not be queued while Active RC is set."
-        )
+        assert "running" not in req_text_while_active.lower(), "PM must not be queued while Active RC is set."
 
         # Phase 2: RC ships — Active RC clears to 'none'.
         (root / "projects" / "project-a" / "release-state.md").write_text(
-            "# Release State\n\n## Active RC\nnone\n\n"
-            "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
+            "# Release State\n\n## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
             encoding="utf-8",
         )
 
@@ -764,9 +714,7 @@ class TestActiveRCGateBlocksPMDecomposition:
             f"stdout: {result_after.stdout}\nstderr: {result_after.stderr}"
         )
 
-    def test_active_rc_in_project_a_does_not_block_project_b_bundling(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_active_rc_in_project_a_does_not_block_project_b_bundling(self, two_project_root: pathlib.Path) -> None:
         """An Active RC in project-a does not prevent project-b from bundling bugs.
 
         The Active-RC gate is per-project.  If project-a has an RC in flight,
@@ -783,8 +731,7 @@ class TestActiveRCGateBlocksPMDecomposition:
         result_b = _run_discovery(root, "project-b")
 
         assert result_b.returncode == 0, (
-            f"project-b pipeline exited non-zero.\n"
-            f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
+            f"project-b pipeline exited non-zero.\n" f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
 
         req_b = _requirements_dir(root, "project-b")
@@ -811,9 +758,7 @@ class TestHaltGates:
     These are independent mechanisms with different scopes.
     """
 
-    def test_global_halt_blocks_all_projects(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_global_halt_blocks_all_projects(self, two_project_root: pathlib.Path) -> None:
         """A HALT file at the kanban root blocks discovery for every project.
 
         Both project-a and project-b have bugs ready to bundle.  With a global
@@ -834,19 +779,14 @@ class TestHaltGates:
                 f"stdout: {result.stdout}\nstderr: {result.stderr}"
             )
             assert "DISCOVERY_STATUS=blocked" in result.stdout, (
-                f"Expected DISCOVERY_STATUS=blocked for {project_name} under global HALT.\n"
-                f"stdout: {result.stdout}"
+                f"Expected DISCOVERY_STATUS=blocked for {project_name} under global HALT.\n" f"stdout: {result.stdout}"
             )
 
             req_dir = _requirements_dir(root, project_name)
             bundles = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
-            assert not bundles, (
-                f"Expected no bundle for {project_name} under global HALT, but found: {bundles}"
-            )
+            assert not bundles, f"Expected no bundle for {project_name} under global HALT, but found: {bundles}"
 
-    def test_per_project_halt_blocks_only_the_named_project(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_per_project_halt_blocks_only_the_named_project(self, two_project_root: pathlib.Path) -> None:
         """A HALT file under projects/<name>/HALT blocks only that project.
 
         project-a is halted; project-b has a bug and must bundle normally.
@@ -866,19 +806,15 @@ class TestHaltGates:
         result_a = _run_discovery(root, "project-a")
         assert result_a.returncode == 0
         assert "DISCOVERY_STATUS=blocked" in result_a.stdout, (
-            f"Expected DISCOVERY_STATUS=blocked for halted project-a.\n"
-            f"stdout: {result_a.stdout}"
+            f"Expected DISCOVERY_STATUS=blocked for halted project-a.\n" f"stdout: {result_a.stdout}"
         )
         req_a = _requirements_dir(root, "project-a")
-        assert not list(req_a.glob("*-bugfix-bundle-*.md")), (
-            "Expected no bundle for halted project-a."
-        )
+        assert not list(req_a.glob("*-bugfix-bundle-*.md")), "Expected no bundle for halted project-a."
 
         # project-b must proceed normally.
         result_b = _run_discovery(root, "project-b")
         assert result_b.returncode == 0, (
-            f"project-b pipeline exited non-zero.\n"
-            f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
+            f"project-b pipeline exited non-zero.\n" f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
         req_b = _requirements_dir(root, "project-b")
         bundles_b = list(req_b.glob("*-bugfix-bundle-*.md")) if req_b.exists() else []
@@ -887,9 +823,7 @@ class TestHaltGates:
             f"stdout: {result_b.stdout}\nstderr: {result_b.stderr}"
         )
 
-    def test_removing_global_halt_file_restores_all_project_pipelines(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_removing_global_halt_file_restores_all_project_pipelines(self, two_project_root: pathlib.Path) -> None:
         """After the global HALT file is removed, discovery resumes for all projects.
 
         This verifies the halt-and-resume cycle: global HALT placed → discovery
@@ -903,9 +837,9 @@ class TestHaltGates:
 
         # Verify halt blocks.
         result_blocked = _run_discovery(root, "project-a")
-        assert "DISCOVERY_STATUS=blocked" in result_blocked.stdout, (
-            f"Expected blocked status while HALT is present.\nstdout: {result_blocked.stdout}"
-        )
+        assert (
+            "DISCOVERY_STATUS=blocked" in result_blocked.stdout
+        ), f"Expected blocked status while HALT is present.\nstdout: {result_blocked.stdout}"
 
         # Remove the global HALT file.
         halt_file.unlink()
@@ -920,9 +854,7 @@ class TestHaltGates:
             f"stdout: {result_resumed.stdout}\nstderr: {result_resumed.stderr}"
         )
 
-    def test_removing_per_project_halt_restores_that_project_pipeline(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_removing_per_project_halt_restores_that_project_pipeline(self, two_project_root: pathlib.Path) -> None:
         """After a per-project HALT file is removed, that project's pipeline resumes.
 
         Halt-and-resume: place per-project HALT → blocked → remove HALT →
@@ -937,8 +869,7 @@ class TestHaltGates:
         # Verify halt blocks.
         result_blocked = _run_discovery(root, "project-a")
         assert "DISCOVERY_STATUS=blocked" in result_blocked.stdout, (
-            f"Expected blocked status while per-project HALT is present.\n"
-            f"stdout: {result_blocked.stdout}"
+            f"Expected blocked status while per-project HALT is present.\n" f"stdout: {result_blocked.stdout}"
         )
 
         # Remove the per-project HALT.
@@ -954,9 +885,7 @@ class TestHaltGates:
             f"stdout: {result_resumed.stdout}\nstderr: {result_resumed.stderr}"
         )
 
-    def test_global_halt_does_not_affect_project_on_disk_state(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_global_halt_does_not_affect_project_on_disk_state(self, two_project_root: pathlib.Path) -> None:
         """When the global HALT file blocks discovery, no on-disk state is mutated.
 
         The pipeline exits early under HALT — no bundle is written, no backlog
@@ -964,9 +893,7 @@ class TestHaltGates:
         state must be identical before and after the blocked pipeline run.
         """
         root = two_project_root
-        bug_file = _add_bug_file(
-            root, "project-a", bug_id="BUG-0096", slug="halt-no-mutation"
-        )
+        bug_file = _add_bug_file(root, "project-a", bug_id="BUG-0096", slug="halt-no-mutation")
 
         # Capture the bug file's initial content.
         initial_content = bug_file.read_text(encoding="utf-8")
@@ -981,9 +908,9 @@ class TestHaltGates:
         _run_discovery(root, "project-a")
 
         # Bug file content must be unchanged.
-        assert bug_file.read_text(encoding="utf-8") == initial_content, (
-            "Bug file content must not be mutated when the pipeline is halted by global HALT."
-        )
+        assert (
+            bug_file.read_text(encoding="utf-8") == initial_content
+        ), "Bug file content must not be mutated when the pipeline is halted by global HALT."
 
         # Requirements directory must remain in the same state as before.
         post_req_files = (

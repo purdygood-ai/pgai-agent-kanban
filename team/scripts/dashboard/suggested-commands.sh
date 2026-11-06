@@ -29,10 +29,15 @@
 # this list summarizes.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # shellcheck source=lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
@@ -52,12 +57,6 @@ while [[ $# -gt 0 ]]; do
     --no-color)
       NO_COLOR_ARG=true
       shift
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2

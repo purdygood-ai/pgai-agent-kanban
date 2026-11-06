@@ -19,10 +19,15 @@ bounded timeout that refuses (dual-channel) naming the still-unarmed panes.
 Test groups
 -----------
 Group 1 -- Static coverage (no tmux required):
-    Every pane's first command in create.sh is dispatched through
-    dashboard_send_armed_keys (never a bare `tmux send-keys` for a pane's
-    first command), and the wrapper's output has the trap as its literal
-    first token.
+    Every pane's first command in create.sh (and in lib/operator_shell.sh,
+    the operator shell start-up sequence create.sh calls) is dispatched
+    through dashboard_send_armed_keys (never a bare `tmux send-keys` for a
+    pane's first command), and the wrapper's output has the trap as its
+    literal first token. Every command-carrying send-keys under
+    team/scripts/dashboard/ composes its line through dashboard_typed_line,
+    and the wrapper's output ends with the typed-line source tag that helper
+    appends, so each line the dashboard types is identifiable in shell
+    history.
 
 Group 2 -- Library-level readiness-handshake behavior (tmux-gated, private
 socket): exercises dashboard_wait_all_armed -- the EXACT function
@@ -55,11 +60,13 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import shlex
 import subprocess
 import time
 import uuid
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Iterator
 
 import pytest
 
@@ -80,6 +87,15 @@ _REPO_ROOT = _TEAM_DIR.parent
 _CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
 _KILL_SH = _TEAM_DIR / "scripts" / "dashboard" / "kill.sh"
 _PANE_READINESS_SH = _TEAM_DIR / "scripts" / "dashboard" / "lib" / "pane_readiness.sh"
+_OPERATOR_SHELL_SH = _TEAM_DIR / "scripts" / "dashboard" / "lib" / "operator_shell.sh"
+_DASHBOARD_DIR = _TEAM_DIR / "scripts" / "dashboard"
+_SCRIPTS_DIR = _TEAM_DIR / "scripts"
+_DASHBOARD_CONSTANTS_SH = _SCRIPTS_DIR / "lib" / "dashboard_constants.sh"
+
+# The trailing comment every line the dashboard types into a pane ends with,
+# pinned here as the operator-facing contract: a grep on it over shell
+# history finds every dashboard-typed line.
+_TYPED_TAG = "# pgai-agent-kanban-dashboard"
 
 _TMUX_SKIP_LABEL = "pane-signal-traps"
 
@@ -141,9 +157,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         wrapper = bin_dir / "tmux"
-        wrapper.write_text(
-            f"#!/usr/bin/env bash\nexec {shlex.quote(real_tmux)} -L {shlex.quote(socket_name)} \"$@\"\n"
-        )
+        wrapper.write_text(f'#!/usr/bin/env bash\nexec {shlex.quote(real_tmux)} -L {shlex.quote(socket_name)} "$@"\n')
         wrapper.chmod(0o755)
 
         env = os.environ.copy()
@@ -162,22 +176,26 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
 
 def test_no_pane_first_command_bypasses_the_armed_wrapper() -> None:
     """
-    Every pane's FIRST command in create.sh is dispatched through
-    dashboard_send_armed_keys, never a bare `tmux send-keys`. This is the
+    Every pane's FIRST command in create.sh -- and in lib/operator_shell.sh,
+    whose dashboard_init_operator_shell create.sh calls for the operator
+    shell pane -- is dispatched through dashboard_send_armed_keys, never a
+    bare `tmux send-keys`. This is the
     static, regression-proof form of the acceptance criterion "reading any
     pane loop shows the trap installation as its first executed
     statement" -- a future edit that reverts one send-keys call back to a
     bare, unwrapped form fails this test immediately rather than needing a
     live-session probe to notice.
 
-    The only bare `tmux send-keys` lines allowed in the file are:
+    The only bare `tmux send-keys` lines allowed in those files are:
       1. Inside dashboard_send_armed_keys's own definition (the one place
          that actually talks to tmux for a pane's first command).
-      2. The operator shell pane's two conveniences-follow-up commands
-         (bashrc source, shell-env re-source) -- typed into the pane's
-         shell after the trap has already been re-armed (see #3) by an
-         in-process `trap` builtin call, not another exec, so these do
-         not need to re-install anything themselves.
+      2. The operator shell pane's three conveniences-follow-up commands
+         (bashrc source, shell-env re-source, the closing screen clear),
+         each composed through dashboard_typed_line --
+         typed into the pane's shell after the trap has already been
+         re-armed (see #3) by an in-process `trap` builtin call, not
+         another exec, so these do not need to re-install anything
+         themselves.
       3. The re-arm follow-ups for the two panes whose first command
          ends in a bare `exec bash` (the operator shell and the terminal
          window's interactive shell): a freshly-started bash does NOT
@@ -188,7 +206,7 @@ def test_no_pane_first_command_bypasses_the_armed_wrapper() -> None:
          what it inherited, contrary to the plain POSIX fork/exec rule
          that holds for every other pane). Each of these two panes gets
          exactly one follow-up `trap '' ${PGAI_DASHBOARD_PANE_SIGNAL}; : >
-         ...` send-keys call, typed into the now-resident shell
+         ...` send-keys call (composed through dashboard_typed_line), typed into the now-resident shell
          immediately after its exec-chain first command, to
          re-establish the ignore disposition the exec silently dropped
          AND touch that pane's armed marker in the same typed line --
@@ -199,40 +217,30 @@ def test_no_pane_first_command_bypasses_the_armed_wrapper() -> None:
          the specific, actually-resident process whose trap that marker
          is meant to prove.
     """
-    text = _CREATE_SH.read_text()
+    text = _CREATE_SH.read_text() + "\n" + _OPERATOR_SHELL_SH.read_text()
     send_keys_lines = [
-        line
-        for line in text.splitlines()
-        if "tmux send-keys" in line and not line.strip().startswith("#")
+        line for line in text.splitlines() if "tmux send-keys" in line and not line.strip().startswith("#")
     ]
 
-    bare_lines = [
-        line
-        for line in send_keys_lines
-        if "${wrapped}" not in line and "$wrapped" not in line
-    ]
+    bare_lines = [line for line in send_keys_lines if "${wrapped}" not in line and "$wrapped" not in line]
 
     allowed_bare_substrings = (
-        '\'[ -f "$HOME/.bashrc" ]',  # operator shell follow-up #1
-        'source ${KANBAN_ROOT}/shell-env" Enter',  # operator shell follow-up #2
+        '"$(dashboard_typed_line \'[ -f "$HOME/.bashrc" ]',  # operator shell follow-up #1
+        '"$(dashboard_typed_line "source ${KANBAN_ROOT}/shell-env")" Enter',  # operator shell follow-up #2
+        "\"$(dashboard_typed_line \"printf '\\\\033[H",  # operator shell follow-up #3: the screen clear
         # Re-arm follow-ups (see docstring point 3): one per bare-`exec
         # bash` pane, each re-installing the ignore trap that exec drops
         # and touching that pane's armed marker in the same typed line.
-        "\"trap '' ${PGAI_DASHBOARD_PANE_SIGNAL}; : > ",
+        "\"$(dashboard_typed_line \"trap '' ${PGAI_DASHBOARD_PANE_SIGNAL}; : > ",
     )
 
-    unexpected = [
-        line
-        for line in bare_lines
-        if not any(sub in line for sub in allowed_bare_substrings)
-    ]
+    unexpected = [line for line in bare_lines if not any(sub in line for sub in allowed_bare_substrings)]
 
     assert not unexpected, (
         "found bare `tmux send-keys` line(s) outside dashboard_send_armed_keys "
-        "and the two documented operator-shell follow-ups -- every pane's "
+        "and the documented operator-shell follow-ups -- every pane's "
         "first command must route through dashboard_send_armed_keys so its "
-        "trap is installed as the pane's first executed statement:\n"
-        + "\n".join(unexpected)
+        "trap is installed as the pane's first executed statement:\n" + "\n".join(unexpected)
     )
 
 
@@ -244,28 +252,28 @@ def test_every_first_send_call_site_uses_the_armed_helper() -> None:
     through the helper is caught even if it never types a raw
     `tmux send-keys` line at all (e.g. a copy-pasted CMD var with no send
     site yet is not itself a violation, but an un-helpered send is).
+    The operator shell's call site lives in lib/operator_shell.sh's
+    dashboard_init_operator_shell, so that file is counted with create.sh.
     """
-    text = _CREATE_SH.read_text()
+    text = _CREATE_SH.read_text() + "\n" + _OPERATOR_SHELL_SH.read_text()
     # Real call sites start the (stripped) line with `dashboard_send_armed_keys "`
     # -- this excludes the function's own doc-comment references (which
     # mention the name but never immediately follow it with a quoted arg)
     # while still counting the two-line continuation calls (debug-logs.0,
     # training-logs.0) whose first line matches this shape.
-    call_count = sum(
-        1
-        for line in text.splitlines()
-        if line.strip().startswith('dashboard_send_armed_keys "')
-    )
+    call_count = sum(1 for line in text.splitlines() if line.strip().startswith('dashboard_send_armed_keys "'))
     # main(4) + shared board dispatcher dashboard_dispatch_board_panes
-    # (8 columns + legend = 9, called once for operator and once for
-    # visibility) + operator shell(1) + attention(1) + schedule(2) + git(2)
+    # (merged 4 columns + split 8 columns + legend = 13, called once for
+    # operator and once for visibility) + operator shell(1, in
+    # dashboard_init_operator_shell) + attention(1) + schedule(2) + git(2)
     # + metadata(1) + rc-metrics(2) + agent-metrics(2) + logs(1) +
     # debug-logs(1) + training-logs(1) + terminal(2) + human-review(2) +
-    # drill-N document(2) + drill-N release(5) = 38 fixed call sites (both
-    # drill branches are present in the source even though only one
-    # executes per project at runtime).
-    assert call_count == 38, (
-        f"expected exactly 38 dashboard_send_armed_keys call sites (one per "
+    # drill-N document(2) + drill-N release(5) = 42 fixed call sites (both
+    # dispatcher column sets and both drill branches are present in the
+    # source even though only one of each executes per board or project
+    # at runtime).
+    assert call_count == 42, (
+        f"expected exactly 42 dashboard_send_armed_keys call sites (one per "
         f"pane's first command across every dashboard window), "
         f"found {call_count} -- a pane's first-command wrap may have been "
         f"reverted to a bare tmux send-keys call, or a new pane was added "
@@ -287,7 +295,7 @@ def test_pane_wrap_installs_trap_as_the_literal_first_statement() -> None:
         [
             "bash",
             "-c",
-            f'source {shlex.quote(str(_PANE_READINESS_SH))}; '
+            f"source {shlex.quote(str(_PANE_READINESS_SH))}; "
             f'dashboard_pane_wrap_cmd "/tmp/armed" "main.0" "echo inner"',
         ],
         capture_output=True,
@@ -297,8 +305,7 @@ def test_pane_wrap_installs_trap_as_the_literal_first_statement() -> None:
     assert result.returncode == 0, result.stderr
     wrapped = result.stdout
     assert wrapped.startswith("trap '' USR1;"), (
-        f"expected the wrapped command to start with the ignore-trap "
-        f"installation; got: {wrapped!r}"
+        f"expected the wrapped command to start with the ignore-trap " f"installation; got: {wrapped!r}"
     )
     # The inner command and the armed-report touch both still appear,
     # strictly after the trap.
@@ -306,6 +313,92 @@ def test_pane_wrap_installs_trap_as_the_literal_first_statement() -> None:
     touch_pos = wrapped.index(": > ")
     inner_pos = wrapped.index("echo inner")
     assert trap_pos < touch_pos < inner_pos
+
+
+@pytest.mark.parametrize(
+    ("call", "expected"),
+    [
+        (
+            'dashboard_pane_wrap_cmd "armed-dir" "main.0" "echo inner"',
+            f"trap '' USR1; : > armed-dir/main.0; echo inner {_TYPED_TAG}",
+        ),
+        (
+            'dashboard_pane_wrap_cmd_no_marker "cd /srv && exec bash"',
+            f"trap '' USR1; cd /srv && exec bash {_TYPED_TAG}",
+        ),
+        ('dashboard_typed_line "printf x"', f"printf x {_TYPED_TAG}"),
+    ],
+    ids=["arming-line", "arming-line-no-marker", "typed-line-helper"],
+)
+def test_composed_typed_lines_end_with_the_source_tag(call: str, expected: str) -> None:
+    """The arming lines pane_readiness.sh composes, and any line composed
+    through dashboard_typed_line, are the bare command followed by one space
+    and the typed-line source tag -- the trap still first, the inner command
+    unchanged, nothing after the tag."""
+    # "armed-dir" and "/srv" are sample data: only the composed STRING is
+    # inspected; nothing is sent to a pane or executed.
+    result = subprocess.run(
+        ["bash", "-c", f"source {shlex.quote(str(_PANE_READINESS_SH))}; {call}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**os.environ, "PGAI_DASHBOARD_PANE_SIGNAL": "USR1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
+
+
+def test_typed_line_tag_is_defined_once_in_the_scripts_tree() -> None:
+    """The tag string is spelled out in exactly one place under team/scripts:
+    the constant in lib/dashboard_constants.sh. Every typed line gets it from
+    there, through dashboard_typed_line."""
+    hits = [
+        f"{path.relative_to(_TEAM_DIR)}:{number}"
+        for path in sorted(_SCRIPTS_DIR.rglob("*"))
+        if path.is_file() and path.suffix in {".sh", ".py", ""}
+        for number, line in enumerate(path.read_text(errors="replace").splitlines(), start=1)
+        if _TYPED_TAG.lstrip("# ") in line
+    ]
+    assert hits == [f"{_DASHBOARD_CONSTANTS_SH.relative_to(_TEAM_DIR)}:{_tag_definition_line()}"], hits
+
+
+def _tag_definition_line() -> int:
+    """The line of dashboard_constants.sh that assigns the tag constant."""
+    for number, line in enumerate(_DASHBOARD_CONSTANTS_SH.read_text().splitlines(), start=1):
+        if line.startswith("PGAI_DASHBOARD_TYPED_TAG="):
+            return number
+    raise AssertionError(f"no PGAI_DASHBOARD_TYPED_TAG= assignment in {_DASHBOARD_CONSTANTS_SH}")
+
+
+# A send-keys call that types no command: only key names (C-c, Escape, ...)
+# after its target. Such a call puts nothing in shell history and is exempt.
+_KEY_ONLY_SEND = re.compile(r"send-keys\s+-t\s+\S+(\s+(?:[CMS]-\S+|Escape|Enter|BSpace|Tab|Up|Down|Left|Right))+\s*$")
+
+
+def test_every_command_carrying_send_keys_is_composed_through_the_tagging_helper() -> None:
+    """Every non-comment `send-keys` line in a shell script under
+    team/scripts/dashboard/ either types a line composed through
+    dashboard_typed_line, or is dashboard_send_armed_keys's own send of the
+    wrapped line pane_readiness.sh composed through it; key-only sends are
+    exempt. A new typed line that skips the helper fails here."""
+    offenders = []
+    for path in sorted(_DASHBOARD_DIR.rglob("*.sh")):
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            stripped = line.strip()
+            if "send-keys" not in stripped or stripped.startswith("#"):
+                continue
+            if _KEY_ONLY_SEND.search(stripped):
+                continue
+            if '"$(dashboard_typed_line ' in stripped:
+                continue
+            if path == _CREATE_SH and stripped.endswith('"$wrapped" Enter'):
+                continue
+            offenders.append(f"{path.relative_to(_TEAM_DIR)}:{number}: {stripped}")
+    assert not offenders, (
+        "send-keys line(s) that type a command not composed through "
+        "dashboard_typed_line -- the line would reach the operator's shell "
+        "history without the source tag:\n" + "\n".join(offenders)
+    )
 
 
 def test_no_pane_command_sources_env_bootstrap_directly() -> None:
@@ -324,16 +417,12 @@ def test_no_pane_command_sources_env_bootstrap_directly() -> None:
     """
     text = _CREATE_SH.read_text()
     cmd_assignment_lines_with_env_bootstrap = [
-        line
-        for line in text.splitlines()
-        if "env_bootstrap" in line
-        and ("_CMD=" in line or "_INIT=" in line)
+        line for line in text.splitlines() if "env_bootstrap" in line and ("_CMD=" in line or "_INIT=" in line)
     ]
     assert not cmd_assignment_lines_with_env_bootstrap, (
         "a pane command string sources env_bootstrap.sh directly -- that "
         "would run ahead of (or race) the per-pane trap installation "
-        "dashboard_send_armed_keys prepends:\n"
-        + "\n".join(cmd_assignment_lines_with_env_bootstrap)
+        "dashboard_send_armed_keys prepends:\n" + "\n".join(cmd_assignment_lines_with_env_bootstrap)
     )
 
 
@@ -361,9 +450,7 @@ def _wrap_and_send(
         f"dashboard_pane_wrap_cmd {shlex.quote(str(armed_dir))} "
         f"{shlex.quote(pane_target)} {shlex.quote(inner_cmd)}'"
     )
-    wrapped = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, timeout=10
-    )
+    wrapped = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
     assert wrapped.returncode == 0, wrapped.stderr
     result = private_tmux.run("send-keys", "-t", pane_target, wrapped.stdout, "Enter")
     assert result.returncode == 0, result.stderr
@@ -464,9 +551,7 @@ def test_create_sh_return_is_gated_on_a_delayed_panes_arm_report(
     )
 
 
-def test_wait_all_armed_times_out_and_names_the_unarmed_pane(
-    private_tmux: PrivateTmux, tmp_path: pathlib.Path
-) -> None:
+def test_wait_all_armed_times_out_and_names_the_unarmed_pane(private_tmux: PrivateTmux, tmp_path: pathlib.Path) -> None:
     """
     The timeout path: one pane forced never to arm (its inner command
     sleeps far longer than the bound and never reaches the armed touch --
@@ -521,12 +606,10 @@ def test_wait_all_armed_times_out_and_names_the_unarmed_pane(
         f"{result.returncode}"
     )
     assert result.stdout.strip() == f"{session}.1", (
-        f"expected the timeout output to name exactly the unarmed pane "
-        f"({session}.1); got: {result.stdout!r}"
+        f"expected the timeout output to name exactly the unarmed pane " f"({session}.1); got: {result.stdout!r}"
     )
     assert timeout_bound <= elapsed < timeout_bound + 2, (
-        f"expected the timeout to fire within ~{timeout_bound}s of the bound; "
-        f"took {elapsed:.2f}s"
+        f"expected the timeout to fire within ~{timeout_bound}s of the bound; " f"took {elapsed:.2f}s"
     )
 
 
@@ -663,29 +746,24 @@ def test_create_sh_signals_a_real_pane_alive_immediately_after_return(
         armed_root = kanban_temp / "dashboard" / "armed" / session
         assert armed_root.is_dir(), f"expected armed marker directory at {armed_root}"
         markers = sorted(p.name for p in armed_root.iterdir())
-        assert "main.0" in markers and "main.1" in markers, (
-            f"expected core window-0 panes among the armed markers; got: {markers}"
-        )
+        assert (
+            "main.0" in markers and "main.1" in markers
+        ), f"expected core window-0 panes among the armed markers; got: {markers}"
 
         # Signal a real pane immediately after create.sh returned and
         # confirm it survives -- the acceptance criterion verbatim.
-        pid_result = private_tmux.run(
-            "display-message", "-p", "-t", f"{session}:main.0", "#{pane_pid}"
-        )
+        pid_result = private_tmux.run("display-message", "-p", "-t", f"{session}:main.0", "#{pane_pid}")
         assert pid_result.returncode == 0, pid_result.stderr
         pane_pid = int(pid_result.stdout.strip())
 
         os.kill(pane_pid, 10)  # SIGUSR1 -- must match PGAI_DASHBOARD_PANE_SIGNAL's default
         time.sleep(0.5)
 
-        panes = private_tmux.run(
-            "list-panes", "-t", f"{session}:main", "-F", "#{pane_dead}"
-        )
+        panes = private_tmux.run("list-panes", "-t", f"{session}:main", "-F", "#{pane_dead}")
         assert panes.returncode == 0, panes.stderr
         dead_flags = panes.stdout.split()
         assert dead_flags and all(flag == "0" for flag in dead_flags), (
-            f"expected every pane in window main to survive the signal "
-            f"(pane_dead=0); got: {panes.stdout!r}"
+            f"expected every pane in window main to survive the signal " f"(pane_dead=0); got: {panes.stdout!r}"
         )
     finally:
         kill_result = subprocess.run(
@@ -702,9 +780,7 @@ def test_create_sh_signals_a_real_pane_alive_immediately_after_return(
             timeout=20,
             env=env,
         )
-        assert kill_result.returncode == 0, (
-            f"kill.sh failed: {kill_result.stdout}\n{kill_result.stderr}"
-        )
+        assert kill_result.returncode == 0, f"kill.sh failed: {kill_result.stdout}\n{kill_result.stderr}"
 
     # No readiness marker survives kill.sh -- the acceptance criterion
     # verbatim. kill.sh wipes the whole "dashboard" temp subtree wholesale
@@ -712,6 +788,5 @@ def test_create_sh_signals_a_real_pane_alive_immediately_after_return(
     # armed directory must be gone entirely, not merely emptied.
     armed_root = kanban_temp / "dashboard" / "armed" / session
     assert not armed_root.exists(), (
-        f"expected kill.sh to remove the readiness marker directory; "
-        f"{armed_root} still exists"
+        f"expected kill.sh to remove the readiness marker directory; " f"{armed_root} still exists"
     )

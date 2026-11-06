@@ -55,7 +55,6 @@ import pathlib
 import re
 import subprocess
 
-import pytest
 
 from tests.fixtures.deep_verify_lane_output import (
     ENGINE_UNAVAILABLE_FAILING_TEST_FILE,
@@ -119,9 +118,7 @@ def _make_kanban_root(tmp_path: pathlib.Path, *, register_project: str | None = 
     root = tmp_path / "kanban_root"
     (root / "projects").mkdir(parents=True, exist_ok=True)
     if register_project:
-        (root / "projects.cfg").write_text(
-            f"[project:{register_project}]\npriority = 1\n", encoding="utf-8"
-        )
+        (root / "projects.cfg").write_text(f"[project:{register_project}]\npriority = 1\n", encoding="utf-8")
     else:
         (root / "projects.cfg").write_text("", encoding="utf-8")
     return root
@@ -260,9 +257,7 @@ def test_built_run_files_no_bug(tmp_path: pathlib.Path) -> None:
     result = _run_deep_verify(kanban_root, "demo", stub_lane=stub)
 
     assert result.returncode == 0, result.stderr
-    assert not _bugs_dir(kanban_root, "demo").exists() or not list(
-        _bugs_dir(kanban_root, "demo").glob("BUG-*.md")
-    )
+    assert not _bugs_dir(kanban_root, "demo").exists() or not list(_bugs_dir(kanban_root, "demo").glob("BUG-*.md"))
 
 
 def test_second_red_run_against_the_same_failing_pair_cites_the_existing_bug_instead_of_duplicating(
@@ -281,9 +276,9 @@ def test_second_red_run_against_the_same_failing_pair_cites_the_existing_bug_ins
     assert second.returncode == 1
 
     bug_files_after_second = sorted(_bugs_dir(kanban_root, "demo").glob("BUG-*.md"))
-    assert bug_files_after_second == bug_files_after_first, (
-        "a second red run against the same failing pair must not file a duplicate bug"
-    )
+    assert (
+        bug_files_after_second == bug_files_after_first
+    ), "a second red run against the same failing pair must not file a duplicate bug"
     assert filed_bug_id in second.stdout
 
 
@@ -310,9 +305,7 @@ def test_non_build_test_failure_records_built_files_a_bug_naming_the_test_and_ex
     stub = _write_captured_output_stub(tmp_path, NON_BUILD_TEST_FAILURE_OUTPUT, 1)
 
     result = _run_deep_verify(kanban_root, "demo", stub_lane=stub)
-    help_text = " ".join(
-        _run_deep_verify(kanban_root, None, extra_args=["--help"]).stdout.split()
-    )
+    help_text = " ".join(_run_deep_verify(kanban_root, None, extra_args=["--help"]).stdout.split())
 
     assert "1 = verdict is failed-to-build, or verdict is built but a non-build cold test failed" in help_text
     assert result.returncode == 1, result.stdout + result.stderr
@@ -354,9 +347,7 @@ def test_all_pairs_skipped_files_no_bug(tmp_path: pathlib.Path) -> None:
     result = _run_deep_verify(kanban_root, "demo", stub_lane=stub)
 
     assert result.returncode == 0, result.stderr
-    assert not _bugs_dir(kanban_root, "demo").exists() or not list(
-        _bugs_dir(kanban_root, "demo").glob("BUG-*.md")
-    )
+    assert not _bugs_dir(kanban_root, "demo").exists() or not list(_bugs_dir(kanban_root, "demo").glob("BUG-*.md"))
 
 
 def test_built_and_could_not_attempt_records_distinguishable_without_reading_captured_output(
@@ -367,9 +358,9 @@ def test_built_and_could_not_attempt_records_distinguishable_without_reading_cap
     skip_stub = _write_stub(tmp_path, "stub_skip.sh", _STUB_ALL_SKIPPED)
 
     _run_deep_verify(kanban_root, "demo", stub_lane=green_stub)
-    green_verdict = re.search(
-        r"- Verdict: (\S+)", _ledger_path(kanban_root, "demo").read_text(encoding="utf-8")
-    ).group(1)
+    green_verdict = re.search(r"- Verdict: (\S+)", _ledger_path(kanban_root, "demo").read_text(encoding="utf-8")).group(
+        1
+    )
 
     _run_deep_verify(kanban_root, "demo", stub_lane=skip_stub)
     records = _ledger_path(kanban_root, "demo").read_text(encoding="utf-8")
@@ -426,9 +417,9 @@ def test_second_engine_less_run_with_the_same_failing_test_cites_the_existing_bu
     second = _run_deep_verify(kanban_root, "demo", stub_lane=stub)
 
     assert second.returncode == 1, second.stdout + second.stderr
-    assert _bug_files(kanban_root, "demo") == bug_files_after_first, (
-        "a second engine-less run with the same failing test must not file a duplicate bug"
-    )
+    assert (
+        _bug_files(kanban_root, "demo") == bug_files_after_first
+    ), "a second engine-less run with the same failing test must not file a duplicate bug"
     assert f"citing existing {filed_bug_id}" in second.stdout
 
 
@@ -493,9 +484,7 @@ def test_cold_build_now_produces_the_same_record_shape_as_deep_verify(
     kanban_root = _make_kanban_root(tmp_path)
     stub = _write_stub(tmp_path, "stub_green.sh", _STUB_GREEN)
 
-    result = _run_deep_verify(
-        kanban_root, "demo", stub_lane=stub, script=_COLD_BUILD_NOW_SCRIPT
-    )
+    result = _run_deep_verify(kanban_root, "demo", stub_lane=stub, script=_COLD_BUILD_NOW_SCRIPT)
 
     assert result.returncode == 0, result.stderr
     ledger_text = _ledger_path(kanban_root, "demo").read_text(encoding="utf-8")
@@ -506,8 +495,6 @@ def test_cold_build_now_missing_project_flag_refuses_without_delegating(
     tmp_path: pathlib.Path,
 ) -> None:
     kanban_root = _make_kanban_root(tmp_path)
-    result = _run_deep_verify(
-        kanban_root, None, script=_COLD_BUILD_NOW_SCRIPT
-    )
+    result = _run_deep_verify(kanban_root, None, script=_COLD_BUILD_NOW_SCRIPT)
     assert result.returncode == 1
     assert "--project is required" in result.stderr

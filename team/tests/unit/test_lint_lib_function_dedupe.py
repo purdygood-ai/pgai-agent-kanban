@@ -50,13 +50,12 @@ import pytest
 
 from tests.fixtures.lint_findings import run_main
 
-
 # ---------------------------------------------------------------------------
 # Load lint_lib_function_dedupe.py as a module.
 # Path: team/tests/unit/ → team/ (three levels up)
 # ---------------------------------------------------------------------------
 _THIS_FILE = Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent   # team/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_lib_function_dedupe.py"
 _REAL_LIB_DIR = _SCRIPTS_DIR / "lib"
@@ -64,9 +63,7 @@ _REAL_LIB_DIR = _SCRIPTS_DIR / "lib"
 
 def _import_lint_module():
     """Import lint_lib_function_dedupe as a module."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_lib_function_dedupe", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_lib_function_dedupe", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -118,10 +115,7 @@ def test_clean_real_lib_dir_produces_no_violations() -> None:
     assert not violations, (
         f"Expected no duplicate function names in {_REAL_LIB_DIR}, "
         f"but find_duplicate_functions() reported {len(violations)} violation(s):\n"
-        + "\n".join(
-            f"  {name}() — defined in: {', '.join(files)}"
-            for name, files in sorted(violations.items())
-        )
+        + "\n".join(f"  {name}() — defined in: {', '.join(files)}" for name, files in sorted(violations.items()))
     )
 
 
@@ -133,9 +127,7 @@ def test_clean_real_lib_dir_main_exits_zero(tmp_path: Path) -> None:
     # Deliberately exercises the real team/scripts/lib/ tree (not a
     # fixture): this is a live regression guard, not an isolated behavior a
     # fixture could stand in for.
-    exit_code, findings = run_main(
-        _lint.main, ["--lib-dir", str(_REAL_LIB_DIR)], tmp_path / "findings.json"
-    )
+    exit_code, findings = run_main(_lint.main, ["--lib-dir", str(_REAL_LIB_DIR)], tmp_path / "findings.json")
 
     assert exit_code == 0 and findings == [], (
         f"Expected lint main() to return 0 with no finding for the clean real "
@@ -168,8 +160,7 @@ def test_planted_duplicate_triggers_violation(tmp_path: Path) -> None:
         f"but got an empty result."
     )
     assert "my_shared_func" in violations, (
-        f"Expected 'my_shared_func' to appear in violations, "
-        f"but got: {sorted(violations.keys())}"
+        f"Expected 'my_shared_func' to appear in violations, " f"but got: {sorted(violations.keys())}"
     )
     assert sorted(violations["my_shared_func"]) == ["alpha_lib.sh", "beta_lib.sh"], (
         f"Expected violations['my_shared_func'] to be ['alpha_lib.sh', 'beta_lib.sh'], "
@@ -189,10 +180,16 @@ def test_planted_duplicate_main_records_finding_and_exits_zero(tmp_path: Path) -
     _write_lib_sh(lib_dir / "a.sh", ["shared_func"])
     _write_lib_sh(lib_dir / "b.sh", ["shared_func"])
 
-    exit_code, findings = run_main(_lint.main, [
-        "--lib-dir", str(lib_dir),
-        "--allow-file", "__no_file_allowed__",  # empty effective allow-list
-    ], tmp_path / "findings.json")
+    exit_code, findings = run_main(
+        _lint.main,
+        [
+            "--lib-dir",
+            str(lib_dir),
+            "--allow-file",
+            "__no_file_allowed__",  # empty effective allow-list
+        ],
+        tmp_path / "findings.json",
+    )
 
     assert exit_code == 0, (
         f"Expected lint main() to return 0 for a lib dir with a duplicated "
@@ -216,8 +213,7 @@ def test_direct_run_prints_writes_and_exits_zero(tmp_path: Path) -> None:
     findings_path = tmp_path / "out" / "findings.json"
 
     proc = subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), "--lib-dir", str(lib_dir),
-         "--findings-file", str(findings_path)],
+        [sys.executable, str(_LINT_SCRIPT), "--lib-dir", str(lib_dir), "--findings-file", str(findings_path)],
         capture_output=True,
         text=True,
     )
@@ -275,41 +271,34 @@ def test_partial_allow_list_does_not_suppress_violation(tmp_path: Path) -> None:
         f"Expected a violation for 'shared_name' because 'disallowed_file.sh' "
         f"is not in the allow-list, but find_duplicate_functions() returned no violations."
     )
-    assert "shared_name" in violations, (
-        f"Expected 'shared_name' in violations, got: {sorted(violations.keys())}"
-    )
+    assert "shared_name" in violations, f"Expected 'shared_name' in violations, got: {sorted(violations.keys())}"
 
 
 def test_find_functions_skips_comments(tmp_path: Path) -> None:
     """Comment lines beginning with '#' are not extracted as function definitions."""
     fixture = tmp_path / "fixture_lib.sh"
     fixture.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             # this_is_a_comment_func() — not a real definition
             real_func() {
                 echo "defined"
             }
             # another_comment_func() still not real
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
     names = _lint.find_functions_in_file(fixture)
 
-    assert names == ["real_func"], (
-        f"Expected only ['real_func'] but got {names!r}."
-    )
+    assert names == ["real_func"], f"Expected only ['real_func'] but got {names!r}."
 
 
 def test_find_functions_ignores_non_definition_lines(tmp_path: Path) -> None:
     """Lines that are not top-level function definitions are not extracted."""
     fixture = tmp_path / "fixture_nondef.sh"
     fixture.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             MY_VAR="hello"
             export MY_VAR
@@ -317,23 +306,18 @@ def test_find_functions_ignores_non_definition_lines(tmp_path: Path) -> None:
             some_util_func
             # Definition with body on same line:
             actual_func() { echo "ok"; }
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
     names = _lint.find_functions_in_file(fixture)
 
-    assert "actual_func" in names, (
-        f"Expected 'actual_func' to be extracted but got {names!r}."
-    )
+    assert "actual_func" in names, f"Expected 'actual_func' to be extracted but got {names!r}."
     # Variable assignments and bare invocations must not be included.
-    assert "MY_VAR" not in names, (
-        f"Variable 'MY_VAR' should not appear in extracted function names."
-    )
-    assert "some_util_func" not in names, (
-        f"Bare invocation 'some_util_func' should not appear in extracted function names."
-    )
+    assert "MY_VAR" not in names, f"Variable 'MY_VAR' should not appear in extracted function names."
+    assert (
+        "some_util_func" not in names
+    ), f"Bare invocation 'some_util_func' should not appear in extracted function names."
 
 
 def test_find_functions_in_missing_file_raises(tmp_path: Path) -> None:
@@ -350,10 +334,7 @@ def test_main_returns_two_for_missing_lib_dir(tmp_path: Path) -> None:
 
     exit_code = _lint.main(["--lib-dir", str(missing_dir)])
 
-    assert exit_code == 2, (
-        f"Expected lint main() to return 2 for a missing lib-dir, "
-        f"but got {exit_code}."
-    )
+    assert exit_code == 2, f"Expected lint main() to return 2 for a missing lib-dir, " f"but got {exit_code}."
 
 
 def test_main_verbose_produces_output(tmp_path: Path, capsys) -> None:
@@ -365,13 +346,10 @@ def test_main_verbose_produces_output(tmp_path: Path, capsys) -> None:
     exit_code = _lint.main(["--lib-dir", str(lib_dir), "--verbose"])
 
     assert exit_code == 0, (
-        f"Expected exit code 0 for a clean single-file lib dir with --verbose, "
-        f"but got {exit_code}."
+        f"Expected exit code 0 for a clean single-file lib dir with --verbose, " f"but got {exit_code}."
     )
     captured = capsys.readouterr()
-    assert "only_lib.sh" in captured.out, (
-        f"Expected 'only_lib.sh' to appear in verbose output but got:\n{captured.out}"
-    )
+    assert "only_lib.sh" in captured.out, f"Expected 'only_lib.sh' to appear in verbose output but got:\n{captured.out}"
 
 
 def test_default_allow_list_covers_provider_files() -> None:

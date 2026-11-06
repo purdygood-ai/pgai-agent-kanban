@@ -105,7 +105,7 @@
 
 set -euo pipefail
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Check Python 3 is available.
 if ! command -v python3 >/dev/null 2>&1; then

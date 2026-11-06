@@ -21,7 +21,7 @@ import os
 import re
 import sys
 import warnings
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -33,13 +33,13 @@ from pathlib import Path
 # enumerate candidates for the backlog cache — it is NOT the filing-time
 # numbering rule. See _BUG_TAKEN_RE below for the rule used by the
 # high-water scan.
-_BUG_FILE_RE = re.compile(r'^(BUG-\d{4,}-.+)\.md$', re.IGNORECASE)
+_BUG_FILE_RE = re.compile(r"^(BUG-\d{4,}-.+)\.md$", re.IGNORECASE)
 
 # Matches only the numeric prefix of a BUG-NNNN-* file (4 or more digits).
-_BUG_NUM_RE = re.compile(r'^BUG-(\d{4,})-', re.IGNORECASE)
+_BUG_NUM_RE = re.compile(r"^BUG-(\d{4,})-", re.IGNORECASE)
 
 # Lock file pattern written during atomic BUG-ID claims.
-_CLAIM_LOCK_RE = re.compile(r'^\.claim-(\d{4,})\.lock$')
+_CLAIM_LOCK_RE = re.compile(r"^\.claim-(\d{4,})\.lock$")
 
 # ---------------------------------------------------------------------------
 # Gate-valid BUG filename pattern, sourced from the single-source
@@ -77,6 +77,7 @@ def _resolve_ledger_filename_re():
     """
     try:
         from pgai_agent_kanban.lib.ledger_filename_contract import ledger_filename_re
+
         return ledger_filename_re
     except ImportError:
         pass
@@ -85,6 +86,7 @@ def _resolve_ledger_filename_re():
         if _team_root not in sys.path:
             sys.path.insert(0, _team_root)
         from pgai_agent_kanban.lib.ledger_filename_contract import ledger_filename_re
+
         return ledger_filename_re
     except ImportError:
         return None
@@ -97,9 +99,7 @@ else:
     # Fallback definition when the package is not importable (e.g. a test
     # environment without a full install).  Kept byte-identical to
     # ledger_filename_contract.py's canonical BUG pattern.
-    _BUG_GATE_RE = re.compile(
-        r'^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$', re.IGNORECASE
-    )
+    _BUG_GATE_RE = re.compile(r"^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\.md$", re.IGNORECASE)
 
 # The closed states every reader shares (done, wont-do, duplicate; the
 # retired "superseded" reads as wont-do) and the needs-operator state. The
@@ -143,14 +143,14 @@ _TASK_ID_ENV_VAR = "PGAI_TASK_ID"
 
 # Extracts severity from **Severity:** field — liberal whitespace handling.
 _SEVERITY_RE = re.compile(
-    r'\*\*Severity:\*\*\s*(.+)',
+    r"\*\*Severity:\*\*\s*(.+)",
     re.IGNORECASE,
 )
 
 # Matches a backlog entry line: "- [x] BUG-ID" or "- [ ] BUG-ID"
 # Group 1: checkbox content (x or space), Group 2: bug ID
 _BACKLOG_ENTRY_RE = re.compile(
-    r'^\s*-\s+\[([x ])\]\s+(BUG-\S+)',
+    r"^\s*-\s+\[([x ])\]\s+(BUG-\S+)",
     re.IGNORECASE,
 )
 
@@ -158,6 +158,7 @@ _BACKLOG_ENTRY_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_summary(text: str) -> str:
     """Return the first non-empty content line under the ## Symptom heading.
@@ -169,7 +170,7 @@ def _extract_summary(text: str) -> str:
     body = read_section(text, "Symptom") or ""
     for line in body.splitlines():
         stripped = line.strip()
-        if stripped and not stripped.startswith('#'):
+        if stripped and not stripped.startswith("#"):
             return stripped
     return ""
 
@@ -216,6 +217,7 @@ def _extract_resolved_by(text: str) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def resolve_bugs_dir(bugs_dir: str = None) -> str:
     """Resolve the bugs directory path using PGAI_PROJECT_ROOT with fallback.
 
@@ -235,8 +237,7 @@ def resolve_bugs_dir(bugs_dir: str = None) -> str:
         return bugs_dir
     # Resolve canonical var first, new-path as default.
     project_root = os.environ.get("PGAI_PROJECT_ROOT") or (
-        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-        or str(Path.home() / "pgai_agent_kanban")
+        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH") or str(Path.home() / "pgai_agent_kanban")
     )
     return str(Path(project_root) / "bugs")
 
@@ -275,12 +276,14 @@ def scan_bugs_directory(bugs_dir: str) -> list:
             continue
         bug_id = m.group(1)
         text = entry.read_text(encoding="utf-8")
-        results.append({
-            "id": bug_id,
-            "file": str(entry.resolve()),
-            "summary": _extract_summary(text),
-            "severity": _extract_severity(text),
-        })
+        results.append(
+            {
+                "id": bug_id,
+                "file": str(entry.resolve()),
+                "summary": _extract_summary(text),
+                "severity": _extract_severity(text),
+            }
+        )
 
     results.sort(key=lambda d: d["id"])
     return results
@@ -306,7 +309,7 @@ def get_bundled_bug_ids(bug_backlog_path: str) -> set:
     bundled = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         m = _BACKLOG_ENTRY_RE.match(line)
-        if m and m.group(1).lower() == 'x':
+        if m and m.group(1).lower() == "x":
             bundled.add(m.group(2))
     return bundled
 
@@ -331,7 +334,7 @@ def get_open_bug_ids(bug_backlog_path: str) -> set:
     open_ids = set()
     for line in path.read_text(encoding="utf-8").splitlines():
         m = _BACKLOG_ENTRY_RE.match(line)
-        if m and m.group(1) == ' ':
+        if m and m.group(1) == " ":
             open_ids.add(m.group(2))
     return open_ids
 
@@ -476,6 +479,7 @@ def get_unbundled_bugs(bugs_dir: str, bug_backlog_path: str) -> list:
 # Atomic BUG-ID claim
 # ---------------------------------------------------------------------------
 
+
 def _archived_bug_dirs(bugs_dir: Path) -> list:
     """Return the archive directories whose bug files hold numbers for bugs_dir.
 
@@ -594,7 +598,7 @@ def _record_bug_claim(bugs_path: Path, bug_id: str, claimed_by: str) -> None:
     by the time this is called; the provenance line is additive evidence,
     not a precondition for filing.
     """
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
     line = f"{timestamp}\t{bug_id}\t{claimed_by}\n"
     try:
         with open(bugs_path / _CLAIM_LOG_FILENAME, "a", encoding="utf-8") as handle:
@@ -603,9 +607,7 @@ def _record_bug_claim(bugs_path: Path, bug_id: str, claimed_by: str) -> None:
         pass
 
 
-def claim_next_bug_id(
-    bugs_dir: str, slug: str, claimed_by: str = None, preferred_num: int = None
-) -> tuple:
+def claim_next_bug_id(bugs_dir: str, slug: str, claimed_by: str = None, preferred_num: int = None) -> tuple:
     """Atomically claim a free BUG-NNNN slot and return the claimed bug file
     path along with a lock path that the caller must release.
 
@@ -692,13 +694,9 @@ def claim_next_bug_id(
     """
     bugs_path = Path(bugs_dir)
     if not bugs_path.is_dir():
-        raise FileNotFoundError(
-            f"claim_next_bug_id: bugs directory does not exist: {bugs_dir!r}"
-        )
+        raise FileNotFoundError(f"claim_next_bug_id: bugs directory does not exist: {bugs_dir!r}")
     if preferred_num is not None and (
-        isinstance(preferred_num, bool)
-        or not isinstance(preferred_num, int)
-        or not 1 <= preferred_num <= 9999
+        isinstance(preferred_num, bool) or not isinstance(preferred_num, int) or not 1 <= preferred_num <= 9999
     ):
         raise ValueError(
             f"claim_next_bug_id: preferred_num must be an integer from 1 to 9999 "
@@ -768,6 +766,7 @@ def release_bug_id_claim(lock_path) -> None:
 # ---------------------------------------------------------------------------
 # Collision detection
 # ---------------------------------------------------------------------------
+
 
 def detect_duplicate_bug_ids(bugs_dir: str) -> list:
     """Scan bugs_dir for files that share the same numeric BUG-NNNN prefix.

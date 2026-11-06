@@ -44,19 +44,10 @@ _LIB_PROJECT_PATHS = _LIB_DIR / "project_paths.sh"
 _LIB_PROJECTS = _LIB_DIR / "projects.sh"
 
 # Source preamble for tests that call cm_resolve_and_enforce_hook directly.
-_SOURCE_PREAMBLE = (
-    f"source {_LIB_PROJECT_PATHS} && "
-    f"source {_LIB_PROJECTS} && "
-    f"source {_LIB_HOOKS}"
-)
+_SOURCE_PREAMBLE = f"source {_LIB_PROJECT_PATHS} && " f"source {_LIB_PROJECTS} && " f"source {_LIB_HOOKS}"
 
 # Minimal cm_halt stub: prints the reason and exits 2.
-_CM_HALT_STUB = (
-    "cm_halt() { "
-    "  echo \"HALT: trigger=$1 reason=$2\"; "
-    "  exit 2; "
-    "}"
-)
+_CM_HALT_STUB = "cm_halt() { " '  echo "HALT: trigger=$1 reason=$2"; ' "  exit 2; " "}"
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +74,7 @@ def _make_sandbox(
 
     cfg_path = project_kanban_dir / "project.cfg"
     cfg_path.write_text(
-        "[project]\n"
-        f"project_name = {project_name}\n"
-        f"dev_tree_path = {dev_tree}\n",
+        "[project]\n" f"project_name = {project_name}\n" f"dev_tree_path = {dev_tree}\n",
         encoding="utf-8",
     )
 
@@ -115,7 +104,7 @@ def _run_resolve(
         f"_rc=0\n"
         f"cm_resolve_and_enforce_hook {project_name!r} {phase!r} "
         f"{str(project_hooks_dir)!r} {str(dev_tree_path)!r} || _rc=$?\n"
-        f"echo \"RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH\"\n"
+        f'echo "RESOLVED_PATH:$CM_RESOLVED_HOOK_PATH"\n'
         f"exit $_rc\n"
     )
     return run_bash(
@@ -164,9 +153,9 @@ class TestStructuralOneImplementation:
             f"Canary '{self._CANARY}' found in {len(hits)} files under {lib_dir} "
             f"(expected 1): {[str(p) for p, _ in hits]}"
         )
-        assert hits[0][0].name == "cm_release_hooks.sh", (
-            f"Canary found in unexpected file: {hits[0][0]}; expected cm_release_hooks.sh"
-        )
+        assert (
+            hits[0][0].name == "cm_release_hooks.sh"
+        ), f"Canary found in unexpected file: {hits[0][0]}; expected cm_release_hooks.sh"
 
     @pytest.mark.parametrize("path", [_SHIP_RC, _SHIP_PY], ids=["ship-rc.sh", "cm-ship.py"])
     def test_resolution_body_absent_from_ship_rc(self, path: pathlib.Path) -> None:
@@ -194,8 +183,7 @@ class TestStructuralOneImplementation:
         call_lines = [
             line
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
-            if "cm_resolve_and_enforce_hook" in line
-            and not line.lstrip().startswith("#")
+            if "cm_resolve_and_enforce_hook" in line and not line.lstrip().startswith("#")
         ]
         return len(call_lines)
 
@@ -250,9 +238,7 @@ class TestSiblingParityResolutionOutput:
     """
 
     @pytest.mark.parametrize("phase", ["pre-squash", "pre-tag", "post-tag"])
-    def test_prints_none_configured_when_no_hook(
-        self, tmp_path: pathlib.Path, phase: str
-    ) -> None:
+    def test_prints_none_configured_when_no_hook(self, tmp_path: pathlib.Path, phase: str) -> None:
         """Both scripts print '<phase> hook: none configured' when no hook exists.
 
         Survives-as-named-parameterization of the original three per-phase
@@ -260,8 +246,11 @@ class TestSiblingParityResolutionOutput:
         kanban_root, project_dir, dev_tree = _make_sandbox(tmp_path, f"parity-{phase}")
 
         result = _run_resolve(
-            tmp_path, kanban_root, f"parity-{phase}",
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            f"parity-{phase}",
+            project_dir / "hooks",
+            dev_tree,
             phase=phase,
         )
         assert result.returncode == 0
@@ -307,8 +296,11 @@ class TestSiblingParityResolutionOutput:
         plant_hook(dev_tree, project_dir, phase)
 
         result = _run_resolve(
-            tmp_path, kanban_root, project_name,
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            project_name,
+            project_dir / "hooks",
+            dev_tree,
             phase=phase,
         )
         assert result.returncode == 0
@@ -324,9 +316,7 @@ class TestSiblingParityEnforcement:
     """
 
     @pytest.mark.parametrize("phase", ["pre-squash", "pre-tag", "post-tag"])
-    def test_required_halts_when_no_hook_and_names_the_phase(
-        self, tmp_path: pathlib.Path, phase: str
-    ) -> None:
+    def test_required_halts_when_no_hook_and_names_the_phase(self, tmp_path: pathlib.Path, phase: str) -> None:
         """Both scripts HALT before the phase when required=true and no hook,
         and the HALT message names the phase.
 
@@ -347,8 +337,11 @@ class TestSiblingParityEnforcement:
         (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
         result = _run_resolve(
-            tmp_path, kanban_root, project_name,
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            project_name,
+            project_dir / "hooks",
+            dev_tree,
             phase=phase,
         )
         # cm_halt stub exits 2
@@ -372,8 +365,11 @@ class TestSiblingParityEnforcement:
         (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
         result = _run_resolve(
-            tmp_path, kanban_root, "enf-locs",
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            "enf-locs",
+            project_dir / "hooks",
+            dev_tree,
             phase="pre-squash",
         )
         assert result.returncode == 2
@@ -396,16 +392,17 @@ class TestSiblingParityEnforcement:
         (project_dir / "project.cfg").write_text(cfg_text, encoding="utf-8")
 
         result = _run_resolve(
-            tmp_path, kanban_root, "enf-false-pre",
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            "enf-false-pre",
+            project_dir / "hooks",
+            dev_tree,
             phase="pre-squash",
         )
         assert result.returncode == 0
         assert "none configured" in result.stdout
 
-    def test_all_three_phases_planted_in_sandbox_resolve_correctly(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_all_three_phases_planted_in_sandbox_resolve_correctly(self, tmp_path: pathlib.Path) -> None:
         """
         Plant hooks at all three tiers for all three phases and verify each
         phase resolves to its own hook — same behavior for both scripts.
@@ -419,19 +416,20 @@ class TestSiblingParityEnforcement:
 
         for phase in ("pre-squash", "pre-tag", "post-tag"):
             result = _run_resolve(
-                tmp_path, kanban_root, "parity-all-phases",
-                project_dir / "hooks", dev_tree,
+                tmp_path,
+                kanban_root,
+                "parity-all-phases",
+                project_dir / "hooks",
+                dev_tree,
                 phase=phase,
             )
-            assert result.returncode == 0, (
-                f"Phase {phase!r}: rc={result.returncode}; stderr={result.stderr}"
-            )
-            assert f"{phase} hook:" in result.stdout, (
-                f"Phase {phase!r}: expected resolution line in stdout; got: {result.stdout!r}"
-            )
-            assert "source: kanban-side" in result.stdout, (
-                f"Phase {phase!r}: expected 'source: kanban-side'; got: {result.stdout!r}"
-            )
+            assert result.returncode == 0, f"Phase {phase!r}: rc={result.returncode}; stderr={result.stderr}"
+            assert (
+                f"{phase} hook:" in result.stdout
+            ), f"Phase {phase!r}: expected resolution line in stdout; got: {result.stdout!r}"
+            assert (
+                "source: kanban-side" in result.stdout
+            ), f"Phase {phase!r}: expected 'source: kanban-side'; got: {result.stdout!r}"
 
 
 class TestSiblingParityNonExecutableHook:
@@ -441,9 +439,7 @@ class TestSiblingParityNonExecutableHook:
     """
 
     @pytest.mark.parametrize("phase", ["pre-squash", "pre-tag", "post-tag"])
-    def test_nonexecutable_inrepo_hook_returns_error(
-        self, tmp_path: pathlib.Path, phase: str
-    ) -> None:
+    def test_nonexecutable_inrepo_hook_returns_error(self, tmp_path: pathlib.Path, phase: str) -> None:
         """A non-executable in-repo hook triggers a loud error (rc=1) at every
         phase. Survives-as-named-parameterization of the original three
         per-phase tests; no case dropped."""
@@ -453,8 +449,11 @@ class TestSiblingParityNonExecutableHook:
         _write_hook(hook, executable=False)
 
         result = _run_resolve(
-            tmp_path, kanban_root, project_name,
-            project_dir / "hooks", dev_tree,
+            tmp_path,
+            kanban_root,
+            project_name,
+            project_dir / "hooks",
+            dev_tree,
             phase=phase,
         )
         assert result.returncode == 1

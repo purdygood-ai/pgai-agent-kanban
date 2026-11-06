@@ -109,7 +109,7 @@ Manual interventions required: none.
   main..rc/v0.0.1 diff. It is byte-identical between main and the RC and fully
   satisfies the deliverable (present, ignores __pycache__). Observation only —
   not a defect; the requirement is met.
-- Commit authorship is mixed. CODER-002/003 commits show git author purdygood;
+- Commit authorship is mixed. CODER-002/003 commits show git author operator;
   WRITER-004 commits show Claude. This reflects local git author configuration,
   not manual intervention in kanban state. Observation only.
 - Window display is a manual check. Per the requirements doc, interactive

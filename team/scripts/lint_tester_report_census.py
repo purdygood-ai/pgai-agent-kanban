@@ -151,10 +151,7 @@ _QUANT = r"(?:[+*?]|\{\d*,?\d*\})?"
 # \s+, \s*, \s{1,}, [ ]+, [ \t]*, [[:space:]]*, [[:blank:]]+ and an escaped
 # space all mean "whitespace".
 _REGEX_SPACE_RE = re.compile(
-    r"\\s" + _QUANT
-    + r"|\[ (?:\\t)?\]" + _QUANT
-    + r"|\[\[:(?:space|blank):\]\]" + _QUANT
-    + r"|\\ "
+    r"\\s" + _QUANT + r"|\[ (?:\\t)?\]" + _QUANT + r"|\[\[:(?:space|blank):\]\]" + _QUANT + r"|\\ "
 )
 # Zero-width escapes carry no text of their own.
 _REGEX_ANCHOR_RE = re.compile(r"\\[bBAZ]")
@@ -257,11 +254,7 @@ def code_lines_python(text: str) -> list[str]:
 
     masked = list(lines)
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Expr)
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
-        ):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             end = getattr(node, "end_lineno", None) or node.lineno
             for number in range(node.lineno, end + 1):
                 if number - 1 < len(masked):
@@ -316,7 +309,7 @@ def is_excluded(rel: str) -> bool:
     parts = Path(rel).parts
     if any(part in TEST_DIR_NAMES for part in parts[:-1]):
         return True
-    return parts[-len(Path(PARSER_REL).parts):] == Path(PARSER_REL).parts
+    return parts[-len(Path(PARSER_REL).parts) :] == Path(PARSER_REL).parts
 
 
 def read_allowlist(path: Path) -> list[str]:
@@ -344,9 +337,7 @@ def tree_files(root: Path) -> list[Path]:
     top = root / SCAN_TOP
     if not top.is_dir():
         return []
-    return sorted(
-        p for p in top.rglob("*") if p.suffix in SCANNED_SUFFIXES and p.is_file()
-    )
+    return sorted(p for p in top.rglob("*") if p.suffix in SCANNED_SUFFIXES and p.is_file())
 
 
 def scan_file(path: Path, rel: str) -> list[Finding]:
@@ -365,15 +356,11 @@ def scan_file(path: Path, rel: str) -> list[Finding]:
         if names:
             source = raw_lines[number - 1].strip()[:120]
             matched = ", ".join(f"'{name}'" for name in names)
-            findings.append(
-                Finding(rel, number, "report-parsing-outside-parser", f"matches {matched}: {source}")
-            )
+            findings.append(Finding(rel, number, "report-parsing-outside-parser", f"matches {matched}: {source}"))
     return findings
 
 
-def run(
-    root: Path, allowlist: list[str], paths: list[Path] | None = None
-) -> tuple[int, list[Finding]]:
+def run(root: Path, allowlist: list[str], paths: list[Path] | None = None) -> tuple[int, list[Finding]]:
     """Scan *root* (or exactly *paths*); return ``(files_scanned, findings)``."""
     whole_tree = paths is None
     candidates = tree_files(root) if whole_tree else paths
@@ -404,8 +391,7 @@ def run(
                         ALLOWLIST_REL,
                         0,
                         "stale-allowlist-entry",
-                        f"entry '{entry}' names no scanned file that matches a "
-                        "report-parsing pattern",
+                        f"entry '{entry}' names no scanned file that matches a " "report-parsing pattern",
                     )
                 )
     return scanned, findings

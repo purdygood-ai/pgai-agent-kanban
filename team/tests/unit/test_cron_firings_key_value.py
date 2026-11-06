@@ -39,18 +39,26 @@ _MODULE = "pgai_agent_kanban.dashboard.cron_firings"
 
 
 def _run(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    env = build_scrubbed_env(home_dir=tmp_path / "home",
-                             extra_path_dirs=[pathlib.Path(sys.executable).parent])
+    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_path_dirs=[pathlib.Path(sys.executable).parent])
     return subprocess.run(
         ["bash", str(_PP_RUN_OPS), _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
 def test_valid_object_flattens_to_key_value_lines_in_order() -> None:
     text = '{"pm": "in 6 min", "coder": "now", "cleanup": "Sun 4am", "n": 3, "x": null}'
     assert flatten_firings_json(text) == [
-        "pm=in 6 min", "coder=now", "cleanup=Sun 4am", "n=3", "x=None",
+        "pm=in 6 min",
+        "coder=now",
+        "cleanup=Sun 4am",
+        "n=3",
+        "x=None",
     ]
 
 

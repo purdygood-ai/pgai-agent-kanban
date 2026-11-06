@@ -46,7 +46,7 @@ import functools
 import pathlib
 import re
 import sys
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 # Run by file path, this module has no parent package; put its own package
 # root first on sys.path so the imports below resolve from the same tree.
@@ -105,7 +105,7 @@ class Signature:
     label: str
     pattern: str
     line: int
-    regex: "re.Pattern[str]" = dataclasses.field(compare=False, repr=False)
+    regex: re.Pattern[str] = dataclasses.field(compare=False, repr=False)
 
 
 def _table_error(path: pathlib.Path, problem: str) -> SignatureTableError:
@@ -132,9 +132,7 @@ def _parse_line(path: pathlib.Path, number: int, raw: str) -> Signature:
         raise _table_error(path, f"line {number} is not '<class> <label> <pattern>': {raw.strip()!r}")
     klass, label, pattern = match.groups()
     if klass not in CLASS_PRECEDENCE:
-        raise _table_error(
-            path, f"line {number} has class {klass!r}; accepted: {', '.join(CLASS_PRECEDENCE)}"
-        )
+        raise _table_error(path, f"line {number} has class {klass!r}; accepted: {', '.join(CLASS_PRECEDENCE)}")
     if not _LABEL_RE.match(label):
         raise _table_error(path, f"line {number} has label {label!r}; a label is [a-z0-9_]+")
     if _NON_PORTABLE_RE.search(pattern):
@@ -170,7 +168,7 @@ def _load(path_text: str) -> tuple[Signature, ...]:
     return tuple(rows)
 
 
-def load_table(path: "pathlib.Path | str | None" = None) -> tuple[Signature, ...]:
+def load_table(path: pathlib.Path | str | None = None) -> tuple[Signature, ...]:
     """Return every signature in the table, in file order.
 
     *path* defaults to :data:`DEFAULT_TABLE_PATH`. Raises
@@ -183,8 +181,8 @@ def load_table(path: "pathlib.Path | str | None" = None) -> tuple[Signature, ...
 def first_match(
     text: str,
     classes: Iterable[str] = CLASS_PRECEDENCE,
-    table: Optional[tuple[Signature, ...]] = None,
-) -> Optional[Signature]:
+    table: tuple[Signature, ...] | None = None,
+) -> Signature | None:
     """The first signature, in table order, of one of *classes* found in *text*."""
     wanted = frozenset(classes)
     for signature in table if table is not None else load_table():
@@ -193,7 +191,7 @@ def first_match(
     return None
 
 
-def classify(text: str, table: Optional[tuple[Signature, ...]] = None) -> Optional[str]:
+def classify(text: str, table: tuple[Signature, ...] | None = None) -> str | None:
     """The class of *text*: the highest-precedence class it carries, or ``None``."""
     rows = table if table is not None else load_table()
     for klass in CLASS_PRECEDENCE:
@@ -202,7 +200,7 @@ def classify(text: str, table: Optional[tuple[Signature, ...]] = None) -> Option
     return None
 
 
-def class_pattern(klass: str, table: Optional[tuple[Signature, ...]] = None) -> str:
+def class_pattern(klass: str, table: tuple[Signature, ...] | None = None) -> str:
     """Every pattern of *klass* joined into one extended-regex alternation.
 
     Each pattern keeps its own group, ``(p1)|(p2)|...``, so an alternation
@@ -244,7 +242,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the CLI. Exit 0 on success (a match, for ``classify``), 1 when
     ``classify`` finds no signature, 2 when the table or FILE cannot be read."""
     args = _parser().parse_args(argv)

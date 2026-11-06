@@ -38,11 +38,10 @@ import csv
 import io
 import json
 import pathlib
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Resolve dev-tree root for API imports
@@ -237,9 +236,7 @@ class TestMetricsJsonEquality:
         )
         rows = resp.json()
         assert len(rows) == 1, f"Expected 1 row; got {len(rows)}"
-        assert rows[0]["version"] == "v2.3.0", (
-            f"row['version'] must equal CSV 'rc' field; got {rows[0]['version']!r}"
-        )
+        assert rows[0]["version"] == "v2.3.0", f"row['version'] must equal CSV 'rc' field; got {rows[0]['version']!r}"
 
     def test_metrics_json_tasks_equals_csv_tasks_total(
         self,
@@ -259,9 +256,7 @@ class TestMetricsJsonEquality:
             params={"project": project_name, "format": "json"},
         )
         rows = resp.json()
-        assert rows[0]["tasks"] == 42, (
-            f"row['tasks'] must equal int(tasks_total)=42; got {rows[0].get('tasks')!r}"
-        )
+        assert rows[0]["tasks"] == 42, f"row['tasks'] must equal int(tasks_total)=42; got {rows[0].get('tasks')!r}"
 
     def test_metrics_json_tokens_in_equals_csv_input_tokens(
         self,
@@ -281,9 +276,9 @@ class TestMetricsJsonEquality:
             params={"project": project_name, "format": "json"},
         )
         rows = resp.json()
-        assert rows[0]["tokens_in"] == 5000000, (
-            f"row['tokens_in'] must equal int(input_tokens); got {rows[0].get('tokens_in')!r}"
-        )
+        assert (
+            rows[0]["tokens_in"] == 5000000
+        ), f"row['tokens_in'] must equal int(input_tokens); got {rows[0].get('tokens_in')!r}"
 
     def test_metrics_json_tokens_out_equals_csv_output_tokens(
         self,
@@ -303,9 +298,9 @@ class TestMetricsJsonEquality:
             params={"project": project_name, "format": "json"},
         )
         rows = resp.json()
-        assert rows[0]["tokens_out"] == 250000, (
-            f"row['tokens_out'] must equal int(output_tokens); got {rows[0].get('tokens_out')!r}"
-        )
+        assert (
+            rows[0]["tokens_out"] == 250000
+        ), f"row['tokens_out'] must equal int(output_tokens); got {rows[0].get('tokens_out')!r}"
 
     def test_metrics_json_wall_seconds_equals_csv_wall_minutes_times_60(
         self,
@@ -326,8 +321,7 @@ class TestMetricsJsonEquality:
         )
         rows = resp.json()
         assert rows[0]["wall_seconds"] == pytest.approx(2700.0, abs=0.5), (
-            f"row['wall_seconds'] must equal wall_time_minutes * 60 = 2700.0; "
-            f"got {rows[0].get('wall_seconds')!r}"
+            f"row['wall_seconds'] must equal wall_time_minutes * 60 = 2700.0; " f"got {rows[0].get('wall_seconds')!r}"
         )
 
     def test_metrics_json_blocked_seconds_equals_csv_blocked_minutes_times_60(
@@ -372,12 +366,10 @@ class TestMetricsJsonEquality:
         )
         rows = resp.json()
         assert "blocked_seconds" in rows[0], (
-            f"'blocked_seconds' must be present (a real 0) when blocked_minutes=0; "
-            f"row: {rows[0]}"
+            f"'blocked_seconds' must be present (a real 0) when blocked_minutes=0; " f"row: {rows[0]}"
         )
         assert rows[0]["blocked_seconds"] == 0, (
-            f"row['blocked_seconds'] must equal 0 for blocked_minutes=0; "
-            f"got {rows[0].get('blocked_seconds')!r}"
+            f"row['blocked_seconds'] must equal 0 for blocked_minutes=0; " f"got {rows[0].get('blocked_seconds')!r}"
         )
 
     def test_metrics_json_pre_existing_fields_unaffected_by_blocked_minutes(
@@ -418,9 +410,7 @@ class TestMetricsJsonEquality:
         assert row["wall_seconds"] == pytest.approx(2700.0, abs=0.5)
         assert row["tokens_in"] == 1000
         assert row["tokens_out"] == 200
-        assert row["cache_read_pct"] == pytest.approx(
-            round(500 / (1000 + 500) * 100, 1), abs=0.05
-        )
+        assert row["cache_read_pct"] == pytest.approx(round(500 / (1000 + 500) * 100, 1), abs=0.05)
         assert row["blocked_seconds"] == pytest.approx(3000.0, abs=0.5)
 
     def test_metrics_json_cache_read_pct_computed_from_csv(
@@ -447,8 +437,7 @@ class TestMetricsJsonEquality:
         rows = resp.json()
         expected_pct = round(500 / (1000 + 500) * 100, 1)
         assert rows[0]["cache_read_pct"] == pytest.approx(expected_pct, abs=0.05), (
-            f"row['cache_read_pct'] must equal {expected_pct}; "
-            f"got {rows[0].get('cache_read_pct')!r}"
+            f"row['cache_read_pct'] must equal {expected_pct}; " f"got {rows[0].get('cache_read_pct')!r}"
         )
 
     def test_metrics_json_est_cost_from_rc_tokens_file(
@@ -488,8 +477,7 @@ class TestMetricsJsonEquality:
         )
         rows = resp.json()
         assert rows[0]["est_cost"] == pytest.approx(1.234567, abs=0.000001), (
-            f"row['est_cost'] must equal totals.cost_usd=1.234567; "
-            f"got {rows[0].get('est_cost')!r}"
+            f"row['est_cost'] must equal totals.cost_usd=1.234567; " f"got {rows[0].get('est_cost')!r}"
         )
 
     def test_metrics_json_multiple_rows_in_csv_order(
@@ -501,9 +489,7 @@ class TestMetricsJsonEquality:
         project_name = "eq-order"
         project_root = _materialise_project(metrics_kanban_root, project_name)
         versions = ["v1.0.0", "v1.1.0", "v1.2.0"]
-        csv_rows = [
-            {"rc": v, "tasks_total": str(i + 5)} for i, v in enumerate(versions)
-        ]
+        csv_rows = [{"rc": v, "tasks_total": str(i + 5)} for i, v in enumerate(versions)]
         _write_history_csv(project_root, csv_rows)
 
         resp = metrics_api_client.get(
@@ -513,9 +499,9 @@ class TestMetricsJsonEquality:
         rows = resp.json()
         assert len(rows) == 3, f"Expected 3 rows; got {len(rows)}"
         for i, expected_version in enumerate(versions):
-            assert rows[i]["version"] == expected_version, (
-                f"Row {i}: version must be {expected_version!r}; got {rows[i]['version']!r}"
-            )
+            assert (
+                rows[i]["version"] == expected_version
+            ), f"Row {i}: version must be {expected_version!r}; got {rows[i]['version']!r}"
 
     def test_metrics_json_last_param_limits_rows(
         self,
@@ -540,12 +526,8 @@ class TestMetricsJsonEquality:
         )
         rows = resp.json()
         assert len(rows) == 2, f"Expected 2 rows with last=2; got {len(rows)}"
-        assert rows[0]["version"] == "v1.1.0", (
-            f"First row with last=2 must be v1.1.0; got {rows[0]['version']!r}"
-        )
-        assert rows[1]["version"] == "v1.2.0", (
-            f"Second row with last=2 must be v1.2.0; got {rows[1]['version']!r}"
-        )
+        assert rows[0]["version"] == "v1.1.0", f"First row with last=2 must be v1.1.0; got {rows[0]['version']!r}"
+        assert rows[1]["version"] == "v1.2.0", f"Second row with last=2 must be v1.2.0; got {rows[1]['version']!r}"
 
     def test_metrics_json_empty_csv_returns_empty_array(
         self,
@@ -633,9 +615,7 @@ class TestCostsJsonEquality:
         )
         rows = resp.json()
         assert len(rows) == 1, f"Expected 1 row for rc scope; got {len(rows)}"
-        assert rows[0]["version"] == version, (
-            f"row['version'] must be {version!r}; got {rows[0]['version']!r}"
-        )
+        assert rows[0]["version"] == version, f"row['version'] must be {version!r}; got {rows[0]['version']!r}"
 
     def test_costs_json_tokens_in_equals_totals_input_tokens(
         self,
@@ -658,8 +638,7 @@ class TestCostsJsonEquality:
         )
         rows = resp.json()
         assert rows[0]["tokens_in"] == 999888, (
-            f"row['tokens_in'] must equal totals.input_tokens=999888; "
-            f"got {rows[0].get('tokens_in')!r}"
+            f"row['tokens_in'] must equal totals.input_tokens=999888; " f"got {rows[0].get('tokens_in')!r}"
         )
 
     def test_costs_json_tokens_out_equals_totals_output_tokens(
@@ -683,8 +662,7 @@ class TestCostsJsonEquality:
         )
         rows = resp.json()
         assert rows[0]["tokens_out"] == 123456, (
-            f"row['tokens_out'] must equal totals.output_tokens=123456; "
-            f"got {rows[0].get('tokens_out')!r}"
+            f"row['tokens_out'] must equal totals.output_tokens=123456; " f"got {rows[0].get('tokens_out')!r}"
         )
 
     def test_costs_json_est_cost_equals_totals_cost_usd(
@@ -708,8 +686,7 @@ class TestCostsJsonEquality:
         )
         rows = resp.json()
         assert rows[0]["est_cost"] == pytest.approx(7.891011, abs=0.000001), (
-            f"row['est_cost'] must equal totals.cost_usd=7.891011; "
-            f"got {rows[0].get('est_cost')!r}"
+            f"row['est_cost'] must equal totals.cost_usd=7.891011; " f"got {rows[0].get('est_cost')!r}"
         )
 
     def test_costs_json_cache_read_pct_computed_from_totals(
@@ -745,8 +722,7 @@ class TestCostsJsonEquality:
         rows = resp.json()
         expected_pct = round(1000 / (2000 + 1000) * 100, 1)
         assert rows[0]["cache_read_pct"] == pytest.approx(expected_pct, abs=0.05), (
-            f"row['cache_read_pct'] must equal {expected_pct}; "
-            f"got {rows[0].get('cache_read_pct')!r}"
+            f"row['cache_read_pct'] must equal {expected_pct}; " f"got {rows[0].get('cache_read_pct')!r}"
         )
 
     def test_costs_json_missing_rc_file_returns_empty_array(
@@ -828,18 +804,11 @@ class TestMetricsCostsTextRegression:
         # cost-report.sh requires a project; if it exits non-zero the envelope
         # still has the expected keys — we just check the shape, not exit_code.
         body = resp.json()
-        assert isinstance(body, dict), (
-            "Text path must return a dict envelope; "
-            f"got {type(body)}"
-        )
+        assert isinstance(body, dict), "Text path must return a dict envelope; " f"got {type(body)}"
         assert "exit_code" in body, (
-            "Text path must return envelope with 'exit_code'; "
-            f"body keys: {list(body.keys())}"
+            "Text path must return envelope with 'exit_code'; " f"body keys: {list(body.keys())}"
         )
-        assert "stdout" in body, (
-            "Text path must return envelope with 'stdout'; "
-            f"body keys: {list(body.keys())}"
-        )
+        assert "stdout" in body, "Text path must return envelope with 'stdout'; " f"body keys: {list(body.keys())}"
 
 
 # ---------------------------------------------------------------------------
@@ -870,8 +839,7 @@ class TestMissingFieldOmission:
         rows = resp.json()
         assert len(rows) == 1
         assert "wall_seconds" not in rows[0], (
-            f"'wall_seconds' must be absent when wall_time_minutes is empty; "
-            f"row: {rows[0]}"
+            f"'wall_seconds' must be absent when wall_time_minutes is empty; " f"row: {rows[0]}"
         )
 
     def test_missing_blocked_minutes_omits_blocked_seconds(
@@ -894,8 +862,7 @@ class TestMissingFieldOmission:
         rows = resp.json()
         assert len(rows) == 1
         assert "blocked_seconds" not in rows[0], (
-            f"'blocked_seconds' must be absent when blocked_minutes is empty; "
-            f"row: {rows[0]}"
+            f"'blocked_seconds' must be absent when blocked_minutes is empty; " f"row: {rows[0]}"
         )
 
     def test_absent_blocked_minutes_column_omits_blocked_seconds(
@@ -924,8 +891,7 @@ class TestMissingFieldOmission:
         rows = resp.json()
         assert len(rows) == 1
         assert "blocked_seconds" not in rows[0], (
-            f"'blocked_seconds' must be absent when the column does not exist "
-            f"in history.csv at all; row: {rows[0]}"
+            f"'blocked_seconds' must be absent when the column does not exist " f"in history.csv at all; row: {rows[0]}"
         )
 
     def test_missing_est_cost_omits_est_cost(
@@ -948,9 +914,7 @@ class TestMissingFieldOmission:
         )
         rows = resp.json()
         assert len(rows) == 1
-        assert "est_cost" not in rows[0], (
-            f"'est_cost' must be absent when no RC usage file exists; row: {rows[0]}"
-        )
+        assert "est_cost" not in rows[0], f"'est_cost' must be absent when no RC usage file exists; row: {rows[0]}"
 
     def test_zero_cache_read_omits_cache_read_pct(
         self,
@@ -971,9 +935,9 @@ class TestMissingFieldOmission:
         )
         rows = resp.json()
         assert len(rows) == 1
-        assert "cache_read_pct" not in rows[0], (
-            f"'cache_read_pct' must be absent when denominator is zero; row: {rows[0]}"
-        )
+        assert (
+            "cache_read_pct" not in rows[0]
+        ), f"'cache_read_pct' must be absent when denominator is zero; row: {rows[0]}"
 
     def test_costs_missing_cost_usd_omits_est_cost(
         self,
@@ -999,9 +963,7 @@ class TestMissingFieldOmission:
         )
         rows = resp.json()
         assert len(rows) == 1
-        assert "est_cost" not in rows[0], (
-            f"'est_cost' must be absent when cost_usd is 0; row: {rows[0]}"
-        )
+        assert "est_cost" not in rows[0], f"'est_cost' must be absent when cost_usd is 0; row: {rows[0]}"
 
 
 # ---------------------------------------------------------------------------
@@ -1022,8 +984,7 @@ class TestFormatJsonValidation:
             params={"format": "json"},
         )
         assert resp.status_code == 422, (
-            f"Expected 422 when project is missing for format=json; "
-            f"got HTTP {resp.status_code}"
+            f"Expected 422 when project is missing for format=json; " f"got HTTP {resp.status_code}"
         )
 
     def test_costs_format_json_without_project_returns_422(
@@ -1036,8 +997,7 @@ class TestFormatJsonValidation:
             params={"format": "json"},
         )
         assert resp.status_code == 422, (
-            f"Expected 422 when project is missing for format=json; "
-            f"got HTTP {resp.status_code}"
+            f"Expected 422 when project is missing for format=json; " f"got HTTP {resp.status_code}"
         )
 
     def test_metrics_format_json_case_insensitive(

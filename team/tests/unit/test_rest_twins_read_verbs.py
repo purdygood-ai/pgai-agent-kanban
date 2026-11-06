@@ -70,6 +70,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="rest-twins-read-verbs")
 
+
 _team_str = str(_TEAM_DIR)
 if _team_str not in sys.path:
     sys.path.insert(0, _team_str)
@@ -92,9 +93,7 @@ def _write_projects_cfg(root: pathlib.Path, projects: list[tuple[str, int]]) -> 
 def _write_task(project_dir: pathlib.Path, task_id: str, state: str) -> None:
     task_dir = project_dir / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "status.md").write_text(
-        f"## State\n{state}\n\n## Summary\nfixture task\n", encoding="utf-8"
-    )
+    (task_dir / "status.md").write_text(f"## State\n{state}\n\n## Summary\nfixture task\n", encoding="utf-8")
 
 
 def _env_for(kanban_root: pathlib.Path) -> dict[str, str]:
@@ -105,9 +104,7 @@ def _env_for(kanban_root: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def _make_client(
-    sandbox_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, *, in_process: bool = False
-):
+def _make_client(sandbox_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, *, in_process: bool = False):
     """Create a TestClient whose scripts resolve to the real team/ dev tree
     while a script's data resolves against sandbox_root (through
     PGAI_AGENT_KANBAN_ROOT_PATH).
@@ -134,9 +131,7 @@ def _init_local_repo(repo_path: pathlib.Path) -> None:
     """Initialise a minimal local git repo with one commit -- no remote."""
     repo_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True
-    )
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True)
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo_path, check=True)
     (repo_path / "README.md").write_text("fixture\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True)
@@ -151,9 +146,7 @@ def _build_verify_rc_state_kanban_root(
     root = parent / "kanban_root"
     (root / "logs").mkdir(parents=True, exist_ok=True)
     (root / "locks").mkdir(parents=True, exist_ok=True)
-    (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\nenabled=true\n", encoding="utf-8")
     proj = root / "projects" / project_name
     (proj / "tasks" / "queues").mkdir(parents=True, exist_ok=True)
     (proj / "project.cfg").write_text(
@@ -209,7 +202,10 @@ class TestVerdictsMatchesWhy:
 
         cli = subprocess.run(
             ["bash", str(_WHY_SH), "--project", proj],
-            capture_output=True, text=True, env=_env_for(tmp_path), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(tmp_path),
+            timeout=15,
         )
         assert cli.returncode == 0, cli.stdout + cli.stderr
         cli_line = cli.stdout.strip()
@@ -230,16 +226,17 @@ class TestVerdictsMatchesWhy:
         )
         assert "cause" in entry and entry["cause"], entry
 
-    def test_idle_project_verdict_matches_cli(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_idle_project_verdict_matches_cli(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         proj = "proj-idle"
         _write_projects_cfg(tmp_path, [(proj, 1)])
         (tmp_path / "projects" / proj / "tasks").mkdir(parents=True, exist_ok=True)
 
         cli = subprocess.run(
             ["bash", str(_WHY_SH), "--project", proj],
-            capture_output=True, text=True, env=_env_for(tmp_path), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(tmp_path),
+            timeout=15,
         )
         cli_line = cli.stdout.strip()
         assert "IDLE" in cli_line, cli_line
@@ -260,9 +257,7 @@ class TestEnvelopeShapeForEachEndpoint:
     """Every one of the five endpoints returns its documented envelope shape,
     and every shape carries a 'warnings' field (the universal contract)."""
 
-    def test_verdicts_envelope_shape(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_verdicts_envelope_shape(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         with _make_client(tmp_path, monkeypatch, in_process=True) as client:
             resp = client.get("/verdicts")
         assert resp.status_code == 200
@@ -270,23 +265,17 @@ class TestEnvelopeShapeForEachEndpoint:
         assert "verdicts" in body and isinstance(body["verdicts"], list)
         assert "warnings" in body and isinstance(body["warnings"], list)
 
-    def test_show_envelope_shape(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_show_envelope_shape(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         proj = "proj-show"
         _write_projects_cfg(tmp_path, [(proj, 1)])
         _write_task(tmp_path / "projects" / proj, "CODER-20260101-002-fixture", "BACKLOG")
         with _make_client(tmp_path, monkeypatch, in_process=True) as client:
-            resp = client.get(
-                "/show", params={"project": proj, "key": "CODER-20260101-002-fixture"}
-            )
+            resp = client.get("/show", params={"project": proj, "key": "CODER-20260101-002-fixture"})
         body = resp.json()
         for key in ("exit_code", "stdout", "stderr", "warnings"):
             assert key in body, f"'{key}' missing from GET /show envelope: {body!r}"
 
-    def test_show_queues_envelope_shape(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_show_queues_envelope_shape(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         proj = "proj-queues"
         _write_projects_cfg(tmp_path, [(proj, 1)])
         (tmp_path / "projects" / proj / "tasks" / "queues").mkdir(parents=True, exist_ok=True)
@@ -296,9 +285,7 @@ class TestEnvelopeShapeForEachEndpoint:
         for key in ("exit_code", "stdout", "stderr", "warnings"):
             assert key in body, f"'{key}' missing from GET /show-queues envelope: {body!r}"
 
-    def test_verify_rc_state_envelope_shape(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_verify_rc_state_envelope_shape(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Deliberately an unresolvable project: the envelope shape must be
         # present regardless of whether the underlying check succeeds.
         with _make_client(tmp_path, monkeypatch) as client:
@@ -308,9 +295,7 @@ class TestEnvelopeShapeForEachEndpoint:
             assert key in body, f"'{key}' missing from GET /verify-rc-state envelope: {body!r}"
         assert body["exit_code"] != 0
 
-    def test_release_locks_envelope_shape(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_release_locks_envelope_shape(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         with _make_client(tmp_path, monkeypatch) as client:
             resp = client.get("/release-locks")
         assert resp.status_code == 200
@@ -336,21 +321,20 @@ class TestRefusalMachineKeyParityAcrossSurfaces:
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _write_projects_cfg(tmp_path, [("registered-proj", 1)])
-        (tmp_path / "projects" / "registered-proj" / "tasks").mkdir(
-            parents=True, exist_ok=True
-        )
+        (tmp_path / "projects" / "registered-proj" / "tasks").mkdir(parents=True, exist_ok=True)
 
         cli = subprocess.run(
             ["bash", str(_SHOW_SH), "--project", "ghost-project", "--key", "anything"],
-            capture_output=True, text=True, env=_env_for(tmp_path), timeout=15,
+            capture_output=True,
+            text=True,
+            env=_env_for(tmp_path),
+            timeout=15,
         )
         assert cli.returncode != 0
         assert "project_resolve.not_found" in cli.stderr, cli.stderr
 
         with _make_client(tmp_path, monkeypatch, in_process=True) as client:
-            resp = client.get(
-                "/show", params={"project": "ghost-project", "key": "anything"}
-            )
+            resp = client.get("/show", params={"project": "ghost-project", "key": "anything"})
         body = resp.json()
         assert resp.status_code == 404
         assert "project_resolve.not_found" in body["stderr"], body
@@ -411,7 +395,10 @@ class TestEndpointsCallShippedImplementationNotAReDerivation:
             env = {**_env_for(tmp_path), "TERM": "dumb", "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp_dir)}
             result = subprocess.run(
                 ["bash", str(_SHOW_QUEUES_SH), "--project", proj],
-                capture_output=True, text=True, env=env, timeout=15,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=15,
             )
             assert result.returncode == 0, result.stderr
             return result.stdout
@@ -428,9 +415,7 @@ class TestEndpointsCallShippedImplementationNotAReDerivation:
         empty_http = _run_http(empty_temp)
         assert empty_http == empty_cli, "HTTP stdout must match CLI stdout byte-for-byte"
 
-        (queues_dir / "coder_backlog.md").write_text(
-            "- [A] CODER-20260101-004-fixture\n", encoding="utf-8"
-        )
+        (queues_dir / "coder_backlog.md").write_text("- [A] CODER-20260101-004-fixture\n", encoding="utf-8")
         _write_task(tmp_path / "projects" / proj, "CODER-20260101-004-fixture", "WORKING")
 
         populated_temp = tmp_path / "snapshot_cache_populated"
@@ -453,23 +438,23 @@ class TestEndpointsCallShippedImplementationNotAReDerivation:
         def _run_cli() -> tuple[int, str]:
             result = subprocess.run(
                 ["bash", str(_VERIFY_RC_STATE_SH), proj, "--verbose"],
-                capture_output=True, text=True, env=_env_for(kanban_root), timeout=30,
+                capture_output=True,
+                text=True,
+                env=_env_for(kanban_root),
+                timeout=30,
             )
             return result.returncode, result.stdout
 
         def _run_http() -> tuple[int, str]:
             with _make_client(kanban_root, monkeypatch, in_process=True) as client:
-                resp = client.get(
-                    "/verify-rc-state", params={"project": proj, "verbose": True}
-                )
+                resp = client.get("/verify-rc-state", params={"project": proj, "verbose": True})
             body = resp.json()
             return body["exit_code"], body["stdout"]
 
         # Well-formed release-state.md -> 0 errors.
         _write_release_state(
             kanban_root / "projects" / proj,
-            "# Release State\n\n## Active RC\nnone\n\n"
-            "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
+            "# Release State\n\n## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
         )
         clean_cli = _run_cli()
         clean_http = _run_http()
@@ -480,8 +465,7 @@ class TestEndpointsCallShippedImplementationNotAReDerivation:
         # exit code and different stdout.
         _write_release_state(
             kanban_root / "projects" / proj,
-            "# Release State\n\n## Active RC\nNONE\n\n"
-            "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
+            "# Release State\n\n## Active RC\nNONE\n\n" "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
         )
         broken_cli = _run_cli()
         broken_http = _run_http()
@@ -501,7 +485,10 @@ class TestEndpointsCallShippedImplementationNotAReDerivation:
         def _run_cli() -> str:
             result = subprocess.run(
                 ["bash", str(_RELEASE_LOCKS_SH)],
-                capture_output=True, text=True, env=_env_for(tmp_path), timeout=15,
+                capture_output=True,
+                text=True,
+                env=_env_for(tmp_path),
+                timeout=15,
             )
             assert result.returncode == 0, result.stderr
             return result.stdout
@@ -519,9 +506,7 @@ class TestEndpointsCallShippedImplementationNotAReDerivation:
 
         # Write a lock file with provenance -- output must change and match.
         lock_file = locks_dir / "fixture-lock.lock"
-        lock_file.write_text(
-            "holder=fixture-holder\npid=999999\nop=test\ntask=NONE\n", encoding="utf-8"
-        )
+        lock_file.write_text("holder=fixture-holder\npid=999999\nop=test\ntask=NONE\n", encoding="utf-8")
 
         populated_cli = _run_cli()
         populated_http = _run_http()

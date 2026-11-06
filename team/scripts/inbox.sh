@@ -14,8 +14,10 @@
 #           under "## Done", each in the file's own shape.
 #   answer  Record TEXT as the answer on an open entry. The entry stays open
 #           until it is closed; a second answer replaces the first. When the
-#           entry is about a bug or priority at needs-operator (its Source
-#           names the item), answering also returns that item to open.
+#           entry is about a bug or priority (its Source names the item), the
+#           answer, entry ID and time are also appended to the item's
+#           "## Operator Answers" section, and an item at needs-operator is
+#           returned to open.
 #   close   Move an open entry to Done, keeping its answer if it has one.
 #
 # --project is required: $PGAI_PROJECT_NAME never stands in for it, so an
@@ -44,9 +46,9 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
-_INBOX_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_INBOX_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _INBOX_LIB_DIR="${_INBOX_SCRIPT_DIR}/lib"
 _INBOX_SELF="$(printf '%q' "${_INBOX_SCRIPT_DIR}/inbox.sh")"
 
@@ -78,9 +80,10 @@ if argparse_has help; then
         "                                closed ones (## Done)." \
         "  answer --id ID --answer TEXT  Record an answer on an open entry; it stays" \
         "                                open until closed. A second answer replaces" \
-        "                                the first. Answering an entry about a" \
-        "                                needs-operator bug or priority also returns" \
-        "                                that item to open." \
+        "                                the first. Answering an entry about a bug" \
+        "                                or priority also appends the answer to the" \
+        "                                item's ## Operator Answers section and returns" \
+        "                                a needs-operator item to open." \
         "  close --id ID                 Move an open entry to Done, keeping its answer." \
         "" \
         "Examples:" \

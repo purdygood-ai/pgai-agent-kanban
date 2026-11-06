@@ -81,9 +81,7 @@ _AP7_SOURCE = (
     "import pathlib\n"
     "import subprocess\n"
     "\n"
-    "_HERE = pathlib.Path(__file__).parent\n"
-    + _GOLDEN_MARKER_LINE
-    + "\n"
+    "_HERE = pathlib.Path(__file__).parent\n" + _GOLDEN_MARKER_LINE + "\n"
     "\n"
     "def test_capture_matches_committed_surface():\n"
     + _INHERITED_ENV_LINE
@@ -115,8 +113,8 @@ _ARGV_STUB_PY = (
 _ARGV_STUB_SH = (
     "#!/usr/bin/env bash\n"
     "python3 -c 'import json, os, sys\n"
-    "with open(os.environ[\"GATE_LOG\"], \"a\", encoding=\"utf-8\") as fh:\n"
-    "    fh.write(json.dumps(sys.argv[1:]) + \"\\n\")' {name!r} \"$@\"\n"
+    'with open(os.environ["GATE_LOG"], "a", encoding="utf-8") as fh:\n'
+    '    fh.write(json.dumps(sys.argv[1:]) + "\\n")\' {name!r} "$@"\n'
 )
 
 
@@ -210,10 +208,7 @@ def _snapshot(paths: list[pathlib.Path]) -> dict[pathlib.Path, tuple[bytes, int]
 def _seed_certification_state(sandbox: _Sandbox, runner_name: str) -> list[pathlib.Path]:
     """Write the certification files and a green-ledger file; return their paths."""
     suite = _RUNNER_CONFIG[runner_name]["suite"]
-    ledger = (
-        sandbox.temp_dir / "projects" / "pgai-agent-kanban" / "green-ledger"
-        / "no-active-rc" / "ledger.jsonl"
-    )
+    ledger = sandbox.temp_dir / "projects" / "pgai-agent-kanban" / "green-ledger" / "no-active-rc" / "ledger.jsonl"
     seeded = [*_certification_files(sandbox, runner_name), ledger]
     for path in seeded:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,9 +227,7 @@ def _files_under(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_ap7_in_a_named_file_prints_file_and_line_and_fails_the_run(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_ap7_in_a_named_file_prints_file_and_line_and_fails_the_run(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     _install_real_lints(team)
     named = _write_test(team, runner_name, "test_named_golden.py", _AP7_SOURCE)
@@ -243,14 +236,11 @@ def test_ap7_in_a_named_file_prints_file_and_line_and_fails_the_run(
     result = sandbox.run(team, runner_name, "--files", _rel(runner_name, named.name))
 
     assert result.returncode == 1, _describe(result)
-    assert f"{named}:{_AP7_ENV_LINENO}: [AP7]" in result.stdout, (
-        "the AP7 finding must name the named file and the inherited-environment line\n"
-        + _describe(result)
-    )
+    assert (
+        f"{named}:{_AP7_ENV_LINENO}: [AP7]" in result.stdout
+    ), "the AP7 finding must name the named file and the inherited-environment line\n" + _describe(result)
     assert "1 passed" in result.stdout, "the named test itself passes; the lint alone fails the run"
-    assert "[targeted-lint] test_anti_patterns: finding(s) in the named files (1)" in result.stdout, (
-        _describe(result)
-    )
+    assert "[targeted-lint] test_anti_patterns: finding(s) in the named files (1)" in result.stdout, _describe(result)
     assert "[targeted-lint] skip_cites_real_bug: OK" in result.stdout, _describe(result)
     expected_key = f"{runner_name.removesuffix('.sh')}.targeted-file-lint-findings"
     assert f"error:   {expected_key}" in result.stderr.splitlines(), _describe(result)
@@ -261,9 +251,7 @@ def test_ap7_in_a_named_file_prints_file_and_line_and_fails_the_run(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_placeholder_skip_citation_in_a_named_file_fails_the_run(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_placeholder_skip_citation_in_a_named_file_fails_the_run(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     _install_real_lints(team)
     named = _write_test(team, runner_name, "test_named_skip.py", _PLACEHOLDER_SKIP_SOURCE)
@@ -296,10 +284,9 @@ def test_clean_named_file_passes_and_an_unnamed_sibling_finding_is_not_reported(
     assert "[targeted-lint] test_anti_patterns: OK" in result.stdout, _describe(result)
     assert "[targeted-lint] skip_cites_real_bug: OK" in result.stdout, _describe(result)
     assert "[AP7]" not in result.stdout, _describe(result)
-    assert sibling.name not in result.stdout + result.stderr, (
-        "a finding in a file the targeted run did not name must not be reported\n"
-        + _describe(result)
-    )
+    assert (
+        sibling.name not in result.stdout + result.stderr
+    ), "a finding in a file the targeted run did not name must not be reported\n" + _describe(result)
     assert "targeted-file-lint-findings" not in result.stderr, _describe(result)
 
 
@@ -310,7 +297,9 @@ def test_pytest_failure_keeps_its_own_verdict_when_a_lint_also_reports(
     team = _build_fixture(tmp_path, runner_name)
     _install_real_lints(team)
     named = _write_test(
-        team, runner_name, "test_named_failing_golden.py",
+        team,
+        runner_name,
+        "test_named_failing_golden.py",
         _AP7_SOURCE + "\n\ndef test_fails():\n    assert False\n",
     )
     sandbox = _Sandbox(tmp_path)
@@ -323,9 +312,7 @@ def test_pytest_failure_keeps_its_own_verdict_when_a_lint_also_reports(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_a_lint_that_exits_non_zero_fails_the_run_as_unchecked(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_a_lint_that_exits_non_zero_fails_the_run_as_unchecked(runner_name: str, tmp_path: pathlib.Path) -> None:
     """Both lints exit 0 on findings, so a non-zero exit means the named
     files were never checked -- the targeted run fails rather than passing
     them unchecked."""
@@ -350,9 +337,7 @@ def test_a_lint_that_exits_non_zero_fails_the_run_as_unchecked(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_hands_each_lint_exactly_the_named_paths(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_hands_each_lint_exactly_the_named_paths(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     _install_argv_stubs(team)
     second = _write_test(team, runner_name, "test_second.py", _CLEAN_SOURCE)
@@ -429,9 +414,7 @@ def test_targeted_run_leaves_findings_file_and_ledger_byte_identical(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_with_a_finding_creates_no_certification_state(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_with_a_finding_creates_no_certification_state(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     _install_real_lints(team)
     named = _write_test(team, runner_name, "test_named_golden.py", _AP7_SOURCE)
@@ -451,9 +434,7 @@ def test_targeted_run_with_a_finding_creates_no_certification_state(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_help_names_the_per_file_lints_a_targeted_run_applies(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_help_names_the_per_file_lints_a_targeted_run_applies(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
 

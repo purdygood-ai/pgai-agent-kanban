@@ -107,7 +107,7 @@ _status_section_re 'HEADING'
     )
     assert result.returncode == 0, _explain(result)
     assert result.stdout.startswith("(^HEADING"), _explain(result)
-    return result.stdout[len("(^HEADING"):]
+    return result.stdout[len("(^HEADING") :]
 
 
 def test_target_version_reader_ends_in_the_status_section_boundary(tmp_path: pathlib.Path) -> None:
@@ -136,7 +136,7 @@ def _open_doc_rewrite(tmp_path: pathlib.Path, release_state: str) -> str:
     return rs_path.read_text(encoding="utf-8")
 
 
-def _field(tmp_path: pathlib.Path, release_state: str, heading: str) -> "str | None":
+def _field(tmp_path: pathlib.Path, release_state: str, heading: str) -> str | None:
     """*heading*'s value in *release_state*, read through the one release-state
     reader as a section ending at the next '##' heading (None: absent)."""
     check = tmp_path / "written-release-state.md"
@@ -229,7 +229,13 @@ def _read_md_field(tmp_path: pathlib.Path, doc_text: str, field_pattern: str) ->
         "## Output Formats\nmarkdown\n\n## Artifact Name\n",
         "## Artifact Name\n\n---\n\n## Output Formats\nmarkdown\n",
     ],
-    ids=["blank-line-then-next", "next-heading-directly", "trailing-space-and-blank-lines", "last-section", "rule-then-next"],
+    ids=[
+        "blank-line-then-next",
+        "next-heading-directly",
+        "trailing-space-and-blank-lines",
+        "last-section",
+        "rule-then-next",
+    ],
 )
 def test_finalize_empty_artifact_name_reads_empty_not_the_next_section(tmp_path: pathlib.Path, doc_text: str) -> None:
     assert _read_md_field(tmp_path, doc_text, r"Artifact\s*Name") == ""

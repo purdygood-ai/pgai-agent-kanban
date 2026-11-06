@@ -50,7 +50,7 @@ import dataclasses
 import os
 import pathlib
 import re
-from typing import Optional, Union
+from typing import Union
 
 __all__ = ["CATEGORY_RESTORE", "LEDGER_FIELDS", "LedgerRow", "append_row", "read_rows"]
 
@@ -89,7 +89,7 @@ class LedgerRow:
         )
 
     @classmethod
-    def parse(cls, line: str) -> Optional["LedgerRow"]:
+    def parse(cls, line: str) -> LedgerRow | None:
         """The row *line* holds, or ``None`` when it is not six tab-separated fields."""
         fields = line.rstrip().split("\t")
         if len(fields) != len(LEDGER_FIELDS) or not all(field.strip() for field in fields):

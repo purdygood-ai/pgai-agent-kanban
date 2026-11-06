@@ -278,7 +278,9 @@ def test_marker_verbs_require_their_arguments(tmp_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_mark_backlog(backlog: pathlib.Path, key: str, marker: str, temp_dir: pathlib.Path) -> subprocess.CompletedProcess:
+def _run_mark_backlog(
+    backlog: pathlib.Path, key: str, marker: str, temp_dir: pathlib.Path
+) -> subprocess.CompletedProcess:
     script = textwrap.dedent(f"""\
         set -euo pipefail
         export PGAI_AGENT_KANBAN_TEMP_DIR="{temp_dir}"
@@ -347,11 +349,17 @@ _CACHE_HEAD = "# Backlog Cache\n\n## Queue\n\n"
         ("# Backlog Cache", "# Backlog Cache\n\n## Queue\n\n- [x] BUG-1\n"),
     ],
     ids=[
-        "missing-file", "pending-line", "every-duplicate", "added-after-entries",
-        "prefix-key-left-alone", "added-before-next-section", "no-queue-section", "no-queue-no-newline",
+        "missing-file",
+        "pending-line",
+        "every-duplicate",
+        "added-after-entries",
+        "prefix-key-left-alone",
+        "added-before-next-section",
+        "no-queue-section",
+        "no-queue-no-newline",
     ],
 )
-def test_ensure_marker_rewrites_or_adds_the_line(before: "str | None", after: str) -> None:
+def test_ensure_marker_rewrites_or_adds_the_line(before: str | None, after: str) -> None:
     assert ensure_marker(before, "BUG-1", "x") == after
 
 

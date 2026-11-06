@@ -54,9 +54,7 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     """A sandbox kanban root with one registered project directory."""
     sandbox = tmp_path / "root"
     (sandbox / "projects" / _PROJECT).mkdir(parents=True)
-    (sandbox / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8"
-    )
+    (sandbox / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8")
     return sandbox
 
 
@@ -251,7 +249,13 @@ def test_project_name_variable_never_stands_in_for_project(root, tmp_path):
     _write(root)
     before = _snapshot(_inbox_file(root))
     result = _run(
-        root, tmp_path, "answer", "--id", "1", "--answer", "keep",
+        root,
+        tmp_path,
+        "answer",
+        "--id",
+        "1",
+        "--answer",
+        "keep",
         extra_env={"PGAI_PROJECT_NAME": _PROJECT},
     )
     assert result.returncode == 2, _diagnostic(result)
@@ -404,8 +408,7 @@ def test_script_reaches_the_module_by_the_function_each_command_runs():
     """The census row's impl names answer_entry; the script must call the
     module by that name (and list/close by theirs) through pp_run_ops."""
     code = "\n".join(
-        line for line in _SCRIPT.read_text(encoding="utf-8").splitlines()
-        if not line.lstrip().startswith("#")
+        line for line in _SCRIPT.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")
     )
     for function in ("read_inbox", "answer_entry", "close_entry"):
         assert f"pp_run_ops pgai_agent_kanban.overwatch.inbox {function}" in code

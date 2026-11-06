@@ -11,10 +11,13 @@
 # (single source of truth via shared constant).
 #
 # Pane identification strategy: the queues pane runs
-#   watch ... show-multi.sh --mode queues ...
+#   cadence-loop.sh --interval N -- show-multi.sh --mode queues ...
 # sent via tmux send-keys.  Because send-keys does not set pane_start_command, this
 # script locates the queues pane by inspecting the child process tree of each pane
 # (via pane_pid + ps) for a process whose arguments contain "--mode queues".
+# cadence-loop.sh is the pane shell's direct child and carries that marker in
+# its own arguments; a grandchild search also covers a wrapper whose own
+# arguments lack it.
 #
 # Usage:
 #   bash verify-window0-geometry.sh <SESSION_NAME> [--kanban-root <path>]
@@ -37,27 +40,19 @@
 # The right-column width is a shared constant defined in lib/dashboard_constants.sh.
 
 set -euo pipefail
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory — needed to source lib files
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source shared dashboard constants (PGAI_WINDOW0_RIGHT_COL_PCT)
 # shellcheck source=../lib/dashboard_constants.sh
@@ -123,11 +118,13 @@ echo ""
 # ---------------------------------------------------------------------------
 # Locate the queues pane by inspecting child process args for '--mode queues'
 # ---------------------------------------------------------------------------
-# The dashboard sends 'watch ... show-multi.sh --mode queues ...' via send-keys.
-# Since pane_start_command is empty for shell panes, we resolve via pane_pid:
+# The dashboard sends 'cadence-loop.sh --interval N -- show-multi.sh --mode queues ...'
+# via send-keys. Since pane_start_command is empty for shell panes, we resolve via pane_pid:
 #   - pane_pid is the shell (bash) PID
-#   - its child processes include the running 'watch' invocation
-#   - we search all descendants for '--mode queues' in their argument list
+#   - its direct child is the running cadence-loop.sh, whose own arguments
+#     already contain '--mode queues', so the direct-child check finds it
+#   - the grandchild search below is a backstop for a wrapper between the
+#     shell and the queues process whose own arguments lack '--mode queues'
 
 QUEUES_LEFT=""
 QUEUES_WIDTH=""
@@ -141,15 +138,25 @@ while IFS=' ' read -r idx left width ppid; do
         QUEUES_INDEX="$idx"
         break
     fi
-    # Also check grandchildren (watch spawns a child process)
-    while IFS= read -r child_pid; do
+    # Also check grandchildren, for a wrapper child whose own arguments lack
+    # '--mode queues' but whose child carries it. The child list
+    # is captured first, never read through a process substitution: the
+    # `break 2` below leaves the loop before such a producer reached EOF,
+    # and it would outlive the loop to be left for PID 1 to reap. A command
+    # substitution is waited for before the loop starts.
+    # ps right-aligns each PID in a column as wide as the largest possible
+    # PID, so a narrower PID arrives with leading spaces, and `ps --ppid`
+    # refuses a padded value. `read` with the default IFS trims them.
+    child_pids="$(ps --ppid "$ppid" -o pid= 2>/dev/null || true)"
+    while read -r child_pid; do
+        [[ -n "$child_pid" ]] || continue
         if grep -q -- '--mode queues' <<< "$(ps --ppid "$child_pid" -o args= 2>/dev/null)"; then
             QUEUES_LEFT="$left"
             QUEUES_WIDTH="$width"
             QUEUES_INDEX="$idx"
             break 2
         fi
-    done < <(ps --ppid "$ppid" -o pid= 2>/dev/null || true)
+    done <<< "$child_pids"
 done <<< "$PANE_DATA"
 
 if [[ -z "$QUEUES_LEFT" ]]; then

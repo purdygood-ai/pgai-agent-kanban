@@ -32,9 +32,7 @@ import pathlib
 import stat
 import subprocess
 
-import pytest
 
-from tests.unit.shell_harness import run_bash
 
 # Paths relative to team/ (pytest cwd when run via run-unit-tests.sh)
 _ENV_BOOTSTRAP_SH = pathlib.Path("scripts/lib/env_bootstrap.sh")
@@ -78,9 +76,7 @@ def _make_synthetic_root(
     prelude_text = _ENV_BOOTSTRAP_SH.read_text(encoding="utf-8")
     prelude_dest = lib_dir / "env_bootstrap.sh"
     prelude_dest.write_text(prelude_text, encoding="utf-8")
-    prelude_dest.chmod(
-        stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
-    )
+    prelude_dest.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 
     if with_shell_env:
         # shell-env exports PGAI_AGENT_KANBAN_ROOT_PATH to the root directory.
@@ -132,7 +128,7 @@ def _write_cron_caller(
         "# --- Bootstrap: delegate root absolutization to env_bootstrap.sh ---\n"
         "# (This is the exact code from wake_common.sh's bootstrap site.)\n"
         'export PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-$TEAM_ROOT}"\n'
-        '# shellcheck source=../lib/env_bootstrap.sh\n'
+        "# shellcheck source=../lib/env_bootstrap.sh\n"
         'source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"\n'
         "\n"
         "# --- Source optional shell-env for PATH and Python venv activation ---\n"
@@ -143,9 +139,7 @@ def _write_cron_caller(
 
     caller_path = script_dir / "caller.sh"
     caller_path.write_text(caller_text, encoding="utf-8")
-    caller_path.chmod(
-        stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
-    )
+    caller_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
     return caller_path
 
 
@@ -173,32 +167,28 @@ def test_cron_style_bootstrap_resolves_root(tmp_path: pathlib.Path) -> None:
 
     # Cron-style env: only PATH and HOME; PGAI_AGENT_KANBAN_ROOT_PATH NOT set.
     result = subprocess.run(
-        ["env", "-i",
-         f"HOME={os.environ.get('HOME', '/root')}",
-         f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
-         "bash", str(caller)],
+        [
+            "env",
+            "-i",
+            f"HOME={os.environ.get('HOME', '/root')}",
+            f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
+            "bash",
+            str(caller),
+        ],
         capture_output=True,
         text=True,
         timeout=15,
     )
 
     assert result.returncode == 0, (
-        f"Bootstrap failed under cron-style env:\n"
-        f"stdout: {result.stdout!r}\n"
-        f"stderr: {result.stderr!r}"
+        f"Bootstrap failed under cron-style env:\n" f"stdout: {result.stdout!r}\n" f"stderr: {result.stderr!r}"
     )
-    assert "ROOT=" in result.stdout, (
-        f"PGAI_AGENT_KANBAN_ROOT_PATH was not echoed:\nstdout: {result.stdout!r}"
-    )
+    assert "ROOT=" in result.stdout, f"PGAI_AGENT_KANBAN_ROOT_PATH was not echoed:\nstdout: {result.stdout!r}"
     exported_root = result.stdout.strip().removeprefix("ROOT=")
-    assert pathlib.Path(exported_root).is_absolute(), (
-        f"Exported root is not absolute: {exported_root!r}"
-    )
+    assert pathlib.Path(exported_root).is_absolute(), f"Exported root is not absolute: {exported_root!r}"
     # The exported root must point to the synthetic kanban root.
     assert exported_root == str(root.resolve()), (
-        f"Wrong root exported.\n"
-        f"Expected: {root.resolve()!s}\n"
-        f"Got:      {exported_root!r}"
+        f"Wrong root exported.\n" f"Expected: {root.resolve()!s}\n" f"Got:      {exported_root!r}"
     )
 
 
@@ -213,21 +203,21 @@ def test_cron_style_bootstrap_silent_on_success(tmp_path: pathlib.Path) -> None:
     caller = _write_cron_caller(root)
 
     result = subprocess.run(
-        ["env", "-i",
-         f"HOME={os.environ.get('HOME', '/root')}",
-         f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
-         "bash", str(caller)],
+        [
+            "env",
+            "-i",
+            f"HOME={os.environ.get('HOME', '/root')}",
+            f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
+            "bash",
+            str(caller),
+        ],
         capture_output=True,
         text=True,
         timeout=15,
     )
 
-    assert result.returncode == 0, (
-        f"Bootstrap failed:\nstderr: {result.stderr!r}"
-    )
-    assert result.stdout == "", (
-        f"Bootstrap emitted unexpected stdout:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"Bootstrap failed:\nstderr: {result.stderr!r}"
+    assert result.stdout == "", f"Bootstrap emitted unexpected stdout:\n{result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -250,19 +240,21 @@ def test_explicit_env_wins_over_default_in_bootstrap(tmp_path: pathlib.Path) -> 
     operator_root = str(root)  # use the real root so realpath works
 
     result = subprocess.run(
-        ["env", "-i",
-         f"HOME={os.environ.get('HOME', '/root')}",
-         f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
-         f"PGAI_AGENT_KANBAN_ROOT_PATH={operator_root}",
-         "bash", str(caller)],
+        [
+            "env",
+            "-i",
+            f"HOME={os.environ.get('HOME', '/root')}",
+            f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
+            f"PGAI_AGENT_KANBAN_ROOT_PATH={operator_root}",
+            "bash",
+            str(caller),
+        ],
         capture_output=True,
         text=True,
         timeout=15,
     )
 
-    assert result.returncode == 0, (
-        f"Bootstrap failed with explicit env:\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"Bootstrap failed with explicit env:\nstderr: {result.stderr!r}"
     exported_root = result.stdout.strip().removeprefix("ROOT=")
     assert exported_root == str(pathlib.Path(operator_root).resolve()), (
         f"Operator root was not preserved.\n"
@@ -288,28 +280,27 @@ def test_bootstrap_succeeds_without_shell_env(tmp_path: pathlib.Path) -> None:
     caller = _write_cron_caller(root, extra_lines='echo "ROOT=${PGAI_AGENT_KANBAN_ROOT_PATH}"')
 
     result = subprocess.run(
-        ["env", "-i",
-         f"HOME={os.environ.get('HOME', '/root')}",
-         f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
-         "bash", str(caller)],
+        [
+            "env",
+            "-i",
+            f"HOME={os.environ.get('HOME', '/root')}",
+            f"PATH={os.environ.get('PATH', '/usr/local/bin:/usr/bin:/bin')}",
+            "bash",
+            str(caller),
+        ],
         capture_output=True,
         text=True,
         timeout=15,
     )
 
     assert result.returncode == 0, (
-        f"Bootstrap failed without shell-env:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"Bootstrap failed without shell-env:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     exported_root = result.stdout.strip().removeprefix("ROOT=")
-    assert pathlib.Path(exported_root).is_absolute(), (
-        f"Exported root is not absolute: {exported_root!r}"
-    )
+    assert pathlib.Path(exported_root).is_absolute(), f"Exported root is not absolute: {exported_root!r}"
     # Root must match the synthetic root (the hardcoded default in the caller).
     assert exported_root == str(root.resolve()), (
-        f"Wrong root when shell-env absent.\n"
-        f"Expected: {root.resolve()!s}\n"
-        f"Got:      {exported_root!r}"
+        f"Wrong root when shell-env absent.\n" f"Expected: {root.resolve()!s}\n" f"Got:      {exported_root!r}"
     )
 
 
@@ -360,9 +351,7 @@ def test_wake_common_pre_exports_before_bootstrap() -> None:
     # Verify pre-export appears before the `source` call to env_bootstrap.sh.
     # Use the `source` line rather than a comment reference to env_bootstrap.sh.
     source_line = 'source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"'
-    assert source_line in content, (
-        f"{_WAKE_BOOTSTRAP_SH} does not contain the expected source line: {source_line!r}"
-    )
+    assert source_line in content, f"{_WAKE_BOOTSTRAP_SH} does not contain the expected source line: {source_line!r}"
     pre_export_pos = content.index(pre_export_marker)
     bootstrap_pos = content.index(source_line)
     assert pre_export_pos < bootstrap_pos, (
@@ -387,9 +376,7 @@ def test_wake_common_still_sources_shell_env_after_bootstrap() -> None:
     # Both the env_bootstrap.sh source call and the shell-env source must be present.
     source_bootstrap = 'source "${SCRIPT_DIR}/../lib/env_bootstrap.sh"'
     source_shell_env = 'source "$TEAM_ROOT/shell-env"'
-    assert source_bootstrap in content, (
-        f"{_WAKE_BOOTSTRAP_SH} does not contain the env_bootstrap.sh source call."
-    )
+    assert source_bootstrap in content, f"{_WAKE_BOOTSTRAP_SH} does not contain the env_bootstrap.sh source call."
     assert source_shell_env in content, (
         f"{_WAKE_BOOTSTRAP_SH} does not source shell-env. "
         "Shell-env is still required for PATH and venv activation even after "

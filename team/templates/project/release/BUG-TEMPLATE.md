@@ -49,7 +49,7 @@ Steps to reproduce:
 Optional. Speculative theory about cause. Do not propose a fix here.
 
 ## Acceptance
-<!-- Name the specific test(s) or command that prove the fix. Do not name a full gated runner; TESTER runs those once per RC.
+<!-- Name the behaviour and the command that proves it; where a test is the proof, name the module's existing test file (the fix extends it; a new test file is for a new source module only). Do not name a full gated runner; TESTER runs those once per RC.
      For a flaky-test fix: the proof is a test whose verdict does not depend on test order, host load or wall-clock timing; assert on behaviour, CPU time or progress, not on elapsed time. Do not generate CPU load on the host to reproduce or prove it. -->
 
 -

@@ -220,7 +220,7 @@ def _firings(recorded: list[str]) -> list[list[str]]:
     while index < len(recorded):
         current.append(recorded[index])
         if recorded[index] == "end_of_chain_release":
-            current.extend(recorded[index + 1:index + 1 + _WAITERS])
+            current.extend(recorded[index + 1 : index + 1 + _WAITERS])
             firings.append(current)
             current = []
             index += 1 + _WAITERS
@@ -233,13 +233,13 @@ def _firings(recorded: list[str]) -> list[list[str]]:
 
 def _assert_other_chains_waited(firing: list[str]) -> None:
     release = firing.index("end_of_chain_release")
-    after = firing[release + 1:]
-    assert sorted(after) == sorted(f"other-chain-{i}" for i in range(1, _WAITERS + 1)), (
-        f"every queued chain must take the lock once, after the end-of-chain release; firing: {firing}"
-    )
-    assert not any(line.startswith("other-chain-") for line in firing[:release]), (
-        f"no queued chain may take the lock while discovery runs; firing: {firing}"
-    )
+    after = firing[release + 1 :]
+    assert sorted(after) == sorted(
+        f"other-chain-{i}" for i in range(1, _WAITERS + 1)
+    ), f"every queued chain must take the lock once, after the end-of-chain release; firing: {firing}"
+    assert not any(
+        line.startswith("other-chain-") for line in firing[:release]
+    ), f"no queued chain may take the lock while discovery runs; firing: {firing}"
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +257,9 @@ def test_idle_chain_bundles_then_queues_pm_under_the_kept_chain_lock(two_project
     assert result.returncode == 0, result.stderr
     assert result.stdout.count(f"queued_waiters={_WAITERS}") == 2, result.stdout
     assert result.stdout.count("discovery_status=produced_work") == 2, result.stdout + result.stderr
-    assert not [line for line in recorded if line.startswith("second pgai_lock_acquire")], (
-        f"the chain path must not acquire the repo lock a second time; record: {recorded}"
-    )
+    assert not [
+        line for line in recorded if line.startswith("second pgai_lock_acquire")
+    ], f"the chain path must not acquire the repo lock a second time; record: {recorded}"
     assert "repo lock not available for the discovery write" not in result.stderr
     assert "repo lock released" not in result.stderr, "the PM wake must not let go of its chain lock for discovery"
     assert result.stderr.count(_KEPT_LINE) == 2, result.stderr
@@ -269,7 +269,9 @@ def test_idle_chain_bundles_then_queues_pm_under_the_kept_chain_lock(two_project
     # Firing 1: the bug is bundled, every write under the chain's hold.
     writes = [line for line in first if line.startswith("_disc_")]
     assert {line.split()[0] for line in writes} == {
-        "_disc_write_bundle", "_disc_set_status_field", "_disc_mark_cache_bundled",
+        "_disc_write_bundle",
+        "_disc_set_status_field",
+        "_disc_mark_cache_bundled",
     }, first
     assert all(line.endswith(" HELD") for line in writes), first
     assert "process_one_task HELD" in first, first
@@ -315,7 +317,9 @@ def test_busy_chain_exits_before_any_scan_and_releases_at_end_of_chain(two_proje
     assert "active ceilings" not in result.stderr
     assert "discovery_step_" not in result.stderr, "no step may scan on a busy chain"
     assert "post-discovery iteration" not in result.stderr
-    assert not [line for line in recorded if line.startswith(("_disc_", "second pgai_lock_acquire", "process_one_task"))], recorded
+    assert not [
+        line for line in recorded if line.startswith(("_disc_", "second pgai_lock_acquire", "process_one_task"))
+    ], recorded
     assert "after_discovery HELD" in recorded, "the chain keeps its lock until the end-of-chain release"
     _assert_other_chains_waited(recorded)
     assert _bundles(root) == []
@@ -339,7 +343,12 @@ def test_write_hook_refuses_when_the_chain_no_longer_owns_the_lock(two_project_r
     assert "lock_lost=true" in result.stdout
     assert "lock.provenance.reverify_lost" in result.stderr
     assert f"project {_PROJECT}: discovery write: repo lock ownership lost; not writing" in result.stderr
-    assert "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake" in result.stderr
-    assert not [line for line in recorded if line.startswith(("_disc_", "second pgai_lock_acquire", "process_one_task"))], recorded
+    assert (
+        "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake"
+        in result.stderr
+    )
+    assert not [
+        line for line in recorded if line.startswith(("_disc_", "second pgai_lock_acquire", "process_one_task"))
+    ], recorded
     assert _bundles(root) == []
     assert "## Status\nopen" in bug.read_text(encoding="utf-8")

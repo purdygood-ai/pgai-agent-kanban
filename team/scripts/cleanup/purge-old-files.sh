@@ -74,7 +74,7 @@ if [[ ! -d "$KANBAN_ROOT" ]]; then
 fi
 
 # Resolve script directory for sourcing helpers.
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source per-category helpers.
 # shellcheck source=lib/purge-helpers.sh
@@ -95,7 +95,7 @@ set -euo pipefail
 # Usage
 # ---------------------------------------------------------------------------
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 
 # Usage text as data (per lib/script_common.sh's print_usage_and_exit contract).
 _USAGE_TEXT="$(cat <<'EOF'

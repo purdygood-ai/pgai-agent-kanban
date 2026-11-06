@@ -18,10 +18,13 @@ Functions / behaviors under test:
   - scan_tasks: walk tasks directory, return records
   - aggregate_rc: full RC rollup written to metrics/rc/<v>.json
   - aggregate_day: per-day rollup written to metrics/day/<day>.json
+  - day parity: aggregate_day and pm-agent/aggregate_tokens.build_day_rollup
+    put a record on the same UTC day (Z, +HH:MM, -HH:MM, padded, no offset)
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import pathlib
 import sys
@@ -38,7 +41,6 @@ if str(_LIB_PATH) not in sys.path:
     sys.path.insert(0, str(_LIB_PATH))
 
 import metrics_aggregator as ma  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -82,9 +84,7 @@ def _make_tokens_json(
     if elapsed_seconds != "__unset__":
         tokens["elapsed_seconds"] = elapsed_seconds
 
-    (task_dir / "artifacts" / "tokens.json").write_text(
-        json.dumps(tokens), encoding="utf-8"
-    )
+    (task_dir / "artifacts" / "tokens.json").write_text(json.dumps(tokens), encoding="utf-8")
 
     if rc_version is not None:
         (task_dir / "README.md").write_text(
@@ -329,9 +329,7 @@ def test_read_rc_version_extracts_version_from_readme(tmp_path: pathlib.Path) ->
     """read_rc_version returns the '## Release Version' value from README.md."""
     task_dir = tmp_path / "my-task"
     task_dir.mkdir()
-    (task_dir / "README.md").write_text(
-        "# Task\n\n## Release Version\nv0.24.7\n", encoding="utf-8"
-    )
+    (task_dir / "README.md").write_text("# Task\n\n## Release Version\nv0.24.7\n", encoding="utf-8")
     assert ma.read_rc_version(task_dir) == "v0.24.7"
 
 
@@ -359,28 +357,36 @@ def test_read_agent_uses_readme_role_field(tmp_path: pathlib.Path) -> None:
     """read_agent falls back to README.md ## Role when status.md is absent."""
     task_dir = tmp_path / "CODER-20260101-001-task"
     task_dir.mkdir()
-    (task_dir / "README.md").write_text(
-        "# Task\n\n## Role\nCODER\n", encoding="utf-8"
-    )
+    (task_dir / "README.md").write_text("# Task\n\n## Role\nCODER\n", encoding="utf-8")
     assert ma.read_agent(task_dir) == "coder"
 
 
 def test_read_agent_falls_back_to_task_name_when_no_files(tmp_path: pathlib.Path) -> None:
-    """read_agent falls back to parsing the task folder name when no files exist.
-
-    The code does parts[1].lower() on the split task name, which for the format
-    ROLE-DATE-SEQ-slug returns the DATE component (legacy CLAUDE-ROLE-DATE format
-    returned the ROLE).  The test asserts the actual behavior rather than assuming
-    the format.
-    """
+    """read_agent falls back to parsing the task folder name when no files exist."""
     task_dir = tmp_path / "PM-20260101-001-task"
     task_dir.mkdir()
     # No README.md or status.md
-    # The fallback splits on '-' and returns parts[1], which is the date "20260101"
     result = ma.read_agent(task_dir)
     # The function always returns a non-empty string in this case
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+@pytest.mark.parametrize(
+    "task_name, role",
+    [
+        ("PM-20260101-001-task", "pm"),
+        ("TESTER-20260101-002-verify", "tester"),
+        ("CLAUDE-WRITER-20260101-003-docs", "writer"),
+    ],
+)
+def test_read_agent_reads_the_role_from_the_task_name_in_either_id_form(
+    tmp_path: pathlib.Path, task_name: str, role: str
+) -> None:
+    """The task-name fallback reads ROLE-DATE-SEQ-slug and the legacy CLAUDE-ROLE-DATE-SEQ-slug."""
+    task_dir = tmp_path / task_name
+    task_dir.mkdir()
+    assert ma.read_agent(task_dir) == role
 
 
 def test_read_agent_returns_unknown_for_unrecognisable_name(tmp_path: pathlib.Path) -> None:
@@ -481,6 +487,7 @@ def test_aggregate_rc_payload_contains_expected_fields(tmp_path: pathlib.Path) -
         dest = tasks_dir / task_dir.name
         if not dest.exists():
             import shutil
+
             shutil.copytree(task_dir, dest)
 
     out_path = ma.aggregate_rc("myproject", "v0.24.7", kanban_root=tmp_path)
@@ -504,9 +511,17 @@ def test_aggregate_rc_filters_to_matching_rc_version(tmp_path: pathlib.Path) -> 
     t1 = tasks_dir / "CODER-001"
     (t1 / "artifacts").mkdir(parents=True)
     (t1 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 100, "output_tokens": 50,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T10:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T10:00:00",
+            }
+        ),
         encoding="utf-8",
     )
     (t1 / "README.md").write_text("## Release Version\nv0.24.7\n## Role\ncoder\n", encoding="utf-8")
@@ -515,9 +530,17 @@ def test_aggregate_rc_filters_to_matching_rc_version(tmp_path: pathlib.Path) -> 
     t2 = tasks_dir / "CODER-002"
     (t2 / "artifacts").mkdir(parents=True)
     (t2 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 999, "output_tokens": 999,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T11:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 999,
+                "output_tokens": 999,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T11:00:00",
+            }
+        ),
         encoding="utf-8",
     )
     (t2 / "README.md").write_text("## Release Version\nv0.99.0\n## Role\ncoder\n", encoding="utf-8")
@@ -537,9 +560,17 @@ def test_aggregate_rc_is_idempotent(tmp_path: pathlib.Path) -> None:
     t1 = tasks_dir / "CODER-001"
     (t1 / "artifacts").mkdir(parents=True)
     (t1 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 50, "output_tokens": 25,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T10:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 50,
+                "output_tokens": 25,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T10:00:00",
+            }
+        ),
         encoding="utf-8",
     )
     (t1 / "README.md").write_text("## Release Version\nv0.24.7\n## Role\ncoder\n", encoding="utf-8")
@@ -556,9 +587,17 @@ def _seed_one_rc_task(tmp_path: pathlib.Path) -> None:
     task = proj / "tasks" / "CODER-001"
     (task / "artifacts").mkdir(parents=True)
     (task / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 50, "output_tokens": 25,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T10:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 50,
+                "output_tokens": 25,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T10:00:00",
+            }
+        ),
         encoding="utf-8",
     )
     (task / "README.md").write_text("## Release Version\nv0.24.7\n## Role\ncoder\n", encoding="utf-8")
@@ -612,12 +651,9 @@ def test_aggregate_rc_computes_per_agent_wall_seconds_and_task_count(
     The two agents' figures must differ (no shared RC-level number).
     """
     proj = _make_project_dir(tmp_path, "proj")
-    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
-                       elapsed_seconds=200)
-    _make_tokens_json(tmp_path, "CODER-002", rc_version="v0.24.7", role="coder",
-                       elapsed_seconds=400)
-    _make_tokens_json(tmp_path, "TESTER-001", rc_version="v0.24.7", role="tester",
-                       elapsed_seconds=90)
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder", elapsed_seconds=200)
+    _make_tokens_json(tmp_path, "CODER-002", rc_version="v0.24.7", role="coder", elapsed_seconds=400)
+    _make_tokens_json(tmp_path, "TESTER-001", rc_version="v0.24.7", role="tester", elapsed_seconds=90)
     (proj / "tasks").symlink_to(tmp_path / "tasks")
 
     out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
@@ -636,16 +672,13 @@ def test_aggregate_rc_skips_tasks_with_missing_or_non_numeric_elapsed_seconds(
     sum nor the task_count -- no exception, no zero entry for that task."""
     proj = _make_project_dir(tmp_path, "proj")
     # Valid: contributes 300s.
-    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
-                       elapsed_seconds=300)
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder", elapsed_seconds=300)
     # Missing elapsed_seconds entirely.
     _make_tokens_json(tmp_path, "CODER-002", rc_version="v0.24.7", role="coder")
     # Non-numeric elapsed_seconds.
-    _make_tokens_json(tmp_path, "CODER-003", rc_version="v0.24.7", role="coder",
-                       elapsed_seconds="not-a-number")
+    _make_tokens_json(tmp_path, "CODER-003", rc_version="v0.24.7", role="coder", elapsed_seconds="not-a-number")
     # Agent with ONLY a missing/non-numeric value -- must not appear at all.
-    _make_tokens_json(tmp_path, "PM-001", rc_version="v0.24.7", role="pm",
-                       elapsed_seconds=None)
+    _make_tokens_json(tmp_path, "PM-001", rc_version="v0.24.7", role="pm", elapsed_seconds=None)
     (proj / "tasks").symlink_to(tmp_path / "tasks")
 
     out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
@@ -666,8 +699,15 @@ def test_aggregate_rc_wall_field_does_not_change_existing_fields(
     """Adding wall.by_agent leaves wall_time_minutes, tasks.by_agent, and
     tokens.by_agent exactly as they were computed before this field existed."""
     proj = _make_project_dir(tmp_path, "proj")
-    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
-                       input_tokens=111, output_tokens=22, elapsed_seconds=500)
+    _make_tokens_json(
+        tmp_path,
+        "CODER-001",
+        rc_version="v0.24.7",
+        role="coder",
+        input_tokens=111,
+        output_tokens=22,
+        elapsed_seconds=500,
+    )
     (proj / "tasks").symlink_to(tmp_path / "tasks")
 
     out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
@@ -690,11 +730,18 @@ def test_aggregate_rc_overwrites_pre_existing_rollup_missing_wall_field(
     out_dir = proj / "metrics" / "rc"
     out_dir.mkdir(parents=True)
     old_payload = {
-        "rc": "v0.24.7", "project": "proj", "workflow_type": "release",
-        "opened_at": None, "closed_at": None, "wall_time_minutes": None,
-        "outcome": "unknown", "tasks": {"total": 0, "by_agent": {}},
+        "rc": "v0.24.7",
+        "project": "proj",
+        "workflow_type": "release",
+        "opened_at": None,
+        "closed_at": None,
+        "wall_time_minutes": None,
+        "outcome": "unknown",
+        "tasks": {"total": 0, "by_agent": {}},
         "tokens": {"total": ma._zero_token_entry(), "by_model": {}, "by_agent": {}},
-        "bugs_filed_during_verification": [], "operator_interventions": [], "input_files": {},
+        "bugs_filed_during_verification": [],
+        "operator_interventions": [],
+        "input_files": {},
     }
     old_path = out_dir / "v0.24.7.json"
     old_path.write_text(json.dumps(old_payload), encoding="utf-8")
@@ -704,8 +751,7 @@ def test_aggregate_rc_overwrites_pre_existing_rollup_missing_wall_field(
     reloaded = json.loads(old_path.read_text(encoding="utf-8"))
     assert "wall" not in reloaded
 
-    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder",
-                       elapsed_seconds=42)
+    _make_tokens_json(tmp_path, "CODER-001", rc_version="v0.24.7", role="coder", elapsed_seconds=42)
     (proj / "tasks").symlink_to(tmp_path / "tasks")
 
     out_path = ma.aggregate_rc("proj", "v0.24.7", kanban_root=tmp_path)
@@ -727,9 +773,17 @@ def test_aggregate_day_writes_json_file(tmp_path: pathlib.Path) -> None:
     t1 = tasks_dir / "CODER-001"
     (t1 / "artifacts").mkdir(parents=True)
     (t1 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 100, "output_tokens": 50,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T12:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T12:00:00",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -747,9 +801,17 @@ def test_aggregate_day_payload_contains_expected_fields(tmp_path: pathlib.Path) 
     t1 = tasks_dir / "CODER-001"
     (t1 / "artifacts").mkdir(parents=True)
     (t1 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 300, "output_tokens": 150,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T09:30:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 300,
+                "output_tokens": 150,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T09:30:00",
+            }
+        ),
         encoding="utf-8",
     )
     (t1 / "README.md").write_text("## Release Version\nv0.24.7\n## Role\ncoder\n", encoding="utf-8")
@@ -773,9 +835,17 @@ def test_aggregate_day_only_includes_matching_day_tasks(tmp_path: pathlib.Path) 
     t1 = tasks_dir / "CODER-001"
     (t1 / "artifacts").mkdir(parents=True)
     (t1 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 100, "output_tokens": 50,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-17T10:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-17T10:00:00",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -783,9 +853,17 @@ def test_aggregate_day_only_includes_matching_day_tasks(tmp_path: pathlib.Path) 
     t2 = tasks_dir / "CODER-002"
     (t2 / "artifacts").mkdir(parents=True)
     (t2 / "artifacts" / "tokens.json").write_text(
-        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 999, "output_tokens": 999,
-                    "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
-                    "invocations": 1, "timestamp": "2026-05-18T10:00:00"}),
+        json.dumps(
+            {
+                "model": "claude-sonnet-4-6",
+                "input_tokens": 999,
+                "output_tokens": 999,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "invocations": 1,
+                "timestamp": "2026-05-18T10:00:00",
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -805,3 +883,53 @@ def test_aggregate_day_empty_when_no_tasks_on_day(tmp_path: pathlib.Path) -> Non
     assert payload["tokens"]["total"]["input"] == 0
     assert payload["tokens"]["total"]["output"] == 0
     assert payload["rcs_included"] == []
+
+
+# ---------------------------------------------------------------------------
+# day parity with pm-agent/aggregate_tokens.py
+# ---------------------------------------------------------------------------
+
+_AGGREGATE_TOKENS_PATH = _REPO_ROOT / "team" / "pm-agent" / "aggregate_tokens.py"
+
+
+def _load_aggregate_tokens() -> Any:
+    """Load team/pm-agent/aggregate_tokens.py by path (pm-agent/ is not a package)."""
+    spec = importlib.util.spec_from_file_location("aggregate_tokens_day_parity", _AGGREGATE_TOKENS_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    "timestamp, utc_day, other_day",
+    [
+        ("2026-05-17T23:30:00Z", "2026-05-17", "2026-05-18"),
+        ("2026-05-18T01:30:00+02:00", "2026-05-17", "2026-05-18"),  # wall-clock date is the next day
+        ("2026-05-17T20:30:00-05:00", "2026-05-18", "2026-05-17"),  # wall-clock date is the previous day
+        (" 2026-05-17T10:00:00Z\n", "2026-05-17", "2026-05-18"),
+        ("2026-05-17T10:00:00", "2026-05-17", "2026-05-18"),  # no offset reads as UTC
+    ],
+)
+def test_both_aggregators_bucket_a_record_on_the_same_utc_day(
+    tmp_path: pathlib.Path, timestamp: str, utc_day: str, other_day: str
+) -> None:
+    """Fed the same task records, both reports list the same days and put the record on the same UTC day."""
+    agg = _load_aggregate_tokens()
+    proj = _make_project_dir(tmp_path, "proj")
+    task_dir = proj / "tasks" / "CODER-001"
+    (task_dir / "artifacts").mkdir(parents=True)
+    (task_dir / "artifacts" / "tokens.json").write_text(
+        json.dumps({"model": "claude-sonnet-4-6", "input_tokens": 100, "invocations": 1, "timestamp": timestamp}),
+        encoding="utf-8",
+    )
+    records = ma.scan_tasks(proj / "tasks")
+    # aggregate_tokens' own record shape carries the timestamp only inside the tokens.json dict.
+    token_only_records = [{"tokens": r["tokens"]} for r in records]
+
+    assert ma.all_days(records) == agg.all_days(records) == agg.all_days(token_only_records) == [utc_day]
+    for day, expected_agents in ((utc_day, ["coder"]), (other_day, [])):
+        ma_payload = json.loads(ma.aggregate_day("proj", day, kanban_root=tmp_path).read_text(encoding="utf-8"))
+        agg_path = agg.build_day_rollup("proj", day, records, {}, tmp_path / "usage" / "daily")
+        agg_payload = json.loads(agg_path.read_text(encoding="utf-8"))
+        assert sorted(ma_payload["tokens"]["by_agent"]) == sorted(agg_payload["by_agent"]) == expected_agents

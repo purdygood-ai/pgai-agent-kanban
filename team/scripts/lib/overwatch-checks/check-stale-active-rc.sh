@@ -48,6 +48,11 @@
 #
 # --dry-run: scans and logs findings but does NOT modify release-state.md.
 
+# This file's directory, as an absolute path
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CSARC_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CSARC_SELF_DIR=""
+
 # overwatch_registered_projects and overwatch_branch_prefix: the shared
 # projects.cfg and branch_prefix readers.
 # shellcheck source=../overwatch_config.sh
@@ -60,35 +65,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _csarc_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-stale-active-rc: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        # Resolve from projects.cfg — never silently fall back to first project.
-        # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
-        # path is only safe for single-project installs.
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-stale-active-rc: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-stale-active-rc: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-stale-active-rc || return 1
 
     # Resolve dev tree path: project.cfg takes precedence over env (falls back to PROJECT.cfg for legacy installs)
     local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
@@ -99,14 +76,9 @@ _csarc_resolve_env() {
         cfg_file="${_proj_root}/PROJECT.cfg"
     fi
     _CSARC_DEV_TREE=""
-    if [[ -n "${cfg_file}" ]]; then
-        _CSARC_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-    fi
-    if [[ -z "${_CSARC_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        _CSARC_DEV_TREE="${PGAI_DEV_TREE_PATH}"
-    fi
+    # The documented dev_tree_path chain (overwatch_dev_tree, overwatch_config.sh):
+    # project.cfg, then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    _CSARC_DEV_TREE="$(overwatch_dev_tree "${OVERWATCH_PROJECT}")" || _CSARC_DEV_TREE=""
     if [[ -z "${_CSARC_DEV_TREE}" ]]; then
         echo "check-stale-active-rc: cannot resolve dev tree path (set PGAI_DEV_TREE_PATH or ensure project.cfg has dev_tree_path)" >&2
         return 1
@@ -246,7 +218,8 @@ overwatch_check_stale_active_rc() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CSARC_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-stale-active-rc: cannot resolve lib dir" >&2
             return 1
         }

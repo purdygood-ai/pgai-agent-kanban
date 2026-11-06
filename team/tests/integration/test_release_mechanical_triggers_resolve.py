@@ -49,7 +49,6 @@ import os
 import pathlib
 import re
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -104,9 +103,14 @@ def _require_git() -> None:
     require_binary("git", label="release-mechanical-triggers-resolve")
 
 
-def _git(*args: str, env: Optional[dict] = None) -> str:
+def _git(*args: str, env: dict | None = None) -> str:
     return subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env,
+        ["git", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        env=env,
     ).stdout.strip()
 
 
@@ -129,15 +133,17 @@ class _Lane:
             env.pop(name, None)
         scrub_agent_scoped_env(env)
         env.update(_GIT_IDENTITY)
-        env.update({
-            "KANBAN_ROOT": str(self.root),
-            "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
-            "TEAM_ROOT": str(self.root),
-            "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
-            "PGAI_PROJECT_NAME": _PROJECT,
-            "REPO_ROOT": str(self.dev),
-            "PYTHONPATH": str(_TEAM_DIR),
-        })
+        env.update(
+            {
+                "KANBAN_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
+                "TEAM_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
+                "PGAI_PROJECT_NAME": _PROJECT,
+                "REPO_ROOT": str(self.dev),
+                "PYTHONPATH": str(_TEAM_DIR),
+            }
+        )
         return env
 
     def _build_root(self, push: bool) -> None:
@@ -188,12 +194,17 @@ class _Lane:
     def git(self, *args: str) -> str:
         return _git("-C", str(self.dev), *args, env=self.env)
 
-    def run(self, script: pathlib.Path, *args: str, extra_env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    def run(self, script: pathlib.Path, *args: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
         env = dict(self.env)
         env.update(extra_env or {})
         return subprocess.run(
-            ["bash", str(script), *args], capture_output=True, text=True, env=env,
-            cwd=str(self.root), timeout=240, stdin=subprocess.DEVNULL,
+            ["bash", str(script), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(self.root),
+            timeout=240,
+            stdin=subprocess.DEVNULL,
         )
 
     def open_rc_with_work(self) -> None:
@@ -228,7 +239,9 @@ class _Lane:
             encoding="utf-8",
         )
         for task_id, role, state in (
-            (_CODER_TASK, "CODER", "DONE"), (_WRITER_TASK, "WRITER", "WAITING"), (_CM_TASK, "CM", "WORKING"),
+            (_CODER_TASK, "CODER", "DONE"),
+            (_WRITER_TASK, "WRITER", "WAITING"),
+            (_CM_TASK, "CM", "WORKING"),
         ):
             task_dir = self.proj / "tasks" / task_id
             task_dir.mkdir(parents=True)
@@ -257,8 +270,9 @@ class _Lane:
         return path.read_text(encoding="utf-8") if path.is_file() else ""
 
     def remote_heads(self) -> dict:
-        out = _git("-C", str(self.bare), "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads",
-                   env=self.env)
+        out = _git(
+            "-C", str(self.bare), "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads", env=self.env
+        )
         return dict(line.split() for line in out.splitlines())
 
     def remote_tags(self) -> list:
@@ -410,9 +424,9 @@ def test_push_failure_ships_locally_and_the_push_lag_check_pushes_later(tmp_path
     assert not [ref for ref in remaining.split() if ref.endswith(f"rc/{_VERSION}")], remaining
     assert lane.remote_branch_refs("feature/keep"), _out(pushed)
     assert lane.remote_branch_refs("ai_rc/v0.0.9"), _out(pushed)
-    assert "Push Lag Event item 'feature/keep (still on origin; deletion failed)' is not deleted" in pushed.stderr, (
-        _out(pushed)
-    )
+    assert (
+        "Push Lag Event item 'feature/keep (still on origin; deletion failed)' is not deleted" in pushed.stderr
+    ), _out(pushed)
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +441,7 @@ def test_tag_already_on_the_remote_writes_an_inbox_entry_and_changes_nothing(tmp
     hook = lane.proj / "hooks" / "cm-release-pre-tag.sh"
     hook.parent.mkdir(parents=True)
     hook.write_text(
-        '#!/bin/sh\n# A concurrent run publishes the release tag after this run fetched.\n'
+        "#!/bin/sh\n# A concurrent run publishes the release tag after this run fetched.\n"
         f'git push -q origin "$PGAI_RC_BRANCH:refs/tags/{_TAG}"\n',
         encoding="utf-8",
     )

@@ -106,9 +106,7 @@ def _enable_defer_posture_global(kanban_root: pathlib.Path, *, level: str = "low
         fh.write(f"\n[release]\ndeferred_bugs = true\ndeferred_bug_level = {level}\n")
 
 
-def _add_open_bug(
-    kanban_root: pathlib.Path, project: str, bug_id: str, *, severity: str = "low"
-) -> None:
+def _add_open_bug(kanban_root: pathlib.Path, project: str, bug_id: str, *, severity: str = "low") -> None:
     bugs_dir = kanban_root / "projects" / project / "bugs"
     bugs_dir.mkdir(parents=True, exist_ok=True)
     (bugs_dir / f"{bug_id}-fixture.md").write_text(
@@ -140,9 +138,7 @@ def _run(script: pathlib.Path, args: list, kanban_root: pathlib.Path, *, term: s
         env=_env(kanban_root, term=term),
         timeout=30,
     )
-    assert result.returncode == 0, (
-        f"{script.name} exited {result.returncode}; stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"{script.name} exited {result.returncode}; stderr: {result.stderr!r}"
     return result.stdout
 
 
@@ -161,9 +157,7 @@ def _run_status_bottom_global(kanban_root: pathlib.Path, *, term: str) -> str:
 
 
 class TestSimultaneousFlagsAllRenderTogether:
-    def test_status_bottom_renders_all_three_flags_together(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_status_bottom_renders_all_three_flags_together(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _touch_global_halt(root)
         _write_project_halt_after(root, "project-a", "rc:v2.9.15")
@@ -177,9 +171,7 @@ class TestSimultaneousFlagsAllRenderTogether:
         assert "HALT-AFTER:project-a until v2.9.15" in stdout, stdout
         assert "BUGS DEFERRED 1 (<=low)" in stdout, stdout
 
-    def test_status_right_renders_all_three_flags_together(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_status_right_renders_all_three_flags_together(self, two_project_root: pathlib.Path) -> None:
         """status-right.sh must agree with the bottom bar -- same three
         flags, none suppressed by the others."""
         root = two_project_root
@@ -197,9 +189,7 @@ class TestSimultaneousFlagsAllRenderTogether:
         assert "HALT-AFTER:project-a until v2.9.15" in stdout, stdout
         assert "DEFER GLOBAL <=low (1 waiting)" in stdout, stdout
 
-    def test_show_header_agrees_with_bottom_bar_on_simultaneous_flags(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_header_agrees_with_bottom_bar_on_simultaneous_flags(self, two_project_root: pathlib.Path) -> None:
         """show-header.sh (the drilled per-project header pane) must not
         contradict the bottom bar: a global HALT and this project's own
         HALT-AFTER both render, neither suppressing the other."""
@@ -225,9 +215,7 @@ class TestSimultaneousFlagsAllRenderTogether:
 
 
 class TestTwoHaltedProjectsBothNamed:
-    def test_status_bottom_names_both_halted_projects(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_status_bottom_names_both_halted_projects(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _write_project_halt(root, "project-a")
         _write_project_halt(root, "project-b")
@@ -237,9 +225,7 @@ class TestTwoHaltedProjectsBothNamed:
         assert "HALT project-a" in stdout, stdout
         assert "HALT project-b" in stdout, stdout
 
-    def test_status_right_names_both_halted_projects(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_status_right_names_both_halted_projects(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _write_project_halt(root, "project-a")
         _write_project_halt(root, "project-b")
@@ -249,9 +235,7 @@ class TestTwoHaltedProjectsBothNamed:
         assert "HALT project-a" in stdout, stdout
         assert "HALT project-b" in stdout, stdout
 
-    def test_one_halted_one_draining_project_both_named(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_one_halted_one_draining_project_both_named(self, two_project_root: pathlib.Path) -> None:
         """Mixed states across two projects -- a HALT and a HALT-AFTER on
         two different projects -- both render, distinctly."""
         root = two_project_root
@@ -270,9 +254,7 @@ class TestTwoHaltedProjectsBothNamed:
 
 
 class TestScopeWordsMatchSopVocabularyExactly:
-    def test_global_scope_renders_as_literal_global(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_global_scope_renders_as_literal_global(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _touch_global_halt(root)
 
@@ -305,9 +287,7 @@ class TestScopeWordsMatchSopVocabularyExactly:
 
 
 class TestVersionPinnedHaltAfterDescriber:
-    def test_status_bottom_renders_until_phrase_for_versioned_token(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_status_bottom_renders_until_phrase_for_versioned_token(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _write_project_halt_after(root, "project-a", "rc:v3.1.4")
 
@@ -317,9 +297,7 @@ class TestVersionPinnedHaltAfterDescriber:
         # The raw token itself must not leak into the rendered text.
         assert "rc:v3.1.4" not in stdout, stdout
 
-    def test_bare_non_versioned_token_renders_unchanged(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_bare_non_versioned_token_renders_unchanged(self, two_project_root: pathlib.Path) -> None:
         """A non-versioned token (e.g. the bare role token "coder") is not
         a release boundary and renders as itself -- no "until " phrase."""
         root = two_project_root
@@ -345,25 +323,21 @@ class TestVersionPinnedHaltAfterDescriber:
         # or f'until {...}') -- not a plain quoted example value such as a
         # docstring's ">>> describe_token(...) \n 'until v2.9.15'" return
         # value, which names the phrase without composing it.
-        composition_re = re.compile(r'''f["']until\s*\{''')
+        composition_re = re.compile(r"""f["']until\s*\{""")
         hits = []
         for py_file in sorted(_PKG_DIR.rglob("*.py")):
             rel = py_file.relative_to(_TEAM_DIR).as_posix()
             if "/tests/" in rel or rel.startswith("tests/"):
                 continue
-            for lineno, line in enumerate(
-                py_file.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
-            ):
+            for lineno, line in enumerate(py_file.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
                 stripped = line.strip()
                 if stripped.startswith("#"):
                     continue
                 if composition_re.search(line):
                     hits.append(f"{rel}:{lineno}: {stripped}")
 
-        assert hits == [
-            f"pgai_agent_kanban/halt_after/token.py:131: return f\"until {{token[3:]}}\""
-        ], (
-            "expected the \"until \" phrase to be composed in exactly one "
+        assert hits == [f'pgai_agent_kanban/halt_after/token.py:130: return f"until {{token[3:]}}"'], (
+            'expected the "until " phrase to be composed in exactly one '
             f"place (halt_after/token.py's describe_token); found: {hits}"
         )
 
@@ -376,9 +350,7 @@ class TestVersionPinnedHaltAfterDescriber:
         composition_re = re.compile(r'["\']until\s+\$')
         hits = []
         for sh_file in sorted(_DASHBOARD_DIR.rglob("*.sh")):
-            for lineno, line in enumerate(
-                sh_file.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
-            ):
+            for lineno, line in enumerate(sh_file.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
                 stripped = line.strip()
                 if stripped.startswith("#"):
                     continue
@@ -430,9 +402,7 @@ class TestNoColorFormMatchesRichFormSegmentSet:
             "all_three_simultaneous",
         ],
     )
-    def test_segment_set_identical_across_color_modes(
-        self, two_project_root: pathlib.Path, setup: str
-    ) -> None:
+    def test_segment_set_identical_across_color_modes(self, two_project_root: pathlib.Path, setup: str) -> None:
         root = two_project_root
 
         if setup == "global_halt_only":
@@ -476,9 +446,7 @@ class TestNoColorFormMatchesRichFormSegmentSet:
 
 
 class TestSegmentOrderDeterministic:
-    def test_repeated_renders_of_the_same_state_preserve_segment_order(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_repeated_renders_of_the_same_state_preserve_segment_order(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _touch_global_halt(root)
         _write_project_halt_after(root, "project-a", "rc:v2.9.15")
@@ -498,9 +466,7 @@ class TestSegmentOrderDeterministic:
             f"state.\nfirst:  {first_segments}\nsecond: {second_segments}"
         )
 
-    def test_global_scope_always_precedes_project_scopes(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_global_scope_always_precedes_project_scopes(self, two_project_root: pathlib.Path) -> None:
         """GLOBAL is always emitted before any per-project scope -- part of
         the documented deterministic emission order."""
         root = two_project_root
@@ -511,9 +477,7 @@ class TestSegmentOrderDeterministic:
 
         assert stdout.index("HALT GLOBAL") < stdout.index("HALT project-a"), stdout
 
-    def test_project_scopes_emitted_in_alphabetical_order(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_project_scopes_emitted_in_alphabetical_order(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _write_project_halt(root, "project-b")
         _write_project_halt(root, "project-a")

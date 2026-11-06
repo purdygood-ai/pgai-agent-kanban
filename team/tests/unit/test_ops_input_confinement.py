@@ -168,8 +168,21 @@ def no_filesystem():
     @contextlib.contextmanager
     def guard():
         with pytest.MonkeyPatch.context() as patch:
-            for name in ("is_dir", "is_file", "exists", "glob", "iterdir", "read_text", "read_bytes",
-                         "open", "unlink", "rmdir", "mkdir", "write_text", "resolve"):
+            for name in (
+                "is_dir",
+                "is_file",
+                "exists",
+                "glob",
+                "iterdir",
+                "read_text",
+                "read_bytes",
+                "open",
+                "unlink",
+                "rmdir",
+                "mkdir",
+                "write_text",
+                "resolve",
+            ):
                 patch.setattr(pathlib.Path, name, _fail)
             for name in ("listdir", "scandir", "remove", "unlink", "makedirs", "mkdir", "rename", "replace"):
                 patch.setattr(os, name, _fail)
@@ -230,8 +243,19 @@ def test_a_traversal_key_changes_nothing_on_disk(root, outer, verb, key) -> None
 @pytest.mark.parametrize(
     "key",
     ["**", "*", "CODER-2026*", "CODER-?", "[C]ODER", "/etc/passwd", "/", "-rf", "a\nb", ".", ".."],
-    ids=["double-star", "star", "trailing-star", "question", "bracket", "absolute", "root",
-         "leading-dash", "newline", "dot", "dotdot"],
+    ids=[
+        "double-star",
+        "star",
+        "trailing-star",
+        "question",
+        "bracket",
+        "absolute",
+        "root",
+        "leading-dash",
+        "newline",
+        "dot",
+        "dotdot",
+    ],
 )
 def test_a_glob_absolute_or_flag_shaped_key_is_refused_without_a_walk(root, outer, no_filesystem, key) -> None:
     ctx = _ctx(root)
@@ -338,9 +362,7 @@ def test_the_resolve_cli_shim_refuses_a_symlink_out_of_the_tree(root, outer, cap
 
 
 @pytest.mark.parametrize("name", ["..", "../..", "../outer", ".", "-x", "a/b"])
-def test_remove_project_with_a_traversal_name_refuses_before_any_filesystem_access(
-    root, no_filesystem, name
-) -> None:
+def test_remove_project_with_a_traversal_name_refuses_before_any_filesystem_access(root, no_filesystem, name) -> None:
     ctx = _ctx(root)
     with no_filesystem(), pytest.raises(ops_projects.ProjectValueRefused) as caught:
         ops_projects.remove_project(ctx, name, force=True)
@@ -361,9 +383,7 @@ def test_remove_project_dotdot_force_leaves_the_kanban_root_and_outside_intact(r
 
 
 @pytest.mark.parametrize("name", ["../x", "../../outer", "..", "a.b", "a b", "My_App", "my_app", "x\n[project:evil]"])
-def test_add_project_with_a_traversal_name_changes_neither_registry_nor_outside(
-    root, outer, name
-) -> None:
+def test_add_project_with_a_traversal_name_changes_neither_registry_nor_outside(root, outer, name) -> None:
     (outer / "x").mkdir()
     before = _snapshot(outer)
 
@@ -482,7 +502,10 @@ def test_the_value_checks_run_before_any_filesystem_access(root, no_filesystem) 
 
 def test_valid_path_values_are_still_written_verbatim(root, capsys) -> None:
     ops_projects.create_project(
-        _ctx(root), "alpha", dev_tree="/srv/develop/my..app", git_repo="git@example.com:o/a.git",
+        _ctx(root),
+        "alpha",
+        dev_tree="/srv/develop/my..app",
+        git_repo="git@example.com:o/a.git",
         git_remote="upstream",
     )
 
@@ -508,9 +531,7 @@ def test_cancel_rc_refuses_an_unchecked_project_before_reading_config_or_running
         raise AssertionError(f"cancel_rc read config or ran git for a refused project: {args!r}")
 
     monkeypatch.setattr(cancel._push_decision, "resolve_push_decision", _fail)
-    monkeypatch.setattr(cancel.ini, "read_line_value", _fail)
-    monkeypatch.setattr(cancel, "_read_cfg_key", _fail)
-    monkeypatch.setattr(cancel, "_project_cfg_file", _fail)
+    monkeypatch.setattr(cancel, "project_dev_tree", _fail)
     monkeypatch.setattr(cancel, "_run_git", _fail)
     monkeypatch.setattr(subprocess, "run", _fail)
     before = _snapshot(outer)
@@ -532,6 +553,7 @@ def test_cancel_rc_refuses_an_unchecked_project_before_reading_config_or_running
 def _run(tmp_path: pathlib.Path, root: pathlib.Path, script: str, *args: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(
         home_dir=tmp_path / "home",
+        extra_path_dirs=[pathlib.Path(sys.executable).parent],
         extra_env={
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
             "KANBAN_ROOT": str(root),
@@ -540,8 +562,13 @@ def _run(tmp_path: pathlib.Path, root: pathlib.Path, script: str, *args: str) ->
     )
     return subprocess.run(
         ["bash", str(_SCRIPTS / script), *args],
-        capture_output=True, text=True, env=env, cwd=str(root),
-        stdin=subprocess.DEVNULL, timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        timeout=120,
+        check=False,
     )
 
 
@@ -552,10 +579,12 @@ def _run(tmp_path: pathlib.Path, root: pathlib.Path, script: str, *args: str) ->
         ("close.sh", ["--project", _PROJECT, "--key", _KEY_TO_SENTINEL_DIR], "resolve_item.key_invalid"),
         ("remove-project.sh", ["--project", "..", "--force"], "remove_project.project_invalid"),
         ("add-project.sh", ["--project", "../x"], "add_project.project_invalid"),
-        ("create-project.sh", ["--project", "alpha", "--workflow-type", "../../tmp/x"],
-         "create_project.workflow_type_invalid"),
-        ("create-project.sh", ["--project", "alpha", "--dev-tree", "relative/path"],
-         "create_project.dev_tree_invalid"),
+        (
+            "create-project.sh",
+            ["--project", "alpha", "--workflow-type", "../../tmp/x"],
+            "create_project.workflow_type_invalid",
+        ),
+        ("create-project.sh", ["--project", "alpha", "--dev-tree", "relative/path"], "create_project.dev_tree_invalid"),
         ("cm/cancel-rc.sh", ["--project", "../..", "--key", "v1.2.3", "--yes"], "cancel_rc.project_invalid"),
     ],
     ids=["delete", "close", "remove-project", "add-project", "create-workflow", "create-dev-tree", "cancel-rc"],

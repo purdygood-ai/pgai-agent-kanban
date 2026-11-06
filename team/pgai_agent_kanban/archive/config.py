@@ -43,7 +43,7 @@ import os
 import pathlib
 import re
 import shlex
-from typing import Optional, TextIO, Union
+from typing import TextIO, Union
 
 from pgai_agent_kanban.archive.layout import live_layout
 from pgai_agent_kanban.lib import project_cfg
@@ -165,9 +165,7 @@ def resolve_archive_count(kanban_root: PathLike, project: str) -> ArchiveCount:
     return ArchiveCount(int(found.value), found.tier, found.source)
 
 
-def effective_archive_count(
-    kanban_root: PathLike, project: str, *, stream: Optional[TextIO] = None
-) -> int:
+def effective_archive_count(kanban_root: PathLike, project: str, *, stream: TextIO | None = None) -> int:
     """Return the count an archive run uses for *project*.
 
     The resolved ``archive_count``, or ``0`` (archive nothing) when the

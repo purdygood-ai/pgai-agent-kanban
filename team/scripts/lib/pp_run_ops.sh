@@ -42,7 +42,8 @@
 #   Order (highest to lowest):
 #     1. Any PYTHONPATH entries the caller already set (caller wins).
 #     2. The "own-tree root" — the directory containing pgai_agent_kanban/,
-#        derived from this file's own location (scripts/lib/../../).
+#        derived from this file's own location (scripts/lib/../../) once,
+#        when the file is sourced or executed (see SELF-LOCATION below).
 #        In the live install this equals the install root.
 #        In a dev-tree worktree this equals the team/ directory, giving
 #        in-development code precedence over the live install.
@@ -56,11 +57,24 @@
 #   its entries at the front.  The own-tree root is never duplicated when it
 #   equals KANBAN_ROOT (the live-install case).
 #
+# SELF-LOCATION:
+#   The own-tree root is resolved once, at file scope, while this file is
+#   being sourced or executed: BASH_SOURCE[0] (this file, in both entry
+#   styles) is turned into an absolute path there and kept in
+#   _PP_RUN_OPS_OWN_ROOT. A relative BASH_SOURCE[0] is still valid at that
+#   moment, because bash has just opened the file by that same path from the
+#   same directory. pp_pythonpath, pp_run_ops and the exec-style entry read
+#   _PP_RUN_OPS_OWN_ROOT and never BASH_SOURCE[0], so a later `cd`, or an
+#   entry script named by a relative path (`bash scripts/cm/release.sh`),
+#   does not change what they resolve. Sourcing the file again (for
+#   instance after `unset -f pp_run_ops pp_pythonpath`) resolves it afresh.
+#
 # CONSTRAINTS:
-#   - Never depends on the current working directory.
+#   - Never depends on the caller's current working directory once the file
+#     has been sourced.
 #   - Safe with a scrubbed environment (env -i HOME=... PATH=... only).
-#   - Self-locates using BASH_SOURCE[0] (sourced) or $0 (exec); never uses
-#     relative paths, `pwd`, or environment variables to find itself.
+#   - Self-locates from BASH_SOURCE[0] only; never from the caller's `pwd`,
+#     environment variables (CDPATH is ignored), or a repository checkout.
 
 # ---------------------------------------------------------------------------
 # _pp_run_ops_locate_root
@@ -69,8 +83,9 @@
 # (i.e. scripts/lib/../../), which in both the live install and the dev-tree
 # worktree is the directory containing the pgai_agent_kanban/ package.
 #
-# Usage: local root; root="$(_pp_run_ops_locate_root "$_self_path")"
-#   where _self_path is the absolute path to this file.
+# Usage: root="$(_pp_run_ops_locate_root "$_self_path")"
+#   where _self_path is this file's path, absolute or relative to the
+#   current directory. Called once, at file scope, below.
 # ---------------------------------------------------------------------------
 _pp_run_ops_locate_root() {
     local _self="${1:-}"
@@ -78,13 +93,20 @@ _pp_run_ops_locate_root() {
         return 1
     fi
     local _lib_dir
-    _lib_dir="$(cd "$(dirname "${_self}")" 2>/dev/null && pwd)" || return 1
+    _lib_dir="$(CDPATH='' cd -- "$(dirname -- "${_self}")" 2>/dev/null && pwd)" || return 1
     # Walk up two levels: lib/ -> scripts/ -> own-tree root (team/ or install root)
     local _scripts_dir _root
     _scripts_dir="$(dirname "${_lib_dir}")"
     _root="$(dirname "${_scripts_dir}")"
     echo "${_root}"
 }
+
+# The own-tree root, resolved now, while BASH_SOURCE[0] still names this
+# file relative to the directory it was opened from, and read by every
+# function below. Empty when it cannot be derived; pp_pythonpath reports
+# that, naming the path recorded in _PP_RUN_OPS_SELF.
+_PP_RUN_OPS_SELF="${BASH_SOURCE[0]:-}"
+_PP_RUN_OPS_OWN_ROOT="$(_pp_run_ops_locate_root "${_PP_RUN_OPS_SELF}")" || _PP_RUN_OPS_OWN_ROOT=""
 
 # ---------------------------------------------------------------------------
 # pp_run_ops <module> [args...]
@@ -107,25 +129,24 @@ _pp_run_ops_locate_root() {
 # ---------------------------------------------------------------------------
 # pp_pythonpath
 # Compose and print the PYTHONPATH value pp_run_ops() would use, per the
-# precedence contract documented in the module header. Callers that need to
-# `import`/`from` a pgai_agent_kanban module inside their OWN inline `python3
-# -` heredoc (rather than invoking a module's CLI via `python3 -m`) use this
-# to get the same cwd-independent path resolution pp_run_ops() gets, e.g.:
+# precedence contract documented in the module header. Callers that build
+# a `python3 -m` command line themselves -- a printed remedy, an environment
+# handed to a child process -- use this to get the same cwd-independent path
+# resolution pp_run_ops() gets, e.g.:
 #
-#   PYTHONPATH="$(pp_pythonpath)" python3 - "$status_file" <<'PY'
-#   from pgai_agent_kanban.lib.state_parser import parse_state
-#   ...
-#   PY
+#   PYTHONPATH="$(pp_pythonpath)" python3 -m pgai_agent_kanban.task_status --read-state "$status_file"
 #
-# Returns 1 (no output) if the own-tree root cannot be derived — mirrors
-# pp_run_ops()'s own failure mode.
+# The own-tree root is the one resolved when this file was sourced
+# (_PP_RUN_OPS_OWN_ROOT), so the output does not depend on the current
+# directory. Returns 1 (no output) if that root could not be derived —
+# mirrors pp_run_ops()'s own failure mode.
 # ---------------------------------------------------------------------------
 pp_pythonpath() {
-    local _pp_own_root
-    _pp_own_root="$(_pp_run_ops_locate_root "${BASH_SOURCE[0]}")" || {
-        echo "pp_pythonpath: could not derive own-tree root from BASH_SOURCE[0]=${BASH_SOURCE[0]:-<unset>}" >&2
+    local _pp_own_root="${_PP_RUN_OPS_OWN_ROOT:-}"
+    if [[ -z "${_pp_own_root}" ]]; then
+        echo "pp_pythonpath: could not derive own-tree root from the path pp_run_ops.sh was sourced by: ${_PP_RUN_OPS_SELF:-<unset>}" >&2
         return 1
-    }
+    fi
 
     if [[ -n "${KANBAN_ROOT:-}" && "${KANBAN_ROOT}" != "${_pp_own_root}" ]]; then
         echo "${PYTHONPATH:+${PYTHONPATH}:}${_pp_own_root}:${KANBAN_ROOT}"
@@ -170,10 +191,12 @@ if [[ "$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")" 
     fi
     shift
 
-    _exec_own_root="$(_pp_run_ops_locate_root "${BASH_SOURCE[0]}")" || {
-        echo "$(basename "${0}"): could not derive own-tree root" >&2
+    # The own-tree root was resolved at file scope, above.
+    _exec_own_root="${_PP_RUN_OPS_OWN_ROOT}"
+    if [[ -z "${_exec_own_root}" ]]; then
+        echo "$(basename "${0}"): could not derive own-tree root from ${_PP_RUN_OPS_SELF:-<unset>}" >&2
         exit 1
-    }
+    fi
 
     if [[ -n "${KANBAN_ROOT:-}" && "${KANBAN_ROOT}" != "${_exec_own_root}" ]]; then
         _exec_pythonpath="${PYTHONPATH:+${PYTHONPATH}:}${_exec_own_root}:${KANBAN_ROOT}"

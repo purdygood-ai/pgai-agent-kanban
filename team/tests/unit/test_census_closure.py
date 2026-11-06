@@ -46,11 +46,9 @@ Naming: function names describe behavior under test, never bug IDs or task IDs
 from __future__ import annotations
 
 import pathlib
-import re
 import subprocess
 import textwrap
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
@@ -118,11 +116,7 @@ def _run_census(tasks_root: pathlib.Path, req_path: str) -> str:
         "skip:<detail>"   — one or more siblings are non-terminal
     A non-zero exit fails the test with the census's stderr.
     """
-    script = (
-        "set -euo pipefail\n"
-        + _close_intake_helpers()
-        + f'{_CENSUS_FUNCTION} "$1" "$2"\n'
-    )
+    script = "set -euo pipefail\n" + _close_intake_helpers() + f'{_CENSUS_FUNCTION} "$1" "$2"\n'
     proc = subprocess.run(
         ["bash", "-c", script, "census", str(tasks_root), req_path],
         capture_output=True,
@@ -131,8 +125,7 @@ def _run_census(tasks_root: pathlib.Path, req_path: str) -> str:
         cwd=str(_TEAM_DIR),
     )
     assert proc.returncode == 0, (
-        f"shipped census exited {proc.returncode}\n"
-        f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+        f"shipped census exited {proc.returncode}\n" f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
     )
     return proc.stdout.strip()
 
@@ -243,9 +236,7 @@ def test_census_one_ticket_done_returns_ok(tmp_path: pathlib.Path) -> None:
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert result.startswith("ok:"), (
-        f"Expected census to return ok:N when sole task is DONE; got {result!r}"
-    )
+    assert result.startswith("ok:"), f"Expected census to return ok:N when sole task is DONE; got {result!r}"
     assert "1" in result, f"Expected total=1 in ok result; got {result!r}"
 
 
@@ -260,9 +251,7 @@ def test_census_two_tickets_working_sibling_returns_skip(
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert result.startswith("skip:"), (
-        f"Expected census to skip when sibling is WORKING; got {result!r}"
-    )
+    assert result.startswith("skip:"), f"Expected census to skip when sibling is WORKING; got {result!r}"
 
 
 def test_census_skip_result_names_non_terminal_sibling(
@@ -276,12 +265,10 @@ def test_census_skip_result_names_non_terminal_sibling(
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert "TESTER-002-sibling" in result, (
-        f"Census skip result must name the non-terminal sibling task ID; got {result!r}"
-    )
-    assert "WORKING" in result, (
-        f"Census skip result must include the sibling's state; got {result!r}"
-    )
+    assert (
+        "TESTER-002-sibling" in result
+    ), f"Census skip result must name the non-terminal sibling task ID; got {result!r}"
+    assert "WORKING" in result, f"Census skip result must include the sibling's state; got {result!r}"
 
 
 def test_census_two_tickets_wontdo_sibling_returns_ok(
@@ -295,9 +282,7 @@ def test_census_two_tickets_wontdo_sibling_returns_ok(
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert result.startswith("ok:"), (
-        f"WONT-DO sibling is terminal; census must return ok:N; got {result!r}"
-    )
+    assert result.startswith("ok:"), f"WONT-DO sibling is terminal; census must return ok:N; got {result!r}"
 
 
 def test_census_two_tickets_wontdo_sibling_total_is_two(
@@ -311,9 +296,7 @@ def test_census_two_tickets_wontdo_sibling_total_is_two(
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert "2" in result, (
-        f"Census ok result must report total=2 for two-ticket graph; got {result!r}"
-    )
+    assert "2" in result, f"Census ok result must report total=2 for two-ticket graph; got {result!r}"
 
 
 def test_census_excludes_tasks_without_matching_req_path(
@@ -343,9 +326,7 @@ def test_census_empty_tasks_root_returns_ok_zero(tmp_path: pathlib.Path) -> None
 
     result = _run_census(tasks_root, str(req_file))
 
-    assert result.startswith("ok:"), (
-        f"Census with no matching tasks must return ok:0; got {result!r}"
-    )
+    assert result.startswith("ok:"), f"Census with no matching tasks must return ok:0; got {result!r}"
 
 
 def test_census_empty_inputs_does_not_count_task_citing_path_in_later_section(
@@ -558,29 +539,20 @@ def test_one_ticket_done_close_item_invoked(tmp_path: pathlib.Path) -> None:
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-1.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-verify", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file)) / "README.md"
 
     stdout, stderr, rc, sentinel = _run_close_intake(
         tmp_path, tasks_root, project_root, "TESTER-001-verify", task_readme
     )
 
-    assert rc == 0, (
-        f"close_intake_on_finalize_report must exit 0; got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
-    )
+    assert rc == 0, f"close_intake_on_finalize_report must exit 0; got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     assert sentinel.exists(), (
         "close_item must be invoked when the sole task is DONE; "
         f"sentinel file not created.\nstdout: {stdout!r}\nstderr: {stderr!r}"
     )
     calls = sentinel.read_text(encoding="utf-8")
-    assert "close_item" in calls, (
-        f"Sentinel must contain 'close_item' invocation; got {calls!r}"
-    )
-    assert "v1.0.0-run-1" in calls, (
-        f"close_item must be called with the requirements key; sentinel: {calls!r}"
-    )
+    assert "close_item" in calls, f"Sentinel must contain 'close_item' invocation; got {calls!r}"
+    assert "v1.0.0-run-1" in calls, f"close_item must be called with the requirements key; sentinel: {calls!r}"
 
 
 def test_one_ticket_done_closed_log_line_present(tmp_path: pathlib.Path) -> None:
@@ -592,9 +564,7 @@ def test_one_ticket_done_closed_log_line_present(tmp_path: pathlib.Path) -> None
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-1b.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-verify", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file)) / "README.md"
 
     stdout, stderr, rc, sentinel = _run_close_intake(
         tmp_path, tasks_root, project_root, "TESTER-001-verify", task_readme
@@ -623,9 +593,7 @@ def test_two_ticket_working_sibling_close_item_not_invoked(
     req_file = _write_requirements(project_root, "v1.0.0-run-2.md")
     tasks_root = project_root / "tasks"
     # The DONE task whose finalize fires
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-primary", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-primary", "DONE", str(req_file)) / "README.md"
     # The non-terminal sibling
     _write_task(tasks_root, "TESTER-002-sibling", "WORKING", str(req_file))
 
@@ -655,9 +623,7 @@ def test_two_ticket_working_sibling_census_log_names_sibling(
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-2b.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-primary", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-primary", "DONE", str(req_file)) / "README.md"
     _write_task(tasks_root, "TESTER-002-sibling", "WORKING", str(req_file))
 
     stdout, _stderr, rc, _sentinel = _run_close_intake(
@@ -667,13 +633,9 @@ def test_two_ticket_working_sibling_census_log_names_sibling(
     assert rc == 0
     # The skip log line must name the non-terminal sibling
     assert "TESTER-002-sibling" in stdout, (
-        "Census log line must name the non-terminal sibling task ID.\n"
-        f"stdout: {stdout!r}"
+        "Census log line must name the non-terminal sibling task ID.\n" f"stdout: {stdout!r}"
     )
-    assert "WORKING" in stdout, (
-        "Census log line must include the sibling's state.\n"
-        f"stdout: {stdout!r}"
-    )
+    assert "WORKING" in stdout, "Census log line must include the sibling's state.\n" f"stdout: {stdout!r}"
 
 
 def test_two_ticket_working_sibling_census_log_contains_skip_summary(
@@ -683,9 +645,7 @@ def test_two_ticket_working_sibling_census_log_contains_skip_summary(
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-2c.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-primary", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-primary", "DONE", str(req_file)) / "README.md"
     _write_task(tasks_root, "TESTER-002-sibling", "WORKING", str(req_file))
 
     stdout, _stderr, rc, _sentinel = _run_close_intake(
@@ -695,14 +655,10 @@ def test_two_ticket_working_sibling_census_log_contains_skip_summary(
     assert rc == 0
     # The log line must contain "census incomplete" or similar skip signal
     assert "census" in stdout.lower(), (
-        "Log output must contain a census-related skip message when a sibling is non-terminal.\n"
-        f"stdout: {stdout!r}"
+        "Log output must contain a census-related skip message when a sibling is non-terminal.\n" f"stdout: {stdout!r}"
     )
     # sibling count context
-    assert "sibling" in stdout.lower(), (
-        "Log output must describe the sibling breakdown.\n"
-        f"stdout: {stdout!r}"
-    )
+    assert "sibling" in stdout.lower(), "Log output must describe the sibling breakdown.\n" f"stdout: {stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -721,27 +677,20 @@ def test_two_ticket_wontdo_sibling_close_item_invoked(
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-3.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-primary", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-primary", "DONE", str(req_file)) / "README.md"
     _write_task(tasks_root, "TESTER-002-corpse", "WONT-DO", str(req_file))
 
     stdout, stderr, rc, sentinel = _run_close_intake(
         tmp_path, tasks_root, project_root, "TESTER-001-primary", task_readme
     )
 
-    assert rc == 0, (
-        f"close_intake_on_finalize_report must exit 0; got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
-    )
+    assert rc == 0, f"close_intake_on_finalize_report must exit 0; got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     assert sentinel.exists(), (
         "close_item must be invoked when all siblings are terminal (DONE + WONT-DO);\n"
         f"sentinel not created.\nstdout: {stdout!r}\nstderr: {stderr!r}"
     )
     calls = sentinel.read_text(encoding="utf-8")
-    assert "close_item" in calls, (
-        f"Sentinel must contain 'close_item'; got {calls!r}"
-    )
+    assert "close_item" in calls, f"Sentinel must contain 'close_item'; got {calls!r}"
 
 
 def test_two_ticket_wontdo_sibling_closed_log_line_present(
@@ -755,9 +704,7 @@ def test_two_ticket_wontdo_sibling_closed_log_line_present(
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-3b.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "TESTER-001-primary", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "TESTER-001-primary", "DONE", str(req_file)) / "README.md"
     _write_task(tasks_root, "TESTER-002-corpse", "WONT-DO", str(req_file))
 
     stdout, stderr, rc, sentinel = _run_close_intake(
@@ -785,9 +732,7 @@ def test_non_report_finalize_skips_entire_function(tmp_path: pathlib.Path) -> No
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-4.md")
     tasks_root = project_root / "tasks"
-    task_readme = _write_task(
-        tasks_root, "CODER-001-impl", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tasks_root, "CODER-001-impl", "DONE", str(req_file)) / "README.md"
 
     stdout, stderr, rc, sentinel = _run_close_intake(
         tmp_path,
@@ -799,8 +744,7 @@ def test_non_report_finalize_skips_entire_function(tmp_path: pathlib.Path) -> No
     )
 
     assert rc == 0, (
-        f"Non-report finalize must exit 0 (silent no-op); got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
+        f"Non-report finalize must exit 0 (silent no-op); got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     )
     assert not sentinel.exists(), (
         "close_item must NOT be invoked when wf_finalize != 'report';\n"
@@ -824,26 +768,19 @@ def test_nonexistent_tasks_root_yields_no_census_and_no_closure(
     """
     project_root = tmp_path / "project"
     req_file = _write_requirements(project_root, "v1.0.0-run-8.md")
-    task_readme = _write_task(
-        tmp_path / "readme_only", "TESTER-001-verify", "DONE", str(req_file)
-    ) / "README.md"
+    task_readme = _write_task(tmp_path / "readme_only", "TESTER-001-verify", "DONE", str(req_file)) / "README.md"
     tasks_root = project_root / "nonexistent_tasks"
 
     stdout, stderr, rc, sentinel = _run_close_intake(
         tmp_path, tasks_root, project_root, "TESTER-001-verify", task_readme
     )
 
-    assert rc == 0, (
-        f"close_intake_on_finalize_report must exit 0; got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
-    )
+    assert rc == 0, f"close_intake_on_finalize_report must exit 0; got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     assert not sentinel.exists(), (
-        "close_item must NOT be invoked when the tasks root does not exist.\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
+        "close_item must NOT be invoked when the tasks root does not exist.\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     )
     assert "tasks_root not found" in stdout, (
-        "The skip log line must say the tasks root was not found.\n"
-        f"stdout: {stdout!r}"
+        "The skip log line must say the tasks root was not found.\n" f"stdout: {stdout!r}"
     )
 
 
@@ -946,7 +883,7 @@ def _run_sweep_census(
     script_parts: list[str] = [
         "#!/usr/bin/env bash\n",
         "set -euo pipefail\n",
-        f"export PATH=\"{stub_bin_s}:$PATH\"\n",
+        f'export PATH="{stub_bin_s}:$PATH"\n',
         "\n",
         log_stub,
         "\n",
@@ -954,7 +891,7 @@ def _run_sweep_census(
         _close_intake_helpers(),
         "\n",
         "# Stub pp_run_ops: delegates to stubbed python3 so close_item interception works.\n",
-        "pp_run_ops() { local _mod=\"$1\"; shift; python3 -m \"$_mod\" \"$@\"; }\n",
+        'pp_run_ops() { local _mod="$1"; shift; python3 -m "$_mod" "$@"; }\n',
         "\n",
         "# Stub wf_load_plugin: WF_MANIFEST_FINALIZE pre-set so Guard 1 passes.\n",
         "wf_load_plugin() { return 0; }\n",
@@ -1034,26 +971,17 @@ def test_sweep_closes_stranded_item_when_all_siblings_terminal(
     _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file))
     _write_task(tasks_root, "TESTER-002-companion", "DONE", str(req_file))
 
-    stdout, stderr, rc, sentinel = _run_sweep_census(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, stderr, rc, sentinel = _run_sweep_census(tmp_path, project_root, tasks_root, req_dir)
 
-    assert rc == 0, (
-        f"sweep_running_intake_census must exit 0; got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
-    )
+    assert rc == 0, f"sweep_running_intake_census must exit 0; got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     assert sentinel.exists(), (
         "close_item must be invoked when all sibling tasks are terminal "
         "and the intake item is still running (stranded-item shape).\n"
         f"sentinel not created.\nstdout: {stdout!r}\nstderr: {stderr!r}"
     )
     calls = sentinel.read_text(encoding="utf-8")
-    assert "close_item" in calls, (
-        f"Sentinel must record a close_item invocation; got {calls!r}"
-    )
-    assert "v1.0.0-stranded" in calls, (
-        f"close_item must be called with the requirements key; sentinel: {calls!r}"
-    )
+    assert "close_item" in calls, f"Sentinel must record a close_item invocation; got {calls!r}"
+    assert "v1.0.0-stranded" in calls, f"close_item must be called with the requirements key; sentinel: {calls!r}"
 
 
 def test_sweep_stranded_item_log_mentions_running_intake(
@@ -1070,14 +998,11 @@ def test_sweep_stranded_item_log_mentions_running_intake(
     tasks_root = project_root / "tasks"
     _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file))
 
-    stdout, _stderr, rc, _sentinel = _run_sweep_census(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, _stderr, rc, _sentinel = _run_sweep_census(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0
     assert "running intake item" in stdout.lower() or "census" in stdout.lower(), (
-        "Sweep must log that it found a running intake item.\n"
-        f"stdout: {stdout!r}"
+        "Sweep must log that it found a running intake item.\n" f"stdout: {stdout!r}"
     )
 
 
@@ -1102,9 +1027,7 @@ def test_sweep_does_not_close_when_sibling_is_working(
     _write_task(tasks_root, "TESTER-001-done", "DONE", str(req_file))
     _write_task(tasks_root, "TESTER-002-working", "WORKING", str(req_file))
 
-    stdout, stderr, rc, sentinel = _run_sweep_census(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, stderr, rc, sentinel = _run_sweep_census(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0, (
         f"sweep_running_intake_census must exit 0 even when skipping; got {rc}\n"
@@ -1131,15 +1054,12 @@ def test_sweep_logs_census_attempt_when_sibling_is_working(
     _write_task(tasks_root, "TESTER-001-done", "DONE", str(req_file))
     _write_task(tasks_root, "TESTER-002-working", "WORKING", str(req_file))
 
-    stdout, _stderr, rc, _sentinel = _run_sweep_census(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, _stderr, rc, _sentinel = _run_sweep_census(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0
     # The census log line must appear (either from sweep or from close_intake)
     assert "census" in stdout.lower(), (
-        "Sweep must log the census attempt when a sibling is non-terminal.\n"
-        f"stdout: {stdout!r}"
+        "Sweep must log the census attempt when a sibling is non-terminal.\n" f"stdout: {stdout!r}"
     )
 
 
@@ -1171,9 +1091,7 @@ def test_sweep_no_running_items_logs_none_found(
     )
     tasks_root = project_root / "tasks"
 
-    stdout, stderr, rc, sentinel = _run_sweep_census(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, stderr, rc, sentinel = _run_sweep_census(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0, (
         f"sweep_running_intake_census must exit 0 when no items are running; got {rc}\n"
@@ -1184,8 +1102,7 @@ def test_sweep_no_running_items_logs_none_found(
         f"sentinel unexpectedly created.\nstdout: {stdout!r}"
     )
     assert "no running" in stdout.lower(), (
-        "Sweep must log that no running intake items were found.\n"
-        f"stdout: {stdout!r}"
+        "Sweep must log that no running intake items were found.\n" f"stdout: {stdout!r}"
     )
 
 
@@ -1291,7 +1208,7 @@ def _run_sweep_census_with_type_dispatch(
     script_parts: list[str] = [
         "#!/usr/bin/env bash\n",
         "set -euo pipefail\n",
-        f"export PATH=\"{stub_bin_s}:$PATH\"\n",
+        f'export PATH="{stub_bin_s}:$PATH"\n',
         "\n",
         log_stub,
         "\n",
@@ -1299,12 +1216,12 @@ def _run_sweep_census_with_type_dispatch(
         _close_intake_helpers(),
         "\n",
         "# Stub pp_run_ops: delegates to stubbed python3 so close_item interception works.\n",
-        "pp_run_ops() { local _mod=\"$1\"; shift; python3 -m \"$_mod\" \"$@\"; }\n",
+        'pp_run_ops() { local _mod="$1"; shift; python3 -m "$_mod" "$@"; }\n',
         "\n",
         # Type-dispatching wf_load_plugin stub.
         "wf_load_plugin() {\n",
         "    WF_MANIFEST_FINALIZE=''\n",
-        "    case \"$1\" in\n",
+        '    case "$1" in\n',
         "        testing-only) WF_MANIFEST_FINALIZE='report'; return 0 ;;\n",
         "        release)      WF_MANIFEST_FINALIZE='tag';    return 0 ;;\n",
         "        document)     WF_MANIFEST_FINALIZE='publish'; return 0 ;;\n",
@@ -1377,32 +1294,21 @@ def test_sweep_cfgless_project_closes_testing_only_item(
     """
     project_root = tmp_path / "project"
     req_dir = project_root / "requirements"
-    req_file = _write_requirements_with_workflow_type(
-        req_dir, "v1.0.0-cfgless.md", "running", "testing-only"
-    )
+    req_file = _write_requirements_with_workflow_type(req_dir, "v1.0.0-cfgless.md", "running", "testing-only")
     tasks_root = project_root / "tasks"
     _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file))
 
-    stdout, stderr, rc, sentinel = _run_sweep_census_with_type_dispatch(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, stderr, rc, sentinel = _run_sweep_census_with_type_dispatch(tmp_path, project_root, tasks_root, req_dir)
 
-    assert rc == 0, (
-        f"sweep_running_intake_census must exit 0; got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
-    )
+    assert rc == 0, f"sweep_running_intake_census must exit 0; got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
     assert sentinel.exists(), (
         "close_item must be invoked for a cfg-less testing-only item when all "
         "siblings are terminal; sentinel not created.\n"
         f"stdout: {stdout!r}\nstderr: {stderr!r}"
     )
     calls = sentinel.read_text(encoding="utf-8")
-    assert "close_item" in calls, (
-        f"Sentinel must record close_item; got {calls!r}"
-    )
-    assert "v1.0.0-cfgless" in calls, (
-        f"close_item must be called with the requirements key; sentinel: {calls!r}"
-    )
+    assert "close_item" in calls, f"Sentinel must record close_item; got {calls!r}"
+    assert "v1.0.0-cfgless" in calls, f"close_item must be called with the requirements key; sentinel: {calls!r}"
 
 
 def test_sweep_cfgless_project_emits_sweep_census_line(
@@ -1415,20 +1321,15 @@ def test_sweep_cfgless_project_emits_sweep_census_line(
     """
     project_root = tmp_path / "project"
     req_dir = project_root / "requirements"
-    req_file = _write_requirements_with_workflow_type(
-        req_dir, "v1.0.0-cfgless-log.md", "running", "testing-only"
-    )
+    req_file = _write_requirements_with_workflow_type(req_dir, "v1.0.0-cfgless-log.md", "running", "testing-only")
     tasks_root = project_root / "tasks"
     _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file))
 
-    stdout, _stderr, rc, _sentinel = _run_sweep_census_with_type_dispatch(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, _stderr, rc, _sentinel = _run_sweep_census_with_type_dispatch(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0
     assert "sweep-census:" in stdout, (
-        "Sweep must emit at least one sweep-census: line for a running item.\n"
-        f"stdout: {stdout!r}"
+        "Sweep must emit at least one sweep-census: line for a running item.\n" f"stdout: {stdout!r}"
     )
 
 
@@ -1452,33 +1353,20 @@ def test_sweep_mixed_type_narrates_release_item_skip(
     project_root = tmp_path / "project"
     req_dir = project_root / "requirements"
 
-    req_testing = _write_requirements_with_workflow_type(
-        req_dir, "v1.0.0-testing.md", "running", "testing-only"
-    )
-    req_release = _write_requirements_with_workflow_type(
-        req_dir, "v1.1.0-release.md", "running", "release"
-    )
+    req_testing = _write_requirements_with_workflow_type(req_dir, "v1.0.0-testing.md", "running", "testing-only")
+    req_release = _write_requirements_with_workflow_type(req_dir, "v1.1.0-release.md", "running", "release")
     tasks_root = project_root / "tasks"
     _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_testing))
 
-    stdout, stderr, rc, sentinel = _run_sweep_census_with_type_dispatch(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, stderr, rc, sentinel = _run_sweep_census_with_type_dispatch(tmp_path, project_root, tasks_root, req_dir)
 
-    assert rc == 0, (
-        f"sweep_running_intake_census must exit 0; got {rc}\n"
-        f"stdout: {stdout!r}\nstderr: {stderr!r}"
-    )
+    assert rc == 0, f"sweep_running_intake_census must exit 0; got {rc}\n" f"stdout: {stdout!r}\nstderr: {stderr!r}"
 
     # Release item must produce a narrated-skip line with finalize=tag.
     assert "finalize=tag" in stdout, (
-        "Sweep must log 'finalize=tag' when skipping a release-type running item.\n"
-        f"stdout: {stdout!r}"
+        "Sweep must log 'finalize=tag' when skipping a release-type running item.\n" f"stdout: {stdout!r}"
     )
-    assert "not report" in stdout.lower(), (
-        "Sweep skip line must include 'not report' reason.\n"
-        f"stdout: {stdout!r}"
-    )
+    assert "not report" in stdout.lower(), "Sweep skip line must include 'not report' reason.\n" f"stdout: {stdout!r}"
 
     # Testing-only item must trigger close_item.
     assert sentinel.exists(), (
@@ -1487,8 +1375,7 @@ def test_sweep_mixed_type_narrates_release_item_skip(
     )
     calls = sentinel.read_text(encoding="utf-8")
     assert "v1.0.0-testing" in calls, (
-        f"close_item must be called with the testing-only requirements key; "
-        f"sentinel: {calls!r}"
+        f"close_item must be called with the testing-only requirements key; " f"sentinel: {calls!r}"
     )
 
 
@@ -1503,33 +1390,23 @@ def test_sweep_mixed_type_release_item_not_closed(
     project_root = tmp_path / "project"
     req_dir = project_root / "requirements"
 
-    _write_requirements_with_workflow_type(
-        req_dir, "v1.0.0-testing-b.md", "running", "testing-only"
-    )
-    req_release = _write_requirements_with_workflow_type(
-        req_dir, "v1.1.0-release-b.md", "running", "release"
-    )
+    _write_requirements_with_workflow_type(req_dir, "v1.0.0-testing-b.md", "running", "testing-only")
+    req_release = _write_requirements_with_workflow_type(req_dir, "v1.1.0-release-b.md", "running", "release")
     tasks_root = project_root / "tasks"
     # No tasks for either item (empty census → testing-only skips closure too,
     # but the release item must still not call close_item).
     tasks_root.mkdir(parents=True, exist_ok=True)
 
-    stdout, stderr, rc, sentinel = _run_sweep_census_with_type_dispatch(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, stderr, rc, sentinel = _run_sweep_census_with_type_dispatch(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0
     # Release item's narrated-skip must appear.
-    assert "finalize=tag" in stdout, (
-        "Narrated-skip for release item must appear in output.\n"
-        f"stdout: {stdout!r}"
-    )
+    assert "finalize=tag" in stdout, "Narrated-skip for release item must appear in output.\n" f"stdout: {stdout!r}"
     # close_item must not have been called with the release key.
     if sentinel.exists():
         calls = sentinel.read_text(encoding="utf-8")
         assert "v1.1.0-release-b" not in calls, (
-            f"close_item must NOT be called for the release-type item; "
-            f"sentinel: {calls!r}"
+            f"close_item must NOT be called for the release-type item; " f"sentinel: {calls!r}"
         )
 
 
@@ -1549,22 +1426,15 @@ def test_sweep_log_contract_report_type_emits_census_line(
     """
     project_root = tmp_path / "project"
     req_dir = project_root / "requirements"
-    req_file = _write_requirements_with_workflow_type(
-        req_dir, "v1.0.0-logcontract.md", "running", "testing-only"
-    )
+    req_file = _write_requirements_with_workflow_type(req_dir, "v1.0.0-logcontract.md", "running", "testing-only")
     tasks_root = project_root / "tasks"
     _write_task(tasks_root, "TESTER-001-verify", "DONE", str(req_file))
 
-    stdout, _stderr, rc, _sentinel = _run_sweep_census_with_type_dispatch(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, _stderr, rc, _sentinel = _run_sweep_census_with_type_dispatch(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0
     census_lines = [ln for ln in stdout.splitlines() if "sweep-census:" in ln]
-    assert len(census_lines) >= 1, (
-        "Wake with ≥1 running item must emit ≥1 sweep-census: line.\n"
-        f"stdout: {stdout!r}"
-    )
+    assert len(census_lines) >= 1, "Wake with ≥1 running item must emit ≥1 sweep-census: line.\n" f"stdout: {stdout!r}"
 
 
 def test_sweep_log_contract_non_report_type_emits_census_line(
@@ -1578,15 +1448,11 @@ def test_sweep_log_contract_non_report_type_emits_census_line(
     """
     project_root = tmp_path / "project"
     req_dir = project_root / "requirements"
-    _write_requirements_with_workflow_type(
-        req_dir, "v1.0.0-logcontract-release.md", "running", "release"
-    )
+    _write_requirements_with_workflow_type(req_dir, "v1.0.0-logcontract-release.md", "running", "release")
     tasks_root = project_root / "tasks"
     tasks_root.mkdir(parents=True, exist_ok=True)
 
-    stdout, _stderr, rc, _sentinel = _run_sweep_census_with_type_dispatch(
-        tmp_path, project_root, tasks_root, req_dir
-    )
+    stdout, _stderr, rc, _sentinel = _run_sweep_census_with_type_dispatch(tmp_path, project_root, tasks_root, req_dir)
 
     assert rc == 0
     census_lines = [ln for ln in stdout.splitlines() if "sweep-census:" in ln]

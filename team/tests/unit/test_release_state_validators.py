@@ -40,7 +40,6 @@ from pgai_agent_kanban.cm.read_state_field import (
     validate_release_state_fields,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -124,9 +123,7 @@ def test_validate_release_state_fields_reports_every_schema_field_ok(
     field, in schema order, for a well-formed file."""
     md = _write_release_state(tmp_path, _well_formed_headings())
     results = validate_release_state_fields(str(md))
-    assert [r.heading for r in results] == [
-        spec.heading for spec in RELEASE_STATE_SCHEMA
-    ]
+    assert [r.heading for r in results] == [spec.heading for spec in RELEASE_STATE_SCHEMA]
     assert all(r.ok for r in results)
 
 
@@ -250,8 +247,7 @@ def test_four_refusal_kinds_are_pairwise_distinguishable(
     not only by reading the message text."""
     empty_md = tmp_path / "empty.md"
     empty_md.write_text(
-        "## Active RC\n---\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
-        "## RC Opened By Task\nnone\n",
+        "## Active RC\n---\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
     missing_dir = tmp_path / "missing"
@@ -273,25 +269,15 @@ def test_four_refusal_kinds_are_pairwise_distinguishable(
     bad_version_md = _write_release_state(bad_version_dir, bad_version_headings)
 
     error_keys = {
-        "empty": next(
-            r.error_key
-            for r in validate_release_state_fields(str(empty_md))
-            if r.heading == "Active RC"
-        ),
+        "empty": next(r.error_key for r in validate_release_state_fields(str(empty_md)) if r.heading == "Active RC"),
         "missing_heading": next(
-            r.error_key
-            for r in validate_release_state_fields(str(missing_md))
-            if r.heading == "RC Opened At"
+            r.error_key for r in validate_release_state_fields(str(missing_md)) if r.heading == "RC Opened At"
         ),
         "malformed_timestamp": next(
-            r.error_key
-            for r in validate_release_state_fields(str(bad_timestamp_md))
-            if r.heading == "RC Opened At"
+            r.error_key for r in validate_release_state_fields(str(bad_timestamp_md)) if r.heading == "RC Opened At"
         ),
         "malformed_version": next(
-            r.error_key
-            for r in validate_release_state_fields(str(bad_version_md))
-            if r.heading == "Active RC"
+            r.error_key for r in validate_release_state_fields(str(bad_version_md)) if r.heading == "Active RC"
         ),
     }
     assert len(set(error_keys.values())) == 4, error_keys

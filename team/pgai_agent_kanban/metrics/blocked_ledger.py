@@ -228,7 +228,6 @@ import os
 import pathlib
 import sys
 from datetime import datetime
-from typing import Optional
 
 # Run by file path (``python3 .../blocked_ledger.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -330,7 +329,7 @@ def record_cause(record: dict) -> str:
     return _vocab_value(record.get(_FIELD_CAUSE), VALID_CAUSES, DEFAULT_CAUSE)
 
 
-def record_reason_code(record: dict) -> Optional[str]:
+def record_reason_code(record: dict) -> str | None:
     """The record's ``reason_code`` field, stripped; None when absent or
     blank."""
     raw = record.get(_FIELD_REASON_CODE)
@@ -340,7 +339,7 @@ def record_reason_code(record: dict) -> Optional[str]:
     return text or None
 
 
-def version_for_active_rc(active_rc: Optional[str]) -> str:
+def version_for_active_rc(active_rc: str | None) -> str:
     """The ledger version to record a block under, given the project's
     ``## Active RC`` value: the RC version itself, or NO_RC_VERSION when
     the Active RC is "none" (any case), empty or None."""
@@ -351,9 +350,9 @@ def version_for_active_rc(active_rc: Optional[str]) -> str:
 
 
 def _optional_fields(
-    block_class: Optional[str],
-    cause: Optional[str],
-    reason_code: Optional[str],
+    block_class: str | None,
+    cause: str | None,
+    reason_code: str | None,
 ) -> dict:
     """Validate and canonicalise the optional fields a writer was handed,
     returning only the ones given. A class or cause outside its vocabulary
@@ -370,8 +369,7 @@ def _optional_fields(
         if word not in vocabulary:
             raise LedgerError(
                 "blocked-ledger.invalid-field",
-                f"{name} {value!r} is not one of {', '.join(vocabulary)}; "
-                "nothing was written",
+                f"{name} {value!r} is not one of {', '.join(vocabulary)}; " "nothing was written",
                 f"pass one of the accepted values, e.g. {example}",
             )
         fields[name] = word
@@ -420,7 +418,7 @@ def parse_records(ledger_path: str) -> list:
     """
     if not os.path.isfile(ledger_path):
         return []
-    with open(ledger_path, "r", encoding="utf-8") as handle:
+    with open(ledger_path, encoding="utf-8") as handle:
         text = handle.read()
     if not text.strip():
         return []
@@ -436,41 +434,32 @@ def parse_records(ledger_path: str) -> list:
             raise LedgerError(
                 "blocked-ledger.malformed",
                 f"{ledger_path} line {lineno} is not valid JSON: {exc}",
-                f"inspect and repair or remove the offending line: "
-                f"sed -n '{lineno}p' {ledger_path}",
+                f"inspect and repair or remove the offending line: " f"sed -n '{lineno}p' {ledger_path}",
             ) from exc
         if not isinstance(record, dict):
             raise LedgerError(
                 "blocked-ledger.malformed",
-                f"{ledger_path} line {lineno} is not a JSON object "
-                f"(got {type(record).__name__})",
-                f"inspect and repair or remove the offending line: "
-                f"sed -n '{lineno}p' {ledger_path}",
+                f"{ledger_path} line {lineno} is not a JSON object " f"(got {type(record).__name__})",
+                f"inspect and repair or remove the offending line: " f"sed -n '{lineno}p' {ledger_path}",
             )
         missing = [f for f in _REQUIRED_FIELDS if not record.get(f)]
         if missing:
             raise LedgerError(
                 "blocked-ledger.malformed",
-                f"{ledger_path} line {lineno} is missing required field(s): "
-                f"{', '.join(missing)}",
-                f"inspect and repair or remove the offending line: "
-                f"sed -n '{lineno}p' {ledger_path}",
+                f"{ledger_path} line {lineno} is missing required field(s): " f"{', '.join(missing)}",
+                f"inspect and repair or remove the offending line: " f"sed -n '{lineno}p' {ledger_path}",
             )
         if record["kind"] not in VALID_KINDS:
             raise LedgerError(
                 "blocked-ledger.malformed",
-                f"{ledger_path} line {lineno} has kind={record['kind']!r}, "
-                f"not one of {VALID_KINDS}",
-                f"inspect and repair or remove the offending line: "
-                f"sed -n '{lineno}p' {ledger_path}",
+                f"{ledger_path} line {lineno} has kind={record['kind']!r}, " f"not one of {VALID_KINDS}",
+                f"inspect and repair or remove the offending line: " f"sed -n '{lineno}p' {ledger_path}",
             )
         if try_parse_iso(str(record["timestamp"]), naive_as_utc=False) is None:
             raise LedgerError(
                 "blocked-ledger.malformed",
-                f"{ledger_path} line {lineno} has an unparseable timestamp: "
-                f"{record['timestamp']!r}",
-                f"inspect and repair or remove the offending line: "
-                f"sed -n '{lineno}p' {ledger_path}",
+                f"{ledger_path} line {lineno} has an unparseable timestamp: " f"{record['timestamp']!r}",
+                f"inspect and repair or remove the offending line: " f"sed -n '{lineno}p' {ledger_path}",
             )
         records.append(record)
     return records
@@ -484,7 +473,7 @@ def parse_records(ledger_path: str) -> list:
 def _append_line(ledger_path: str, record: dict) -> None:
     existing = ""
     if os.path.isfile(ledger_path):
-        with open(ledger_path, "r", encoding="utf-8") as handle:
+        with open(ledger_path, encoding="utf-8") as handle:
             existing = handle.read()
     line = json.dumps(record, sort_keys=True)
     new_content = existing if existing.endswith("\n") or not existing else existing + "\n"
@@ -561,18 +550,14 @@ def _open_blocks(records: list, version: str) -> dict:
             if source not in open_by_source:
                 raise LedgerError(
                     "blocked-ledger.malformed",
-                    f"version {version!r} source {source!r} has a "
-                    "block-end event with no matching open block-start",
-                    "remove the orphaned block-end, or append the missing "
-                    "block-start ahead of it, then re-read",
+                    f"version {version!r} source {source!r} has a " "block-end event with no matching open block-start",
+                    "remove the orphaned block-end, or append the missing " "block-start ahead of it, then re-read",
                 )
             del open_by_source[source]
     return open_by_source
 
 
-def _boundary_record(
-    version: str, kind: str, source: str, timestamp: str, optional: dict
-) -> dict:
+def _boundary_record(version: str, kind: str, source: str, timestamp: str, optional: dict) -> dict:
     """One record: the four required fields plus the optional ones given."""
     record = {"version": version, "kind": kind, "source": source, "timestamp": timestamp}
     record.update(optional)
@@ -585,9 +570,9 @@ def append_block_start(
     source: str,
     timestamp: str,
     *,
-    block_class: Optional[str] = None,
-    cause: Optional[str] = None,
-    reason_code: Optional[str] = None,
+    block_class: str | None = None,
+    cause: str | None = None,
+    reason_code: str | None = None,
 ) -> None:
     """Stamp the start of a blocked interval for (*version*, *source*).
     See module docstring "Three write operations" for the pairing rule this
@@ -623,9 +608,9 @@ def append_block_end(
     source: str,
     timestamp: str,
     *,
-    block_class: Optional[str] = None,
-    cause: Optional[str] = None,
-    reason_code: Optional[str] = None,
+    block_class: str | None = None,
+    cause: str | None = None,
+    reason_code: str | None = None,
 ) -> None:
     """Stamp the end of a blocked interval for (*version*, *source*). See
     module docstring "Three write operations" for the pairing rule this
@@ -645,8 +630,7 @@ def append_block_end(
     if source not in open_by_source:
         raise LedgerError(
             ERROR_NO_OP,
-            f"version {version!r} source {source!r} has no open "
-            "block-start to close",
+            f"version {version!r} source {source!r} has no open " "block-start to close",
             "append a block-start for this source first, or confirm the "
             "caller is not closing a block that was never opened",
         )
@@ -659,7 +643,7 @@ def mark_block_escalated(
     source: str,
     timestamp: str,
     *,
-    reason_code: Optional[str] = None,
+    reason_code: str | None = None,
 ) -> None:
     """Mark the open block of (*version*, *source*) escalated to a human,
     so it reads class "human" from now on. Appends one block-escalate
@@ -678,8 +662,7 @@ def mark_block_escalated(
     if state is None:
         raise LedgerError(
             ERROR_NO_OP,
-            f"version {version!r} source {source!r} has no open "
-            "block-start to escalate",
+            f"version {version!r} source {source!r} has no open " "block-start to escalate",
             "append a block-start for this source first, or confirm the "
             "caller is escalating the version the block was opened under",
         )
@@ -688,12 +671,9 @@ def mark_block_escalated(
             ERROR_NO_OP,
             f"version {version!r} source {source!r} already reads class "
             f"{CLASS_HUMAN!r} (open since {state['start']['timestamp']})",
-            "nothing to do: the open block is already escalated; close it "
-            "with a block-end when it is resolved",
+            "nothing to do: the open block is already escalated; close it " "with a block-end when it is resolved",
         )
-    _append_line(
-        ledger_path, _boundary_record(version, KIND_ESCALATE, source, timestamp, optional)
-    )
+    _append_line(ledger_path, _boundary_record(version, KIND_ESCALATE, source, timestamp, optional))
 
 
 # ---------------------------------------------------------------------------
@@ -721,16 +701,14 @@ def _intervals_for_version(records: list, version: str, window_closed_at: dateti
                     "blocked-ledger.malformed",
                     f"version {version!r} source {source!r} has two "
                     "block-start events with no block-end between them",
-                    "repair the ledger to remove the duplicate start, or "
-                    "append the missing block-end",
+                    "repair the ledger to remove the duplicate start, or " "append the missing block-end",
                 )
             open_by_source[source] = ts
         else:  # block-end
             if source not in open_by_source:
                 raise LedgerError(
                     "blocked-ledger.malformed",
-                    f"version {version!r} source {source!r} has a "
-                    "block-end event with no matching open block-start",
+                    f"version {version!r} source {source!r} has a " "block-end event with no matching open block-start",
                     "repair the ledger to remove the orphaned block-end, "
                     "or append the missing block-start ahead of it",
                 )
@@ -781,19 +759,15 @@ def blocked_minutes(
     if opened_dt is None:
         raise LedgerError(
             "blocked-ledger.invalid-window",
-            f"window_opened_at {window_opened_at!r} is not a parseable "
-            "ISO-8601 timestamp",
-            "pass the RC's own opened timestamp in ISO-8601, e.g. "
-            "2026-09-18T09:15:22+00:00",
+            f"window_opened_at {window_opened_at!r} is not a parseable " "ISO-8601 timestamp",
+            "pass the RC's own opened timestamp in ISO-8601, e.g. " "2026-09-18T09:15:22+00:00",
         )
     closed_dt = try_parse_iso(str(window_closed_at), naive_as_utc=False)
     if closed_dt is None:
         raise LedgerError(
             "blocked-ledger.invalid-window",
-            f"window_closed_at {window_closed_at!r} is not a parseable "
-            "ISO-8601 timestamp",
-            "pass the RC's own closed/shipped timestamp in ISO-8601, e.g. "
-            "2026-09-18T09:15:22+00:00",
+            f"window_closed_at {window_closed_at!r} is not a parseable " "ISO-8601 timestamp",
+            "pass the RC's own closed/shipped timestamp in ISO-8601, e.g. " "2026-09-18T09:15:22+00:00",
         )
 
     records = parse_records(ledger_path)
@@ -839,7 +813,7 @@ def _block_entry(start: dict) -> dict:
     }
 
 
-def block_intervals(ledger_path: str, version: Optional[str] = None) -> list:
+def block_intervals(ledger_path: str, version: str | None = None) -> list:
     """Return one dict per block recorded for *version* (every version,
     NO_RC_VERSION included, when *version* is None), in block-start file
     order. Keys: version, source, start, end (None while open), class,
@@ -865,8 +839,7 @@ def block_intervals(ledger_path: str, version: Optional[str] = None) -> list:
                     "blocked-ledger.malformed",
                     f"version {pair[0]!r} source {pair[1]!r} has two "
                     "block-start events with no block-end between them",
-                    "repair the ledger to remove the duplicate start, or "
-                    "append the missing block-end",
+                    "repair the ledger to remove the duplicate start, or " "append the missing block-end",
                 )
             entry = _block_entry(record)
             open_by_pair[pair] = entry
@@ -876,10 +849,8 @@ def block_intervals(ledger_path: str, version: Optional[str] = None) -> list:
         if entry is None:
             raise LedgerError(
                 "blocked-ledger.malformed",
-                f"version {pair[0]!r} source {pair[1]!r} has a {kind} "
-                "event with no matching open block-start",
-                f"repair the ledger to remove the orphaned {kind}, or "
-                "append the missing block-start ahead of it",
+                f"version {pair[0]!r} source {pair[1]!r} has a {kind} " "event with no matching open block-start",
+                f"repair the ledger to remove the orphaned {kind}, or " "append the missing block-start ahead of it",
             )
         if kind == KIND_ESCALATE:
             if not entry["escalated"]:
@@ -985,8 +956,7 @@ def main() -> int:
         type=str.lower,
         choices=VALID_CLASSES,
         default=None,
-        help="class of the resolution: human when a human had to clear the block; "
-        "a record without it reads as any",
+        help="class of the resolution: human when a human had to clear the block; " "a record without it reads as any",
     )
     for subparser in (p_start, p_end):
         subparser.add_argument(
@@ -1028,20 +998,26 @@ def main() -> int:
         if args.command in ("start", "end"):
             writer = append_block_start if args.command == "start" else append_block_end
             writer(
-                args.ledger_path, args.version, args.source, args.timestamp,
-                block_class=args.block_class, cause=args.cause, reason_code=args.reason_code,
+                args.ledger_path,
+                args.version,
+                args.source,
+                args.timestamp,
+                block_class=args.block_class,
+                cause=args.cause,
+                reason_code=args.reason_code,
             )
             sys.stdout.write(json.dumps({"written": True}) + "\n")
         elif args.command == "escalate":
             mark_block_escalated(
-                args.ledger_path, args.version, args.source, args.timestamp,
+                args.ledger_path,
+                args.version,
+                args.source,
+                args.timestamp,
                 reason_code=args.reason_code,
             )
             sys.stdout.write(json.dumps({"written": True}) + "\n")
         elif args.command == "read":
-            minutes = blocked_minutes(
-                args.ledger_path, args.version, args.window_opened_at, args.window_closed_at
-            )
+            minutes = blocked_minutes(args.ledger_path, args.version, args.window_opened_at, args.window_closed_at)
             sys.stdout.write(json.dumps({"blocked_minutes": minutes}) + "\n")
     except LedgerError as exc:
         from pgai_agent_kanban.lib.error_contract import emit_error_contract, format_error_contract

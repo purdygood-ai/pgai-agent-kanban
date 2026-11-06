@@ -33,16 +33,12 @@ import pathlib
 import re
 import textwrap
 
-import pytest
 
 from pgai_agent_kanban.cm.changelog_writer import (
-    BugRecord,
     load_published_manifest,
     parse_bug_file,
-    parse_release_notes,
     regenerate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -201,9 +197,7 @@ class TestClassificationNegative:
     """A bugfix bundle must produce a non-empty Fixed section; Fixed:None with
     BUG items present is impossible."""
 
-    def test_bugfix_release_lists_symptom_in_fixed_section(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bugfix_release_lists_symptom_in_fixed_section(self, tmp_path: pathlib.Path) -> None:
         """A release resolving a BUG item renders the bug's symptom in Fixed."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -219,19 +213,13 @@ class TestClassificationNegative:
                     "fixed_in": "v1.1.0",
                 }
             ],
-            release_kwargs={
-                "v1.1.0": {
-                    "bug_fixes": "- **BUG-0001**: Widget crashes on startup. Fixed."
-                }
-            },
+            release_kwargs={"v1.1.0": {"bug_fixes": "- **BUG-0001**: Widget crashes on startup. Fixed."}},
         )
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
         # The v1.1.0 Fixed section must contain the symptom text
         assert "Widget crashes on startup" in content
 
-    def test_fixed_section_present_with_bug_items_never_shows_none(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fixed_section_present_with_bug_items_never_shows_none(self, tmp_path: pathlib.Path) -> None:
         """When BUG items exist in the release, Fixed section cannot be None."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -247,32 +235,22 @@ class TestClassificationNegative:
                     "fixed_in": "v1.1.0",
                 }
             ],
-            release_kwargs={
-                "v1.1.0": {
-                    "bug_fixes": "- **BUG-0001**: Data lost on write. Fixed."
-                }
-            },
+            release_kwargs={"v1.1.0": {"bug_fixes": "- **BUG-0001**: Data lost on write. Fixed."}},
         )
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
 
         # Locate the v1.1.0 entry and confirm Fixed section is not None
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None, "v1.1.0 entry not found in output"
         entry_text = entry_match.group(0)
 
         fixed_match = re.search(r"### Fixed\n(.+?)(?=###|\Z)", entry_text, re.DOTALL)
         assert fixed_match is not None, "Fixed section not found in v1.1.0 entry"
         fixed_body = fixed_match.group(1).strip()
-        assert fixed_body != "None", (
-            "Fixed section shows 'None' despite BUG items present in release"
-        )
+        assert fixed_body != "None", "Fixed section shows 'None' despite BUG items present in release"
         assert "Data lost on write" in fixed_body
 
-    def test_fixed_section_shows_none_when_no_bug_items_exist(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fixed_section_shows_none_when_no_bug_items_exist(self, tmp_path: pathlib.Path) -> None:
         """A release with no bug items correctly shows Fixed: None."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -291,9 +269,7 @@ class TestClassificationNegative:
         assert fixed_match is not None
         assert fixed_match.group(1).strip() == "None"
 
-    def test_internal_only_bug_renders_symptom_without_identifier(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_internal_only_bug_renders_symptom_without_identifier(self, tmp_path: pathlib.Path) -> None:
         """An internal-only bug (no public disclosure) renders as plain symptom."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -310,11 +286,7 @@ class TestClassificationNegative:
                     "fixed_in": "v1.1.0",
                 }
             ],
-            release_kwargs={
-                "v1.1.0": {
-                    "bug_fixes": "- **BUG-0002**: Internal race condition. Fixed."
-                }
-            },
+            release_kwargs={"v1.1.0": {"bug_fixes": "- **BUG-0002**: Internal race condition. Fixed."}},
         )
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
         # Symptom appears (as plain text in Fixed)
@@ -333,9 +305,7 @@ class TestDisclosureScope:
     published versions do not; empty PUBLISHED discloses nothing; absent
     PUBLISHED is treated as empty (no error, same semantics as empty)."""
 
-    def test_bug_affecting_published_version_is_disclosed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bug_affecting_published_version_is_disclosed(self, tmp_path: pathlib.Path) -> None:
         """A bug with Affects=v1.0.0 (in PUBLISHED) appears in Known Issues."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -355,9 +325,7 @@ class TestDisclosureScope:
         assert "KI-" in content
         assert "Crash on startup" in content
 
-    def test_bug_born_and_fixed_between_published_versions_not_disclosed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bug_born_and_fixed_between_published_versions_not_disclosed(self, tmp_path: pathlib.Path) -> None:
         """A bug born and fixed entirely between published releases is not disclosed."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -369,7 +337,7 @@ class TestDisclosureScope:
                     "slug": "internal-only",
                     "symptom": "Internal scheduler glitch",
                     "status": "resolved",
-                    "affects": "v1.1.0",   # not in PUBLISHED
+                    "affects": "v1.1.0",  # not in PUBLISHED
                     "fixed_in": "v1.1.5",  # not in PUBLISHED either
                 }
             ],
@@ -380,9 +348,7 @@ class TestDisclosureScope:
         # Definitively: no KI- identifier for this bug
         assert not re.search(r"KI-1\.1\.0\.\d+", content)
 
-    def test_both_disclosed_and_internal_bugs_in_same_fixture(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_both_disclosed_and_internal_bugs_in_same_fixture(self, tmp_path: pathlib.Path) -> None:
         """Only the bug affecting a published version appears in Known Issues."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -416,9 +382,7 @@ class TestDisclosureScope:
         # since we have no release entry that resolved an earlier defect in versions list
         assert "Internal glitch symptom" not in content
 
-    def test_empty_published_manifest_discloses_nothing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_empty_published_manifest_discloses_nothing(self, tmp_path: pathlib.Path) -> None:
         """An empty PUBLISHED manifest results in no Known Issues anywhere."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -440,9 +404,7 @@ class TestDisclosureScope:
         # Known Issues sections exist but say None
         assert re.search(r"### Known Issues\nNone", content)
 
-    def test_absent_published_manifest_returns_empty_list(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_absent_published_manifest_returns_empty_list(self, tmp_path: pathlib.Path) -> None:
         """Absent release-notes/PUBLISHED returns [] (empty-manifest semantics).
 
         Managed dev trees that predate the v1.17 disclosure architecture have no
@@ -454,13 +416,9 @@ class TestDisclosureScope:
         repo_root.mkdir()
         # Do NOT create release-notes/PUBLISHED — verify tolerance
         result = load_published_manifest(repo_root)
-        assert result == [], (
-            f"Expected [] for absent PUBLISHED, got {result!r}"
-        )
+        assert result == [], f"Expected [] for absent PUBLISHED, got {result!r}"
 
-    def test_absent_published_manifest_writer_exits_cleanly(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_absent_published_manifest_writer_exits_cleanly(self, tmp_path: pathlib.Path) -> None:
         """Writer on a manifest-less fixture tree exits without error.
 
         All entries are rendered as internal (no KI- identifiers); Known Issues
@@ -492,12 +450,10 @@ class TestDisclosureScope:
         # regenerate() must complete without error; output must have no KI- IDs
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], published, bugs_dir)
         assert content, "Expected non-empty CHANGELOG output"
-        assert "KI-" not in content, (
-            "No KI- identifiers expected when manifest is absent (empty-manifest semantics)"
-        )
-        assert re.search(r"### Known Issues\nNone", content), (
-            "Known Issues section must say 'None' when no versions are published"
-        )
+        assert "KI-" not in content, "No KI- identifiers expected when manifest is absent (empty-manifest semantics)"
+        assert re.search(
+            r"### Known Issues\nNone", content
+        ), "Known Issues section must say 'None' when no versions are published"
 
 
 # ===========================================================================
@@ -529,9 +485,7 @@ class TestRetroactiveUpdate:
         assert "· open" in content
         assert "Open issue symptom" in content
 
-    def test_adding_fixed_in_flips_rendering_to_fixed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_adding_fixed_in_flips_rendering_to_fixed(self, tmp_path: pathlib.Path) -> None:
         """After adding Fixed In to an open bug, regeneration shows 'fixed in'."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -567,9 +521,7 @@ class TestRetroactiveUpdate:
         assert "· open" not in content2
         assert "fixed in v1.2.0" in content2
 
-    def test_regeneration_is_byte_identical_on_same_inputs(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_regeneration_is_byte_identical_on_same_inputs(self, tmp_path: pathlib.Path) -> None:
         """Two consecutive regenerations with unchanged inputs produce identical output."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -590,9 +542,7 @@ class TestRetroactiveUpdate:
         content2 = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
         assert content1 == content2, "Regeneration produced different output on second call"
 
-    def test_regeneration_does_not_change_other_entries_after_fix(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_regeneration_does_not_change_other_entries_after_fix(self, tmp_path: pathlib.Path) -> None:
         """Flipping one bug's Fixed In does not change the content of other entries."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -617,9 +567,7 @@ class TestRetroactiveUpdate:
                 },
             ],
         )
-        content_before = regenerate(
-            repo_root, versions, ["v1.0.0", "v1.2.0"], bugs_dir
-        )
+        content_before = regenerate(repo_root, versions, ["v1.0.0", "v1.2.0"], bugs_dir)
         # Add Fixed In to bug-a only
         bug_file = bugs_dir / "BUG-0001-bug-a.md"
         bug_text = bug_file.read_text(encoding="utf-8")
@@ -630,9 +578,7 @@ class TestRetroactiveUpdate:
         )
         bug_file.write_text(bug_text, encoding="utf-8")
 
-        content_after = regenerate(
-            repo_root, versions, ["v1.0.0", "v1.2.0"], bugs_dir
-        )
+        content_after = regenerate(repo_root, versions, ["v1.0.0", "v1.2.0"], bugs_dir)
         # Bug B rendering unchanged
         assert "Bug B symptom" in content_before
         assert "Bug B symptom" in content_after
@@ -647,9 +593,7 @@ class TestRetroactiveUpdate:
 class TestCoordinateTranslation:
     """Internal fix version translates to public coordinate system."""
 
-    def test_internal_fix_not_yet_published_renders_fix_pending(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_internal_fix_not_yet_published_renders_fix_pending(self, tmp_path: pathlib.Path) -> None:
         """When Fixed In version is not yet in PUBLISHED, renders 'fix pending next release'."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -662,7 +606,7 @@ class TestCoordinateTranslation:
                     "symptom": "Fix pending symptom",
                     "status": "resolved",
                     "affects": "v1.0.0",
-                    "fixed_in": "v1.1.0",   # internal fix version
+                    "fixed_in": "v1.1.0",  # internal fix version
                     "public_id": "KI-1.0.0.1",
                 }
             ],
@@ -671,9 +615,7 @@ class TestCoordinateTranslation:
         assert "fix pending next release" in content
         assert "Fix pending symptom" in content
 
-    def test_publishing_fix_version_renders_fixed_in(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_publishing_fix_version_renders_fixed_in(self, tmp_path: pathlib.Path) -> None:
         """After adding the fix version to PUBLISHED, renders 'fixed in <version>'."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -695,9 +637,7 @@ class TestCoordinateTranslation:
         assert "fix pending" not in content
         assert "fixed in v1.1.0" in content
 
-    def test_open_bug_renders_open_not_fixed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_open_bug_renders_open_not_fixed(self, tmp_path: pathlib.Path) -> None:
         """An open bug with no Fixed In renders '· open'."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -730,9 +670,7 @@ class TestStructuralConformance:
     """CHANGELOG structure: one ## vX.Y.Z per release, ### headings,
     optional empty sections, Known Issues always present."""
 
-    def test_one_h2_heading_per_release_newest_first(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_one_h2_heading_per_release_newest_first(self, tmp_path: pathlib.Path) -> None:
         """Each release has exactly one ## vX.Y.Z heading; newest release first."""
         versions = ["v1.3.0", "v1.2.0", "v1.1.0", "v1.0.0"]
         repo_root, bugs_dir, _ = _make_minimal_repo(
@@ -744,9 +682,7 @@ class TestStructuralConformance:
         content = regenerate(repo_root, versions, [], bugs_dir)
 
         headings = re.findall(r"^## (v\d+\.\d+\.\d+)", content, re.MULTILINE)
-        assert headings == versions, (
-            f"Expected headings {versions}, got {headings}"
-        )
+        assert headings == versions, f"Expected headings {versions}, got {headings}"
 
     def test_content_sections_use_h3_headings(self, tmp_path: pathlib.Path) -> None:
         """Implemented, Fixed, Known Issues use ### (H3) headings."""
@@ -762,9 +698,7 @@ class TestStructuralConformance:
         assert "### Fixed" in content
         assert "### Known Issues" in content
 
-    def test_known_issues_always_present_even_when_empty(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_known_issues_always_present_even_when_empty(self, tmp_path: pathlib.Path) -> None:
         """Known Issues section appears in every entry, even when no issues exist."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -776,13 +710,9 @@ class TestStructuralConformance:
 
         # Count Known Issues sections — should match number of releases
         ki_count = len(re.findall(r"### Known Issues", content))
-        assert ki_count == len(versions), (
-            f"Expected {len(versions)} Known Issues sections, got {ki_count}"
-        )
+        assert ki_count == len(versions), f"Expected {len(versions)} Known Issues sections, got {ki_count}"
 
-    def test_empty_implemented_shows_none_bugfix_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_empty_implemented_shows_none_bugfix_release(self, tmp_path: pathlib.Path) -> None:
         """A release with no features shows 'None (bugfix release)' in Implemented."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -799,9 +729,7 @@ class TestStructuralConformance:
         content = regenerate(repo_root, versions, [], bugs_dir)
         assert "None (bugfix release)" in content
 
-    def test_requirement_release_lists_its_requirement_under_implemented(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_requirement_release_lists_its_requirement_under_implemented(self, tmp_path: pathlib.Path) -> None:
         """A release built from a requirement, whose notes name it under Other
         Changes, lists that requirement under Implemented -- never 'None
         (bugfix release)'. Other bullets there stay out of the entry."""
@@ -832,9 +760,7 @@ class TestStructuralConformance:
         older = content.split("\n## v1.1.0", 1)[1]
         assert "None (bugfix release)" in older.split("### Fixed", 1)[0]
 
-    def test_header_contains_auto_generated_marker(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_header_contains_auto_generated_marker(self, tmp_path: pathlib.Path) -> None:
         """The CHANGELOG header includes the auto-generated do-not-edit marker."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -867,9 +793,7 @@ class TestStructuralConformance:
 class TestInternalIdLeakGate:
     """BUG-[0-9] must never appear in generated CHANGELOG output."""
 
-    def test_bug_ids_absent_from_output_with_single_bug(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bug_ids_absent_from_output_with_single_bug(self, tmp_path: pathlib.Path) -> None:
         """No BUG-NNNN in output when one bug is present in a bugfix release."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -894,13 +818,9 @@ class TestInternalIdLeakGate:
         )
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
         matches = re.findall(r"BUG-[0-9]", content)
-        assert matches == [], (
-            f"Internal BUG-NNNN identifiers found in output: {matches}"
-        )
+        assert matches == [], f"Internal BUG-NNNN identifiers found in output: {matches}"
 
-    def test_bug_ids_absent_from_output_with_multiple_bugs(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bug_ids_absent_from_output_with_multiple_bugs(self, tmp_path: pathlib.Path) -> None:
         """No BUG-NNNN in output when multiple bugs across multiple releases."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -939,17 +859,11 @@ class TestInternalIdLeakGate:
                 },
             },
         )
-        content = regenerate(
-            repo_root, versions, ["v1.0.0", "v1.2.0"], bugs_dir
-        )
+        content = regenerate(repo_root, versions, ["v1.0.0", "v1.2.0"], bugs_dir)
         matches = re.findall(r"BUG-[0-9]", content)
-        assert matches == [], (
-            f"Internal BUG-NNNN identifiers found in output: {matches}"
-        )
+        assert matches == [], f"Internal BUG-NNNN identifiers found in output: {matches}"
 
-    def test_bug_ids_absent_from_output_with_empty_published(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bug_ids_absent_from_output_with_empty_published(self, tmp_path: pathlib.Path) -> None:
         """No BUG-NNNN in output even when PUBLISHED is empty."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -973,9 +887,7 @@ class TestInternalIdLeakGate:
         )
         content = regenerate(repo_root, versions, [], bugs_dir)
         matches = re.findall(r"BUG-[0-9]", content)
-        assert matches == [], (
-            f"Internal BUG-NNNN identifiers found in output: {matches}"
-        )
+        assert matches == [], f"Internal BUG-NNNN identifiers found in output: {matches}"
 
 
 # ===========================================================================
@@ -1002,9 +914,7 @@ class TestLoadPublishedManifest:
         result = load_published_manifest(repo_root)
         assert result == []
 
-    def test_missing_file_returns_empty_list(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_missing_file_returns_empty_list(self, tmp_path: pathlib.Path) -> None:
         """Absent PUBLISHED file returns [] (empty-manifest semantics, no error).
 
         Managed dev trees that predate the v1.17 disclosure architecture have no
@@ -1014,9 +924,7 @@ class TestLoadPublishedManifest:
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         result = load_published_manifest(repo_root)
-        assert result == [], (
-            f"Expected [] for absent PUBLISHED, got {result!r}"
-        )
+        assert result == [], f"Expected [] for absent PUBLISHED, got {result!r}"
 
 
 # ===========================================================================
@@ -1048,9 +956,7 @@ class TestParseBugFile:
         assert rec.fixed_in == "v1.1.0"
         assert rec.public_id == "KI-1.0.0.3"
 
-    def test_absent_fields_return_empty_string(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_absent_fields_return_empty_string(self, tmp_path: pathlib.Path) -> None:
         """Missing Affects / Fixed In / Public ID return empty strings."""
         bugs_dir = tmp_path / "bugs"
         path = _make_bug_file(
@@ -1083,9 +989,7 @@ class TestPublicIdStickiness:
           regeneration reads it verbatim.
     """
 
-    def test_two_bugs_same_anchor_assigned_in_disclosure_order(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_two_bugs_same_anchor_assigned_in_disclosure_order(self, tmp_path: pathlib.Path) -> None:
         """Two bugs with the same anchor get .1 and .2 in ascending BUG-ID order."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -1119,9 +1023,7 @@ class TestPublicIdStickiness:
         assert "KI-1.0.0.1 — Alpha crash symptom" in content
         assert "KI-1.0.0.2 — Beta crash symptom" in content
 
-    def test_third_bug_leaves_first_two_ids_unchanged(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_third_bug_leaves_first_two_ids_unchanged(self, tmp_path: pathlib.Path) -> None:
         """Adding a third bug and regenerating leaves the first two IDs unchanged."""
         repo_root, bugs_dir, versions = _make_minimal_repo(
             tmp_path,
@@ -1152,12 +1054,12 @@ class TestPublicIdStickiness:
         # Verify the IDs were persisted back to the bug files.
         bug1_rec = parse_bug_file(bugs_dir / "BUG-0001-alpha-crash.md")
         bug2_rec = parse_bug_file(bugs_dir / "BUG-0002-beta-crash.md")
-        assert bug1_rec.public_id == "KI-1.0.0.1", (
-            f"KI-1.0.0.1 not persisted to the first bug file; got '{bug1_rec.public_id}'"
-        )
-        assert bug2_rec.public_id == "KI-1.0.0.2", (
-            f"KI-1.0.0.2 not persisted to the second bug file; got '{bug2_rec.public_id}'"
-        )
+        assert (
+            bug1_rec.public_id == "KI-1.0.0.1"
+        ), f"KI-1.0.0.1 not persisted to the first bug file; got '{bug1_rec.public_id}'"
+        assert (
+            bug2_rec.public_id == "KI-1.0.0.2"
+        ), f"KI-1.0.0.2 not persisted to the second bug file; got '{bug2_rec.public_id}'"
 
         # Add a third bug (no Public ID yet).
         _make_bug_file(
@@ -1171,18 +1073,12 @@ class TestPublicIdStickiness:
 
         # Second regeneration: third bug gets .3; first two IDs must be unchanged.
         content2 = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
-        assert "KI-1.0.0.1 — Alpha crash symptom" in content2, (
-            "KI-1.0.0.1 changed after adding a third bug"
-        )
-        assert "KI-1.0.0.2 — Beta crash symptom" in content2, (
-            "KI-1.0.0.2 changed after adding a third bug"
-        )
+        assert "KI-1.0.0.1 — Alpha crash symptom" in content2, "KI-1.0.0.1 changed after adding a third bug"
+        assert "KI-1.0.0.2 — Beta crash symptom" in content2, "KI-1.0.0.2 changed after adding a third bug"
         assert "KI-1.0.0.3" in content2, "Third bug should receive KI-1.0.0.3"
         assert "KI-1.0.0.3 — Gamma crash symptom" in content2
 
-    def test_missing_public_id_triggers_assign_and_persist(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_missing_public_id_triggers_assign_and_persist(self, tmp_path: pathlib.Path) -> None:
         """A disclosed bug without ## Public ID causes assign-and-persist.
 
         Verify: the bug file gains the ## Public ID field, and a subsequent
@@ -1215,12 +1111,8 @@ class TestPublicIdStickiness:
 
         # Bug file should now carry the Public ID.
         post_rec = parse_bug_file(bug_path)
-        assert post_rec.public_id != "", (
-            "Bug file must have a Public ID after first regeneration (assign-and-persist)"
-        )
-        assert post_rec.public_id.startswith("KI-1.0.0."), (
-            f"Public ID format unexpected: '{post_rec.public_id}'"
-        )
+        assert post_rec.public_id != "", "Bug file must have a Public ID after first regeneration (assign-and-persist)"
+        assert post_rec.public_id.startswith("KI-1.0.0."), f"Public ID format unexpected: '{post_rec.public_id}'"
 
         # The assigned ID must appear in the generated content.
         assert post_rec.public_id in content1
@@ -1228,15 +1120,13 @@ class TestPublicIdStickiness:
         # Second regeneration: reads the persisted ID verbatim — output must be
         # byte-identical (no re-assignment, no change to the file).
         content2 = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
-        assert content1 == content2, (
-            "Second regeneration produced different output — Public ID was not read verbatim"
-        )
+        assert content1 == content2, "Second regeneration produced different output — Public ID was not read verbatim"
 
         # Bug file must not have changed (Public ID field still the same).
         post_rec2 = parse_bug_file(bug_path)
-        assert post_rec2.public_id == post_rec.public_id, (
-            "Public ID in bug file changed between first and second regeneration"
-        )
+        assert (
+            post_rec2.public_id == post_rec.public_id
+        ), "Public ID in bug file changed between first and second regeneration"
 
 
 # ===========================================================================
@@ -1257,9 +1147,7 @@ class TestContentQualityFixed:
     Each test fails against a writer that shows the regression it names.
     """
 
-    def test_multi_line_bullet_produces_single_fixed_item(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_multi_line_bullet_produces_single_fixed_item(self, tmp_path: pathlib.Path) -> None:
         """A multi-line bullet in ## Bug Fixes yields exactly one Fixed line.
 
         A parser that iterates every line individually turns each continuation
@@ -1352,9 +1240,7 @@ class TestContentQualityFixed:
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
 
         # Locate the v1.1.0 entry's Fixed section.
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None, "v1.1.0 entry not found in output"
         entry_text = entry_match.group(0)
 
@@ -1365,18 +1251,13 @@ class TestContentQualityFixed:
         # There must be exactly one non-empty line in the Fixed body.
         fixed_lines = [ln for ln in fixed_body.splitlines() if ln.strip()]
         assert len(fixed_lines) == 1, (
-            f"Expected exactly 1 Fixed line for a multi-line bullet; "
-            f"got {len(fixed_lines)}: {fixed_lines!r}"
+            f"Expected exactly 1 Fixed line for a multi-line bullet; " f"got {len(fixed_lines)}: {fixed_lines!r}"
         )
 
         # The single line must contain the bug's symptom text.
-        assert "Widget crashes on startup" in fixed_lines[0], (
-            f"Fixed line does not contain symptom: {fixed_lines[0]!r}"
-        )
+        assert "Widget crashes on startup" in fixed_lines[0], f"Fixed line does not contain symptom: {fixed_lines[0]!r}"
 
-    def test_phantom_bug_id_in_prose_does_not_produce_placeholder(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_phantom_bug_id_in_prose_does_not_produce_placeholder(self, tmp_path: pathlib.Path) -> None:
         """A short BUG-ID token embedded in prose does not surface a placeholder.
 
         An extractor that matches any BUG-\\d+ token pulls a short ID like
@@ -1406,16 +1287,11 @@ class TestContentQualityFixed:
 
         # The placeholder must not appear anywhere in the output.
         assert "internal fix — bug file not found" not in content, (
-            "A bug-shaped token embedded in changelog prose caused a "
-            "'bug file not found' placeholder in output"
+            "A bug-shaped token embedded in changelog prose caused a " "'bug file not found' placeholder in output"
         )
-        assert "bug file not found" not in content, (
-            "Unexpected 'bug file not found' text found in output"
-        )
+        assert "bug file not found" not in content, "Unexpected 'bug file not found' text found in output"
 
-    def test_code_fence_symptom_does_not_produce_lone_fence_fixed_line(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_code_fence_symptom_does_not_produce_lone_fence_fixed_line(self, tmp_path: pathlib.Path) -> None:
         """A bug whose ## Symptom starts with a lone code-fence line does not
         produce a bare '```' as the only content of the Fixed line.
 
@@ -1495,9 +1371,7 @@ class TestContentQualityFixed:
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)
 
         # Locate the v1.1.0 Fixed section.
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None, "v1.1.0 entry not found in output"
         entry_text = entry_match.group(0)
 
@@ -1509,24 +1383,22 @@ class TestContentQualityFixed:
         # The defect shape this guards: a Fixed body reduced to just '```'
         # (a lone stray fence). The correct body carries the joined symptom
         # text, including the prose sentence that follows the code block.
-        assert "fence" in fixed_body.lower() or "changelog" in fixed_body.lower(), (
-            f"Fixed line does not contain the prose symptom description: {fixed_body!r}"
-        )
+        assert (
+            "fence" in fixed_body.lower() or "changelog" in fixed_body.lower()
+        ), f"Fixed line does not contain the prose symptom description: {fixed_body!r}"
 
         # The Fixed body must NOT be just the bare opening fence.
         fixed_lines = [ln for ln in fixed_body.splitlines() if ln.strip()]
-        assert not (len(fixed_lines) == 1 and fixed_lines[0].strip() == "```"), (
-            "Fixed section consists of only a bare '```' — stray fence regression present"
-        )
+        assert not (
+            len(fixed_lines) == 1 and fixed_lines[0].strip() == "```"
+        ), "Fixed section consists of only a bare '```' — stray fence regression present"
 
 
 # ===========================================================================
 # Criterion 9: Provenance scrub on bug titles and Fixed lines
 # ===========================================================================
 
-_PROVENANCE_SYMPTOM = (
-    "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
-)
+_PROVENANCE_SYMPTOM = "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
 _PROVENANCE_TOKENS = ("a1b2c3d4", "ai_rc/v1.2.3", "TESTER-20260101-001", "()")
 
 
@@ -1553,17 +1425,29 @@ class TestProvenanceScrub:
             tmp_path,
             versions_newest_first=["v1.1.0", "v1.0.0"],
             published_versions=["v1.0.0"],
-            bugs=[{
-                "bug_num": 42, "slug": "leak", "symptom": _PROVENANCE_SYMPTOM,
-                "status": "resolved", "affects": "v1.0.0", "fixed_in": "v1.1.0",
-            }],
+            bugs=[
+                {
+                    "bug_num": 42,
+                    "slug": "leak",
+                    "symptom": _PROVENANCE_SYMPTOM,
+                    "status": "resolved",
+                    "affects": "v1.0.0",
+                    "fixed_in": "v1.1.0",
+                }
+            ],
             # Continuation lines carry the notes template's own indent, which
             # _make_release_notes dedents away.
-            release_kwargs={"v1.1.0": {"bug_fixes": "\n        ".join([
-                "- BUG-0042: the suite.",
-                f"- Fixed: {_PROVENANCE_SYMPTOM}",
-                "- Fixed: PRIORITY-0007 shipped in v2.53.5 (commit d3e118d7).",
-            ])}},
+            release_kwargs={
+                "v1.1.0": {
+                    "bug_fixes": "\n        ".join(
+                        [
+                            "- BUG-0042: the suite.",
+                            f"- Fixed: {_PROVENANCE_SYMPTOM}",
+                            "- Fixed: PRIORITY-0007 shipped in v2.53.5 (commit d3e118d7).",
+                        ]
+                    )
+                }
+            },
         )
 
         content = regenerate(repo_root, versions, ["v1.0.0"], bugs_dir)

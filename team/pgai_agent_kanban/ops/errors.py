@@ -63,8 +63,8 @@ class Ambiguous(OpsError):
     def __init__(
         self,
         message: str,
-        candidates: "list | None" = None,
-        result: "object | None" = None,
+        candidates: list | None = None,
+        result: object | None = None,
     ) -> None:
         super().__init__(message)
         self.candidates: list = candidates or []

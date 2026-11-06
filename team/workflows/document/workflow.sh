@@ -34,7 +34,7 @@
 #
 # wf_finalize [version]
 #   Document finalizes by publishing.  Returns "publish".  The actual
-#   publish operation is performed by CM (cm-finalize.sh), which copies
+#   publish operation is performed by CM (scripts/cm/finalize.sh), which copies
 #   the polished document to projects/<name>/artifacts/; this hook declares
 #   the finalize mode.
 #
@@ -101,7 +101,7 @@ wf_post_task() {
 # wf_finalize [version]
 #
 # The document workflow finalizes by publishing.  The actual publish
-# operation is performed by CM (cm-finalize.sh); this hook declares the
+# operation is performed by CM (scripts/cm/finalize.sh); this hook declares the
 # finalize mode.
 # ---------------------------------------------------------------------------
 wf_finalize() {

@@ -46,7 +46,7 @@ import importlib.util
 import os
 import re
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 from pgai_agent_kanban.lib.terminal_states import ACTIVE_INTAKE_STATES
 from pgai_agent_kanban.task_status import section_lines, section_value
@@ -99,7 +99,7 @@ def iter_live_bugs(bugs_dir: str) -> Iterator[LiveBug]:
             continue
         path = os.path.join(bugs_dir, name)
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            with open(path, encoding="utf-8", errors="replace") as handle:
                 text = handle.read()
         except OSError:
             continue
@@ -126,20 +126,39 @@ def iter_open_or_running_bugs(bugs_dir: str) -> Iterator[tuple]:
 #: of a slug marks the slug as a re-file of the slug without it
 #: (``lock-leak-again``, ``redux-lock-leak``).  The same word in the middle
 #: of a slug is part of the defect's name.
-REFILE_WORDS = frozenset({
-    "again", "redux", "recurring",
-    "repeat", "repeats", "repeated", "repeating",
-    "refile", "refiles", "refiled", "refiling",
-})
+REFILE_WORDS = frozenset(
+    {
+        "again",
+        "redux",
+        "recurring",
+        "repeat",
+        "repeats",
+        "repeated",
+        "repeating",
+        "refile",
+        "refiles",
+        "refiled",
+        "refiling",
+    }
+)
 
 #: Ordinals of two or more.  One at the start or end of a slug marks a
 #: re-file (``second-lock-leak``, ``lock-leak-third``).  ``first`` is not a
 #: re-file marker, and neither are ``still``, ``once`` or ``another``: in a
 #: slug they name part of the defect (``docs-still-halt-on-errors``).
-REFILE_ORDINALS = frozenset({
-    "second", "third", "fourth", "fifth",
-    "sixth", "seventh", "eighth", "ninth", "tenth",
-})
+REFILE_ORDINALS = frozenset(
+    {
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+        "seventh",
+        "eighth",
+        "ninth",
+        "tenth",
+    }
+)
 
 # A numeric ordinal (2nd, 3rd, 11th); a re-file marker at either end of a
 # slug when its number is two or more.
@@ -168,8 +187,7 @@ _CITE_LEAD = (
     r"|re-?open(?:s|ed|ing)?(?:\s+of)?"
 )
 _CITE_AFTER_PHRASE_RE = re.compile(
-    rf"\b(?:{_CITE_LEAD})[\s*_:`#>()\[\]-]*(?:[A-Za-z][A-Za-z'-]*\s+){{0,3}}"
-    r"[`*_(\[]*(BUG-[0-9]{4,})\b",
+    rf"\b(?:{_CITE_LEAD})[\s*_:`#>()\[\]-]*(?:[A-Za-z][A-Za-z'-]*\s+){{0,3}}" r"[`*_(\[]*(BUG-[0-9]{4,})\b",
     re.IGNORECASE,
 )
 # The ID first, then a phrase saying that bug is still happening:
@@ -201,10 +219,10 @@ def _canonical_bug_id(raw: str) -> str:
 
 def _negated(text: str, start: int) -> bool:
     """True when a negation sits shortly before *start* in the same sentence."""
-    window = text[max(0, start - _NEGATION_WINDOW):start]
+    window = text[max(0, start - _NEGATION_WINDOW) : start]
     breaks = list(_SENTENCE_BREAK_RE.finditer(window))
     if breaks:
-        window = window[breaks[-1].end():]
+        window = window[breaks[-1].end() :]
     return bool(_NEGATION_RE.search(window))
 
 
@@ -238,7 +256,7 @@ def cited_defect_ids(text: str) -> list:
     return found
 
 
-def bug_slug(filename: str) -> "str | None":
+def bug_slug(filename: str) -> str | None:
     """Return the lower-cased slug of a ``BUG-NNNN[-YYYYMMDD]-<slug>.md`` name,
     or None when *filename* does not have that shape."""
     match = _BUG_SLUG_RE.match(os.path.basename(filename))
@@ -321,7 +339,7 @@ class SameDefect:
     why: str
 
 
-def find_same_defect(bugs_dir: str, filename: str, text: str) -> "SameDefect | None":
+def find_same_defect(bugs_dir: str, filename: str, text: str) -> SameDefect | None:
     """Return the live bug a new draft reports the same defect as, or None.
 
     The one same-defect rule.  A draft named *filename* (a
@@ -364,18 +382,20 @@ def _cites_match(bug: LiveBug) -> SameDefect:
     return SameDefect(bug, "cites", f"its body cites {bug.bug_id} as the defect it reports")
 
 
-def _slug_match(slug: str, bug: LiveBug) -> "SameDefect | None":
+def _slug_match(slug: str, bug: LiveBug) -> SameDefect | None:
     """The ``slug`` SameDefect naming *bug* when *slug* differs from its
     slug only by re-file markers, else None."""
     other = bug_slug(bug.name)
     if other is None or not slugs_differ_only_by_count_words(slug, other):
         return None
     return SameDefect(
-        bug, "slug", f"its slug '{slug}' differs from '{other}' only by a re-file word, ordinal or trailing counter",
+        bug,
+        "slug",
+        f"its slug '{slug}' differs from '{other}' only by a re-file word, ordinal or trailing counter",
     )
 
 
-def same_defect_matches(bugs: "list[LiveBug]") -> "list[tuple[LiveBug, SameDefect]]":
+def same_defect_matches(bugs: list[LiveBug]) -> list[tuple[LiveBug, SameDefect]]:
     """Return every ``(bug, match)`` pair among *bugs* where *bug* reports the
     same defect as ``match.bug`` -- find_same_defect's rule applied to each
     member of a set of live bugs in turn, against the others.
@@ -417,7 +437,7 @@ def same_defect_matches(bugs: "list[LiveBug]") -> "list[tuple[LiveBug, SameDefec
 DRAFT_BUG_ID = "BUG-0000"
 
 
-def find_same_defect_for_draft(bugs_dir: str, slug: str, text: str) -> "SameDefect | None":
+def find_same_defect_for_draft(bugs_dir: str, slug: str, text: str) -> SameDefect | None:
     """Return the live bug an autonomous filer's unclaimed draft reports the
     same defect as, or None.
 
@@ -556,7 +576,7 @@ class BugRecord:
     files_involved: str
     hypothesis: str
     key_heading: str
-    key: "str | tuple"
+    key: str | tuple
     extra_sections: tuple = ()
 
 
@@ -597,7 +617,7 @@ def render_bug_record(bug_id: str, record: BugRecord) -> str:
     )
 
 
-def find_existing_bug(bugs_dir: str, heading: str, key: "str | tuple | frozenset") -> "str | None":
+def find_existing_bug(bugs_dir: str, heading: str, key: str | tuple | frozenset) -> str | None:
     """Return the BUG-NNNN ID of the first live bug in *bugs_dir* -- status
     open, running or needs-operator, in filename order (iter_live_bugs) --
     whose ``## <heading>`` section records *key*, or None.
@@ -608,8 +628,10 @@ def find_existing_bug(bugs_dir: str, heading: str, key: "str | tuple | frozenset
     nothing.  A missing *bugs_dir* matches nothing.  Reads only.
     """
     if isinstance(key, str):
+
         def recorded(text: str) -> bool:
             return section_value(text, heading) == key
+
     else:
         wanted = frozenset(key)
         if not wanted:
@@ -617,6 +639,7 @@ def find_existing_bug(bugs_dir: str, heading: str, key: "str | tuple | frozenset
 
         def recorded(text: str) -> bool:
             return frozenset(section_lines(text, heading)) == wanted
+
     for bug in iter_live_bugs(bugs_dir):
         if recorded(bug.text):
             return bug.bug_id
@@ -638,7 +661,7 @@ class FiledRecord:
 
     outcome: str
     bug_id: str
-    bug_path: "str | None"
+    bug_path: str | None
 
 
 def file_or_cite_record(bugs_dir: str, record: BugRecord, *, claimed_by: str) -> FiledRecord:

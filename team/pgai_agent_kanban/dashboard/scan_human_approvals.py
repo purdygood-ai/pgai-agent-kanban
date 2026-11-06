@@ -64,10 +64,10 @@ if not __package__:
 from pgai_agent_kanban.task_status import section_lines  # noqa: E402
 from pgai_agent_kanban.task_status import section_value as _read_field  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Field reader helpers (mirrors pattern in scan_attention.py)
 # ---------------------------------------------------------------------------
+
 
 def _format_age(secs: int) -> str:
     """Format elapsed seconds as human-readable age string."""
@@ -89,6 +89,7 @@ def _format_age(secs: int) -> str:
 # ---------------------------------------------------------------------------
 # Project discovery
 # ---------------------------------------------------------------------------
+
 
 def _iter_projects(kanban_root: pathlib.Path):
     """Yield (project_name, project_tasks_path) for each registered project.
@@ -185,14 +186,16 @@ def _collect_pending_approvals(kanban_root: pathlib.Path) -> list[dict]:
                 except OSError:
                     pass
 
-            results.append({
-                "project": proj_name,
-                "task_id": task_id,
-                "release_ver": release_ver,
-                "goal_lines": goal_lines,
-                "age_str": age_str,
-                "state": state,
-            })
+            results.append(
+                {
+                    "project": proj_name,
+                    "task_id": task_id,
+                    "release_ver": release_ver,
+                    "goal_lines": goal_lines,
+                    "age_str": age_str,
+                    "state": state,
+                }
+            )
 
     # Sort: project name ascending, then task_id ascending
     results.sort(key=lambda r: (r["project"], r["task_id"]))
@@ -228,9 +231,7 @@ def _build_review_cmds(proj: str, task_id: str, rc: str) -> list[str]:
     # (starts with "v").  The fallback value for ## Release Version is the
     # task_id itself, which starts with "HUMAN-APPROVE" — never "v".
     if rc.startswith("v"):
-        cmds.append(
-            f"scripts/show-test-report.sh --project {proj} --key {rc}"
-        )
+        cmds.append(f"scripts/show-test-report.sh --project {proj} --key {rc}")
     return cmds
 
 
@@ -285,18 +286,20 @@ def collect_pending_approvals(
         approve_cmd = f"scripts/close.sh --project {proj} --key {task_id}"
         reject_cmd = f"scripts/wontdo.sh --project {proj} --key {task_id}"
 
-        records.append({
-            "task_id": task_id,
-            "project": proj,
-            "state": r["state"],
-            "rc": rc,
-            "target_version": rc,
-            "age": r["age_str"],
-            "review": review,
-            "review_cmds": review_cmds,
-            "approve_cmd": approve_cmd,
-            "reject_cmd": reject_cmd,
-        })
+        records.append(
+            {
+                "task_id": task_id,
+                "project": proj,
+                "state": r["state"],
+                "rc": rc,
+                "target_version": rc,
+                "age": r["age_str"],
+                "review": review,
+                "review_cmds": review_cmds,
+                "approve_cmd": approve_cmd,
+                "reject_cmd": reject_cmd,
+            }
+        )
 
     if project is not None:
         records = [rec for rec in records if rec["project"] == project]
@@ -328,15 +331,15 @@ def scan_pending_approvals(kanban_root: str, use_color: bool = True) -> None:
     """
     root = pathlib.Path(kanban_root)
 
-    RESET  = "\033[0m"           if use_color else ""
-    C_BOLD = "\033[1m"           if use_color else ""
-    C_DIM  = "\033[2m"           if use_color else ""
-    C_RED  = "\033[0;31m"        if use_color else ""
-    C_YEL  = "\033[0;33m"        if use_color else ""
-    C_CYAN = "\033[0;36m"        if use_color else ""
-    C_GRN  = "\033[0;32m"        if use_color else ""
-    C_BLU  = "\033[0;34m"        if use_color else ""
-    HAND   = "✋"            if use_color else "!"  # ✋
+    RESET = "\033[0m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
+    C_RED = "\033[0;31m" if use_color else ""
+    C_YEL = "\033[0;33m" if use_color else ""
+    C_CYAN = "\033[0;36m" if use_color else ""
+    C_GRN = "\033[0;32m" if use_color else ""
+    C_BLU = "\033[0;34m" if use_color else ""
+    HAND = "✋" if use_color else "!"  # ✋
 
     pending = _collect_pending_approvals(root)
 
@@ -345,24 +348,17 @@ def scan_pending_approvals(kanban_root: str, use_color: bool = True) -> None:
         return
 
     for entry in pending:
-        proj    = entry["project"]
+        proj = entry["project"]
         task_id = entry["task_id"]
-        ver     = entry["release_ver"]
-        age     = entry["age_str"]
-        state   = entry["state"]
-        goals   = entry["goal_lines"]
+        ver = entry["release_ver"]
+        age = entry["age_str"]
+        state = entry["state"]
+        goals = entry["goal_lines"]
         review_cmds = _build_review_cmds(proj, task_id, ver)
 
         # Header row: ✋ task-id [project]
-        print(
-            f"{HAND} {C_BOLD}{C_RED}{task_id}{RESET}"
-            f"  {C_DIM}[{proj}]{RESET}"
-        )
-        print(
-            f"  RC/target:  {C_CYAN}{ver}{RESET}"
-            f"   age: {C_DIM}{age}{RESET}"
-            f"   state: {C_DIM}{state}{RESET}"
-        )
+        print(f"{HAND} {C_BOLD}{C_RED}{task_id}{RESET}" f"  {C_DIM}[{proj}]{RESET}")
+        print(f"  RC/target:  {C_CYAN}{ver}{RESET}" f"   age: {C_DIM}{age}{RESET}" f"   state: {C_DIM}{state}{RESET}")
 
         # Show content (goal lines from README)
         if goals:
@@ -375,21 +371,16 @@ def scan_pending_approvals(kanban_root: str, use_color: bool = True) -> None:
             print(f"    {cmd}")
 
         # Approve command
-        print(
-            f"  {C_GRN}Approve:{RESET}  "
-            f"scripts/close.sh --project {proj} --key {task_id}"
-        )
+        print(f"  {C_GRN}Approve:{RESET}  " f"scripts/close.sh --project {proj} --key {task_id}")
         # Reject command
-        print(
-            f"  {C_RED}Reject: {RESET}  "
-            f"scripts/wontdo.sh --project {proj} --key {task_id}"
-        )
+        print(f"  {C_RED}Reject: {RESET}  " f"scripts/wontdo.sh --project {proj} --key {task_id}")
         print("")
 
 
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def _main() -> None:
     parser = argparse.ArgumentParser(

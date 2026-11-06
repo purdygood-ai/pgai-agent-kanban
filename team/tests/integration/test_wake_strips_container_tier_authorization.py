@@ -50,9 +50,7 @@ def _run_wake(tmp_path: pathlib.Path, *, shell_env_line: str = "", extra_env: di
         stub_bin_dir=stub_bin_dir,
         extra_env=extra_env,
     )
-    result = run_wake_entrypoint(
-        kanban_root, cwd=make_foreign_cwd(tmp_path), env=env, agent=_AGENT
-    )
+    result = run_wake_entrypoint(kanban_root, cwd=make_foreign_cwd(tmp_path), env=env, agent=_AGENT)
     assert result.returncode == 0, f"wake exited {result.returncode}:\n{result.combined}"
     assert not marker_file.exists(), "the stub provider saw a real task dispatch"
     match = _PROBE_RE.search(result.combined)

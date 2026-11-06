@@ -56,7 +56,7 @@ _DIFF_MODULE_FILES = (
 # push to it through whatever `git` resolves first on PATH (the guard shim
 # here). Setup uses the real git binary directly so only the push itself
 # goes through the guard.
-_FIXTURE_PUSH_TEST = '''
+_FIXTURE_PUSH_TEST = """
 import os
 import subprocess
 
@@ -81,13 +81,13 @@ def test_push_to_fixture_local_bare_repository(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
-'''
+"""
 
 # Records every test's call-phase outcome, labelled by the pass that ran
 # it, to a file the outer test owns. The script removes its own workdir
 # (logs and junit reports included) on exit, so this is the only surface
 # that survives to say what each pass actually concluded.
-_FIXTURE_CONFTEST = '''
+_FIXTURE_CONFTEST = """
 import json
 import os
 
@@ -102,7 +102,7 @@ def pytest_runtest_logreport(report):
     }
     with open(os.environ["VOI_FIXTURE_OUTCOME_LOG"], "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record) + "\\n")
-'''
+"""
 
 
 def _build_throwaway_team_tree(root: pathlib.Path) -> pathlib.Path:
@@ -192,17 +192,11 @@ def test_fixture_local_push_passes_in_both_orders_under_guarded_non_cm_role(
         env=env,
         cwd=str(tmp_path),
     )
-    diagnostics = (
-        f"exit: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    diagnostics = f"exit: {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert result.returncode == 0, diagnostics
 
     assert outcome_log.is_file(), f"the fixture suite recorded no outcomes\n{diagnostics}"
-    records = [
-        json.loads(line)
-        for line in outcome_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    records = [json.loads(line) for line in outcome_log.read_text(encoding="utf-8").splitlines() if line.strip()]
     by_pass = {r["pass"]: r["outcome"] for r in records}
     assert by_pass == {"forward": "passed", "reverse": "passed"}, (
         f"the fixture-local push must pass in both orders; recorded: {records}\n"
@@ -210,7 +204,6 @@ def test_fixture_local_push_passes_in_both_orders_under_guarded_non_cm_role(
         f"{evidence.read_text(encoding='utf-8') if evidence.exists() else '(none)'}"
     )
 
-    assert not evidence.exists() or not evidence.read_text(encoding="utf-8").strip(), (
-        "the guard refused a fixture-local push during the sweep:\n"
-        + evidence.read_text(encoding="utf-8")
-    )
+    assert (
+        not evidence.exists() or not evidence.read_text(encoding="utf-8").strip()
+    ), "the guard refused a fixture-local push during the sweep:\n" + evidence.read_text(encoding="utf-8")

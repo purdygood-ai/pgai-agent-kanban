@@ -189,6 +189,14 @@
 #       tasks whose triage writes failed partway, or stops the decision wake
 #       could not decide or carry out (each narrated on stderr)
 
+# This file's path and directory, and the lib directory above it, as
+# absolute paths resolved once at load: no function depends on the
+# caller's current directory or on whether this file was named by a
+# relative path.
+_CBTR_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CBTR_SELF_DIR=""
+_CBTR_LIB_DIR="${_CBTR_SELF_DIR%/*}"
+_CBTR_SELF_FILE="${_CBTR_SELF_DIR}/$(basename "${BASH_SOURCE[0]:-$0}")"
+
 # ---------------------------------------------------------------------------
 # _cbtr_resolve_env
 # Resolve KANBAN_ROOT and OVERWATCH_PROJECT. Returns 0 on success, 1 on failure.
@@ -227,7 +235,8 @@ _cbtr_resolve_env() {
 # ---------------------------------------------------------------------------
 _cbtr_load_libs() {
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || {
+    lib_dir="${_CBTR_LIB_DIR}"
+    [[ -n "${lib_dir}" ]] || {
         echo "check-block-triage: cannot resolve the lib directory" >&2
         return 1
     }
@@ -426,7 +435,7 @@ overwatch_check_block_triage() {
                 # print it: awk reads the file itself, so no pipe stage can
                 # close early.
                 local -a _cbtr_help=()
-                mapfile -t _cbtr_help < <(awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}")
+                mapfile -t _cbtr_help < <(awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${_CBTR_SELF_FILE}")
                 printf '%s\n' "${_cbtr_help[@]}"
                 return 0
                 ;;

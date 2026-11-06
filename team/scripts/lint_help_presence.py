@@ -2,30 +2,39 @@
 """
 lint_help_presence.py
 =====================
-Lint: every operator-facing script under team/scripts/ — shell script
-or Python entry point — must implement a ``--help`` or ``-h`` flag that
-prints usage text. Each script that does not is reported as a finding.
+Lint: every executable script in the tree — shell script, Python entry
+point or other ``#!`` script — must implement a ``--help`` or ``-h`` flag
+that prints usage text. Each script that does not is reported as a finding.
 
-Scripts that are exempt (dashboard-internal pane scripts, process-internal
-helpers invoked by other scripts rather than directly by operators) are
-listed in an exempt-list data file read at runtime.
+Scripts that are exempt (process-internal helpers invoked by other scripts
+rather than directly by operators, or shims whose sourced library answers
+``--help``) are listed in an exempt-list data file read at runtime.
 
 Scope
 -----
-The scanner operates on two directories by default (non-recursive in each):
+By default the scanner walks the whole tree recursively: the repository
+root in a dev tree (this file at ``team/scripts/``), or the kanban root in
+an install (this file at ``scripts/``); ``--root`` names another tree. A
+file is scanned when it is a regular file (not a symlink) with an execute
+bit set and either a ``.sh``/``.py`` suffix or a ``#!`` first line.
+Every ``*.sh``/``*.py`` file directly in the tree's scripts directory
+(``team/scripts/`` or ``scripts/``) and its ``cm/`` subdirectory is scanned
+too, execute bit or not: those are entry points run as
+``python3 scripts/<name>.py``. Directories whose name starts with ``.``,
+``__pycache__`` and ``node_modules`` are not entered.
 
-  1. ``team/scripts/`` — top-level operator-facing scripts (``*.sh``,
-     ``*.py``).
-  2. ``team/scripts/cm/`` — CM subsystem operator entry points
-     (``cm/release.sh``, ``cm/open-rc.sh``, ``cm/finalize.sh``,
-     ``cm/promote_bundled_items.py``, etc.).
+Exempt by rule, because they are sourced rather than run and so have no
+command line of their own:
 
-Other subdirectories (``lib/``, ``dashboard/``, ``wake/``, ``migrate/``,
-``cleanup/``, ``harness/``) remain excluded: those contain library helpers
-and process-internal scripts invoked programmatically, not by operators.
+  - sourced libraries: any file with a ``lib`` directory anywhere in its
+    path (``team/scripts/lib/``, ``team/scripts/dashboard/lib/``,
+    ``team/verification/lib/``, ...);
+  - workflow plugins: a ``workflow.sh`` directly inside a
+    ``workflows/<type>/`` directory (``team/workflows/release/workflow.sh``).
 
 When ``--scripts-dir`` is supplied the scanner operates on that single
-directory only (non-recursive), matching the pre-cm-extension behavior.
+directory only (non-recursive), and every ``*.sh``/``*.py`` file in it is
+scanned whatever its mode.
 
 Detection
 ---------
@@ -49,10 +58,14 @@ in its source text (any line):
   5. A ``--help`` string in a heredoc block: ``--help,``, ``--help|-h``,
      or ``--help`` followed by whitespace/punctuation (documentation)
 
-  6. (``.py`` files only) An ``argparse.ArgumentParser(`` constructor call
+  6. (Python scripts only) An ``argparse.ArgumentParser(`` constructor call
      without a companion ``add_help=False`` — argparse adds a working
      ``-h``/``--help`` flag automatically unless that default is turned
      off, so a script built this way gets a genuine help handler for free.
+
+  7. A call (on a line that is not a comment) to the shared header-help
+     helpers in ``team/scripts/lib/header_help.sh``:
+     ``header_help_exit_if_requested`` or ``header_help_print``.
 
 These patterns match the conventions used across the team/scripts/ codebase.
 A script that passes none of these checks is flagged as missing help.
@@ -60,11 +73,13 @@ A script that passes none of these checks is flagged as missing help.
 Exempt list
 -----------
 A plain-text data file (one entry per line, ``#`` comments allowed, blank
-lines ignored) lists scripts that are exempt from the check.  Entries may
-be bare basenames (``wake-batch.sh``) for top-level scripts, or
-directory-relative names (``cm/open-doc.sh``) for scripts in scanned
-subdirectories.  The default path is ``team/scripts/help_presence_exempt.txt``
-relative to the script's inferred repo root.  Override via ``--exempt-list``.
+lines ignored) lists scripts that are exempt from the check.  An entry
+matches a script whose label (its path relative to the scanned tree, or
+its basename under ``--scripts-dir``) equals the entry or ends with
+``/`` plus the entry: a bare basename (``wake-batch.sh``), a trailing path
+(``wake/claude.sh``, ``cm/open-doc.sh``) or a full label all work.  The
+default path is ``help_presence_exempt.txt`` beside this script.  Override
+via ``--exempt-list``.
 
 Help-quality checks (quality class — recorded as findings like the rest)
 ------------------------------------------------------------------------
@@ -115,14 +130,18 @@ Exit codes
 
 Usage
 -----
-  python3 scripts/lint_help_presence.py [--scripts-dir PATH]
+  python3 scripts/lint_help_presence.py [--root PATH | --scripts-dir PATH]
                                         [--exempt-list PATH]
                                         [--findings-file PATH]
                                         [--verbose]
 
-  --scripts-dir PATH   Single directory to scan (overrides the default two-
-                       directory scan of team/scripts/ and team/scripts/cm/);
-                       also the root of the recursive help-quality scan.
+  --root PATH          Tree to scan recursively (default: the repository
+                       root, or the kanban root in an install). The
+                       help-quality checks run over its team/scripts/ (or
+                       scripts/) directory.
+  --scripts-dir PATH   Single directory to scan, non-recursive (instead of
+                       the tree scan); also the root of the recursive
+                       help-quality scan.
   --exempt-list PATH   Exempt-list data file (default: team/scripts/
                        help_presence_exempt.txt relative to repo root).
   --findings-file PATH Write the findings as a JSON array to PATH (parent
@@ -131,7 +150,7 @@ Usage
 
 Examples
 --------
-  # From repo root (scans team/scripts/ AND team/scripts/cm/ by default):
+  # From repo root (scans every executable script in the tree):
   python3 team/scripts/lint_help_presence.py
 
   # With explicit single directory:
@@ -151,10 +170,11 @@ Examples
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 # The finding shape and the error-contract emitter live in the team package
 # beside scripts/; this script is run directly as well as imported, so the
@@ -177,33 +197,27 @@ _LINT_NAME = "help_presence"
 
 # Pattern 1: case-branch ``--help)`` / ``-h)`` / combined forms.
 # Captures: --help) or -h) or --help|-h) or -h|--help) and variants.
-_CASE_HELP: re.Pattern[str] = re.compile(
-    r"""(?:--help|-h)\s*[|)]"""
-)
+_CASE_HELP: re.Pattern[str] = re.compile(r"""(?:--help|-h)\s*[|)]""")
 
 # Pattern 2: operator_args.sh framework: argparse_has (with or without quotes).
 # Forms: argparse_has help  argparse_has "help"  argparse_has 'h'  argparse_has h
-_ARGPARSE_HELP: re.Pattern[str] = re.compile(
-    r"""argparse_has\s+['"']?(help|h)['"']?\b"""
-)
+_ARGPARSE_HELP: re.Pattern[str] = re.compile(r"""argparse_has\s+['"']?(help|h)['"']?\b""")
 
 # Pattern 3: string comparison against "--help" or "-h" (scripts that use
 # $arg == "--help" or [[ "$1" == "--help" ]] patterns).
-_ARG_CMP_HELP: re.Pattern[str] = re.compile(
-    r"""["'](?:--help|-h)["']\s*"""
-)
+_ARG_CMP_HELP: re.Pattern[str] = re.compile(r"""["'](?:--help|-h)["']\s*""")
 
 # Pattern 4: exec/delegate with "$@" passthrough (thin dispatcher scripts
 # that forward all flags including --help to a subcommand).
-_EXEC_PASSTHROUGH: re.Pattern[str] = re.compile(
-    r"""\bexec\b.*\"\$@\""""
-)
+_EXEC_PASSTHROUGH: re.Pattern[str] = re.compile(r"""\bexec\b.*\"\$@\"""")
 
 # Pattern 5: --help in a heredoc documentation block (indented --help entry).
 # Matches lines like "  --help, -h   Show help" inside a cat <<EOF block.
-_HEREDOC_HELP: re.Pattern[str] = re.compile(
-    r"""^\s{2,}--help\b"""
-)
+_HEREDOC_HELP: re.Pattern[str] = re.compile(r"""^\s{2,}--help\b""")
+
+# Pattern 7: a call to the shared header-help helpers (lib/header_help.sh)
+# on a line that is not a comment; both print the script's header as usage.
+_HEADER_HELP_CALL: re.Pattern[str] = re.compile(r"""^(?!\s*#).*\bheader_help_(?:exit_if_requested|print)\b""")
 
 # Combined list: a script is help-aware if any line matches any pattern.
 _HELP_PATTERNS: list[re.Pattern[str]] = [
@@ -212,23 +226,34 @@ _HELP_PATTERNS: list[re.Pattern[str]] = [
     _ARG_CMP_HELP,
     _EXEC_PASSTHROUGH,
     _HEREDOC_HELP,
+    _HEADER_HELP_CALL,
 ]
 
 # Pattern 6 (``.py`` only): a Python entry point built on
 # ``argparse.ArgumentParser(`` gets a working ``-h``/``--help`` flag for
 # free, unless the constructor call disables it with ``add_help=False``.
-_ARGPARSE_CONSTRUCTOR: re.Pattern[str] = re.compile(
-    r"""argparse\.ArgumentParser\("""
-)
-_ARGPARSE_HELP_DISABLED: re.Pattern[str] = re.compile(
-    r"""add_help\s*=\s*False"""
-)
+_ARGPARSE_CONSTRUCTOR: re.Pattern[str] = re.compile(r"""argparse\.ArgumentParser\(""")
+_ARGPARSE_HELP_DISABLED: re.Pattern[str] = re.compile(r"""add_help\s*=\s*False""")
+
+
+def _is_python_script(path: Path) -> bool:
+    """True for a ``.py`` file or a suffix-less script with a python shebang."""
+    if path.suffix == ".py":
+        return True
+    if path.suffix:
+        return False
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline(200)
+    except OSError:
+        return False
+    return first_line.startswith(b"#!") and b"python" in first_line
 
 
 def _has_help_handler(path: Path) -> bool:
     """Return True if *path* contains any help-presence detection pattern.
 
-    ``.py`` files get one extra whole-file check (pattern 6, above) ahead of
+    Python scripts get one extra whole-file check (pattern 6, above) ahead of
     the shared line-by-line scan: an ``argparse.ArgumentParser(`` call with
     its default ``add_help=True`` behavior intact counts as help-aware even
     when no individual line matches one of the bash-oriented patterns below.
@@ -238,7 +263,7 @@ def _has_help_handler(path: Path) -> bool:
     except OSError:
         return False
 
-    if path.suffix == ".py" and _ARGPARSE_CONSTRUCTOR.search(text):
+    if _is_python_script(path) and _ARGPARSE_CONSTRUCTOR.search(text):
         if not _ARGPARSE_HELP_DISABLED.search(text):
             return True
 
@@ -254,14 +279,14 @@ def _has_help_handler(path: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _load_exempt_list(exempt_list_path: Path) -> Optional[frozenset[str]]:
+def _load_exempt_list(exempt_list_path: Path) -> frozenset[str] | None:
     """Load the exempt list and return a frozenset of entry strings, or
     ``None`` when the file does not exist (the caller records that as a
     finding; see `_report_exempt_list_missing`).
 
     File format: one entry per line, ``#`` comments, blank lines ignored.
-    Entries may be bare basenames (``wake-batch.sh``) for top-level scripts
-    or directory-relative names (``cm/open-doc.sh``) for subdirectory scripts.
+    Entries are matched by `_is_listed_exempt`: a bare basename
+    (``wake-batch.sh``), a trailing path (``cm/open-doc.sh``) or a full label.
     """
     if not exempt_list_path.is_file():
         return None
@@ -288,6 +313,134 @@ class _Offender(NamedTuple):
     path: Path
 
 
+def _is_listed_exempt(label: str, exempt_names: frozenset[str]) -> bool:
+    """True when *label* equals an exempt-list entry or ends with ``/<entry>``."""
+    return any(label == entry or label.endswith("/" + entry) for entry in exempt_names)
+
+
+def _check_scripts(
+    labelled: list[tuple[str, Path]],
+    *,
+    exempt_names: frozenset[str],
+    verbose: bool,
+) -> tuple[list[_Offender], int, int]:
+    """Check each ``(label, path)`` for a help handler, skipping listed exemptions.
+
+    Returns ``(offenders, exempt_count, checked_count)``.
+    """
+    offenders: list[_Offender] = []
+    exempt_count = 0
+    checked_count = 0
+    for label, script in labelled:
+        if _is_listed_exempt(label, exempt_names):
+            if verbose:
+                print(f"  exempt: {label}", flush=True)
+            exempt_count += 1
+            continue
+        if verbose:
+            print(f"  scanning: {label}", flush=True)
+        checked_count += 1
+        if not _has_help_handler(script):
+            offenders.append(_Offender(label, script))
+    return offenders, exempt_count, checked_count
+
+
+# Directory names the tree walk never enters, beside every name starting
+# with "." (VCS and tool state): byte-code caches and vendored packages.
+_PRUNED_DIR_NAMES: frozenset[str] = frozenset({"__pycache__", "node_modules"})
+
+
+def _is_executable_script(path: Path) -> bool:
+    """True for a regular, non-symlink file with an execute bit set and a
+    ``.sh``/``.py`` suffix or a ``#!`` first line."""
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        if not path.stat().st_mode & 0o111:
+            return False
+        if path.suffix in (".sh", ".py"):
+            return True
+        with path.open("rb") as handle:
+            return handle.read(2) == b"#!"
+    except OSError:
+        return False
+
+
+def _sourced_by_rule(relative: Path) -> bool:
+    """True for a sourced library (a ``lib`` directory in the path) or a
+    workflow plugin (``workflows/<type>/workflow.sh``): neither is run with
+    a command line of its own, so neither owes a ``--help``."""
+    parents = relative.parts[:-1]
+    if "lib" in parents:
+        return True
+    return relative.name == "workflow.sh" and len(parents) >= 2 and parents[-2] == "workflows"
+
+
+def _list_tree_scripts(root: Path) -> tuple[list[tuple[str, Path]], int]:
+    """Walk *root* recursively; return ``(labelled, rule_exempt_count)``.
+
+    ``labelled`` holds ``(label, path)`` for each executable script outside
+    the rule exemptions (`_sourced_by_rule`), label being the path relative
+    to *root*; ``rule_exempt_count`` counts the executable scripts the rule
+    skipped. Hidden directories, ``__pycache__`` and ``node_modules`` are not
+    entered. Sorted by label for deterministic narration.
+    """
+    labelled: list[tuple[str, Path]] = []
+    rule_exempt = 0
+    for current, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and d not in _PRUNED_DIR_NAMES)
+        for filename in filenames:
+            path = Path(current) / filename
+            if not _is_executable_script(path):
+                continue
+            relative = path.relative_to(root)
+            if _sourced_by_rule(relative):
+                rule_exempt += 1
+                continue
+            labelled.append((relative.as_posix(), path))
+    labelled.sort()
+    return labelled, rule_exempt
+
+
+def _default_tree_root(script_dir: Path) -> Path:
+    """The tree this script belongs to: the repository root when it sits at
+    ``team/scripts/``, the kanban root when it sits at ``scripts/`` in an
+    install."""
+    return script_dir.parent.parent if script_dir.parent.name == "team" else script_dir.parent
+
+
+def _tree_scripts_dir(root: Path) -> Path | None:
+    """The scripts directory of tree *root* (``team/scripts/`` or ``scripts/``),
+    where the help-quality checks run, or ``None`` when it has neither."""
+    for candidate in (root / "team" / "scripts", root / "scripts"):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _tree_scan_set(root: Path) -> tuple[list[tuple[str, Path]], int, Path | None]:
+    """Return ``(labelled, rule_exempt_count, scripts_dir)`` for a tree scan.
+
+    The executable scripts under *root* (`_list_tree_scripts`), plus every
+    ``*.sh``/``*.py`` directly in the tree's scripts directory and its
+    ``cm/`` subdirectory whatever its mode, each listed once; *scripts_dir*
+    is that directory (``None`` when the tree has none).
+    """
+    labelled, rule_exempt = _list_tree_scripts(root)
+    scripts_dir = _tree_scripts_dir(root)
+    if scripts_dir is not None:
+        seen = {path for _label, path in labelled}
+        for directory in (scripts_dir, scripts_dir / "cm"):
+            if not directory.is_dir():
+                continue
+            for path in _list_scannable_scripts(directory):
+                if path not in seen and not path.is_symlink():
+                    labelled.append((path.relative_to(root).as_posix(), path))
+                    seen.add(path)
+        labelled.sort()
+    return labelled, rule_exempt, scripts_dir
+
+
 def _list_scannable_scripts(scripts_dir: Path) -> list[Path]:
     """Return the operator-facing scripts in *scripts_dir*, non-recursive.
 
@@ -296,11 +449,7 @@ def _list_scannable_scripts(scripts_dir: Path) -> list[Path]:
     directory. Sorted by full path so scan order is deterministic and
     stable regardless of the mix of the two extensions.
     """
-    return sorted(
-        p
-        for p in scripts_dir.iterdir()
-        if p.is_file() and p.suffix in (".sh", ".py")
-    )
+    return sorted(p for p in scripts_dir.iterdir() if p.is_file() and p.suffix in (".sh", ".py"))
 
 
 def _scan_directory(
@@ -319,31 +468,11 @@ def _scan_directory(
     command.
 
     *exempt_names* is matched against the label form (``cm/name.sh`` or bare
-    ``name.sh``), allowing directory-specific exemptions.
+    ``name.sh``) by `_is_listed_exempt`, allowing directory-specific
+    exemptions.
     """
-    scripts: list[Path] = _list_scannable_scripts(scripts_dir)
-
-    offenders: list[_Offender] = []
-    exempt_count = 0
-    checked_count = 0
-
-    for script in scripts:
-        label = label_prefix + script.name
-
-        if label in exempt_names or script.name in exempt_names:
-            if verbose:
-                print(f"  exempt: {label}", flush=True)
-            exempt_count += 1
-            continue
-
-        if verbose:
-            print(f"  scanning: {label}", flush=True)
-
-        checked_count += 1
-        if not _has_help_handler(script):
-            offenders.append(_Offender(label, script))
-
-    return offenders, exempt_count, checked_count
+    labelled = [(label_prefix + script.name, script) for script in _list_scannable_scripts(scripts_dir)]
+    return _check_scripts(labelled, exempt_names=exempt_names, verbose=verbose)
 
 
 # ---------------------------------------------------------------------------
@@ -357,10 +486,7 @@ def _scan_directory(
 # runtime by the script itself ($0, $1), so the fix command carries no
 # site-specific placeholder: the same literal line is correct for any
 # offending script.
-_HELP_HANDLER_SNIPPET = (
-    'case "${1:-}" in --help|-h) echo "Usage: $(basename "$0") [--help]"; '
-    'exit 0 ;; esac'
-)
+_HELP_HANDLER_SNIPPET = 'case "${1:-}" in --help|-h) echo "Usage: $(basename "$0") [--help]"; ' "exit 0 ;; esac"
 
 # The equivalent guard for a Python entry point.  Unlike the shell case
 # branch, this cannot simply be appended to the end of the file: a Python
@@ -378,10 +504,7 @@ _HELP_GUARD_PY_SOURCE = (
 
 def _build_causes(offenders: list[_Offender]) -> list[str]:
     """Return one cause bullet per offender, naming the concrete script path."""
-    return [
-        f"{o.path}: does not implement a --help/-h handler (label: {o.label})"
-        for o in offenders
-    ]
+    return [f"{o.path}: does not implement a --help/-h handler (label: {o.label})" for o in offenders]
 
 
 def _py_single_quoted_literal(value: str) -> str:
@@ -389,9 +512,7 @@ def _py_single_quoted_literal(value: str) -> str:
     literal: backslashes, embedded single quotes, and real newlines are all
     escaped so the result is safe to splice into a one-line ``python3 -c``
     program with no further quoting concerns."""
-    escaped = (
-        value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
-    )
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
     return "'" + escaped + "'"
 
 
@@ -418,9 +539,7 @@ def _build_py_fix_command(path: Path) -> str:
     return f'python3 -c "{rewrite_source}"'
 
 
-def _build_fix_commands(
-    offenders: list[_Offender], lint_script: Path, recheck_args: list[str]
-) -> list[str]:
+def _build_fix_commands(offenders: list[_Offender], lint_script: Path, recheck_args: list[str]) -> list[str]:
     """Return the numbered, verbatim-runnable fix commands for *offenders*.
 
     Each shell-script (``.sh``) offender gets one single-line command that
@@ -438,9 +557,11 @@ def _build_fix_commands(
     detection time (*recheck_args*), proving the fix cleared the gate.
     """
     commands = [
-        f"echo '{_HELP_HANDLER_SNIPPET}' >> \"{o.path}\""
-        if o.path.suffix != ".py"
-        else _build_py_fix_command(o.path)
+        (
+            _build_py_fix_command(o.path)
+            if _is_python_script(o.path)
+            else f"echo '{_HELP_HANDLER_SNIPPET}' >> \"{o.path}\""
+        )
         for o in offenders
     ]
     args_str = " ".join(recheck_args)
@@ -449,9 +570,7 @@ def _build_fix_commands(
     return commands
 
 
-def _format_remedy_block(
-    offenders: list[_Offender], lint_script: Path, recheck_args: list[str]
-) -> str:
+def _format_remedy_block(offenders: list[_Offender], lint_script: Path, recheck_args: list[str]) -> str:
     """Assemble the full three-part remedy block: cause(s) with concrete
     location, a numbered fix block of verbatim-runnable commands ending with
     the re-lint check, then the one-line rule the gate enforces.
@@ -472,10 +591,11 @@ def _format_remedy_block(
         lines.append(f"  {i}. {command}")
     lines.append("")
     lines.append(
-        "Rule: every operator-facing script under team/scripts/ must implement "
-        "a --help/-h handler so operators can discover its usage without "
-        "reading the source; scripts that are process-internal (never invoked "
-        "directly by an operator) belong on the exempt list instead."
+        "Rule: every executable script must implement a --help/-h handler so "
+        "operators can discover its usage without reading the source; sourced "
+        "libraries (lib/) and workflow plugins are exempt by rule, and scripts "
+        "that are process-internal (never invoked directly by an operator) "
+        "belong on the exempt list instead."
     )
     return "\n".join(lines)
 
@@ -494,55 +614,40 @@ _CASE_ARM_LINE: re.Pattern[str] = re.compile(r"""^\s*\(?\s*([^\s()#][^()]*?)\s*\
 
 # One alternative of a case arm that names a long flag, optionally quoted,
 # optionally followed by an ``=*`` / ``=`` value glob.
-_CASE_ARM_FLAG: re.Pattern[str] = re.compile(
-    r"""^["']?--(""" + _LONG_FLAG_NAME + r""")(?:=\*?)?["']?$"""
-)
+_CASE_ARM_FLAG: re.Pattern[str] = re.compile(r"""^["']?--(""" + _LONG_FLAG_NAME + r""")(?:=\*?)?["']?$""")
 
 # ``argparse_has name`` / ``argparse_has "name"`` (operator_args/argparse.sh).
-_ARGPARSE_HAS_FLAG: re.Pattern[str] = re.compile(
-    r"""argparse_has\s+["']?(""" + _LONG_FLAG_NAME + r""")["']?"""
-)
+_ARGPARSE_HAS_FLAG: re.Pattern[str] = re.compile(r"""argparse_has\s+["']?(""" + _LONG_FLAG_NAME + r""")["']?""")
 
 # ``argparse_parse --value-flags "a b c"`` — bare names, each one a ``--name``.
-_VALUE_FLAGS_LIST: re.Pattern[str] = re.compile(
-    r"""--value-flags\s+(?:"([^"]*)"|'([^']*)')"""
-)
+_VALUE_FLAGS_LIST: re.Pattern[str] = re.compile(r"""--value-flags\s+(?:"([^"]*)"|'([^']*)')""")
 
 # ``OPERATOR_VALID_FLAGS=(a b c)`` — bare names, each one a ``--name``.
-_OPERATOR_VALID_FLAGS: re.Pattern[str] = re.compile(
-    r"""OPERATOR_VALID_FLAGS=\(([^)]*)\)"""
-)
+_OPERATOR_VALID_FLAGS: re.Pattern[str] = re.compile(r"""OPERATOR_VALID_FLAGS=\(([^)]*)\)""")
 
 # A script whose help is rendered from OPERATOR_VALID_FLAGS names every entry.
-_RENDER_HELP_FOR_FLAGS: re.Pattern[str] = re.compile(
-    r"""\boperator_args_render_help_for_flags\b"""
-)
+_RENDER_HELP_FOR_FLAGS: re.Pattern[str] = re.compile(r"""\boperator_args_render_help_for_flags\b""")
 
 # Heredoc opener: ``<<EOF``, ``<<-EOF``, ``<<'EOF'``, ``<< "EOF"``. ``<<<``
 # (a here-string) is excluded by the negative look-ahead.
-_HEREDOC_OPEN: re.Pattern[str] = re.compile(
-    r"""<<(?!<)-?\s*["']?([A-Za-z_][A-Za-z0-9_]*)["']?"""
-)
+_HEREDOC_OPEN: re.Pattern[str] = re.compile(r"""<<(?!<)-?\s*["']?([A-Za-z_][A-Za-z0-9_]*)["']?""")
 
 # Function definition whose name marks it as a usage/help printer.
 _HELP_FUNCTION_OPEN: re.Pattern[str] = re.compile(
-    r"""^\s*(?:function\s+)?[A-Za-z0-9_:-]*(?:usage|help|USAGE|HELP)"""
-    r"""[A-Za-z0-9_:-]*\s*\(\)\s*\{?\s*$"""
+    r"""^\s*(?:function\s+)?[A-Za-z0-9_:-]*(?:usage|help|USAGE|HELP)""" r"""[A-Za-z0-9_:-]*\s*\(\)\s*\{?\s*$"""
 )
 
 # Assignment to a usage/help text variable (``_USAGE_TEXT="$(cat <<EOF``,
 # ``USAGE="..."``, ``declare -A OPERATOR_FLAG_HELP=(``).
 _HELP_VARIABLE_OPEN: re.Pattern[str] = re.compile(
-    r"""^\s*(?:(?:declare|local|readonly)\s+(?:-\w+\s+)*)?"""
-    r"""[A-Za-z0-9_]*(?:USAGE|HELP)[A-Za-z0-9_]*="""
+    r"""^\s*(?:(?:declare|local|readonly)\s+(?:-\w+\s+)*)?""" r"""[A-Za-z0-9_]*(?:USAGE|HELP)[A-Za-z0-9_]*="""
 )
 
 # Check (b): a fixed ``sed -n 'A,Bp'`` range printed straight from the
 # script's own file. Loose on quoting and spacing; the file operand is
 # ``$0``, ``${0}`` or ``${BASH_SOURCE[0]}`` (quoted or not).
 _FIXED_SED_HELP_RANGE: re.Pattern[str] = re.compile(
-    r"""sed\s+-n\s+["']?\d+\s*,\s*\d+\s*p["']?\s+"""
-    r"""["']?\$(?:0|\{0\}|\{BASH_SOURCE\[0\]\})["']?"""
+    r"""sed\s+-n\s+["']?\d+\s*,\s*\d+\s*p["']?\s+""" r"""["']?\$(?:0|\{0\}|\{BASH_SOURCE\[0\]\})["']?"""
 )
 
 
@@ -554,8 +659,8 @@ class _QualityFinding(NamedTuple):
     check: str
     label: str
     detail: str
-    path: Optional[Path] = None
-    line: Optional[int] = None
+    path: Path | None = None
+    line: int | None = None
 
 
 def _list_quality_scripts(root: Path) -> list[Path]:
@@ -621,9 +726,7 @@ def _help_function_bodies(lines: list[str]) -> list[str]:
             body_line = lines[index]
             index += 1
             stripped = body_line.strip()
-            if stripped.startswith("}") and (
-                len(body_line) - len(body_line.lstrip()) <= indent
-            ):
+            if stripped.startswith("}") and (len(body_line) - len(body_line.lstrip()) <= indent):
                 break
             bodies.append(body_line)
     return bodies
@@ -671,8 +774,7 @@ def _bare_flag_names(words: str) -> set[str]:
     return {
         word.strip("\"'")
         for word in words.split()
-        if len(word.strip("\"'")) > 1
-        and re.fullmatch(_LONG_FLAG_NAME, word.strip("\"'"))
+        if len(word.strip("\"'")) > 1 and re.fullmatch(_LONG_FLAG_NAME, word.strip("\"'"))
     }
 
 
@@ -710,10 +812,7 @@ def _undocumented_flags(path: Path) -> list[str]:
         return []
 
     help_source = "\n".join(
-        _header_block(lines)
-        + _heredoc_bodies(lines)
-        + _help_function_bodies(lines)
-        + _help_variable_bodies(lines)
+        _header_block(lines) + _heredoc_bodies(lines) + _help_function_bodies(lines) + _help_variable_bodies(lines)
     )
     rendered_from_valid_flags = bool(_RENDER_HELP_FOR_FLAGS.search(text))
 
@@ -749,9 +848,7 @@ def _fixed_sed_ranges(path: Path) -> list[tuple[int, str]]:
     return hits
 
 
-def _scan_help_quality(
-    root: Path, *, verbose: bool
-) -> tuple[list[_QualityFinding], int]:
+def _scan_help_quality(root: Path, *, verbose: bool) -> tuple[list[_QualityFinding], int]:
     """Run both help-quality checks over the bash scripts under *root*.
 
     Returns ``(findings, checked_count)``. Check (a) applies only to scripts
@@ -788,7 +885,7 @@ def _scan_help_quality(
                     f"{label}:{number}",
                     f"prints help through a fixed range ({line}); source "
                     "lib/header_help.sh and call header_help_print "
-                    "\"${BASH_SOURCE[0]}\" instead",
+                    '"${BASH_SOURCE[0]}" instead',
                     script,
                     number,
                 )
@@ -796,9 +893,7 @@ def _scan_help_quality(
     return findings, len(scripts)
 
 
-def _narrate_help_quality(
-    findings: list[_QualityFinding], checked: int, root: Path
-) -> None:
+def _narrate_help_quality(findings: list[_QualityFinding], checked: int, root: Path) -> None:
     """Print the help-quality findings, one line each, then a count line.
 
     Quality class: the caller records each one as a finding too; none
@@ -806,8 +901,7 @@ def _narrate_help_quality(
     """
     for finding in findings:
         print(
-            f"lint_help_presence: quality [{finding.check}] "
-            f"{finding.label}: {finding.detail}",
+            f"lint_help_presence: quality [{finding.check}] " f"{finding.label}: {finding.detail}",
             flush=True,
         )
     print(
@@ -827,33 +921,46 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_help_presence.py",
         description=(
-            "Check that every operator-facing shell script in team/scripts/ "
-            "and team/scripts/cm/ implements a --help or -h flag that prints "
-            "usage text.  Scripts listed in the exempt list are skipped.  "
-            "Quality class: each script missing help is a finding, and the "
-            "lint exits 0 whatever it finds (2 when the scan directory does "
-            "not exist).  Supply --scripts-dir to scan a single directory "
-            "instead of the default two-directory scan."
+            "Check that every executable script in the tree (a file with an "
+            "execute bit and a .sh/.py suffix or a #! line, found recursively) "
+            "implements a --help or -h flag that prints usage text.  Exempt by "
+            "rule, because they are sourced and have no command line of their "
+            "own: sourced libraries (any path with a lib/ directory) and "
+            "workflow plugins (workflows/<type>/workflow.sh).  Scripts listed in "
+            "the exempt list are skipped too.  Quality class: each script "
+            "missing help is a finding, and the lint exits 0 whatever it finds "
+            "(2 when the scan directory does not exist)."
         ),
     )
-    parser.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--root",
+        metavar="PATH",
+        help=(
+            "Tree to scan recursively.  Default: the repository root (this "
+            "script at team/scripts/) or the kanban root (this script at "
+            "scripts/ in an install).  The help-quality checks run over its "
+            "team/scripts/ or scripts/ directory."
+        ),
+    )
+    scope.add_argument(
         "--scripts-dir",
         metavar="PATH",
         help=(
-            "Single directory to scan for operator-facing shell scripts "
-            "(overrides the default two-directory scan of team/scripts/ and "
-            "team/scripts/cm/).  Default: scan both team/scripts/ and "
-            "team/scripts/cm/ relative to this script's repo root."
+            "Single directory to scan instead of the tree, non-recursive; every "
+            "*.sh and *.py file in it is checked whatever its mode.  Also the "
+            "root of the recursive help-quality scan."
         ),
     )
     parser.add_argument(
         "--exempt-list",
         metavar="PATH",
         help=(
-            "Path to the exempt-list data file (one entry per line; bare "
-            "basenames for top-level scripts, 'cm/<name>.sh' for cm/ scripts; "
-            "# comments allowed).  Default: team/scripts/help_presence_exempt.txt "
-            "relative to repo root."
+            "Path to the exempt-list data file (one entry per line; an entry "
+            "matches a script whose label equals it or ends with '/' plus it, "
+            "so a basename or a trailing path such as cm/open-doc.sh works; "
+            "# comments allowed).  Default: help_presence_exempt.txt beside "
+            "this script."
         ),
     )
     parser.add_argument(
@@ -875,12 +982,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _recheck_command(lint_script: Path, recheck_args: list[str]) -> str:
     """This lint re-run with *recheck_args*, as a shell command."""
-    suffix = "".join(f' {a}' if a.startswith("--") else f' "{a}"' for a in recheck_args)
+    suffix = "".join(f" {a}" if a.startswith("--") else f' "{a}"' for a in recheck_args)
     return f'python3 "{lint_script}"{suffix}'
 
 
 def _report_exempt_list_missing(
-    exempt_list_path: Path, *, explicit: bool, lint_script: Path, findings_file: Optional[str]
+    exempt_list_path: Path, *, explicit: bool, lint_script: Path, findings_file: str | None
 ) -> int:
     """Record the unreadable exempt list as the run's one finding and return 0.
 
@@ -904,8 +1011,7 @@ def _report_exempt_list_missing(
     )
     write_findings_file(findings_file, [finding], lint="lint_help_presence")
     print(
-        f"ERROR: exempt list not found: {exempt_list_path}\n"
-        "Use --exempt-list to specify an alternative path.",
+        f"ERROR: exempt list not found: {exempt_list_path}\n" "Use --exempt-list to specify an alternative path.",
         file=sys.stderr,
     )
     # CENSUS-ANCHOR: lint-help-presence-exempt-list-missing-01
@@ -932,8 +1038,7 @@ def _findings(
     findings = [
         quality_finding(
             _LINT_NAME,
-            f"{display_path(o.path, repo_root)} does not implement a --help/-h handler "
-            f"(label: {o.label})",
+            f"{display_path(o.path, repo_root)} does not implement a --help/-h handler " f"(label: {o.label})",
             f"{fix} && {recheck}",
             file=display_path(o.path, repo_root),
             kind="missing-help",
@@ -975,9 +1080,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _parse_args(argv)
 
-    # Infer the repo root: team/scripts/lint_help_presence.py → repo root.
-    script_dir = Path(__file__).resolve().parent  # team/scripts/
-    repo_root = script_dir.parent.parent           # repo root
+    # This script's own directory: team/scripts/ in a dev tree, scripts/ in
+    # an install. The default tree root and exempt list are found from it.
+    script_dir = Path(__file__).resolve().parent
 
     # Resolve the exempt list path.
     if args.exempt_list:
@@ -996,115 +1101,64 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     # ------------------------------------------------------------------
-    # Determine which directories to scan.
+    # Determine what to scan.
     #
-    # --scripts-dir supplied: single-directory mode (backward-compatible).
-    # No --scripts-dir: default two-directory scan (team/scripts/ + cm/).
+    # --scripts-dir supplied: one directory, non-recursive.
+    # Otherwise: every executable script under the tree root, recursively.
     # ------------------------------------------------------------------
     if args.scripts_dir:
-        # Single-directory override: scan exactly this directory, no cm/ addition.
-        single_dir = Path(args.scripts_dir).resolve()
-        if not single_dir.is_dir():
+        scan_dir = Path(args.scripts_dir).resolve()
+        if not scan_dir.is_dir():
             print(
-                f"ERROR: scripts directory not found: {single_dir}\n"
-                "Use --scripts-dir to specify an alternative path.",
+                f"ERROR: scripts directory not found: {scan_dir}\n" "Use --scripts-dir to specify an alternative path.",
                 file=sys.stderr,
             )
             return 2
-
-        scripts: list[Path] = _list_scannable_scripts(single_dir)
         print(
-            f"lint_help_presence: scanning {len(scripts)} scripts in {single_dir}",
+            f"lint_help_presence: scanning {len(_list_scannable_scripts(scan_dir))} scripts in {scan_dir}",
             flush=True,
         )
-
-        offenders: list[_Offender] = []
-        exempt_count = 0
-        checked_count = 0
-
-        for script in scripts:
-            name = script.name
-            if name in exempt_names:
-                if args.verbose:
-                    print(f"  exempt: {name}", flush=True)
-                exempt_count += 1
-                continue
-            if args.verbose:
-                print(f"  scanning: {name}", flush=True)
-            checked_count += 1
-            if not _has_help_handler(script):
-                offenders.append(_Offender(name, script))
-
-    else:
-        # Default: scan team/scripts/ (top-level) AND team/scripts/cm/.
-        top_dir = script_dir          # team/scripts/
-        cm_dir = script_dir / "cm"   # team/scripts/cm/
-
-        if not top_dir.is_dir():
-            print(
-                f"ERROR: scripts directory not found: {top_dir}\n"
-                "Use --scripts-dir to specify an alternative path.",
-                file=sys.stderr,
-            )
-            return 2
-
-        # Collect counts for the summary line.
-        top_scripts = _list_scannable_scripts(top_dir)
-        cm_scripts: list[Path] = []
-        if cm_dir.is_dir():
-            cm_scripts = _list_scannable_scripts(cm_dir)
-
-        total = len(top_scripts) + len(cm_scripts)
-        print(
-            f"lint_help_presence: scanning {total} scripts in "
-            f"{top_dir} and {cm_dir}",
-            flush=True,
-        )
-
-        offenders = []
-        exempt_count = 0
-        checked_count = 0
-
-        # Scan top-level scripts (bare basename label).
-        top_offenders, top_exempt, top_checked = _scan_directory(
-            top_dir,
+        offenders, exempt_count, checked_count = _scan_directory(
+            scan_dir,
             label_prefix="",
             exempt_names=exempt_names,
             verbose=args.verbose,
         )
-        offenders.extend(top_offenders)
-        exempt_count += top_exempt
-        checked_count += top_checked
-
-        # Scan cm/ scripts (directory-relative label: "cm/<name>.sh").
-        if cm_dir.is_dir():
-            cm_offenders, cm_exempt, cm_checked = _scan_directory(
-                cm_dir,
-                label_prefix="cm/",
-                exempt_names=exempt_names,
-                verbose=args.verbose,
+        quality_root: Path | None = scan_dir
+    else:
+        scan_dir = Path(args.root).resolve() if args.root else _default_tree_root(script_dir)
+        if not scan_dir.is_dir():
+            print(
+                f"ERROR: tree root not found: {scan_dir}\n" "Use --root to specify an alternative path.",
+                file=sys.stderr,
             )
-            offenders.extend(cm_offenders)
-            exempt_count += cm_exempt
-            checked_count += cm_checked
+            return 2
+        labelled, rule_exempt, quality_root = _tree_scan_set(scan_dir)
+        print(
+            f"lint_help_presence: scanning {len(labelled)} scripts under {scan_dir} "
+            f"(recursive; {rule_exempt} sourced libraries and workflow plugins exempt by rule)",
+            flush=True,
+        )
+        offenders, exempt_count, checked_count = _check_scripts(
+            labelled, exempt_names=exempt_names, verbose=args.verbose
+        )
 
     # Help-quality checks (quality class): narrated whatever the presence
     # check found, and never part of the exit status below.
-    quality_root = single_dir if args.scripts_dir else script_dir
-    quality_findings, quality_checked = _scan_help_quality(
-        quality_root, verbose=args.verbose
-    )
-    _narrate_help_quality(quality_findings, quality_checked, quality_root)
+    quality_findings: list[_QualityFinding] = []
+    if quality_root is not None:
+        quality_findings, quality_checked = _scan_help_quality(quality_root, verbose=args.verbose)
+        _narrate_help_quality(quality_findings, quality_checked, quality_root)
 
     # Reconstruct the exact re-lint invocation so the recheck command in
     # the remedy block reproduces this run's scan surface precisely.
     recheck_args: list[str] = []
     if args.scripts_dir:
-        recheck_args += ["--scripts-dir", str(single_dir)]
+        recheck_args += ["--scripts-dir", str(scan_dir)]
+    elif args.root:
+        recheck_args += ["--root", str(scan_dir)]
     recheck_args += ["--exempt-list", str(exempt_list_path)]
-    findings = _findings(
-        offenders, quality_findings, lint_script=lint_script, recheck_args=recheck_args
-    )
+    findings = _findings(offenders, quality_findings, lint_script=lint_script, recheck_args=recheck_args)
     write_findings_file(args.findings_file, findings, lint="lint_help_presence")
 
     if offenders:
@@ -1117,15 +1171,14 @@ def main(argv: list[str] | None = None) -> int:
         # zero runtime-failure risk -- recorded as findings; returns 0.
         emit_error_contract(
             "lint.help-presence",
-            f"{len(offenders)} operator-facing script(s) do not implement a --help/-h "
+            f"{len(offenders)} executable script(s) do not implement a --help/-h "
             "handler; each is listed above with its fix.",
             findings[0]["remedy"],
         )
         return 0
 
     print(
-        f"lint_help_presence: OK — {checked_count} script(s) checked, "
-        f"{exempt_count} exempt, 0 offenders.",
+        f"lint_help_presence: OK — {checked_count} script(s) checked, " f"{exempt_count} exempt, 0 offenders.",
         flush=True,
     )
     return 0

@@ -53,9 +53,7 @@ def _single_key_root(tmp_path: pathlib.Path, form: str) -> tuple[pathlib.Path, p
     root = tmp_path / "kanban"
     root.mkdir()
     bigdisk = tmp_path / "bigdisk"
-    (root / "kanban.cfg").write_text(
-        f"[paths]\ntmp_root = {bigdisk}\n{_SUBDIR_FORMS[form]}", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text(f"[paths]\ntmp_root = {bigdisk}\n{_SUBDIR_FORMS[form]}", encoding="utf-8")
     return root, bigdisk
 
 
@@ -83,11 +81,13 @@ def test_resolver_and_load_config_give_tmp_root_with_the_default_subdir(
         extra_env={"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root)},
     )
     assert "PGAI_AGENT_KANBAN_TEMP_DIR" not in env
-    script = "\n".join([
-        f"source '{_CONFIG_LOADER}'",
-        f"load_config '{root / 'kanban.cfg'}' || exit 7",
-        "printf 'temp_dir=%s\\n' \"$PGAI_AGENT_KANBAN_TEMP_DIR\"",
-    ])
+    script = "\n".join(
+        [
+            f"source '{_CONFIG_LOADER}'",
+            f"load_config '{root / 'kanban.cfg'}' || exit 7",
+            "printf 'temp_dir=%s\\n' \"$PGAI_AGENT_KANBAN_TEMP_DIR\"",
+        ]
+    )
     result = run_bash(tmp_path, script, base_env=env, cwd=tmp_path)
     assert result.returncode == 0, f"load_config exited {result.returncode}\n{result.stdout}\n{result.stderr}"
     exported = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
@@ -133,10 +133,9 @@ def test_install_creates_the_resolver_root_for_a_single_key_cfg(
     output = f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     assert result.returncode == 0, f"install.sh failed\n{output}"
     assert f"Ensured framework temp directory: {expected}\n" in result.stdout, (
-        f"install.sh must create the resolver's root {expected!r} for a kanban.cfg setting only "
-        f"tmp_root\n{output}"
+        f"install.sh must create the resolver's root {expected!r} for a kanban.cfg setting only " f"tmp_root\n{output}"
     )
     assert pathlib.Path(expected).is_dir()
-    assert (root / "kanban.cfg").read_text(encoding="utf-8").count("tmp_root") == 1, (
-        "install.sh must keep the operator's existing kanban.cfg"
-    )
+    assert (root / "kanban.cfg").read_text(encoding="utf-8").count(
+        "tmp_root"
+    ) == 1, "install.sh must keep the operator's existing kanban.cfg"

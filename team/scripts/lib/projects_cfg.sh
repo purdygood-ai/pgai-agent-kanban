@@ -321,9 +321,11 @@ _projects_cfg_read_raw_color() {
 # project based on its registration order within projects.cfg (0-based,
 # modulo palette size). Returns the index on stdout.
 #
-# Handles both INI and colon-legacy formats. In INI, a [project:...]
-# section whose name the registry rejects ends the section before it, as
-# in projects_cfg_list, so a priority under it moves no project's slot.
+# Handles both INI and colon-legacy formats. In INI the order is
+# projects_cfg_list's: a repeated section keeps its first position, and any
+# other section -- a [project:...] one whose name the registry rejects, or
+# one of another kind such as [defaults] -- ends the section before it, so
+# a priority under it moves no project's slot.
 # ---------------------------------------------------------------------------
 _projects_cfg_palette_index_for() {
     local name="$1"
@@ -346,14 +348,18 @@ _projects_cfg_palette_index_for() {
             /^[[:space:]]*$/ { next }
             (hdr = project_header($0)) != "" {
                 cur = hdr
-                section_line[cur] = NR
-                section_order[++n_sections] = cur
+                # A repeated section keeps the first position, as in
+                # projects_cfg_list.
+                if (!(cur in section_line)) {
+                    section_line[cur] = NR
+                    section_order[++n_sections] = cur
+                }
                 next
             }
-            # A [project:...] section with a rejected name is no project:
+            # Any other section -- a [project:...] one with a rejected name,
+            # or one of another kind such as [defaults] -- is no project:
             # its keys belong to none, as in projects_cfg_list.
-            project_section($0) { cur = ""; next }
-            /^[[:space:]]*\[/ { next }
+            /^[[:space:]]*\[/ { cur = ""; next }
             /^[a-z_]+[[:space:]]*=/ && cur != "" {
                 eq = index($0, "=")
                 key = substr($0, 1, eq - 1)
@@ -366,7 +372,9 @@ _projects_cfg_palette_index_for() {
             END {
                 for (i = 1; i <= n_sections; i++) {
                     nm = section_order[i]
-                    p  = (prio[nm] == "" ? 999 : prio[nm])
+                    # An absent or non-integer priority reads as 999, as
+                    # in projects_cfg_list.
+                    p  = (prio[nm] ~ /^[+-]?[0-9]+$/ ? prio[nm] : 999)
                     row[i] = sprintf("%010d\t%d\t%s", section_line[nm], p, nm)
                 }
                 # Bubble sort by priority then line order
@@ -472,7 +480,10 @@ projects_cfg_color() {
 #        colon-field (colon-legacy), that explicit value is the effective color.
 #      - For projects WITHOUT an explicit color, the effective color is the
 #        implicit palette fallback: PGAI_DEFAULT_PALETTE[ordinal % palette_size]
-#        where ordinal is the project's sorted registration position (0-based).
+#        where ordinal is the project's sorted registration position (0-based):
+#        by priority, then file order. In INI an absent priority, or one that
+#        is not a plain, optionally signed integer, reads as 999 -- the
+#        reading _projects_cfg_palette_index_for (projects_cfg_color) uses.
 #      Both explicit and implicit assignments are treated as "in use" so that
 #      a newly registered project never silently duplicates an existing color.
 #      (Counting only explicit colors would let projects migrated to INI format
@@ -506,7 +517,10 @@ projects_cfg_next_color() {
         if [[ "$_fmt" == "ini" ]]; then
             # INI format: collect all section names and their explicit colors,
             # sorted by (priority, line-order) — same order as
-            # _projects_cfg_palette_index_for.  For each project, use the
+            # _projects_cfg_palette_index_for, where an absent or non-integer
+            # priority reads as 999 and sorts last by file order.  A project registered by two
+            # sections is one project at its first header's line; a section
+            # of another kind ends the one before it.  For each project, use the
             # explicit dashboard_color when present; otherwise compute the
             # implicit palette index from the project's sorted ordinal.
             local _awk_palette=""
@@ -526,8 +540,12 @@ projects_cfg_next_color() {
                 /^[[:space:]]*$/ { next }
                 (hdr = project_header($0)) != "" {
                     cur = hdr
-                    section_line[cur] = NR
-                    section_order[++n_sections] = cur
+                    # A repeated section keeps the first position, as in
+                    # _projects_cfg_palette_index_for: one project, one slot.
+                    if (!(cur in section_line)) {
+                        section_line[cur] = NR
+                        section_order[++n_sections] = cur
+                    }
                     next
                 }
                 /^[[:space:]]*\[/ { cur = ""; next }
@@ -541,10 +559,14 @@ projects_cfg_next_color() {
                     if (key == "dashboard_color" && val != "") explicit_color[cur] = val
                 }
                 END {
-                    # Build sort keys: "priority\tline_no\tname"
+                    # Build sort keys: "priority\tline_no\tname". An absent
+                    # priority, or one that is not a plain, optionally signed
+                    # integer (abc, 7abc), reads as 999, as in
+                    # _projects_cfg_palette_index_for -- so the slots counted
+                    # here are the slots projects_cfg_color hands out.
                     for (i = 1; i <= n_sections; i++) {
                         nm = section_order[i]
-                        p  = (prio[nm] == "" ? 999 : prio[nm])
+                        p  = (prio[nm] ~ /^[+-]?[0-9]+$/ ? prio[nm] : 999)
                         row[i] = sprintf("%d\t%010d\t%s", p+0, section_line[nm], nm)
                     }
                     # Bubble sort by (priority, line_order) ascending
@@ -679,7 +701,12 @@ projects_cfg_next_color() {
 # projects_cfg_next_priority
 # Echo max(existing priorities) + 1, or 1 when projects.cfg is empty.
 #
-# Handles both INI and colon-legacy formats.
+# Handles both INI and colon-legacy formats. In INI only projects count, as
+# projects_cfg_list lists them: a priority under a section of another kind
+# ([defaults], or a [project:...] one whose name the registry rejects) is no
+# project's, and a project registered by two sections counts once, with the
+# priority its last section that sets one gives it (_projects_cfg_ini_value).
+# A priority that is not a plain unsigned integer is skipped.
 # Returns 0 always.
 # ---------------------------------------------------------------------------
 projects_cfg_next_priority() {
@@ -697,16 +724,25 @@ projects_cfg_next_priority() {
 
     local max_prio
     if [[ "$fmt" == "ini" ]]; then
-        max_prio="$(awk '
-            /^[a-z_]+[[:space:]]*=/ {
+        max_prio="$(awk "${PROJECTS_CFG_AWK_HEADER}"'
+            /^[[:space:]]*#/ { next }
+            /^[[:space:]]*$/ { next }
+            (hdr = project_header($0)) != "" { cur = hdr; next }
+            /^[[:space:]]*\[/ { cur = ""; next }
+            cur != "" && /^[a-z_]+[[:space:]]*=/ {
                 eq = index($0, "=")
                 key = substr($0, 1, eq - 1)
                 val = substr($0, eq + 1)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-                if (key == "priority" && val ~ /^[0-9]+$/ && val+0 > max+0) max = val
+                if (key == "priority") prio[cur] = val
             }
-            END { print (max == "" ? 0 : max) }
+            END {
+                for (nm in prio) {
+                    if (prio[nm] ~ /^[0-9]+$/ && (max == "" || prio[nm]+0 > max+0)) max = prio[nm]
+                }
+                print (max == "" ? 0 : max + 0)
+            }
         ' "$cfg")"
     else
         max_prio="$(awk -F: '

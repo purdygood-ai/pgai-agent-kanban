@@ -92,7 +92,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 # The durations options live beside this file; put this file's own directory
 # on sys.path so they import whether this module runs as a script or is
@@ -164,9 +164,7 @@ def module_importable(name: str) -> bool:
     return True
 
 
-def coverage_decision(
-    requested: bool, config_enabled: bool, environ: Mapping[str, str]
-) -> CoverageDecision:
+def coverage_decision(requested: bool, config_enabled: bool, environ: Mapping[str, str]) -> CoverageDecision:
     """Decide whether a ``--coverage`` request is honoured.
 
     Honoured when ``[testing] coverage`` is true, or when the operator set
@@ -414,8 +412,12 @@ def _build_parser() -> argparse.ArgumentParser:
             "the runner would run as a single process."
         ),
     )
-    plan.add_argument("--suite", required=True, choices=("unit", "integration"), help="suite name; names the coverage JSON report")
-    plan.add_argument("--workers", type=_non_negative_int, default=1, help="[testing] workers (0 or 1 = single process)")
+    plan.add_argument(
+        "--suite", required=True, choices=("unit", "integration"), help="suite name; names the coverage JSON report"
+    )
+    plan.add_argument(
+        "--workers", type=_non_negative_int, default=1, help="[testing] workers (0 or 1 = single process)"
+    )
     plan.add_argument(
         "--requested-workers",
         type=_non_negative_int,
@@ -431,7 +433,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--durations-dir",
         default="",
         help="directory the lanes' timing reports are written into; a certification run records "
-             "its slowest tests there (a targeted or quarantined run ignores it)",
+        "its slowest tests there (a targeted or quarantined run ignores it)",
     )
     plan.add_argument("pytest_argv", nargs=argparse.REMAINDER, help="-- followed by the pytest argv")
     return parser

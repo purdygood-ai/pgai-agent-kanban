@@ -137,9 +137,7 @@ def test_help_sandbox_is_made_under_the_temp_dir_override(
     assert made.name.startswith("help-sandbox-") and made.is_dir()
 
 
-def test_help_sandbox_honours_configured_paths(
-    tmp_path: pathlib.Path, sandboxed_env: pytest.MonkeyPatch
-) -> None:
+def test_help_sandbox_honours_configured_paths(tmp_path: pathlib.Path, sandboxed_env: pytest.MonkeyPatch) -> None:
     expected_root = _configure_paths(tmp_path, sandboxed_env)
 
     made = doc_truth_lint._make_help_sandbox_root()
@@ -159,8 +157,7 @@ def test_help_probe_runs_inside_the_sandbox_under_the_temp_dir_override(
     record = tmp_path / "probe-cwd.txt"
     script = scripts_dir / "records_cwd.sh"
     script.write_text(
-        "#!/usr/bin/env bash\n"
-        f'case "${{1:-}}" in\n  --help|-h) pwd > "{record}"; exit 0 ;;\nesac\n',
+        "#!/usr/bin/env bash\n" f'case "${{1:-}}" in\n  --help|-h) pwd > "{record}"; exit 0 ;;\nesac\n',
         encoding="utf-8",
     )
     script.chmod(0o755)

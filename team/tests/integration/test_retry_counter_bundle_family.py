@@ -35,7 +35,6 @@ import json
 import os
 import pathlib
 import subprocess
-from typing import Optional
 
 import pytest
 from tests.fixtures.binary_guard import require_binary
@@ -51,6 +50,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="retry-counter-bundle-family")
+
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
@@ -77,15 +77,18 @@ def _init_git_repo_with_remote(
     subprocess.run(["git", "init", "--bare", str(bare_remote)], capture_output=True, check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "init", f"--initial-branch={main_branch}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     (repo_path / "README.md").write_text("# Test repo\n", encoding="utf-8")
@@ -93,19 +96,23 @@ def _init_git_repo_with_remote(
     (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_path), "add", "README.md", "release-notes/PUBLISHED"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "Initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", main_branch],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -122,14 +129,12 @@ def _build_kanban_root_for_rc(
     root.mkdir(parents=True, exist_ok=True)
 
     (root / "kanban.cfg").write_text(
-        "[paths]\n\n[chain]\npm_mode = automatic\n\n[wake]\n"
-        "max_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
+        "[paths]\n\n[chain]\npm_mode = automatic\n\n[wake]\n" "max_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
         encoding="utf-8",
     )
 
     (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority=1\n"
-        "description=retry-counter-bundle-family test\nenabled=true\n",
+        f"[project:{project_name}]\npriority=1\n" "description=retry-counter-bundle-family test\nenabled=true\n",
         encoding="utf-8",
     )
 
@@ -151,8 +156,7 @@ def _build_kanban_root_for_rc(
     )
 
     (proj / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n\n"
-        "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
+        "# Release State\n\n## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
 
@@ -182,7 +186,8 @@ def _write_bundle(
     lines = [
         f"# Requirements: {version} — BUG bundle\n\n",
         "## Status\n\nopen\n\n",
-        "## Target Version\n\n", f"{version}\n\n",
+        "## Target Version\n\n",
+        f"{version}\n\n",
         "## Bundled Items\n\n",
     ]
     for name in bug_basenames:
@@ -198,8 +203,8 @@ def _run_cm_script(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    repo_root: Optional[pathlib.Path] = None,
-    extra_env: Optional[dict] = None,
+    repo_root: pathlib.Path | None = None,
+    extra_env: dict | None = None,
     timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     """Run a CM script against a temporary kanban root."""
@@ -216,8 +221,11 @@ def _run_cm_script(
 
     return subprocess.run(
         ["bash", str(script_path)] + list(args),
-        capture_output=True, text=True, env=base_env,
-        cwd=str(kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=timeout,
     )
 
 
@@ -246,9 +254,7 @@ class TestFirstAttemptHappyPath:
         requirements_dir = kanban_root / "projects" / project_name / "requirements"
         _write_bundle(requirements_dir, version, ["BUG-0001-foo.md", "BUG-0002-bar.md"])
 
-        result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path
-        )
+        result = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
         assert result.returncode == 0, f"open-rc failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         state = _read_rc_state_json(kanban_root, project_name, version)
@@ -269,9 +275,7 @@ class TestFirstAttemptHappyPath:
         kanban_root = _build_kanban_root_for_rc(tmp_path, project_name, repo_path)
         # No bundle file written — requirements/ is empty.
 
-        result = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path
-        )
+        result = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
         assert result.returncode == 0, f"open-rc failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         state = _read_rc_state_json(kanban_root, project_name, version)
@@ -286,9 +290,7 @@ class TestFirstAttemptHappyPath:
 
 
 class TestSameCargoSetIncrementsAcrossRebundle:
-    def test_cancel_then_rebundle_same_bugs_increments_attempt(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_cancel_then_rebundle_same_bugs_increments_attempt(self, tmp_path: pathlib.Path) -> None:
         """open(v0.1.0, bugs A+B) -> cancel -> open(v0.1.1, same bugs A+B)
         -> attempt goes 1 -> 2, same family_key, both real script runs."""
         project_name = "same_cargo_retry_test"
@@ -302,9 +304,7 @@ class TestSameCargoSetIncrementsAcrossRebundle:
 
         # First bundle + open: attempt 1.
         _write_bundle(requirements_dir, "v0.1.0", cargo)
-        result_open1 = _run_cm_script(
-            _OPEN_RC_SCRIPT, ["v0.1.0"], kanban_root, project_name, repo_root=repo_path
-        )
+        result_open1 = _run_cm_script(_OPEN_RC_SCRIPT, ["v0.1.0"], kanban_root, project_name, repo_root=repo_path)
         assert result_open1.returncode == 0, result_open1.stderr
         state_v1 = _read_rc_state_json(kanban_root, project_name, "v0.1.0")
         assert state_v1["attempt"] == 1
@@ -313,16 +313,17 @@ class TestSameCargoSetIncrementsAcrossRebundle:
 
         # Cancel v0.1.0 — archives the attempt-1 record to history/.
         result_cancel = _run_cm_script(
-            _CANCEL_RC_SCRIPT, ["--key", "v0.1.0", "--yes"],
-            kanban_root, project_name, repo_root=repo_path,
+            _CANCEL_RC_SCRIPT,
+            ["--key", "v0.1.0", "--yes"],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_cancel.returncode == 0, result_cancel.stderr
 
         # Rebundle the SAME bugs under a new patch number and open v0.1.1.
         _write_bundle(requirements_dir, "v0.1.1", list(reversed(cargo)))
-        result_open2 = _run_cm_script(
-            _OPEN_RC_SCRIPT, ["v0.1.1"], kanban_root, project_name, repo_root=repo_path
-        )
+        result_open2 = _run_cm_script(_OPEN_RC_SCRIPT, ["v0.1.1"], kanban_root, project_name, repo_root=repo_path)
         assert result_open2.returncode == 0, result_open2.stderr
 
         state_v2 = _read_rc_state_json(kanban_root, project_name, "v0.1.1")
@@ -336,9 +337,7 @@ class TestSameCargoSetIncrementsAcrossRebundle:
 
 
 class TestDifferentCargoSetStartsFreshFamily:
-    def test_different_bugs_after_a_cancelled_family_starts_at_one(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_different_bugs_after_a_cancelled_family_starts_at_one(self, tmp_path: pathlib.Path) -> None:
         """After one family (bugs A+B) is opened and cancelled, a completely
         different family (bug C) opened next must record attempt 1 and a
         distinct family_key — the prior family's history must not leak in."""
@@ -355,15 +354,16 @@ class TestDifferentCargoSetStartsFreshFamily:
         _run_cm_script(_OPEN_RC_SCRIPT, ["v0.1.0"], kanban_root, project_name, repo_root=repo_path)
         state_a = _read_rc_state_json(kanban_root, project_name, "v0.1.0")
         _run_cm_script(
-            _CANCEL_RC_SCRIPT, ["--key", "v0.1.0", "--yes"],
-            kanban_root, project_name, repo_root=repo_path,
+            _CANCEL_RC_SCRIPT,
+            ["--key", "v0.1.0", "--yes"],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         # Family B: an unrelated bug set bundled next.
         _write_bundle(requirements_dir, "v0.1.1", ["BUG-0099-unrelated.md"])
-        result_open_b = _run_cm_script(
-            _OPEN_RC_SCRIPT, ["v0.1.1"], kanban_root, project_name, repo_root=repo_path
-        )
+        result_open_b = _run_cm_script(_OPEN_RC_SCRIPT, ["v0.1.1"], kanban_root, project_name, repo_root=repo_path)
         assert result_open_b.returncode == 0, result_open_b.stderr
 
         state_b = _read_rc_state_json(kanban_root, project_name, "v0.1.1")

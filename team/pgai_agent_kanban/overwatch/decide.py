@@ -94,7 +94,8 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import shlex
-from typing import Any, Mapping, Optional
+from typing import Any
+from collections.abc import Mapping
 
 from pgai_agent_kanban.overwatch import block_classifier as bc
 from pgai_agent_kanban.overwatch.block_record import (
@@ -289,21 +290,21 @@ class DecisionInput:
 
     subject: str
     project: str
-    task_id: Optional[str] = None
-    record: Optional[BlockRecord] = None
-    record_error: Optional[str] = None
-    task_state: Optional[str] = None
+    task_id: str | None = None
+    record: BlockRecord | None = None
+    record_error: str | None = None
+    task_state: str | None = None
     active_rc: str = NO_ACTIVE_RC
     history: TaskHistory = dataclasses.field(default_factory=TaskHistory)
     runaway_trips: tuple[Trip, ...] = ()
-    halt: Optional[HaltProvenance] = None
+    halt: HaltProvenance | None = None
     operator_halts: tuple[str, ...] = ()
     cause_checks: tuple[CauseCheck, ...] = ()
     facts: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    transient_retry: Optional[tuple[int, Optional[int]]] = None
+    transient_retry: tuple[int, int | None] | None = None
     requeue_budget: int = DEFAULT_REQUEUE_BUDGET
     kanban_root: str = ""
-    now: "datetime.datetime | str | None" = None
+    now: datetime.datetime | str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -333,13 +334,13 @@ class Outcome:
     kind: str
     why: str
     detail: str
-    name: Optional[str] = None
+    name: str | None = None
     args: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    question: Optional[str] = None
-    source: Optional[str] = None
-    how_to_answer: Optional[str] = None
+    question: str | None = None
+    source: str | None = None
+    how_to_answer: str | None = None
     evidence: tuple[str, ...] = ()
-    classifier: Optional[bc.Decision] = None
+    classifier: bc.Decision | None = None
 
     def as_json_dict(self) -> dict:
         """The outcome as a JSON-ready dict."""
@@ -352,8 +353,13 @@ class Outcome:
 
 def _verb(name: str, args: Mapping[str, Any], why: str, detail: str, evidence: tuple, classifier=None) -> Outcome:
     return Outcome(
-        kind=OUTCOME_VERB, why=why, detail=detail, name=name, args=dict(args),
-        evidence=tuple(evidence), classifier=classifier,
+        kind=OUTCOME_VERB,
+        why=why,
+        detail=detail,
+        name=name,
+        args=dict(args),
+        evidence=tuple(evidence),
+        classifier=classifier,
     )
 
 
@@ -361,8 +367,14 @@ def _inbox(
     question: str, source: str, how_to_answer: str, why: str, detail: str, evidence: tuple, classifier=None
 ) -> Outcome:
     return Outcome(
-        kind=OUTCOME_INBOX, why=why, detail=detail, question=question, source=source,
-        how_to_answer=how_to_answer, evidence=tuple(evidence), classifier=classifier,
+        kind=OUTCOME_INBOX,
+        why=why,
+        detail=detail,
+        question=question,
+        source=source,
+        how_to_answer=how_to_answer,
+        evidence=tuple(evidence),
+        classifier=classifier,
     )
 
 
@@ -390,7 +402,7 @@ def _task_commands(inputs: DecisionInput) -> str:
     )
 
 
-def _template_values(inputs: DecisionInput, record: Optional[BlockRecord]) -> dict:
+def _template_values(inputs: DecisionInput, record: BlockRecord | None) -> dict:
     """Placeholder values for a row's question and answer (before the evidence)."""
     values = {key: value for key, value in inputs.facts.items() if isinstance(value, str)}
     values.update(
@@ -402,7 +414,7 @@ def _template_values(inputs: DecisionInput, record: Optional[BlockRecord]) -> di
     return values
 
 
-def _record_evidence(inputs: DecisionInput, record: Optional[BlockRecord]) -> list:
+def _record_evidence(inputs: DecisionInput, record: BlockRecord | None) -> list:
     lines = [f"subject={inputs.subject}", f"project={inputs.project}"]
     if inputs.task_id:
         lines.append(f"task_id={inputs.task_id}")
@@ -444,8 +456,11 @@ def _row_decision(
     decision = rule.decision
     if decision is None:
         return _fail_closed_inbox(
-            inputs, WHY_FAIL_CLOSED, f"{rule.reason_code} has no decision in the classifier table ({cause})",
-            evidence, classifier,
+            inputs,
+            WHY_FAIL_CLOSED,
+            f"{rule.reason_code} has no decision in the classifier table ({cause})",
+            evidence,
+            classifier,
         )
     if allow_verb and decision.verb is not None:
         used = inputs.history.uses(decision.verb)
@@ -470,8 +485,13 @@ def _row_decision(
     question = bc.render_note(decision.inbox, record_evidence, values)
     answer = f"{bc.render_note(decision.answer, record_evidence, values)}; {_task_commands(inputs)}"
     return _inbox(
-        question, inputs.task_id or inputs.project, answer, WHY_ROW_INBOX,
-        f"{cause}; {rule.reason_code} asks the operator", tuple(evidence), classifier,
+        question,
+        inputs.task_id or inputs.project,
+        answer,
+        WHY_ROW_INBOX,
+        f"{cause}; {rule.reason_code} asks the operator",
+        tuple(evidence),
+        classifier,
     )
 
 
@@ -493,13 +513,16 @@ def _triage_verb(inputs: DecisionInput, record: BlockRecord, classifier: bc.Deci
         name = TRIAGE_ACTION_VERBS.get(classifier.action, "")
     if name not in VERBS:
         return _fail_closed_inbox(
-            inputs, WHY_FAIL_CLOSED,
-            f"the classifier chose {classifier.action}, which no operator verb carries out", evidence, classifier,
+            inputs,
+            WHY_FAIL_CLOSED,
+            f"the classifier chose {classifier.action}, which no operator verb carries out",
+            evidence,
+            classifier,
         )
     return _verb(name, args, WHY_TRIAGE_ACTION, classifier.detail, tuple(evidence), classifier)
 
 
-def _decide_verification(inputs: DecisionInput, record: BlockRecord, evidence: list) -> Optional[Outcome]:
+def _decide_verification(inputs: DecisionInput, record: BlockRecord, evidence: list) -> Outcome | None:
     """A TESTER task's own block while it verifies a release, or None.
 
     The RC's one requeue still available (and the RC still open) returns it
@@ -514,29 +537,35 @@ def _decide_verification(inputs: DecisionInput, record: BlockRecord, evidence: l
     spent = inputs.facts.get(FACT_VERIFICATION_RETRY_SPENT) is True
     cause = " ".join(str(inputs.facts.get(FACT_VERIFICATION_CAUSE) or "no block cause recorded").split())
     args = {
-        "project": inputs.project, "task_id": inputs.task_id, "reason_code": record.reason_code,
-        "version": version, "cause": cause,
+        "project": inputs.project,
+        "task_id": inputs.task_id,
+        "reason_code": record.reason_code,
+        "version": version,
+        "cause": cause,
     }
     evidence = evidence + [f"verification: {version}; requeue {'spent' if spent else 'available'}; cause: {cause}"]
     if not spent:
         if version != inputs.active_rc:
             return None
         return _verb(
-            VERB_RESET_TO_BACKLOG, {**args, "verification_retry": version, "use": 1, "budget": 1},
+            VERB_RESET_TO_BACKLOG,
+            {**args, "verification_retry": version, "use": 1, "budget": 1},
             WHY_VERIFICATION_REQUEUE,
             f"{inputs.task_id} blocked while verifying {version}: the RC's one requeue returns it to BACKLOG "
             f"with its block cause ({cause})",
             tuple(evidence),
         )
     return _verb(
-        VERB_CLOSE_UNVERIFIED, args, WHY_VERIFICATION_UNVERIFIED,
+        VERB_CLOSE_UNVERIFIED,
+        args,
+        WHY_VERIFICATION_UNVERIFIED,
         f"{inputs.task_id} blocked again while verifying {version} after the RC's one requeue: it is closed so "
         f"the release ships NON-FUNCTIONAL as unverified ({cause})",
         tuple(evidence),
     )
 
 
-def _decide_task(inputs: DecisionInput, table: Optional[bc.ClassifierTable]) -> Outcome:
+def _decide_task(inputs: DecisionInput, table: bc.ClassifierTable | None) -> Outcome:
     record = inputs.record
     evidence = _record_evidence(inputs, record)
     if inputs.record_error:
@@ -571,11 +600,16 @@ def _decide_task(inputs: DecisionInput, table: Optional[bc.ClassifierTable]) -> 
             return _none(
                 WHY_TRANSIENT_HANDLER,
                 f"transient retry {count} of {ceiling}: the transient-error handler still requeues it after its backoff",
-                tuple(evidence), classifier,
+                tuple(evidence),
+                classifier,
             )
         return _row_decision(
-            inputs, rule, record, classifier,
-            f"the transient-error handler reached its retry ceiling ({count} of {ceiling})", evidence,
+            inputs,
+            rule,
+            record,
+            classifier,
+            f"the transient-error handler reached its retry ceiling ({count} of {ceiling})",
+            evidence,
         )
 
     if classifier.action == bc.NOT_YET:
@@ -583,11 +617,18 @@ def _decide_task(inputs: DecisionInput, table: Optional[bc.ClassifierTable]) -> 
 
     if classifier.action == bc.ESCALATE:
         if rule is None or classifier.why not in (
-            bc.WHY_ALWAYS_HUMAN, bc.WHY_ATTEMPTS_EXHAUSTED, bc.WHY_PRECONDITION_UNMET,
+            bc.WHY_ALWAYS_HUMAN,
+            bc.WHY_ATTEMPTS_EXHAUSTED,
+            bc.WHY_PRECONDITION_UNMET,
         ):
             return _fail_closed_inbox(inputs, WHY_FAIL_CLOSED, classifier.detail, evidence, classifier)
         return _row_decision(
-            inputs, rule, record, classifier, classifier.detail, evidence,
+            inputs,
+            rule,
+            record,
+            classifier,
+            classifier.detail,
+            evidence,
             allow_verb=classifier.why != bc.WHY_PRECONDITION_UNMET,
         )
 
@@ -599,9 +640,11 @@ def _decide_task(inputs: DecisionInput, table: Optional[bc.ClassifierTable]) -> 
     ):
         evidence.append(f"requeue budget: {record.requeues} of {inputs.requeue_budget} spent")
         return _row_decision(
-            inputs, rule, record, classifier,
-            f"the requeue budget is spent ({record.requeues} of {inputs.requeue_budget}: "
-            f"{record.requeue_reasons})",
+            inputs,
+            rule,
+            record,
+            classifier,
+            f"the requeue budget is spent ({record.requeues} of {inputs.requeue_budget}: " f"{record.requeue_reasons})",
             evidence,
         )
     return _triage_verb(inputs, record, classifier, evidence)
@@ -617,8 +660,10 @@ def _decide_chain_halt(inputs: DecisionInput, halt: HaltProvenance) -> Outcome:
         f"halt: {halt.path}; origin={halt.origin}; writer={halt.writer}; reason={halt.reason}; "
         f"trigger={halt.trigger}; source={halt.source}"
     ]
-    evidence += [f"cause check {check.check}: {'passed' if check.passed else 'failed'}: {check.evidence}"
-                 for check in inputs.cause_checks]
+    evidence += [
+        f"cause check {check.check}: {'passed' if check.passed else 'failed'}: {check.evidence}"
+        for check in inputs.cause_checks
+    ]
     if halt.writer in (WRITER_OVERWATCH_RUNAWAY, WRITER_OVERWATCH_REPAIR):
         return _none(
             WHY_HALT_OWN_WRITER,
@@ -637,12 +682,16 @@ def _decide_chain_halt(inputs: DecisionInput, halt: HaltProvenance) -> Outcome:
     if passed:
         args["checks"] = tuple(check.check for check in passed)
         return _verb(
-            VERB_CLEAR_CHAIN_HALT, args, WHY_HALT_CAUSE_RESOLVED,
+            VERB_CLEAR_CHAIN_HALT,
+            args,
+            WHY_HALT_CAUSE_RESOLVED,
             f"the chain HALT's cause is resolved ({'; '.join(c.check + ': ' + c.evidence for c in passed)})",
             tuple(evidence),
         )
     return _verb(
-        VERB_RESOLUTION_STAGE, args, WHY_HALT_TO_STAGE,
+        VERB_RESOLUTION_STAGE,
+        args,
+        WHY_HALT_TO_STAGE,
         f"the {halt.writer} chain HALT goes to the resolution stage, which keys on its writer and trigger",
         tuple(evidence),
     )
@@ -669,7 +718,7 @@ def _runaway(inputs: DecisionInput) -> Outcome:
 
 
 def inbox_after_verb(
-    inputs: DecisionInput, verb: str, cause: str, *, table: Optional[bc.ClassifierTable] = None
+    inputs: DecisionInput, verb: str, cause: str, *, table: bc.ClassifierTable | None = None
 ) -> Outcome:
     """The inbox question to park when *verb*, decided for *inputs*, could not be carried out.
 
@@ -701,7 +750,7 @@ def inbox_after_verb(
     return _inbox(question, inputs.task_id or inputs.project, answer, WHY_VERB_NOT_CARRIED_OUT, cause, tuple(evidence))
 
 
-def decide(inputs: DecisionInput, *, table: Optional[bc.ClassifierTable] = None) -> Outcome:
+def decide(inputs: DecisionInput, *, table: bc.ClassifierTable | None = None) -> Outcome:
     """Decide what OVERWATCH does about *inputs* (see the module docstring).
 
     Pure: reads nothing but *inputs* and the classifier table — *table* when
@@ -713,8 +762,10 @@ def decide(inputs: DecisionInput, *, table: Optional[bc.ClassifierTable] = None)
     """
     if inputs.subject not in SUBJECTS:
         return _fail_closed_inbox(
-            inputs, WHY_SUBJECT_UNKNOWN,
-            f"subject {inputs.subject!r} is not one of {', '.join(SUBJECTS)}", [f"subject={inputs.subject}"],
+            inputs,
+            WHY_SUBJECT_UNKNOWN,
+            f"subject {inputs.subject!r} is not one of {', '.join(SUBJECTS)}",
+            [f"subject={inputs.subject}"],
         )
     if inputs.subject == SUBJECT_HALT:
         halt = inputs.halt

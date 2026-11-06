@@ -68,13 +68,7 @@ def _governance_script(call: str, log_file: pathlib.Path) -> str:
     followed by `echo "$_wd_governance_line"`.
     """
     stub = make_log_stub_fragment(log_file)
-    return (
-        stub
-        + "\n"
-        + f"source {_READ_ORDER_LIB}\n"
-        + f"source {_WAKE_DRIVER_INVOKE_LIB}\n"
-        + textwrap.dedent(call)
-    )
+    return stub + "\n" + f"source {_READ_ORDER_LIB}\n" + f"source {_WAKE_DRIVER_INVOKE_LIB}\n" + textwrap.dedent(call)
 
 
 def _make_root(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -117,10 +111,7 @@ def test_manifest_present_names_exact_documents_in_manifest_order(
     assert result.returncode == 0, result.stderr
     line = result.stdout.strip().splitlines()[-1]
 
-    expected = (
-        f"{root}/DIRECTIVES.md, {root}/SOP-core.md, "
-        f"and your role file at {root}/roles/TESTROLE.md"
-    )
+    expected = f"{root}/DIRECTIVES.md, {root}/SOP-core.md, " f"and your role file at {root}/roles/TESTROLE.md"
     assert line == expected, f"Got:\n{line}\nExpected:\n{expected}"
     # OVERVIEW.md and README.md exist on disk but are NOT in this manifest --
     # a document not listed in the manifest must never appear.
@@ -136,9 +127,7 @@ def test_document_added_to_manifest_appears_with_no_code_change(
     hardcoded copy of its contents."""
     root = _make_root(tmp_path)
     (root / "EXTRA.md").write_text("extra doc\n", encoding="utf-8")
-    (root / "read-order" / "testrole.txt").write_text(
-        "DIRECTIVES.md\nroles/TESTROLE.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("DIRECTIVES.md\nroles/TESTROLE.md\n", encoding="utf-8")
     log_file = tmp_path / "wake.log"
 
     call = f"""
@@ -152,20 +141,14 @@ def test_document_added_to_manifest_appears_with_no_code_change(
 
     # Manifest edit only -- append the new document, in order, before the
     # role file (which must stay last for the "your role file at" phrasing).
-    (root / "read-order" / "testrole.txt").write_text(
-        "DIRECTIVES.md\nEXTRA.md\nroles/TESTROLE.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("DIRECTIVES.md\nEXTRA.md\nroles/TESTROLE.md\n", encoding="utf-8")
     after = run_bash(tmp_path, _governance_script(call, log_file))
     assert after.returncode == 0, after.stderr
     after_line = after.stdout.strip().splitlines()[-1]
     assert f"{root}/EXTRA.md" in after_line
     # Order preserved: EXTRA.md between DIRECTIVES.md and the role file.
-    assert after_line.index(str(root / "DIRECTIVES.md")) < after_line.index(
-        str(root / "EXTRA.md")
-    )
-    assert after_line.index(str(root / "EXTRA.md")) < after_line.index(
-        str(root / "roles" / "TESTROLE.md")
-    )
+    assert after_line.index(str(root / "DIRECTIVES.md")) < after_line.index(str(root / "EXTRA.md"))
+    assert after_line.index(str(root / "EXTRA.md")) < after_line.index(str(root / "roles" / "TESTROLE.md"))
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +196,7 @@ def test_manifest_naming_only_missing_files_also_falls_back(
     degrade exactly like a wholly-absent manifest, not emit an empty
     governance stack."""
     root = _make_root(tmp_path)
-    (root / "read-order" / "testrole.txt").write_text(
-        "GHOST-ONE.md\nGHOST-TWO.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("GHOST-ONE.md\nGHOST-TWO.md\n", encoding="utf-8")
     log_file = tmp_path / "wake.log"
 
     call = f"""
@@ -242,9 +223,7 @@ def test_project_readme_line_follows_the_role_file(
     tmp_path: pathlib.Path,
 ) -> None:
     root = _make_root(tmp_path)
-    (root / "read-order" / "testrole.txt").write_text(
-        "DIRECTIVES.md\nREADME.md\nroles/TESTROLE.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("DIRECTIVES.md\nREADME.md\nroles/TESTROLE.md\n", encoding="utf-8")
     log_file = tmp_path / "wake.log"
     readme_line = " and your project README at /projects/demo/README.md"
 
@@ -271,9 +250,7 @@ def test_empty_project_readme_line_appends_nothing_extra(
     """The common (single-project) case: project_readme_line is empty, and
     the README.md entry is emitted with no trailing text spliced in."""
     root = _make_root(tmp_path)
-    (root / "read-order" / "testrole.txt").write_text(
-        "README.md\nroles/TESTROLE.md\n", encoding="utf-8"
-    )
+    (root / "read-order" / "testrole.txt").write_text("README.md\nroles/TESTROLE.md\n", encoding="utf-8")
     log_file = tmp_path / "wake.log"
 
     call = f"""
@@ -377,10 +354,7 @@ def test_prompt_builder_calls_governance_line_function() -> None:
     assert "${_wd_governance_line}" in content
     # The old hardcoded sentence must be gone from the heredoc -- the
     # manifest, not this literal string, drives what the prompt names.
-    assert (
-        "read the governance stack: ${TEAM_ROOT}/DIRECTIVES.md, ${TEAM_ROOT}/OVERVIEW.md"
-        not in content
-    )
+    assert "read the governance stack: ${TEAM_ROOT}/DIRECTIVES.md, ${TEAM_ROOT}/OVERVIEW.md" not in content
 
 
 def test_wake_driver_sources_read_order_lib() -> None:
@@ -395,7 +369,7 @@ def test_wake_driver_sources_read_order_lib() -> None:
     [
         "IMPORTANT: The working directory for this task is the isolated git worktree",
         "Scratch/diagnostic output goes under ${_project_temp_subtree}",
-        'You are running autonomously. No human is reviewing your output in real time.',
+        "You are running autonomously. No human is reviewing your output in real time.",
         "${role_reminder}",
     ],
     ids=[

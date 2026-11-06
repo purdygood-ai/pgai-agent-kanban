@@ -10,6 +10,7 @@ final measurement's executed_lines/executed_branches for the SAME file
 Usage: coverage_compare.py <baseline.json> <final.json> <suite-label>
 Prints a markdown-ready summary block to stdout.
 """
+
 import json
 import sys
 
@@ -40,16 +41,18 @@ def main():
 
     print(f"## {label} suite — baseline vs final")
     print()
-    print(f"- Baseline line coverage: {b_line_pct:.2f}% "
-          f"({b_totals['covered_lines']}/{b_totals['num_statements']})")
-    print(f"- Final line coverage:    {f_line_pct:.2f}% "
-          f"({f_totals['covered_lines']}/{f_totals['num_statements']})")
+    print(f"- Baseline line coverage: {b_line_pct:.2f}% " f"({b_totals['covered_lines']}/{b_totals['num_statements']})")
+    print(f"- Final line coverage:    {f_line_pct:.2f}% " f"({f_totals['covered_lines']}/{f_totals['num_statements']})")
     print(f"- Line delta: {f_line_pct - b_line_pct:+.2f} pct pts")
     print()
-    print(f"- Baseline branch coverage: {b_branch_pct:.2f}% "
-          f"({b_totals.get('covered_branches',0)}/{b_totals.get('num_branches',0)})")
-    print(f"- Final branch coverage:    {f_branch_pct:.2f}% "
-          f"({f_totals.get('covered_branches',0)}/{f_totals.get('num_branches',0)})")
+    print(
+        f"- Baseline branch coverage: {b_branch_pct:.2f}% "
+        f"({b_totals.get('covered_branches',0)}/{b_totals.get('num_branches',0)})"
+    )
+    print(
+        f"- Final branch coverage:    {f_branch_pct:.2f}% "
+        f"({f_totals.get('covered_branches',0)}/{f_totals.get('num_branches',0)})"
+    )
     print(f"- Branch delta: {f_branch_pct - b_branch_pct:+.2f} pct pts")
     print()
 
@@ -87,16 +90,14 @@ def main():
 
     print(f"- Files measured in baseline: {len(b_files)}")
     print(f"- Files measured in final:    {len(f_files)}")
-    print(f"- Files present in baseline but absent from final report: "
-          f"{len(files_removed)}")
+    print(f"- Files present in baseline but absent from final report: " f"{len(files_removed)}")
     if files_removed:
         for fn in files_removed:
             print(f"  - {fn}")
     print()
 
     if not line_regressions and not branch_regressions:
-        print("- Covered-line-set diff: ZERO regressions "
-              "(no baseline-covered line or branch became uncovered).")
+        print("- Covered-line-set diff: ZERO regressions " "(no baseline-covered line or branch became uncovered).")
     else:
         print("- Covered-line-set diff: REGRESSIONS FOUND")
         for fname, lines in line_regressions:

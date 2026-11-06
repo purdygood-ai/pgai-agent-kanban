@@ -212,21 +212,86 @@ from pgai_agent_kanban.lib.error_contract import format_error_contract  # noqa: 
 #: more (``line``, ``exists``, ``has``, ``lines``, ``module`` and
 #: ``function`` each appear in 200+ files of the kanban's own test tree);
 #: project vocabulary such as ``release`` is not generic and stays searched.
-GENERIC_NAMES: frozenset[str] = frozenset({
-    "main", "_main", "run", "_run", "cli", "_cli",
-    "parse_args", "_parse_args", "build_parser", "_build_parser",
-    "parser", "args", "argv", "help", "usage",
-    "setup", "teardown", "init", "test", "tests", "conftest",
-    "get", "set", "load", "save", "read", "write", "parse", "render",
-    "log", "logger", "_log", "die", "fail", "error", "info", "warn",
-    "path", "name", "data", "value", "result", "self", "cls",
-    "util", "utils", "common", "helpers", "lib", "config",
-    "failed", "passed", "skipped", "say", "git", "commit",
-    "exists", "has", "holds", "line", "lines", "module", "function",
-    "code", "field", "record", "step", "add", "describe", "format",
-    "heading", "changed", "last",
-    "README.md", "__init__.py", "conftest.py",
-})
+GENERIC_NAMES: frozenset[str] = frozenset(
+    {
+        "main",
+        "_main",
+        "run",
+        "_run",
+        "cli",
+        "_cli",
+        "parse_args",
+        "_parse_args",
+        "build_parser",
+        "_build_parser",
+        "parser",
+        "args",
+        "argv",
+        "help",
+        "usage",
+        "setup",
+        "teardown",
+        "init",
+        "test",
+        "tests",
+        "conftest",
+        "get",
+        "set",
+        "load",
+        "save",
+        "read",
+        "write",
+        "parse",
+        "render",
+        "log",
+        "logger",
+        "_log",
+        "die",
+        "fail",
+        "error",
+        "info",
+        "warn",
+        "path",
+        "name",
+        "data",
+        "value",
+        "result",
+        "self",
+        "cls",
+        "util",
+        "utils",
+        "common",
+        "helpers",
+        "lib",
+        "config",
+        "failed",
+        "passed",
+        "skipped",
+        "say",
+        "git",
+        "commit",
+        "exists",
+        "has",
+        "holds",
+        "line",
+        "lines",
+        "module",
+        "function",
+        "code",
+        "field",
+        "record",
+        "step",
+        "add",
+        "describe",
+        "format",
+        "heading",
+        "changed",
+        "last",
+        "README.md",
+        "__init__.py",
+        "conftest.py",
+    }
+)
 
 #: Names shorter than this are dropped as generic.
 MIN_NAME_LENGTH = 3
@@ -297,7 +362,10 @@ class AffectedTests(list):
     """
 
     def __init__(
-        self, paths: Iterable[pathlib.Path] = (), *, matched_count: int = 0,
+        self,
+        paths: Iterable[pathlib.Path] = (),
+        *,
+        matched_count: int = 0,
         cap: int | None = None,
     ) -> None:
         super().__init__(paths)
@@ -323,7 +391,9 @@ class _Reference:
 
     def rank_key(self) -> tuple[int, int, int, str]:
         return (
-            -len(self.names), -len(self.directories), -self.occurrences,
+            -len(self.names),
+            -len(self.directories),
+            -self.occurrences,
             self.relative.as_posix(),
         )
 
@@ -379,9 +449,7 @@ def is_test_file(relative: pathlib.PurePath) -> bool:
     """
     if not any(fnmatch.fnmatchcase(relative.name, p) for p in TEST_FILE_PATTERNS):
         return False
-    return not any(
-        part in NON_TEST_DIRS or part.startswith(".") for part in relative.parts[:-1]
-    )
+    return not any(part in NON_TEST_DIRS or part.startswith(".") for part in relative.parts[:-1])
 
 
 def iter_test_files(tests_root: pathlib.Path) -> list[pathlib.PurePosixPath]:
@@ -426,8 +494,7 @@ def ancestor_directories(name: str) -> list[str]:
     gives none."""
     components = directory_components(name)
     return [
-        "/".join(components[:count]) + "/"
-        for count in range(len(components) - 1, MIN_DIRECTORY_COMPONENTS - 1, -1)
+        "/".join(components[:count]) + "/" for count in range(len(components) - 1, MIN_DIRECTORY_COMPONENTS - 1, -1)
     ]
 
 
@@ -474,10 +541,16 @@ def _lists_name(text: str, holder: str, *, recursive: bool = False) -> bool:
 
 # Tokens that do not start a statement: layout, comments and the stream's
 # own markers.
-_LAYOUT_TOKENS = frozenset({
-    tokenize.NL, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT,
-    tokenize.ENCODING, tokenize.ENDMARKER,
-})
+_LAYOUT_TOKENS = frozenset(
+    {
+        tokenize.NL,
+        tokenize.COMMENT,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+        tokenize.ENCODING,
+        tokenize.ENDMARKER,
+    }
+)
 
 
 def _statement_starts(text: str, line_count: int) -> list[int] | None:
@@ -505,7 +578,10 @@ def _statement_starts(text: str, line_count: int) -> list[int] | None:
 
 
 def _lists_directory(
-    text: str, citation: re.Pattern[str], *, recursive: bool = False,
+    text: str,
+    citation: re.Pattern[str],
+    *,
+    recursive: bool = False,
 ) -> int:
     """How many lines of *text* cite a directory (*citation*) and list it:
     the line calls a listing function itself, or its statement assigns the
@@ -538,9 +614,7 @@ def _lists_directory(
                 match = _ASSIGNED_NAME_RE.match(lines[starts[index]])
         if match is not None:
             holders.add(match.group(1))
-    listing_lines += sum(
-        1 for holder in sorted(holders) if _lists_name(text, holder, recursive=recursive)
-    )
+    listing_lines += sum(1 for holder in sorted(holders) if _lists_name(text, holder, recursive=recursive))
     return listing_lines
 
 
@@ -556,7 +630,8 @@ class _DirectorySearch:
     @classmethod
     def for_directory(cls, name: str) -> _DirectorySearch:
         return cls(
-            name, _directory_citation(name),
+            name,
+            _directory_citation(name),
             tuple(_directory_citation(a) for a in ancestor_directories(name)),
         )
 
@@ -570,8 +645,10 @@ class _DirectorySearch:
 
 
 def _reference(
-    tests_root: pathlib.Path, relative: pathlib.PurePosixPath,
-    pattern: re.Pattern[str] | None, names: frozenset[str],
+    tests_root: pathlib.Path,
+    relative: pathlib.PurePosixPath,
+    pattern: re.Pattern[str] | None,
+    names: frozenset[str],
     directories: Sequence[_DirectorySearch] = (),
 ) -> _Reference | None:
     """Measure how *relative* references *names* and lists *directories*;
@@ -610,7 +687,9 @@ def _check_cap(cap: int | None) -> None:
 
 
 def affected_tests(
-    diff_names: Iterable[str], tests_root: str | pathlib.Path, cap: int | None,
+    diff_names: Iterable[str],
+    tests_root: str | pathlib.Path,
+    cap: int | None,
 ) -> AffectedTests:
     """Select the test files under *tests_root* that cite a changed name
     or list a changed directory.
@@ -650,13 +729,16 @@ def affected_tests(
     pattern = _name_pattern(plain) if plain else None
     directories = [_DirectorySearch.for_directory(d) for d in searched if is_directory_name(d)]
     references = [
-        ref for relative in iter_test_files(root)
+        ref
+        for relative in iter_test_files(root)
         if (ref := _reference(root, relative, pattern, names, directories)) is not None
     ]
     references.sort(key=_Reference.rank_key)
     kept = references if cap is None else references[:cap]
     return AffectedTests(
-        (root / ref.relative for ref in kept), matched_count=len(references), cap=cap,
+        (root / ref.relative for ref in kept),
+        matched_count=len(references),
+        cap=cap,
     )
 
 
@@ -739,12 +821,8 @@ _HUNK_RE = re.compile(r"^@@+\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@")
 # type parameters ``[``. "class whose members ..." does not match.
 _PY_DEF_RE = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)\s*[(:\[]")
 _PY_ASSIGN_RE = re.compile(r"^([A-Za-z_]\w*)\s*(?::[^=]*)?=(?!=)")
-_SH_FUNC_RE = re.compile(
-    r"^(\s*)(?:function\s+([A-Za-z_][\w:.-]*)\s*(?:\(\s*\))?|([A-Za-z_][\w:.-]*)\s*\(\s*\))"
-)
-_SH_ASSIGN_RE = re.compile(
-    r"^(?:export\s+|readonly\s+|declare\s+(?:-\w+\s+)*)?([A-Z][A-Z0-9_]+)="
-)
+_SH_FUNC_RE = re.compile(r"^(\s*)(?:function\s+([A-Za-z_][\w:.-]*)\s*(?:\(\s*\))?|([A-Za-z_][\w:.-]*)\s*\(\s*\))")
+_SH_ASSIGN_RE = re.compile(r"^(?:export\s+|readonly\s+|declare\s+(?:-\w+\s+)*)?([A-Z][A-Z0-9_]+)=")
 
 _SHELL_SUFFIXES = (".sh", ".bash")
 
@@ -942,7 +1020,9 @@ def _definitions_on_lines(path: str, text_lines: Iterable[str]) -> set[str]:
 
 
 def names_from_diff(
-    repo: str | pathlib.Path, base: str, head: str = "HEAD",
+    repo: str | pathlib.Path,
+    base: str,
+    head: str = "HEAD",
 ) -> list[str]:
     """Return the sorted, unique names changed in ``git diff base...head``.
 
@@ -972,12 +1052,10 @@ def names_from_diff(
     # them would select unrelated tests. Nor does it contribute its
     # directory: a new or edited test is not a subject other tests list.
     names |= {
-        directory for p in paths
-        if not is_test_file(pathlib.PurePosixPath(p)) and (directory := directory_name(p))
+        directory for p in paths if not is_test_file(pathlib.PurePosixPath(p)) and (directory := directory_name(p))
     }
     code_paths = [
-        p for p in paths
-        if p.endswith((".py", *_SHELL_SUFFIXES)) and not is_test_file(pathlib.PurePosixPath(p))
+        p for p in paths if p.endswith((".py", *_SHELL_SUFFIXES)) and not is_test_file(pathlib.PurePosixPath(p))
     ]
     if code_paths:
         unified = _git(repo_path, "diff", *common, "-U0", "--no-prefix", span, "--", *code_paths)
@@ -1000,7 +1078,6 @@ def names_from_diff(
             names |= {scope.name for scope in scopes if scope.holds(change)}
     names.discard("")
     return sorted(names)
-
 
 
 # ---------------------------------------------------------------------------
@@ -1032,38 +1109,49 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
-        "--base", metavar="REF",
-        help="diff base: names come from 'git diff REF...HEAD' in --repo "
-             "(local refs only; nothing is fetched)",
+        "--base",
+        metavar="REF",
+        help="diff base: names come from 'git diff REF...HEAD' in --repo " "(local refs only; nothing is fetched)",
     )
     source.add_argument(
-        "--names", metavar="NAME", nargs="+",
+        "--names",
+        metavar="NAME",
+        nargs="+",
         help="search for these names directly instead of reading a diff; a "
-             "name ending in '/' is a directory (team/scripts/dashboard/)",
+        "name ending in '/' is a directory (team/scripts/dashboard/)",
     )
     parser.add_argument(
-        "--head", metavar="REF", default="HEAD",
+        "--head",
+        metavar="REF",
+        default="HEAD",
         help="diff head used with --base (default: HEAD)",
     )
     parser.add_argument(
-        "--repo", metavar="DIR", default=".",
+        "--repo",
+        metavar="DIR",
+        default=".",
         help="git repository to read the diff from (default: the current directory)",
     )
     parser.add_argument(
-        "--tests-root", metavar="DIR",
-        help="directory holding the test tree (default: team/tests at the "
-             "top of --repo)",
+        "--tests-root",
+        metavar="DIR",
+        help="directory holding the test tree (default: team/tests at the " "top of --repo)",
     )
     parser.add_argument(
-        "--cap", metavar="N", type=int, default=None,
+        "--cap",
+        metavar="N",
+        type=int,
+        default=None,
         help="return at most N test files, the most-referencing (default: no cap)",
     )
     parser.add_argument(
-        "--show-names", action="store_true",
+        "--show-names",
+        action="store_true",
         help="also print, on stderr, the names searched for and the generic names dropped",
     )
     parser.add_argument(
-        "--json", action="store_true",
+        "--json",
+        action="store_true",
         help="print the whole selection as one JSON object on stdout",
     )
     return parser
@@ -1087,29 +1175,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     # dual-channel shape so the remedy is runnable, and mapped to exit 2.
     try:
         names = list(args.names) if args.names else names_from_diff(repo, args.base, args.head)
-        tests_root = (
-            pathlib.Path(args.tests_root) if args.tests_root else _default_tests_root(repo)
-        )
+        tests_root = pathlib.Path(args.tests_root) if args.tests_root else _default_tests_root(repo)
         selection = affected_tests(names, tests_root, args.cap)
     except DiffReadError as exc:
         print(format_error_contract(exc.error, exc.message, exc.remedy), file=sys.stderr)
         return 2
     except (NotADirectoryError, ValueError) as exc:
-        print(format_error_contract(
-            "affected.bad_argument", str(exc),
-            "python3 team/pgai_agent_kanban/testing/affected.py --help",
-        ), file=sys.stderr)
+        print(
+            format_error_contract(
+                "affected.bad_argument",
+                str(exc),
+                "python3 team/pgai_agent_kanban/testing/affected.py --help",
+            ),
+            file=sys.stderr,
+        )
         return 2
 
     searched, dropped = split_generic_names(names)
     shown = [_display_path(p, tests_root) for p in selection]
     if args.json:
-        print(json.dumps({
-            "base": args.base, "head": args.head if args.base else None,
-            "tests_root": str(tests_root), "names": searched, "generic_names": dropped,
-            "matched": selection.matched_count, "cap": selection.cap,
-            "cap_applied": selection.cap_applied, "tests": shown,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "base": args.base,
+                    "head": args.head if args.base else None,
+                    "tests_root": str(tests_root),
+                    "names": searched,
+                    "generic_names": dropped,
+                    "matched": selection.matched_count,
+                    "cap": selection.cap,
+                    "cap_applied": selection.cap_applied,
+                    "tests": shown,
+                },
+                indent=2,
+            )
+        )
         return 0
     if args.show_names:
         print(f"names searched ({len(searched)}): {' '.join(searched) or '(none)'}", file=sys.stderr)

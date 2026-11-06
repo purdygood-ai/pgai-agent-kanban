@@ -27,7 +27,6 @@ from __future__ import annotations
 import pathlib
 import sys
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Ensure the package root is importable regardless of cwd.
@@ -43,7 +42,6 @@ from pgai_agent_kanban.dashboard.scan_auto_resolutions import (
     scan_auto_resolutions,
 )
 from pgai_agent_kanban.overwatch.ledger import LedgerEntry, append_entry, ledger_path_for_project
-
 
 # ---------------------------------------------------------------------------
 # Fixture builder helpers
@@ -142,8 +140,11 @@ def test_single_entry_renders_rc_attempt_and_decision(tmp_path: pathlib.Path, ca
     """
     _write_ceiling_cfg(tmp_path, max_rc_retries=3)
     _append_resolution(
-        tmp_path, "proj-alpha",
-        rc="v2.0.1", attempt_from=1, attempt_to=2,
+        tmp_path,
+        "proj-alpha",
+        rc="v2.0.1",
+        attempt_from=1,
+        attempt_to=2,
         matrix_row="CANCEL-AND-REBUNDLE",
     )
     scan_auto_resolutions(str(tmp_path), use_color=False)
@@ -250,7 +251,8 @@ def test_two_projects_both_listed(tmp_path: pathlib.Path, capsys) -> None:
 
 
 def test_per_project_ceiling_override_used_in_attempt_display(
-    tmp_path: pathlib.Path, capsys,
+    tmp_path: pathlib.Path,
+    capsys,
 ) -> None:
     """A project.cfg [release] max_rc_retries override wins over the
     kanban.cfg default for that project's attempt display."""
@@ -272,7 +274,8 @@ def test_per_project_ceiling_override_used_in_attempt_display(
 
 
 def test_missing_ceiling_config_renders_question_mark_instead_of_crashing(
-    tmp_path: pathlib.Path, capsys,
+    tmp_path: pathlib.Path,
+    capsys,
 ) -> None:
     """No kanban.cfg and no project.cfg [release] max_rc_retries anywhere:
     the display degrades to 'N/?' rather than raising CeilingConfigError.
@@ -320,12 +323,20 @@ def test_collect_orders_newest_first_within_a_project(tmp_path: pathlib.Path) ->
     the "recent tags, newest first" dashboard convention elsewhere)."""
     _write_ceiling_cfg(tmp_path)
     _append_resolution(
-        tmp_path, "proj-alpha", rc="v1.0.1",
-        attempt_from=1, attempt_to=2, timestamp="2026-07-27T10:00:00Z",
+        tmp_path,
+        "proj-alpha",
+        rc="v1.0.1",
+        attempt_from=1,
+        attempt_to=2,
+        timestamp="2026-07-27T10:00:00Z",
     )
     _append_resolution(
-        tmp_path, "proj-alpha", rc="v1.0.2",
-        attempt_from=1, attempt_to=2, timestamp="2026-07-27T11:00:00Z",
+        tmp_path,
+        "proj-alpha",
+        rc="v1.0.2",
+        attempt_from=1,
+        attempt_to=2,
+        timestamp="2026-07-27T11:00:00Z",
     )
     results = _collect_auto_resolutions(tmp_path)
     assert [r["rc"] for r in results] == ["v1.0.2", "v1.0.1"]

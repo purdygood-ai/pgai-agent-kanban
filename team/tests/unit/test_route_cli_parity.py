@@ -56,8 +56,12 @@ _HALT = "module:pgai_agent_kanban.ops.write.halt"
 # ---------------------------------------------------------------------------
 
 
-def _row(route: str = "/fake/in-process", impl: str = f"module:{_FAKE_MODULE}.do_work",
-         script: str = "scripts/fake.sh", name: str = "fake-verb") -> types.SimpleNamespace:
+def _row(
+    route: str = "/fake/in-process",
+    impl: str = f"module:{_FAKE_MODULE}.do_work",
+    script: str = "scripts/fake.sh",
+    name: str = "fake-verb",
+) -> types.SimpleNamespace:
     return types.SimpleNamespace(name=name, impl=impl, rest_method="POST", rest_route=route, script=script)
 
 

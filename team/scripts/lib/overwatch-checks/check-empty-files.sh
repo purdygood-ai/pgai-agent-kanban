@@ -3,7 +3,10 @@
 #
 # OVERWATCH detection module: scan bugs/ and priority/ under the kanban project
 # for 0-byte REPORT files, rename each to <name>.empty.orphan, log the action,
-# and file a brief bug entry. The scan is scoped to report files only — any
+# and file a brief bug entry. When the bug entry cannot be filed (bugs/
+# missing, intake refused or failed), each rename is undone, so no file is
+# left quarantined without a bug naming it and the next sweep tries again.
+# The scan is scoped to report files only — any
 # dotfile (a filename starting with ".") is protocol machinery (claim-lock
 # sentinels, claim ledgers, and similar in-flight state) rather than a report,
 # and is left untouched regardless of size. The module also runs a bounded
@@ -37,6 +40,15 @@
 #
 # --dry-run: scans and logs findings but does NOT rename, prune, or create
 # bug entries.
+
+# This file's directory, as an absolute path
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CEF_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CEF_SELF_DIR=""
+
+# overwatch_deposit_bug: files the bug report through intake.
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
 # ---------------------------------------------------------------------------
 # _cef_resolve_env
@@ -115,29 +127,6 @@ _cef_is_claim_lock_residue() {
     local bn
     bn="$(basename "$1")"
     [[ "${bn}" =~ ^\.claim-[0-9]{4,}\.lock\.empty\.orphan$ ]]
-}
-
-# ---------------------------------------------------------------------------
-# _cef_next_bug_number <bugs_dir>
-# Determine the next bug report sequence number by scanning existing BUG-NNNN
-# files in <bugs_dir>. Echoes a zero-padded 4-digit number.
-# ---------------------------------------------------------------------------
-_cef_next_bug_number() {
-    local bugs_dir="$1"
-    local highest=0
-    local num
-
-    if [[ -d "${bugs_dir}" ]]; then
-        while IFS= read -r f; do
-            # Extract the 4-digit sequence from BUG-NNNN-... filenames
-            num="$(basename "${f}" | grep -oE '^BUG-[0-9]+' | grep -oE '[0-9]+' | head -n1)"
-            if [[ -n "${num}" ]] && (( 10#${num} > highest )); then
-                highest=$(( 10#${num} ))
-            fi
-        done < <(find "${bugs_dir}" -maxdepth 1 -name 'BUG-[0-9]*' -type f 2>/dev/null)
-    fi
-
-    printf '%04d' $(( highest + 1 ))
 }
 
 # ---------------------------------------------------------------------------
@@ -221,22 +210,28 @@ _cef_do_prune() {
 }
 
 # ---------------------------------------------------------------------------
-# _cef_file_bug <bugs_dir> <orphan_list>
-# Create a brief bug entry listing the orphaned files.
+# _cef_file_bug <project_name> <bugs_dir> <orphan_list>
+# File a brief bug report listing the orphaned files, deposited through
+# intake (overwatch_deposit_bug): intake claims its number, and a report
+# under the same day's slug while that day's bug is still live is refused
+# as the same defect and filed no second time.
 # <orphan_list> is a newline-separated list of original file paths.
+# Returns 0 when a bug names the files (filed now, or already filed) or the
+# list is empty; 1 when nothing was filed (bugs/ missing, intake refused or
+# failed), so the caller undoes the renames.
 # ---------------------------------------------------------------------------
 _cef_file_bug() {
-    local bugs_dir="$1"
-    local orphan_list="$2"
+    local project_name="$1"
+    local bugs_dir="$2"
+    local orphan_list="$3"
 
-    if [[ -z "${orphan_list}" ]] || [[ ! -d "${bugs_dir}" ]]; then
-        return 0
+    [[ -n "${orphan_list}" ]] || return 0
+    if [[ ! -d "${bugs_dir}" ]]; then
+        echo "check-empty-files: bug report not filed: ${bugs_dir} does not exist" >&2
+        return 1
     fi
 
-    local seq
-    seq="$(_cef_next_bug_number "${bugs_dir}")"
     local slug="auto-empty-files-$(date +%Y%m%d)"
-    local bug_file="${bugs_dir}/BUG-${seq}-${slug}.md"
 
     # Build the file list for the report
     local file_list=""
@@ -246,9 +241,9 @@ _cef_file_bug() {
 "
     done <<< "${orphan_list}"
 
-    cat > "${bug_file}" <<EOF
-# BUG-${seq}: Empty files detected and quarantined
-
+    local bug_file="" deposit_rc=0
+    bug_file="$(overwatch_deposit_bug check-empty-files "${project_name}" "${slug}" \
+        "Empty files detected and quarantined" <<EOF
 ## Status
 open
 
@@ -265,9 +260,44 @@ $(date -u +%Y-%m-%dT%H:%M:%SZ)
 ## Detected By
 check-empty-files (OVERWATCH)
 EOF
+)" || deposit_rc=$?
 
-    echo "check-empty-files: filed bug report at ${bug_file}" >&2
+    case "${deposit_rc}" in
+        0) echo "check-empty-files: filed bug report at ${bug_file}" >&2 ;;
+        2) echo "check-empty-files: already filed as ${bug_file}; not filed again" >&2 ;;
+        *) echo "check-empty-files: bug report not filed (see the intake message above)" >&2
+           return 1 ;;
+    esac
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cef_restore_renames <orphan_list>
+# Undo this sweep's renames after its bug report could not be filed: move
+# each <path>.empty.orphan back to <path> and log it. <orphan_list> is a
+# newline-separated list of original file paths. A file whose original name
+# is taken again, or whose move fails, stays quarantined and is named on
+# stderr. The rename being undone is this sweep's own, so it runs directly
+# rather than through overwatch_halt_first_fix: a HALT that appears
+# mid-sweep must not strand a quarantined file with no bug naming it.
+# ---------------------------------------------------------------------------
+_cef_restore_renames() {
+    local f
+    while IFS= read -r f; do
+        [[ -z "${f}" ]] && continue
+        if [[ ! -e "${f}" ]] && mv "${f}.empty.orphan" "${f}" 2>/dev/null; then
+            echo "check-empty-files: bug report not filed; restored ${f}.empty.orphan -> ${f}" >&2
+            overwatch_log_action \
+                "check-empty-files" \
+                "${f}" \
+                "restored-after-failed-deposit" \
+                "none" \
+                "bug report not filed; rename undone, ${f}.empty.orphan restored to its original name" \
+            || true
+        else
+            echo "check-empty-files: restore failed; ${f} is still quarantined at ${f}.empty.orphan" >&2
+        fi
+    done <<< "$1"
 }
 
 # ---------------------------------------------------------------------------
@@ -299,7 +329,8 @@ overwatch_check_empty_files() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CEF_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-empty-files: cannot resolve lib dir" >&2
             return 1
         }
@@ -412,9 +443,11 @@ overwatch_check_empty_files() {
         unset _CEF_TARGET_FILE _CEF_DRY_RUN
     done
 
-    # File one consolidated bug entry for all orphaned files
+    # File one consolidated bug entry for all orphaned files; when nothing
+    # could be filed, undo the renames so no file stays quarantined unreported.
     if [[ -n "${orphan_list}" ]]; then
-        _cef_file_bug "${bugs_dir}" "${orphan_list}" || true
+        _cef_file_bug "${project_name}" "${bugs_dir}" "${orphan_list}" \
+            || _cef_restore_renames "${orphan_list}"
     fi
 
     # Live mode: prune claim-lock residue via overwatch_halt_first_fix.

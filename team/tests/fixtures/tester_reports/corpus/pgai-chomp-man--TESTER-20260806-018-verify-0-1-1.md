@@ -122,7 +122,7 @@ records held state, which is the precise mechanism that fixes the original bug.
 4. Queue files manually edited? **NO** — none observed; diff touches no queue files.
 
 Manual interventions required: none. All RC commits are authored under the chain's
-configured git identity (`purdygood`), the same identity on every prior autonomous
+configured git identity (`operator`), the same identity on every prior autonomous
 release commit — not a distinct manual-edit signal.
 
 ## Caveats / Observations (not findings)

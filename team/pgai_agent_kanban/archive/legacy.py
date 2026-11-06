@@ -58,7 +58,8 @@ import dataclasses
 import os
 import pathlib
 import shlex
-from typing import Callable, Optional, Union
+from typing import Union
+from collections.abc import Callable
 
 from pgai_agent_kanban.archive.apply import (
     _RUN_ERRORS,
@@ -188,7 +189,7 @@ def _free_destination(directory: pathlib.Path, name: str, taken: set[pathlib.Pat
     return candidate
 
 
-def plan_legacy(project: str, *, kanban_root: Optional[PathLike] = None) -> LegacyPlan:
+def plan_legacy(project: str, *, kanban_root: PathLike | None = None) -> LegacyPlan:
     """Plan the move of every legacy requirements-archive file of *project*.
 
     Args:
@@ -211,7 +212,9 @@ def plan_legacy(project: str, *, kanban_root: Optional[PathLike] = None) -> Lega
     moves = []
     for source in _legacy_files(source_dir, notes):
         parsed = classify_item_id(source.name)
-        category = CATEGORY_PRIORITY if parsed is not None and parsed.category == CATEGORY_PRIORITY else CATEGORY_REQUIREMENTS
+        category = (
+            CATEGORY_PRIORITY if parsed is not None and parsed.category == CATEGORY_PRIORITY else CATEGORY_REQUIREMENTS
+        )
         destination = _free_destination(archive.category_dir(category), source.name, taken)
         taken.add(destination)
         landed = classify_item_id(destination.name)
@@ -242,9 +245,9 @@ def render_legacy_plan(planned: LegacyPlan) -> list[str]:
 def migrate_legacy(
     project: str,
     *,
-    kanban_root: Optional[PathLike] = None,
+    kanban_root: PathLike | None = None,
     task: str = NO_TASK,
-    log: Optional[Callable[[str], None]] = None,
+    log: Callable[[str], None] | None = None,
     accept_chain_lock: bool = False,
 ) -> RunResult:
     """Move every file of *project*'s legacy requirements archive into the archive tree.

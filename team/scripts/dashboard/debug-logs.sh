@@ -40,28 +40,20 @@
 #   PGAI_AGENT_KANBAN_ROOT_PATH  — kanban root (default: ~/pgai_agent_kanban)
 #   NO_COLOR                     — set to 1 to disable color
 
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # Not using set -euo pipefail — long-running tail pipeline; pipe closes should
 # not abort the process.
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 # Source shared ANSI color primitive (single home for the color-name ->
 # escape-code table -- see team/scripts/lib/script_common.sh).
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -95,7 +87,7 @@ if [[ -n "$KANBAN_ROOT_OVERRIDE" ]]; then
   KANBAN_ROOT="$KANBAN_ROOT_OVERRIDE"
 fi
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${_SCRIPT_DIR}/../lib/project_paths.sh"
 # shellcheck source=lib/projects.sh

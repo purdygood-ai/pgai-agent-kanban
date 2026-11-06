@@ -70,9 +70,19 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 def _guard_agent(*args: str) -> subprocess.CompletedProcess:
     """Run wake_batch_guard_agent over *args* in a fresh bash."""
     return subprocess.run(
-        ["bash", "-c", 'set -euo pipefail; source "$1"; shift; wake_batch_guard_agent "$@"',
-         "guard-agent", str(_GUARD_LIB), *args],
-        capture_output=True, text=True, cwd=str(_TEAM_DIR), timeout=30, check=False,
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; source "$1"; shift; wake_batch_guard_agent "$@"',
+            "guard-agent",
+            str(_GUARD_LIB),
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(_TEAM_DIR),
+        timeout=30,
+        check=False,
     )
 
 
@@ -81,9 +91,7 @@ def _guard_agent(*args: str) -> subprocess.CompletedProcess:
 def test_every_accepted_form_names_the_agent_after_any_value_option(options, form) -> None:
     result = _guard_agent(*options, *form)
     assert result.returncode == 0, _diagnostic(result)
-    assert result.stdout == "coder\n", (
-        f"arguments {[*options, *form]} must name coder\n" + _diagnostic(result)
-    )
+    assert result.stdout == "coder\n", f"arguments {[*options, *form]} must name coder\n" + _diagnostic(result)
 
 
 def test_a_short_sleep_value_before_the_agent_is_not_read_as_the_agent() -> None:
@@ -140,7 +148,12 @@ def _fire(install: dict, *args: str) -> subprocess.CompletedProcess:
         env.pop(name, None)
     return subprocess.run(
         ["bash", str(install["script"]), *args],
-        capture_output=True, text=True, env=env, cwd=str(install["tmp"]), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(install["tmp"]),
+        timeout=60,
+        check=False,
     )
 
 
@@ -165,7 +178,7 @@ def test_the_refusal_remedy_runs_as_printed(install) -> None:
     script = str(install["script"])
     assert remedy.startswith(script + " "), _diagnostic(refused)
 
-    result = _fire(install, *remedy[len(script) + 1:].split())
+    result = _fire(install, *remedy[len(script) + 1 :].split())
 
     assert result.returncode == 0, _diagnostic(result)
     assert (install["root"] / "stub-ran").exists(), "the remedy started no batch\n" + _diagnostic(result)

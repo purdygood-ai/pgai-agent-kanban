@@ -420,8 +420,10 @@ def test_requirement_without_a_readable_target_version_is_never_selected(sandbox
 
 
 def test_invalid_release_state_holds_tasks_and_requirements_but_not_bugs(sandbox) -> None:
-    sandbox.set_release_state(text="# Release State\n\n## Active RC\nNONE\n\n## RC Opened At\nnone\n\n"
-                                   "## RC Opened By Task\nnone\n\n## Last Released\nv1.0.0\n")
+    sandbox.set_release_state(
+        text="# Release State\n\n## Active RC\nNONE\n\n## RC Opened At\nnone\n\n"
+        "## RC Opened By Task\nnone\n\n## Last Released\nv1.0.0\n"
+    )
     old_task = sandbox.add_task(ArchiveSandbox.task_id("CODER", 1), "DONE").name
     sandbox.add_task(ArchiveSandbox.task_id("CODER", 2), "DONE")
     sandbox.add_requirement("v0.1.0", "done", slug="old")
@@ -464,9 +466,7 @@ def test_prerequisite_of_a_finished_task_does_not_hold(sandbox) -> None:
 
 def test_prerequisite_written_with_a_trailing_note_still_holds(sandbox) -> None:
     needed = sandbox.add_task(ArchiveSandbox.task_id("CODER", 1), "DONE").name
-    sandbox.add_task(
-        ArchiveSandbox.task_id("CODER", 2), "BLOCKED", prerequisites=[f"{needed} (opens the RC),"]
-    )
+    sandbox.add_task(ArchiveSandbox.task_id("CODER", 2), "BLOCKED", prerequisites=[f"{needed} (opens the RC),"])
 
     result = plan(sandbox.project, 1, kanban_root=sandbox.root)
 
@@ -596,7 +596,5 @@ def test_plan_renders_as_json(scenario) -> None:
     rendered = plan(scenario.sandbox.project, kanban_root=scenario.sandbox.root).to_dict()
 
     decoded = json.loads(json.dumps(rendered))
-    assert [row["item_id"] for row in decoded["items"] if row["category"] == "bugs"] == list(
-        scenario.expected_bug_ids
-    )
+    assert [row["item_id"] for row in decoded["items"] if row["category"] == "bugs"] == list(scenario.expected_bug_ids)
     assert decoded["active_rc"] == "v1.4.0" and decoded["last_released"] == "v1.3.0"

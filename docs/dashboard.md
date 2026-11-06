@@ -46,7 +46,8 @@ Every window the tmux dashboard builds, in the order create.sh creates them, wit
 | Window | Name | Panes | Variant |
 |---|---|---|---|
 | 0 | `main` | 4 | - |
-| 1 | `operator` | 10 | - |
+| 1 | `operator` | 7 | merged |
+| 1 | `operator` | 11 | split |
 | 2 | `visibility` | 9 | - |
 | 3 | `attention` | 1 | - |
 | 4 | `schedule` | 2 | - |
@@ -78,9 +79,25 @@ What each window is for, in creation order. Everything here is orientation: the 
 
 **Window 0: `main`** — the overview, and where the session drops you. Framework version, clock and global HALT state across the top; per-project progress in the middle; a live tail of the agent logs below; a per-project queues column pinned to the right quarter of the window. If you look at one window while a release runs, look at this one.
 
-**Window 1: `operator`** — window 2 with somewhere to type. Top to bottom, it holds three rows. First comes the same eight-column board at the same widths: BUGS, PRIORITIES and REQUIREMENTS on the left, and the PM, CODER, WRITER, TESTER and CM queues on the right. Below the board is a full-width command-line shell, opened at the kanban root with the kanban environment already sourced. Last is window 2's colour legend bar. The shell takes 15% of the window height and never fewer than three rows, and the window opens with your cursor in it. For a reminder of the common commands, run `scripts/dashboard/suggested-commands.sh` from that shell. This is the window to live in when your only terminal is an attach — over ssh, or inside a container.
+**Window 1: `operator`** — the board with somewhere to type. Top left is the board: BUGS, PRIORITIES and REQUIREMENTS, then one AGENTS column listing every task in the PM, CODER, WRITER, TESTER and CM queues, grouped by project and newest first (row format in [`DASHBOARD-PANES.md`](DASHBOARD-PANES.md), window 1). Under the board, and as wide as it, is a command-line shell that takes 15% of the window height and never fewer than three rows. On the far right is the workbench: a second, tall shell as high as the board and the command line together, for an assistant CLI or any other long-running interactive tool you want beside the board. Window 2's colour legend bar runs the full width along the bottom. Both shells open at the kanban root with the kanban environment already sourced. For a reminder of the common commands, run `scripts/dashboard/suggested-commands.sh` from the command line. This is the window to live in when your only terminal is an attach — over ssh, or inside a container.
 
-**Window 2: `visibility`** — the same eight board columns, read-only, with a colour legend along the bottom. No shell, nothing to type into. This is the display-on-a-second-monitor window: white items are pending, amber are active, magenta are waiting on an operator answer (needs-operator), green are settled (done, WONT-DO or duplicate), and a `↻` after an ID marks a carried item (see "Board status and WONT-DO" below). Each project keeps the colour it was given in the project registry.
+The window opens with your cursor in the command-line pane. To move into the workbench, press `Ctrl-b` then the Right arrow: tmux's default pane-select key, and the workbench is the pane to the right of the command line. `Ctrl-b ;` takes you back to the pane you came from.
+
+Every command the dashboard itself types into either shell ends with the comment `# pgai-agent-kanban-dashboard`, so your shell history tells its lines from yours: `history | grep -v ' # pgai-agent-kanban-dashboard$'` shows only what you typed.
+
+Three optional `[dashboard]` keys in `kanban.cfg` shape window 1, and leave window 2 untouched:
+
+- `operator_board_agents` (default `merged`) — the board's columns. `merged` shows the one AGENTS column; `split` shows the PM, CODER, WRITER, TESTER and CM queues as five columns instead, the same eight-column board as window 2. Window 2 ignores the key.
+- `operator_workbench_pct` (default `40`) — the workbench's width, a whole-number percent of the window width from 0 to 99. `0` disables the pane: the board and command line take the full width.
+- `operator_workbench_min_cols` (default `160`) — the narrow-window guard. While the window is narrower than this many columns it shows no workbench, and the board keeps the full width. `0` turns the guard off. The guard has a second test that applies at any setting: there is no workbench wherever a board column would get fewer than 15 columns beside it.
+
+An invalid value falls back to its default with one warning line naming the key. All three keys are read when `create.sh` builds the session. A running session keeps the values it was built with until you rebuild it with `kill.sh` and `create.sh`.
+
+**Narrow windows.** The guard runs when `create.sh` builds the window, and again whenever the window changes size, for example when a client attaches from a terminal of another width or a terminal is resized. `create.sh` builds the session at 220 columns before attaching your terminal. When the guard leaves the workbench out at build time, `create.sh` prints one NOTICE line naming the width and why.
+
+If a resize leaves the window too narrow, the workbench pane moves to a window of its own named `workbench`. Its shell keeps running there, and the board and command line take the full width. Once the window is wide enough again, the workbench moves back beside the board. A workbench that `create.sh` did not build is never added by a resize; to get one, rebuild the session at a width that fits. To work without the workbench at any width, set `operator_workbench_pct = 0` and rebuild.
+
+**Window 2: `visibility`** — the eight-column board, BUGS, PRIORITIES and REQUIREMENTS then the PM, CODER, WRITER, TESTER and CM queues, read-only, with a colour legend along the bottom. No shell, nothing to type into. This is the display-on-a-second-monitor window: white items are pending, amber are active, magenta are waiting on an operator answer (needs-operator), green are settled (done, WONT-DO or duplicate), and a `↻` after an ID marks a carried item (see "Board status and WONT-DO" below). Each project keeps the colour it was given in the project registry.
 
 **Window 3: `attention`** — a single pane listing the items that want a human: tasks sitting in BLOCKED, with the reason each one recorded, and bugs or priorities waiting at needs-operator. An empty pane here is the healthy state, and it is the fastest question the board answers — "is anything waiting on me?"
 
@@ -112,7 +129,7 @@ What each window is for, in creation order. Everything here is orientation: the 
 
 The closed states are `done`, `wont-do` and `duplicate`, and `close.sh` accepts no others. A `duplicate` bug or priority was closed in favour of the item its `## Close Note` names. An older file may still carry the retired status `superseded`. It is not rewritten, but the board reads it as `wont-do`: it classifies as `wont-do` and is drawn in the closed green, never in the open white.
 
-The eight board columns in windows 1 and 2 and `GET /board` classify every item through the same classifier, the `pgai_agent_kanban.board` package, so the two surfaces cannot disagree about an item. `GET /board` returns `"status": "wont-do"` for such an item (the full status vocabulary is in the `/board` row of [operator-api.md](operator-api.md), "Structured reads"). The columns draw `wont-do` and `duplicate` in the same green as a done item, because all three are settled and need no action.
+The board columns in windows 1 and 2 and `GET /board` classify every item through the same classifier, the `pgai_agent_kanban.board` package, so the two surfaces cannot disagree about an item. `GET /board` returns `"status": "wont-do"` for such an item (the full status vocabulary is in the `/board` row of [operator-api.md](operator-api.md), "Structured reads"). The columns draw `wont-do` and `duplicate` in the same green as a done item, because all three are settled and need no action.
 
 Two board states are for bugs and priorities waiting on you:
 

@@ -57,8 +57,12 @@ def _wake_now(tmp_path: pathlib.Path, root: pathlib.Path, *args: str) -> subproc
     (tmp_path / "home").mkdir(exist_ok=True)
     return subprocess.run(
         ["bash", str(root / "scripts" / "wake-now.sh"), *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path),
-        stdin=subprocess.DEVNULL, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        stdin=subprocess.DEVNULL,
+        timeout=60,
     )
 
 
@@ -79,9 +83,9 @@ def test_overwatch_runs_the_sweep_not_a_model_wake(tmp_path: pathlib.Path, extra
     result = _wake_now(tmp_path, root, "--agent", "overwatch", *extra)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert _fired(record) == ["overwatch-sweep.sh "], (
-        f"expected exactly one bare overwatch-sweep.sh run\n{result.stdout}{result.stderr}"
-    )
+    assert _fired(record) == [
+        "overwatch-sweep.sh "
+    ], f"expected exactly one bare overwatch-sweep.sh run\n{result.stdout}{result.stderr}"
 
 
 def test_a_pipeline_agent_still_fires_through_wake_batch(tmp_path: pathlib.Path) -> None:

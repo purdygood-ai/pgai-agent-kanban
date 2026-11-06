@@ -21,11 +21,7 @@ import json
 import pathlib
 import shlex
 import subprocess
-import sys
-import textwrap
 import time
-from io import StringIO
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -141,9 +137,7 @@ def test_read_reason_sidecar_ignores_blank_lines_and_comments(tmp_path: pathlib.
     """read_reason_sidecar skips blank lines and lines starting with '#'."""
     sidecar = tmp_path / "file.md.reason"
     sidecar.write_text(
-        "# This is a comment\n"
-        "\n"
-        "original_type=priority\n",
+        "# This is a comment\n" "\n" "original_type=priority\n",
         encoding="utf-8",
     )
     info = read_reason_sidecar(sidecar)
@@ -154,8 +148,7 @@ def test_read_reason_sidecar_ignores_unknown_keys(tmp_path: pathlib.Path) -> Non
     """read_reason_sidecar silently ignores keys not in SIDECAR_KEYS."""
     sidecar = tmp_path / "file.md.reason"
     sidecar.write_text(
-        "original_type=bugs\n"
-        "future_key=some_value\n",
+        "original_type=bugs\n" "future_key=some_value\n",
         encoding="utf-8",
     )
     info = read_reason_sidecar(sidecar)
@@ -167,8 +160,7 @@ def test_read_reason_sidecar_ignores_lines_without_equals(tmp_path: pathlib.Path
     """read_reason_sidecar skips lines that don't contain an '=' separator."""
     sidecar = tmp_path / "file.md.reason"
     sidecar.write_text(
-        "not-a-key-value-line\n"
-        "original_type=bugs\n",
+        "not-a-key-value-line\n" "original_type=bugs\n",
         encoding="utf-8",
     )
     info = read_reason_sidecar(sidecar)
@@ -228,7 +220,8 @@ def test_quarantined_files_reads_rejected_dir_then_legacy_dirs(tmp_path: pathlib
     rejected.mkdir(parents=True)
     (rejected / "BUG-12-bad.md").write_text("x", encoding="utf-8")
     (rejected / "BUG-12-bad.md.reason").write_text(
-        f"original_type=bugs\noriginal_dir={root / 'bugs'}\n", encoding="utf-8")
+        f"original_type=bugs\noriginal_dir={root / 'bugs'}\n", encoding="utf-8"
+    )
     (rejected / ".hidden.md").write_text("x", encoding="utf-8")
     (rejected / "link.md").symlink_to(rejected / "BUG-12-bad.md")
     legacy = root / "priority" / ".rejected"
@@ -332,7 +325,8 @@ def test_load_pricing_returns_dict_for_valid_json(tmp_path: pathlib.Path) -> Non
     ["missing_file", "empty_path", "malformed_json"],
 )
 def test_load_pricing_returns_empty_dict_for_invalid_input(
-    tmp_path: pathlib.Path, case: str,
+    tmp_path: pathlib.Path,
+    case: str,
 ) -> None:
     """load_pricing returns {} for every invalid-input shape: a missing file,
     an empty string path, and a file containing malformed JSON."""
@@ -400,9 +394,12 @@ def test_model_cost_parts_computes_costs_from_pricing_rates() -> None:
         }
     }
     i_cost, cc_cost, cr_cost, o_cost = model_cost_parts(
-        pricing, "test-model",
-        input_tok=1_000_000, output_tok=1_000_000,
-        cache_create=1_000_000, cache_read=1_000_000,
+        pricing,
+        "test-model",
+        input_tok=1_000_000,
+        output_tok=1_000_000,
+        cache_create=1_000_000,
+        cache_read=1_000_000,
     )
     assert abs(i_cost - 1.0) < 0.001
     assert abs(cc_cost - 2.0) < 0.001
@@ -433,7 +430,8 @@ def test_load_rollup_returns_dict_for_valid_json(tmp_path: pathlib.Path) -> None
 
 @pytest.mark.parametrize("case", ["missing_file", "malformed_json"])
 def test_load_rollup_returns_none_for_invalid_input(
-    tmp_path: pathlib.Path, case: str,
+    tmp_path: pathlib.Path,
+    case: str,
 ) -> None:
     """load_rollup returns None for both invalid-input shapes: a missing
     file and a file containing malformed JSON."""
@@ -477,14 +475,28 @@ def test_extract_by_model_aggregates_rc_rollup_from_tasks() -> None:
     """extract_by_model sums tokens across tasks in an RC rollup 'tasks' list."""
     data = {
         "tasks": [
-            {"model": "model-a", "input": 100, "output": 50,
-             "cache_creation_tokens": 0, "cache_read_tokens": 0,
-             "input_cost_usd": 0.0, "cache_creation_cost_usd": 0.0,
-             "cache_read_cost_usd": 0.0, "output_cost_usd": 0.0},
-            {"model": "model-a", "input": 200, "output": 100,
-             "cache_creation_tokens": 0, "cache_read_tokens": 0,
-             "input_cost_usd": 0.0, "cache_creation_cost_usd": 0.0,
-             "cache_read_cost_usd": 0.0, "output_cost_usd": 0.0},
+            {
+                "model": "model-a",
+                "input": 100,
+                "output": 50,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "input_cost_usd": 0.0,
+                "cache_creation_cost_usd": 0.0,
+                "cache_read_cost_usd": 0.0,
+                "output_cost_usd": 0.0,
+            },
+            {
+                "model": "model-a",
+                "input": 200,
+                "output": 100,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "input_cost_usd": 0.0,
+                "cache_creation_cost_usd": 0.0,
+                "cache_read_cost_usd": 0.0,
+                "output_cost_usd": 0.0,
+            },
         ]
     }
     result = extract_by_model(data)
@@ -559,20 +571,22 @@ def test_render_costs_renders_model_line_for_populated_by_model(
     """render_costs emits model-specific lines when by_model contains data."""
     rollup = tmp_path / "rollup.json"
     rollup.write_text(
-        json.dumps({
-            "by_model": {
-                "my-model-v1": {
-                    "input": 1000,
-                    "cache_creation_tokens": 500,
-                    "cache_read_tokens": 2000,
-                    "output": 300,
-                    "input_cost_usd": 0.01,
-                    "cache_creation_cost_usd": 0.005,
-                    "cache_read_cost_usd": 0.001,
-                    "output_cost_usd": 0.02,
+        json.dumps(
+            {
+                "by_model": {
+                    "my-model-v1": {
+                        "input": 1000,
+                        "cache_creation_tokens": 500,
+                        "cache_read_tokens": 2000,
+                        "output": 300,
+                        "input_cost_usd": 0.01,
+                        "cache_creation_cost_usd": 0.005,
+                        "cache_read_cost_usd": 0.001,
+                        "output_cost_usd": 0.02,
+                    }
                 }
             }
-        }),
+        ),
         encoding="utf-8",
     )
     render_costs(str(rollup), "", "    ")
@@ -590,20 +604,22 @@ def test_render_costs_uses_precomputed_costs_when_nonzero(
     """render_costs uses precomputed cost fields rather than recomputing from pricing."""
     rollup = tmp_path / "rollup.json"
     rollup.write_text(
-        json.dumps({
-            "by_model": {
-                "model-x": {
-                    "input": 10000,
-                    "cache_creation_tokens": 0,
-                    "cache_read_tokens": 0,
-                    "output": 5000,
-                    "input_cost_usd": 9.99,  # precomputed
-                    "cache_creation_cost_usd": 0.0,
-                    "cache_read_cost_usd": 0.0,
-                    "output_cost_usd": 4.99,  # precomputed
+        json.dumps(
+            {
+                "by_model": {
+                    "model-x": {
+                        "input": 10000,
+                        "cache_creation_tokens": 0,
+                        "cache_read_tokens": 0,
+                        "output": 5000,
+                        "input_cost_usd": 9.99,  # precomputed
+                        "cache_creation_cost_usd": 0.0,
+                        "cache_read_cost_usd": 0.0,
+                        "output_cost_usd": 4.99,  # precomputed
+                    }
                 }
             }
-        }),
+        ),
         encoding="utf-8",
     )
     render_costs(str(rollup), "", "    ")
@@ -687,31 +703,19 @@ def test_format_elapsed_over_one_hour_shows_hours_and_minutes() -> None:
 
 def test_is_transient_blocked_returns_true_for_transient_error_with_needs_human_no() -> None:
     """_is_transient_blocked returns True for BLOCKED tasks with Needs Human=no and TRANSIENT reason."""
-    text = (
-        "## State\nBLOCKED\n\n"
-        "## Needs Human\nno\n\n"
-        "## Blocked Reason\nTRANSIENT API ERROR: 529 overloaded\n"
-    )
+    text = "## State\nBLOCKED\n\n" "## Needs Human\nno\n\n" "## Blocked Reason\nTRANSIENT API ERROR: 529 overloaded\n"
     assert _is_transient_blocked(text) is True
 
 
 def test_is_transient_blocked_returns_false_when_needs_human_yes() -> None:
     """_is_transient_blocked returns False when Needs Human is 'yes'."""
-    text = (
-        "## State\nBLOCKED\n\n"
-        "## Needs Human\nyes\n\n"
-        "## Blocked Reason\nTRANSIENT API ERROR: some issue\n"
-    )
+    text = "## State\nBLOCKED\n\n" "## Needs Human\nyes\n\n" "## Blocked Reason\nTRANSIENT API ERROR: some issue\n"
     assert _is_transient_blocked(text) is False
 
 
 def test_is_transient_blocked_returns_false_when_reason_not_transient() -> None:
     """_is_transient_blocked returns False when blocked reason does not start with TRANSIENT."""
-    text = (
-        "## State\nBLOCKED\n\n"
-        "## Needs Human\nno\n\n"
-        "## Blocked Reason\nMissing prerequisite file\n"
-    )
+    text = "## State\nBLOCKED\n\n" "## Needs Human\nno\n\n" "## Blocked Reason\nMissing prerequisite file\n"
     assert _is_transient_blocked(text) is False
 
 
@@ -724,8 +728,7 @@ def test_scan_state_file_returns_pending_rejection_entries(tmp_path: pathlib.Pat
     """_scan_state_file returns entries where count is between 1 and threshold-1."""
     state_file = tmp_path / "rejected-counts.tsv"
     state_file.write_text(
-        "BUG-0001.md\t2\t2026-06-01T00:00:00Z\tmalformed\n"
-        "BUG-0002.md\t3\t2026-06-01T00:00:00Z\tother\n",
+        "BUG-0001.md\t2\t2026-06-01T00:00:00Z\tmalformed\n" "BUG-0002.md\t3\t2026-06-01T00:00:00Z\tother\n",
         encoding="utf-8",
     )
     # threshold=3: count 2 < 3 is pending; count 3 == threshold (already quarantined)
@@ -763,7 +766,7 @@ def _quarantine_blocks(output: str) -> dict[str, list[str]]:
     current: list[str] | None = None
     for line in output.splitlines():
         if line.startswith("  X ") and line.endswith("quarantined"):
-            label = line[len("  X "):].split(":", 1)[0]
+            label = line[len("  X ") :].split(":", 1)[0]
             current = blocks.setdefault(label, [])
         elif current is not None and line.startswith("      "):
             current.append(line.strip())
@@ -779,8 +782,7 @@ def test_scan_quarantine_lists_project_rejected_dir_files(tmp_path: pathlib.Path
     (project / "rejected" / "BUG-5-new.md").write_text("x", encoding="utf-8")
     (project / "rejected" / "BUG-5-new.md.reason").write_text("original_type=bugs\n", encoding="utf-8")
     (project / "rejected" / "REQ-notes.md").write_text("x", encoding="utf-8")
-    (project / "rejected" / "REQ-notes.md.reason").write_text(
-        "original_type=requirements\n", encoding="utf-8")
+    (project / "rejected" / "REQ-notes.md.reason").write_text("original_type=requirements\n", encoding="utf-8")
     (project / "rejected" / "notes.md").write_text("x", encoding="utf-8")
 
     scan_quarantine(kanban_root=str(tmp_path), use_color=False, threshold=3)
@@ -814,7 +816,8 @@ def test_scan_quarantine_warning_and_terminal_blocks_share_a_group(tmp_path: pat
     project = tmp_path / "projects" / "demo-app"
     (project / ".discovery-state").mkdir(parents=True)
     (project / ".discovery-state" / "rejected-counts.tsv").write_text(
-        "PRIORITY-9-bad.md\t2\t2026-06-01T00:00:00Z\tmalformed filename\n", encoding="utf-8")
+        "PRIORITY-9-bad.md\t2\t2026-06-01T00:00:00Z\tmalformed filename\n", encoding="utf-8"
+    )
     (project / "priority" / ".rejected").mkdir(parents=True)
     (project / "priority" / ".rejected" / "PRIORITY-3-old.md").write_text("x", encoding="utf-8")
 
@@ -847,12 +850,15 @@ def test_scan_quarantine_recover_hint_runs_as_printed(two_project_root: pathlib.
     blocks = _quarantine_blocks(capsys.readouterr().out)
 
     (root / "tmp").mkdir(exist_ok=True)
-    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={
-        "KANBAN_ROOT": str(root),
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
-        "TERM": "dumb",
-    })
+    env = build_scrubbed_env(
+        home_dir=tmp_path / "home",
+        extra_env={
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+            "TERM": "dumb",
+        },
+    )
     for label, filename, intake in (
         ("project-a [bugs]", "BUG-12-bad.md", "bugs"),
         ("project-a [priority]", "PRIORITY-3-old.md", "priority"),
@@ -862,11 +868,11 @@ def test_scan_quarantine_recover_hint_runs_as_printed(two_project_root: pathlib.
         assert printed.startswith("Recover: ")
         # The printed path is the installed layout's; the repo keeps it under team/.
         # The optional [--rename NEW] part is not passed.
-        argv = [token for token in shlex.split(printed[len("Recover: "):])
-                if token not in ("[--rename", "NEW]")]
+        argv = [token for token in shlex.split(printed[len("Recover: ") :]) if token not in ("[--rename", "NEW]")]
         argv = [str(_TEAM_DIR / argv[0])] + [filename if token == "<filename>" else token for token in argv[1:]]
-        result = subprocess.run(argv, capture_output=True, text=True, env=env, cwd=str(root),
-                                timeout=120, stdin=subprocess.DEVNULL)
+        result = subprocess.run(
+            argv, capture_output=True, text=True, env=env, cwd=str(root), timeout=120, stdin=subprocess.DEVNULL
+        )
         assert result.returncode == 0, f"{argv}\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert (project / intake / filename).is_file()
 
@@ -958,9 +964,7 @@ def test_scan_blocked_tasks_excludes_transient_errors(
 ) -> None:
     """scan_blocked_tasks does not print tasks whose blocked reason is a transient API error."""
     tasks_dir = tmp_path / "tasks"
-    _write_task_status_file(
-        tasks_dir, "CODER-001", "BLOCKED", "no", "TRANSIENT API ERROR: 529"
-    )
+    _write_task_status_file(tasks_dir, "CODER-001", "BLOCKED", "no", "TRANSIENT API ERROR: 529")
     scan_blocked_tasks(str(tasks_dir), use_color=False)
     captured = capsys.readouterr()
     # Should show no blocked message because the one task is transient
@@ -978,9 +982,7 @@ def test_scan_transient_tasks_prints_task_id_for_transient_block(
 ) -> None:
     """scan_transient_tasks prints the task ID for a BLOCKED task with TRANSIENT API ERROR."""
     tasks_dir = tmp_path / "tasks"
-    _write_task_status_file(
-        tasks_dir, "CODER-20260601-002-transient", "BLOCKED", "no", "TRANSIENT API ERROR: 529"
-    )
+    _write_task_status_file(tasks_dir, "CODER-20260601-002-transient", "BLOCKED", "no", "TRANSIENT API ERROR: 529")
     scan_transient_tasks(str(tasks_dir), use_color=False)
     captured = capsys.readouterr()
     assert "CODER-20260601-002-transient" in captured.out
@@ -1042,6 +1044,7 @@ def test_scan_stale_working_tasks_flags_old_working_task(
     # Backdate the mtime to be very old (more than 5400s ago)
     old_mtime = time.time() - 10000
     import os
+
     os.utime(str(status_file), (old_mtime, old_mtime))
 
     scan_stale_working_tasks(str(tasks_dir), use_color=False, max_task_seconds=5400)
@@ -1121,8 +1124,7 @@ def test_parse_overwatch_action_log_labels_routine_action_as_info(
     """_parse_overwatch_action_log sets type=info for sweep-end and check-ok entries."""
     log_path = tmp_path / "actions.log"
     log_path.write_text(
-        "2026-07-07T10:00:00Z\toverwatch-sweep\tpgai-agent-kanban\t"
-        "sweep-end\tnone\t5 ok, 0 error\n",
+        "2026-07-07T10:00:00Z\toverwatch-sweep\tpgai-agent-kanban\t" "sweep-end\tnone\t5 ok, 0 error\n",
         encoding="utf-8",
     )
     entries = _parse_overwatch_action_log(log_path, max_entries=10)
@@ -1374,8 +1376,7 @@ def test_cron_firings_converts_integer_seconds_to_label(tmp_path: pathlib.Path) 
     """cron_firings converts int seconds from next_firings into human-readable labels."""
     parser_path = tmp_path / "cron_parser.py"
     parser_path.write_text(
-        "def next_firings(text, now=None):\n"
-        "    return {'coder': 360, 'pm': 60}\n",
+        "def next_firings(text, now=None):\n" "    return {'coder': 360, 'pm': 60}\n",
         encoding="utf-8",
     )
     result = cron_firings("fake crontab", str(parser_path))
@@ -1387,8 +1388,7 @@ def test_cron_firings_passes_through_string_sentinel_values(tmp_path: pathlib.Pa
     """cron_firings passes through string sentinels (e.g. 'Sun 4am') unchanged."""
     parser_path = tmp_path / "cron_parser.py"
     parser_path.write_text(
-        "def next_firings(text, now=None):\n"
-        "    return {'cleanup': 'Sun 4am'}\n",
+        "def next_firings(text, now=None):\n" "    return {'cleanup': 'Sun 4am'}\n",
         encoding="utf-8",
     )
     result = cron_firings("fake crontab", str(parser_path))
@@ -1403,8 +1403,7 @@ def test_cron_firings_with_now_ts_passes_datetime_to_next_firings(
 
     parser_path = tmp_path / "cron_parser.py"
     parser_path.write_text(
-        "def next_firings(text, now=None):\n"
-        "    return {'agent': 120}\n",
+        "def next_firings(text, now=None):\n" "    return {'agent': 120}\n",
         encoding="utf-8",
     )
     # Use a known timestamp

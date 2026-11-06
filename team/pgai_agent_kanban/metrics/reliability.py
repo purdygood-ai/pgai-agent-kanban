@@ -110,7 +110,6 @@ import json
 import os
 import pathlib
 import sys
-from typing import Optional, Union
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path. Put this file's own package root -- the
@@ -151,7 +150,7 @@ STATUS_NO_BLOCK = "no block on record"
 _TASK_SOURCE_PREFIX = "task:"
 _SHIPPED = "shipped"
 
-_Timestamp = Union[str, datetime.datetime, None]
+_Timestamp = str | datetime.datetime | None
 
 
 class ReliabilityError(LedgerError):
@@ -166,18 +165,18 @@ class ReliabilityError(LedgerError):
 # ---------------------------------------------------------------------------
 
 
-def metrics_dir_for_project(kanban_root: Union[str, os.PathLike], project: str) -> str:
+def metrics_dir_for_project(kanban_root: str | os.PathLike, project: str) -> str:
     """<kanban_root>/projects/<project>/metrics — the directory holding the
     ledger, the rc/ rollups and reliability.json."""
     return os.path.join(os.fspath(kanban_root), "projects", project, METRICS_DIRNAME)
 
 
-def reliability_path_for_project(kanban_root: Union[str, os.PathLike], project: str) -> str:
+def reliability_path_for_project(kanban_root: str | os.PathLike, project: str) -> str:
     """<kanban_root>/projects/<project>/metrics/reliability.json."""
     return os.path.join(metrics_dir_for_project(kanban_root, project), RELIABILITY_FILENAME)
 
 
-def _resolve_root(kanban_root: Union[str, os.PathLike, None]) -> str:
+def _resolve_root(kanban_root: str | os.PathLike | None) -> str:
     if kanban_root is not None:
         return os.fspath(kanban_root)
     from pgai_agent_kanban.env import resolve_kanban_root
@@ -193,7 +192,7 @@ def _resolve_root(kanban_root: Union[str, os.PathLike, None]) -> str:
 def _as_datetime(value: _Timestamp) -> datetime.datetime:
     """*value* as an aware UTC datetime; the current time when None."""
     if value is None:
-        return datetime.datetime.now(datetime.timezone.utc)
+        return datetime.datetime.now(datetime.UTC)
     if isinstance(value, datetime.datetime):
         dt = value
     else:
@@ -205,11 +204,11 @@ def _as_datetime(value: _Timestamp) -> datetime.datetime:
                 "pass an ISO-8601 time, e.g. --now 2026-10-18T12:00:00+00:00",
             )
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.replace(tzinfo=datetime.UTC)
     return dt
 
 
-def shipped_rcs(rc_dir: Union[str, os.PathLike]) -> list:
+def shipped_rcs(rc_dir: str | os.PathLike) -> list:
     """The shipped RCs recorded under *rc_dir* (metrics/rc/), as a list of
     ``(version, closed_at)`` pairs — version the rollup's ``rc`` (or the
     file name's version), closed_at an aware datetime — ordered by version
@@ -224,7 +223,7 @@ def shipped_rcs(rc_dir: Union[str, os.PathLike]) -> list:
         if not name.endswith(".json"):
             continue
         try:
-            with open(os.path.join(rc_dir, name), "r", encoding="utf-8") as handle:
+            with open(os.path.join(rc_dir, name), encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, ValueError):
             continue
@@ -243,7 +242,7 @@ def shipped_rcs(rc_dir: Union[str, os.PathLike]) -> list:
     return [by_key[key] for key in sorted(by_key)]
 
 
-def _rcs_after(rcs: list, since: datetime.datetime, own_version: Optional[str]) -> int:
+def _rcs_after(rcs: list, since: datetime.datetime, own_version: str | None) -> int:
     """How many of *rcs* closed after *since*, not counting *own_version*."""
     own_key = semver.parse_version(own_version) if own_version else None
     return sum(
@@ -267,7 +266,7 @@ def hours_between(since: datetime.datetime, now: datetime.datetime) -> float:
 def _block_detail(block: dict) -> dict:
     """The schema's <block> object for one block_intervals() entry."""
     source = block["source"]
-    task = source[len(_TASK_SOURCE_PREFIX):].strip() if source.startswith(_TASK_SOURCE_PREFIX) else ""
+    task = source[len(_TASK_SOURCE_PREFIX) :].strip() if source.startswith(_TASK_SOURCE_PREFIX) else ""
     resolution = None
     if block["end"] is not None:
         resolution = {
@@ -288,7 +287,7 @@ def _block_detail(block: dict) -> dict:
     }
 
 
-def _last_block(blocks: list) -> Optional[dict]:
+def _last_block(blocks: list) -> dict | None:
     """The block a streak runs from: an open block when there is one (the
     latest-started), otherwise the one resolved most recently."""
     open_blocks = [b for b in blocks if b["end"] is None]
@@ -303,7 +302,7 @@ def _streak(
     block_class: str,
     blocks: list,
     rcs: list,
-    first_record_at: Optional[datetime.datetime],
+    first_record_at: datetime.datetime | None,
     now: datetime.datetime,
 ) -> dict:
     last = _last_block(blocks)
@@ -340,7 +339,7 @@ def _streak(
 
 def compute_reliability(
     project: str,
-    metrics_dir: Union[str, os.PathLike],
+    metrics_dir: str | os.PathLike,
     *,
     now: _Timestamp = None,
 ) -> dict:
@@ -381,14 +380,12 @@ def compute_reliability(
 def reliability(
     project: str,
     *,
-    kanban_root: Union[str, os.PathLike, None] = None,
+    kanban_root: str | os.PathLike | None = None,
     now: _Timestamp = None,
 ) -> dict:
     """Both streaks for *project* under *kanban_root* (default: the
     resolved PGAI_AGENT_KANBAN_ROOT_PATH). See compute_reliability()."""
-    return compute_reliability(
-        project, metrics_dir_for_project(_resolve_root(kanban_root), project), now=now
-    )
+    return compute_reliability(project, metrics_dir_for_project(_resolve_root(kanban_root), project), now=now)
 
 
 # ---------------------------------------------------------------------------
@@ -405,15 +402,14 @@ def _write_document(path: str, document: dict) -> None:
         raise ReliabilityError(
             "reliability.write-failed",
             f"writing {path} failed: {exc}",
-            f"confirm the directory is writable, then retry: "
-            f"install -d -m 0755 {os.path.dirname(path)}",
+            f"confirm the directory is writable, then retry: " f"install -d -m 0755 {os.path.dirname(path)}",
         ) from exc
 
 
 def write_reliability(
     project: str,
     *,
-    kanban_root: Union[str, os.PathLike, None] = None,
+    kanban_root: str | os.PathLike | None = None,
     now: _Timestamp = None,
 ) -> str:
     """Compute both streaks for *project* and rewrite its
@@ -427,7 +423,7 @@ def write_reliability(
     return path
 
 
-def refresh_for_ledger(ledger_path: Union[str, os.PathLike], *, now: _Timestamp = None) -> Optional[str]:
+def refresh_for_ledger(ledger_path: str | os.PathLike, *, now: _Timestamp = None) -> str | None:
     """Rewrite the reliability.json beside *ledger_path* — the hook
     blocked_ledger calls after every append. Only a ledger at the
     convention path ``<...>/<project>/metrics/blocked-intervals.jsonl`` has
@@ -448,7 +444,7 @@ def refresh_for_ledger(ledger_path: Union[str, os.PathLike], *, now: _Timestamp 
 # ---------------------------------------------------------------------------
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the reliability CLI.
 
     ``refresh`` rewrites the project's metrics/reliability.json and prints
@@ -487,8 +483,7 @@ def main(argv: Optional[list] = None) -> int:
         sub.add_argument(
             "--now",
             default=None,
-            help="ISO-8601 time to measure hours to, e.g. 2026-10-18T12:00:00+00:00 "
-            "(default: the current time)",
+            help="ISO-8601 time to measure hours to, e.g. 2026-10-18T12:00:00+00:00 " "(default: the current time)",
         )
     args = parser.parse_args(argv)
 
@@ -507,7 +502,7 @@ def main(argv: Optional[list] = None) -> int:
             format_error_contract(
                 "reliability.no-kanban-root",
                 str(exc),
-                "pass the root explicitly, e.g. --kanban-root \"$HOME/pgai_agent_kanban\"",
+                'pass the root explicitly, e.g. --kanban-root "$HOME/pgai_agent_kanban"',
             ),
             file=sys.stderr,
         )

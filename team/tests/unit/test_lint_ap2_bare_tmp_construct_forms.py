@@ -59,9 +59,7 @@ _LINT_SCRIPT = _TEAM_DIR / "scripts" / "lint_test_anti_patterns.py"
 
 
 def _import_lint_module():
-    spec = importlib.util.spec_from_file_location(
-        "lint_test_anti_patterns", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_test_anti_patterns", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -146,9 +144,7 @@ def test_bare_tmp_subject_matter_whitelist_exempts_path_constructor_only() -> No
         _bad_line('probe = pathlib.Path(f"{tmp}{prefix}-{suffix}")'),
         _bad_line('handle = open("{tmp}other", "w")'),
     ]
-    findings = _lint._check_ap2_py(
-        Path("test_wake_bracket_litter_check.py"), lines
-    )
+    findings = _lint._check_ap2_py(Path("test_wake_bracket_litter_check.py"), lines)
     assert findings == [], findings
 
 
@@ -158,9 +154,7 @@ def test_bare_tmp_subject_matter_whitelist_still_flags_other_ap2_patterns() -> N
     whole file.
     """
     lines = [_bad_line('leftover = "{tmp}not_routed_through_the_helper"')]
-    findings = _lint._check_ap2_py(
-        Path("test_wake_bracket_litter_check.py"), lines
-    )
+    findings = _lint._check_ap2_py(Path("test_wake_bracket_litter_check.py"), lines)
     assert len(findings) == 1, findings
     assert "assigned to variable" in findings[0]
 
@@ -176,15 +170,10 @@ def test_real_litter_check_module_has_zero_ap2_findings() -> None:
     helper (covered by the whitelist above), and no other bare-/tmp
     construct exists anywhere else in the file.
     """
-    real_file = (
-        _TEAM_DIR / "tests" / "unit" / "test_wake_bracket_litter_check.py"
-    )
+    real_file = _TEAM_DIR / "tests" / "unit" / "test_wake_bracket_litter_check.py"
     lines = real_file.read_text(encoding="utf-8").splitlines(keepends=True)
     findings = _lint._check_ap2_py(real_file, lines)
-    assert findings == [], (
-        "Unexpected AP2 findings in the shipped litter-check test module:\n"
-        + "\n".join(findings)
-    )
+    assert findings == [], "Unexpected AP2 findings in the shipped litter-check test module:\n" + "\n".join(findings)
 
 
 def test_shell_remedies_recommend_the_temp_helpers_not_a_hand_read_idiom() -> None:

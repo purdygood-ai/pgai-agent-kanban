@@ -3,9 +3,9 @@ test_container_up.py
 ====================
 scripts/container-up.sh runs the kanban detached in one named container:
 
-  * from nothing, it issues exactly one detached run named pgai-kanban with
-    the HOME and kanban-root mounts and environment lib/container_mounts.sh
-    assembles, then one scheduler start (the tmux session "pseudocron"),
+  * from nothing, it issues exactly one detached run named pgai-kanban, with
+    --init (a reaping PID 1) and the HOME and kanban-root mounts and
+    environment lib/container_mounts.sh assembles, then one scheduler start (the tmux session "pseudocron"),
     then reports the scheduler's confirmed heartbeat; a heartbeat that never
     comes is reported with a non-zero exit inside the bounded wait;
   * it is idempotent: a container already running with a live scheduler gets
@@ -65,7 +65,7 @@ def _contract(stderr: str) -> dict:
         for key in ("error", "message", "remedy"):
             prefix = f"{key}:"
             if line.startswith(prefix) and key not in fields:
-                fields[key] = line[len(prefix):].strip()
+                fields[key] = line[len(prefix) :].strip()
     return fields
 
 
@@ -89,10 +89,14 @@ class _Sandbox:
         self.home.mkdir()
         self.temp = tmp_path / "pgai_tmp"
         self.temp.mkdir()
-        self.engine = FakeEngine(tmp_path / "engine", name="docker", scenario={
-            "images": [_IMAGE],
-            "scheduler": {"log": str(self.root / "logs" / "pseudocron.log"), "fires": True},
-        })
+        self.engine = FakeEngine(
+            tmp_path / "engine",
+            name="docker",
+            scenario={
+                "images": [_IMAGE],
+                "scheduler": {"log": str(self.root / "logs" / "pseudocron.log"), "fires": True},
+            },
+        )
         self.cron_bin = tmp_path / "cron_bin"
         install_fake_crontab(self.cron_bin, None)
         # The interpreter running this test answers python3 inside the script.
@@ -159,16 +163,20 @@ def sandbox(tmp_path: pathlib.Path) -> _Sandbox:
 def _expected_mount_args(sb: _Sandbox) -> list[str]:
     home, root = str(sb.home), str(sb.root)
     return [
-        "-v", f"{home}:{home}",
-        "-v", f"{root}:{root}",
-        "-e", f"HOME={home}",
-        "-e", f"PGAI_AGENT_KANBAN_ROOT_PATH={root}",
+        "-v",
+        f"{home}:{home}",
+        "-v",
+        f"{root}:{root}",
+        "-e",
+        f"HOME={home}",
+        "-e",
+        f"PGAI_AGENT_KANBAN_ROOT_PATH={root}",
     ]
 
 
 def _assert_scheduler_start(argv: list[str], sb: _Sandbox, name: str = _NAME) -> None:
     assert argv[0] == "exec" and name in argv, argv
-    tmux = argv[argv.index("tmux"):]
+    tmux = argv[argv.index("tmux") :]
     assert tmux[:5] == ["tmux", "new", "-d", "-s", "pseudocron"], tmux
     command = tmux[5]
     assert f"{sb.root}/scripts/pseudocron.py" in command
@@ -187,8 +195,9 @@ def test_fresh_start_runs_one_detached_container_then_one_scheduler_and_confirms
     runs = sandbox.calls_named("run")
     assert len(runs) == 1, sandbox.commands()
     run = runs[0]
-    assert run[:5] == ["run", "-d", "-i", "-t", "--name"] and run[5] == _NAME, run
-    assert run[6:-1] == _expected_mount_args(sandbox), run
+    # --init: the engine's init is PID 1 and reaps orphans, whatever the entrypoint ends in.
+    assert run[:6] == ["run", "-d", "-i", "-t", "--init", "--name"] and run[6] == _NAME, run
+    assert run[7:-1] == _expected_mount_args(sandbox), run
     assert run[-1] == _IMAGE
 
     starts = sandbox.calls_named("exec tmux")
@@ -286,7 +295,7 @@ def test_running_container_without_scheduler_gets_one_scheduler_and_no_run(sandb
 
 
 def test_host_cron_wake_line_refuses_before_any_engine_call(sandbox):
-    install_fake_crontab(sandbox.cron_bin, "MAILTO=\"\"\n" + _template_wake_line(sandbox.root) + "\n")
+    install_fake_crontab(sandbox.cron_bin, 'MAILTO=""\n' + _template_wake_line(sandbox.root) + "\n")
     result = sandbox.up()
 
     assert result.returncode == 1, _diagnostic(result)
@@ -311,9 +320,9 @@ def _install_stateful_crontab(bin_dir: pathlib.Path, text: str) -> pathlib.Path:
     q = shlex.quote(str(store))
     stub.write_text(
         "#!/usr/bin/env bash\n"
-        f"if [[ \"$*\" == \"-l\" ]]; then cat {q}; exit 0; fi\n"
-        f"if [[ \"$*\" == \"-\" ]]; then new=\"$(cat; echo .)\"; printf '%s' \"${{new%.}}\" > {q}; exit 0; fi\n"
-        "echo \"stub crontab: unsupported: $*\" >&2; exit 1\n",
+        f'if [[ "$*" == "-l" ]]; then cat {q}; exit 0; fi\n'
+        f'if [[ "$*" == "-" ]]; then new="$(cat; echo .)"; printf \'%s\' "${{new%.}}" > {q}; exit 0; fi\n'
+        'echo "stub crontab: unsupported: $*" >&2; exit 1\n',
         encoding="utf-8",
     )
     stub.chmod(0o755)
@@ -329,8 +338,12 @@ def test_cron_refusal_remedy_removes_the_wake_lines_when_run_as_printed(sandbox)
     remedy = _contract(refused.stderr)["remedy"]
 
     applied = subprocess.run(
-        ["bash", "-c", remedy], capture_output=True, text=True,
-        env=sandbox.env(), cwd=str(sandbox.tmp), timeout=30,
+        ["bash", "-c", remedy],
+        capture_output=True,
+        text=True,
+        env=sandbox.env(),
+        cwd=str(sandbox.tmp),
+        timeout=30,
     )
     assert applied.returncode == 0, _diagnostic(applied)
 

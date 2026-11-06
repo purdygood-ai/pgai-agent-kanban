@@ -30,8 +30,7 @@ from tests.fixtures.binary_guard import require_binary
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 
-_INNER_TESTS = textwrap.dedent(
-    '''
+_INNER_TESTS = textwrap.dedent("""
     import os
     import pathlib
     import subprocess
@@ -90,8 +89,7 @@ _INNER_TESTS = textwrap.dedent(
 
     def test_errors(private_server_then_setup_error):
         pass  # pragma: no cover
-    '''
-)
+    """)
 
 
 def _pgai_sockets(directory: pathlib.Path) -> set[str]:
@@ -122,8 +120,7 @@ def test_passing_failing_and_erroring_uses_leave_no_socket(
         # remove the directory, so a regression in the helper leaks nothing.
         for leftover in tmux_tmpdir.rglob("*"):
             if leftover.is_socket():
-                subprocess.run([guard.path, "-S", str(leftover), "kill-server"],
-                               capture_output=True, timeout=10)
+                subprocess.run([guard.path, "-S", str(leftover), "kill-server"], capture_output=True, timeout=10)
         shutil.rmtree(tmux_tmpdir, ignore_errors=True)
 
 
@@ -145,20 +142,35 @@ def _run_inner_session_and_check(tmp_path: pathlib.Path, tmux_tmpdir: pathlib.Pa
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-p", "no:randomly",
-            "--rootdir", str(inner_dir), "-q", "-rA", str(inner_dir / "test_inner_private_tmux.py"),
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "no:randomly",
+            "--rootdir",
+            str(inner_dir),
+            "-q",
+            "-rA",
+            str(inner_dir / "test_inner_private_tmux.py"),
         ],
-        capture_output=True, text=True, env=env, cwd=str(inner_dir), timeout=120,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(inner_dir),
+        timeout=120,
     )
 
     diagnostic = f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     assert "1 failed, 1 passed, 1 error" in result.stdout, diagnostic
     recorded = {p.name: p.read_text() for p in marks.iterdir()}
-    assert recorded == {"test_passes": "True", "test_fails": "True", "test_errors": "True"}, (
-        f"each inner test must have had a live socket to clean up: {recorded}\n{diagnostic}"
-    )
+    assert recorded == {
+        "test_passes": "True",
+        "test_fails": "True",
+        "test_errors": "True",
+    }, f"each inner test must have had a live socket to clean up: {recorded}\n{diagnostic}"
     after = _pgai_sockets(socket_dir)
     assert after - before == set(), (
-        f"the private-tmux teardown left sockets behind in {socket_dir}: "
-        f"{sorted(after - before)}\n{diagnostic}"
+        f"the private-tmux teardown left sockets behind in {socket_dir}: " f"{sorted(after - before)}\n{diagnostic}"
     )

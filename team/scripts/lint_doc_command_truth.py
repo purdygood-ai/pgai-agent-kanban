@@ -401,7 +401,6 @@ import sys
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Optional
 
 # The pgai_agent_kanban package sits beside scripts/ in both the dev tree
 # (team/) and the live install (the install root), so it is located from
@@ -495,6 +494,7 @@ def _is_placeholder_citation(candidate: str) -> bool:
 @dataclass(frozen=True)
 class Citation:
     """One script or verb a document cites: where it appears, the raw text, and whether it is a fenced or inline citation."""
+
     doc_display: str  # document path as shown in findings (relative when possible)
     doc_path: Path  # absolute path to the document, for the grep remedy line
     line: int  # 1-based line number of the citation's first physical line
@@ -555,9 +555,7 @@ def _extract_citations(doc_path: Path, doc_display: str) -> list[Citation]:
 
             scan_block = (not block_skip) and (not docker_gate) and lang in _SCANNED_FENCE_LANGS
             if scan_block:
-                citations.extend(
-                    _scan_fenced_block(lines, body_start, close_idx, doc_path, doc_display)
-                )
+                citations.extend(_scan_fenced_block(lines, body_start, close_idx, doc_path, doc_display))
 
             i = close_idx + 1
             continue
@@ -647,7 +645,7 @@ def _scan_inline_line(line: str, line_no: int, doc_path: Path, doc_display: str)
     return out
 
 
-def _classify_command(text: str) -> tuple[Optional[str], Optional[str]]:
+def _classify_command(text: str) -> tuple[str | None, str | None]:
     """Return (candidate, kind) for *text*, or (None, None) if it names
     nothing this lint tracks."""
     try:
@@ -694,7 +692,8 @@ def _classify_command(text: str) -> tuple[Optional[str], Optional[str]]:
 @dataclass(frozen=True)
 class Resolution:
     """Where a cited script resolved to (None when it did not), and every path or verb tried."""
-    resolved_path: Optional[Path]  # None when the candidate does not resolve
+
+    resolved_path: Path | None  # None when the candidate does not resolve
     tried: tuple[str, ...]  # human-readable list of paths/verbs tried
 
 
@@ -716,7 +715,7 @@ def _strip_root_var_prefix(candidate: str) -> str:
     return candidate
 
 
-def _find_under_scripts_by_basename(basename: str, scripts_dir: Path) -> Optional[Path]:
+def _find_under_scripts_by_basename(basename: str, scripts_dir: Path) -> Path | None:
     """Exact-basename search anywhere under *scripts_dir* (recursive).
 
     A real-file existence check, not a fuzzy match: only an exact filename
@@ -751,7 +750,7 @@ def _resolve_script(candidate: str, repo_root: Path, team_dir: Path) -> Resoluti
     return Resolution(resolved_path=None, tried=tuple(tried))
 
 
-def _resolve_verb(candidate: str, verbs: dict, team_dir: Path) -> Optional[Resolution]:
+def _resolve_verb(candidate: str, verbs: dict, team_dir: Path) -> Resolution | None:
     """Return a Resolution for *candidate* as a verb, or None if *candidate*
     is not a declared verb at all (caller then reports it as unclassified,
     not as a missing citation — a bare word that is not a verb was never a
@@ -783,6 +782,7 @@ def _resolve_verb(candidate: str, verbs: dict, team_dir: Path) -> Optional[Resol
 @dataclass(frozen=True)
 class HelpResult:
     """Whether a resolved script's ``--help`` ran cleanly, with a human-readable detail."""
+
     ok: bool
     detail: str  # human-readable explanation (exit code, or timeout)
 
@@ -822,13 +822,14 @@ def _make_help_sandbox_root() -> Path:
     return Path(tempfile.mkdtemp(prefix="help-sandbox-", dir=str(temp_base)))
 
 
-def _format_captured_output(stdout: Optional[str], stderr: Optional[str], limit: int = 2000) -> str:
+def _format_captured_output(stdout: str | None, stderr: str | None, limit: int = 2000) -> str:
     """Render a bounded excerpt of a failed child's stdout/stderr for a
     finding's ``Cause:`` line, so a failure names what the command actually
     said instead of only its exit status. Bounded so one runaway child's
     output cannot blow up the report; ``repr()`` so embedded newlines and
     control characters stay on one printed line."""
-    def _trim(text: Optional[str]) -> str:
+
+    def _trim(text: str | None) -> str:
         text = (text or "").strip()
         if len(text) > limit:
             text = text[:limit] + "...[truncated]"
@@ -848,7 +849,7 @@ def _kill_process_group(pgid: int) -> None:
 
 @dataclass(frozen=True)
 class _ProbeOutcome:
-    returncode: Optional[int]  # None when the probe itself never exited in time
+    returncode: int | None  # None when the probe itself never exited in time
     stdout: str
     stderr: str
 
@@ -939,8 +940,7 @@ def _check_help(resolved: Path, timeout: float, sandbox_root: Path) -> HelpResul
     return HelpResult(
         ok=False,
         detail=(
-            f"'{' '.join(argv)}' exited {proc.returncode} "
-            f"({_format_captured_output(proc.stdout, proc.stderr)})"
+            f"'{' '.join(argv)}' exited {proc.returncode} " f"({_format_captured_output(proc.stdout, proc.stderr)})"
         ),
     )
 
@@ -1022,7 +1022,7 @@ def _format_help_finding(citation: Citation, resolved: Path, detail: str, lint_i
             f"  resolved: {resolved}",
             f"  Cause: {detail}.",
             "  Next diagnostic step: re-run it directly to see the full output:",
-            f"    bash \"{resolved}\" --help" if resolved.suffix != ".py" else f"    python3 \"{resolved}\" --help",
+            f'    bash "{resolved}" --help' if resolved.suffix != ".py" else f'    python3 "{resolved}" --help',
             f"  Then re-run this lint: {lint_invocation}",
             "  Rule: every command a document cites must answer --help without erroring.",
         ]
@@ -1034,7 +1034,7 @@ def _format_help_finding(citation: Citation, resolved: Path, detail: str, lint_i
 # ---------------------------------------------------------------------------
 
 
-def _load_verb_manifest(team_dir: Path, manifest_path: Optional[Path], verbose: bool) -> dict:
+def _load_verb_manifest(team_dir: Path, manifest_path: Path | None, verbose: bool) -> dict:
     team_str = str(team_dir)
     if team_str not in sys.path:
         sys.path.insert(0, team_str)
@@ -1081,9 +1081,7 @@ _SCAN_SET_EXCLUSIONS = frozenset(
 )
 
 
-def _load_extra_scan_docs(
-    repo_root: Path, extra_scan_manifest: Path, verbose: bool
-) -> list[tuple[Path, str]]:
+def _load_extra_scan_docs(repo_root: Path, extra_scan_manifest: Path, verbose: bool) -> list[tuple[Path, str]]:
     """Return a list of (absolute_path, display_name) for the second scan-set
     source — ``team/config/doc-truth-extra-scan-docs.txt`` by default (see
     the module docstring's "Scan set" section for why this is a separate
@@ -1129,7 +1127,7 @@ def _load_scan_set(
     docs_manifest: Path,
     explicit_docs: list[str],
     verbose: bool,
-    extra_scan_manifest: Optional[Path] = None,
+    extra_scan_manifest: Path | None = None,
 ) -> list[tuple[Path, str]]:
     """Return a list of (absolute_path, display_name) for every document to
     scan. *explicit_docs*, when non-empty, overrides BOTH scan-set sources
@@ -1252,7 +1250,7 @@ _REGISTRY_MODEL_DEFAULT_RE = re.compile(r'default\s+"([^"]*)"')
 _REGISTRY_MODEL_SHIPPED_RE = re.compile(r'shipped\s+value\s+"([^"]*)"', re.IGNORECASE)
 
 
-def _normalize_default_text(value: Optional[str]) -> str:
+def _normalize_default_text(value: str | None) -> str:
     """Normalize a default/value string for cross-source comparison.
 
     Strips one layer of surrounding quote/backtick characters and cuts a
@@ -1312,7 +1310,7 @@ def _parse_config_loader_registry(
         )
 
     registry: dict[tuple[str, str], RegistryKey] = {}
-    current_section: Optional[str] = None
+    current_section: str | None = None
     current_section_is_models = False
     model_default = ""
 
@@ -1395,6 +1393,7 @@ class KeyCitation:
     registry key is dropped rather than reported unknown: prose also says
     what CLI flags and function parameters default to.
     """
+
     doc_display: str
     doc_path: Path
     line: int
@@ -1425,12 +1424,11 @@ _KEY_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})\s*([A-Za-z0-9_+-]*)\s*$")
 #   `[providers] available` defaults to `claude codex`
 #   `[release]` `deferred_bugs` defaults to `false`
 _KEY_PROSE_DEFAULT_RE = re.compile(
-    r"`(?:\[(?P<sec>[a-z][a-z0-9_.]*)\]`?\s*`?)?(?P<key>[a-z_][a-z0-9_]*)`"
-    r"\s+defaults\s+to\s+`(?P<val>[^`]*)`"
+    r"`(?:\[(?P<sec>[a-z][a-z0-9_.]*)\]`?\s*`?)?(?P<key>[a-z_][a-z0-9_]*)`" r"\s+defaults\s+to\s+`(?P<val>[^`]*)`"
 )
 
 
-def _section_header_from_line(line: str) -> Optional[str]:
+def _section_header_from_line(line: str) -> str | None:
     """Return the section name when *line* is a section-header line for the
     key-parity scanner, or None otherwise.
 
@@ -1453,9 +1451,7 @@ def _section_header_from_line(line: str) -> Optional[str]:
     return m.group(1)
 
 
-def _extract_key_citations(
-    doc_path: Path, doc_display: str, is_raw_ini: bool
-) -> list[KeyCitation]:
+def _extract_key_citations(doc_path: Path, doc_display: str, is_raw_ini: bool) -> list[KeyCitation]:
     """Return every configuration-key citation found in *doc_path*.
 
     *is_raw_ini* is True for a real ``.cfg_example`` template (the whole
@@ -1473,7 +1469,7 @@ def _extract_key_citations(
         return []
 
     citations: list[KeyCitation] = []
-    current_section: Optional[str] = None
+    current_section: str | None = None
     fence_active = False
     fence_is_ini = False
     fence_char = ""
@@ -1518,7 +1514,12 @@ def _extract_key_citations(
                 # block's is an example (see KeyCitation.claims_default).
                 citations.append(
                     KeyCitation(
-                        doc_display, doc_path, lineno, current_section, km.group(1), km.group(2).strip(),
+                        doc_display,
+                        doc_path,
+                        lineno,
+                        current_section,
+                        km.group(1),
+                        km.group(2).strip(),
                         claims_default=is_raw_ini,
                     )
                 )
@@ -1527,7 +1528,12 @@ def _extract_key_citations(
                 if cm:
                     citations.append(
                         KeyCitation(
-                            doc_display, doc_path, lineno, current_section, cm.group(1), cm.group(2).strip(),
+                            doc_display,
+                            doc_path,
+                            lineno,
+                            current_section,
+                            cm.group(1),
+                            cm.group(2).strip(),
                             commented=True,
                         )
                     )
@@ -1544,8 +1550,13 @@ def _extract_key_citations(
             for pm in _KEY_PROSE_DEFAULT_RE.finditer(line):
                 citations.append(
                     KeyCitation(
-                        doc_display, doc_path, lineno, pm.group("sec") or current_section or "",
-                        pm.group("key"), pm.group("val").strip(), prose=True,
+                        doc_display,
+                        doc_path,
+                        lineno,
+                        pm.group("sec") or current_section or "",
+                        pm.group("key"),
+                        pm.group("val").strip(),
+                        prose=True,
                     )
                 )
 
@@ -1577,9 +1588,7 @@ def _format_unknown_key_finding(
     )
 
 
-def _format_key_default_mismatch_finding(
-    citation: KeyCitation, entry: RegistryKey, lint_invocation: str
-) -> str:
+def _format_key_default_mismatch_finding(citation: KeyCitation, entry: RegistryKey, lint_invocation: str) -> str:
     return "\n".join(
         [
             f"CONFIG DEFAULT MISMATCH: [{citation.section}] {citation.key}",
@@ -1616,7 +1625,7 @@ def _format_undocumented_key_finding(entry: RegistryKey, lint_invocation: str) -
 
 def _resolve_prose_key_citation(
     citation: KeyCitation, registry: dict[tuple[str, str], RegistryKey]
-) -> Optional[KeyCitation]:
+) -> KeyCitation | None:
     """Pin a prose default statement to one registry entry, or return None.
 
     The section the citation carries wins when the registry declares the key
@@ -1695,10 +1704,10 @@ def run_key_parity_check(
             continue
         matched.add((c.section, c.key))
         matched_citations.append(c)
-        if c.claims_default and entry.default_checked and _normalize_default_text(
-            c.claimed_default
-        ) != _normalize_default_text(
-            entry.default
+        if (
+            c.claims_default
+            and entry.default_checked
+            and _normalize_default_text(c.claimed_default) != _normalize_default_text(entry.default)
         ):
             findings.append(_format_key_default_mismatch_finding(c, entry, lint_invocation))
 
@@ -1718,16 +1727,18 @@ def run_key_parity_check(
 @dataclass(frozen=True)
 class WindowCitation:
     """One dashboard window a document names: its tmux index and the name it claims (None when unnamed)."""
+
     doc_display: str
     doc_path: Path
     line: int
     tmux_index: int
-    claimed_name: Optional[str]
+    claimed_name: str | None
 
 
 @dataclass(frozen=True)
 class PaneCitation:
     """One pane-table row a document carries for a window: the pane's position label and the script it claims."""
+
     doc_display: str
     doc_path: Path
     line: int
@@ -1747,13 +1758,13 @@ _PANE_HEADING_RE = re.compile(r"^#{1,6}\s")
 _PANE_TABLE_LOOKAHEAD_LINES = 20
 
 
-def _line_window_citations(line: str) -> list[tuple[int, Optional[str]]]:
+def _line_window_citations(line: str) -> list[tuple[int, str | None]]:
     """Return (tmux_index, claimed_name_or_None) for every window citation
     on *line*, checked in priority order (name-then-index, index-then-name,
     bare index) so an already-matched span is never double-counted by a
     lower-priority pattern."""
     spans: list[tuple[int, int]] = []
-    results: list[tuple[int, Optional[str]]] = []
+    results: list[tuple[int, str | None]] = []
 
     for m in _PANE_WINDOW_NAME_THEN_IDX_RE.finditer(line):
         results.append((int(m.group(2)), m.group(1)))
@@ -1819,8 +1830,8 @@ def _extract_window_and_pane_citations(
     window_citations: list[WindowCitation] = []
     pane_citations: list[PaneCitation] = []
 
-    pending_index: Optional[int] = None
-    pending_line: Optional[int] = None
+    pending_index: int | None = None
+    pending_line: int | None = None
 
     for i, line in enumerate(lines):
         if _PANE_HEADING_RE.match(line):
@@ -1870,9 +1881,7 @@ def _format_unknown_window_finding(citation: WindowCitation, lint_invocation: st
     )
 
 
-def _format_window_name_mismatch_finding(
-    citation: WindowCitation, actual_name: str, lint_invocation: str
-) -> str:
+def _format_window_name_mismatch_finding(citation: WindowCitation, actual_name: str, lint_invocation: str) -> str:
     return "\n".join(
         [
             f"DASHBOARD WINDOW NAME MISMATCH: window {citation.tmux_index}",
@@ -1892,8 +1901,7 @@ def _format_window_name_mismatch_finding(
 def _format_unknown_pane_finding(citation: PaneCitation, lint_invocation: str) -> str:
     return "\n".join(
         [
-            f"UNKNOWN DASHBOARD PANE: window {citation.tmux_index}, position "
-            f"{citation.position_label!r}",
+            f"UNKNOWN DASHBOARD PANE: window {citation.tmux_index}, position " f"{citation.position_label!r}",
             f"  in: {citation.doc_display}:{citation.line}",
             f"  Cause: {citation.doc_display} claims window {citation.tmux_index}'s "
             f"{citation.position_label!r} pane runs '{citation.claimed_script}', which "
@@ -1908,7 +1916,7 @@ def _format_unknown_pane_finding(citation: PaneCitation, lint_invocation: str) -
     )
 
 
-def _format_undocumented_window_finding(window: "Window", lint_invocation: str) -> str:
+def _format_undocumented_window_finding(window: Window, lint_invocation: str) -> str:
     return "\n".join(
         [
             f"UNDOCUMENTED DASHBOARD WINDOW: window {window.tmux_index} ({window.name})",
@@ -1928,7 +1936,7 @@ def _format_undocumented_window_finding(window: "Window", lint_invocation: str) 
 
 def run_pane_parity_check(
     scan_set: list[tuple[Path, str]],
-    windows: list["Window"],
+    windows: list[Window],
     lint_invocation: str,
 ) -> tuple[list[str], int]:
     """Reconcile every window/pane claim cited across *scan_set* against
@@ -1979,7 +1987,7 @@ def run_pane_parity_check(
     return findings, total_citations
 
 
-def _load_dashboard_windows(team_dir: Path, census_path: Optional[Path]) -> list:
+def _load_dashboard_windows(team_dir: Path, census_path: Path | None) -> list:
     """Load the dashboard census through window_census.load_census() —
     the one Python reader for team/config/dashboard_windows.census.
 
@@ -2155,7 +2163,7 @@ def run_undocumented_script_check(
     scripts_dir: Path,
     operator_docs: list[tuple[Path, str]],
     internal_checks_docs: list[tuple[Path, str]],
-) -> tuple[list[UndocumentedScript], int, Optional[tuple[str, int]]]:
+) -> tuple[list[UndocumentedScript], int, tuple[str, int] | None]:
     """Report every installed script no operator doc names and no Internal checks section lists.
 
     Returns ``(undocumented, scripts_checked, where_to_list)``. *where_to_list*
@@ -2171,7 +2179,7 @@ def run_undocumented_script_check(
             corpus.append(path.read_text(encoding="utf-8"))
         except OSError:
             continue
-    where_to_list: Optional[tuple[str, int]] = None
+    where_to_list: tuple[str, int] | None = None
     for path, display in internal_checks_docs:
         try:
             lines = path.read_text(encoding="utf-8").splitlines()
@@ -2191,7 +2199,7 @@ def run_undocumented_script_check(
 def _format_undocumented_script_finding(
     entry: UndocumentedScript,
     operator_doc_displays: list[str],
-    where_to_list: Optional[tuple[str, int]],
+    where_to_list: tuple[str, int] | None,
     lint_invocation: str,
 ) -> str:
     docs_named = ", ".join(operator_doc_displays) or "(none found)"
@@ -2247,7 +2255,7 @@ class UndocumentedScriptReport:
     operator_doc_displays: list[str]
     # (display path, heading line) of the Internal checks section a finding's
     # remedy opens; None when no scanned document has that section.
-    where_to_list: Optional[tuple[str, int]]
+    where_to_list: tuple[str, int] | None
     # One formatted finding per undocumented script, exactly as printed.
     findings: list[str]
 
@@ -2255,10 +2263,10 @@ class UndocumentedScriptReport:
 def check_undocumented_scripts(
     repo_root: Path,
     *,
-    scripts_dir: Optional[Path] = None,
-    operator_doc: Optional[list[str]] = None,
-    internal_checks_doc: Optional[list[str]] = None,
-) -> Optional[UndocumentedScriptReport]:
+    scripts_dir: Path | None = None,
+    operator_doc: list[str] | None = None,
+    internal_checks_doc: list[str] | None = None,
+) -> UndocumentedScriptReport | None:
     """Run the undocumented-script check the way ``main()`` runs it.
 
     Resolves the document lists (``--operator-doc`` / ``--internal-checks-doc``
@@ -2296,7 +2304,7 @@ def check_undocumented_scripts(
 # ---------------------------------------------------------------------------
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_doc_command_truth.py",
         description=(
@@ -2304,13 +2312,17 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "must exist in this tree and must answer --help without erroring."
         ),
     )
-    parser.add_argument("--repo-root", metavar="PATH", help="Repo root (default: inferred from this script's location).")
+    parser.add_argument(
+        "--repo-root", metavar="PATH", help="Repo root (default: inferred from this script's location)."
+    )
     parser.add_argument(
         "--docs-manifest",
         metavar="PATH",
         help="Scan-set manifest (default: <repo-root>/team/config/docs-manifest.txt).",
     )
-    parser.add_argument("--docs-root", metavar="PATH", help="Root the manifest entries resolve against (default: <repo-root>/docs).")
+    parser.add_argument(
+        "--docs-root", metavar="PATH", help="Root the manifest entries resolve against (default: <repo-root>/docs)."
+    )
     parser.add_argument(
         "--extra-scan-manifest",
         metavar="PATH",
@@ -2416,7 +2428,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the doc command-truth lint: command citations, config-key parity, dashboard parity, undocumented scripts.
 
     Exit codes: 0 no findings from any of the four checks; 1 one or more
@@ -2514,9 +2526,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         resolved_key = str(resolution.resolved_path)
         if resolved_key not in help_cache:
-            help_cache[resolved_key] = _check_help(
-                resolution.resolved_path, args.help_timeout, help_sandbox_root
-            )
+            help_cache[resolved_key] = _check_help(resolution.resolved_path, args.help_timeout, help_sandbox_root)
         help_result = help_cache[resolved_key]
         if not help_result.ok:
             # The exempt-list lookup runs strictly after resolution succeeded
@@ -2538,9 +2548,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         flush=True,
                     )
                 continue
-            findings.append(
-                _format_help_finding(c, resolution.resolved_path, help_result.detail, lint_invocation)
-            )
+            findings.append(_format_help_finding(c, resolution.resolved_path, help_result.detail, lint_invocation))
 
     # Every probe's process group is already gone (_run_probe); the sandbox
     # directory, and anything a probe wrote into it, goes with the run.
@@ -2571,9 +2579,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # that registry's own header note).
     # ------------------------------------------------------------------
     config_loader_path = (
-        Path(args.config_loader).resolve()
-        if args.config_loader
-        else team_dir / "scripts" / "lib" / "config_loader.sh"
+        Path(args.config_loader).resolve() if args.config_loader else team_dir / "scripts" / "lib" / "config_loader.sh"
     )
     project_key_registry_path = (
         Path(args.project_key_registry).resolve()
@@ -2654,9 +2660,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     pane_scan_set = _resolve_pane_parity_scan_set(args, repo_root, docs_root, docs_manifest, scan_set)
     pane_findings, pane_citations_scanned = run_pane_parity_check(pane_scan_set, windows, lint_invocation)
-    undocumented_window_count = sum(
-        1 for f in pane_findings if f.startswith("UNDOCUMENTED DASHBOARD WINDOW")
-    )
+    undocumented_window_count = sum(1 for f in pane_findings if f.startswith("UNDOCUMENTED DASHBOARD WINDOW"))
     unique_window_ids = len({w.tmux_index for w in windows})
     print(
         f"lint_doc_command_truth: pane-parity: scanned {pane_citations_scanned} window/pane "

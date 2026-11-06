@@ -232,7 +232,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 # The Key Registry comment parser lives in lint_doc_command_truth.py beside
 # this file; it is imported, never copied.
@@ -419,15 +419,15 @@ class DynamicSite(NamedTuple):
     *key_literal* hold the side that is a fixed string, if either is.
     """
 
-    section_re: "re.Pattern[str]"
-    key_re: "re.Pattern[str]"
+    section_re: re.Pattern[str]
+    key_re: re.Pattern[str]
     file: str
     line: int
-    function: "str | None" = None
-    section_pos: "int | None" = None
-    key_pos: "int | None" = None
-    section_literal: "str | None" = None
-    key_literal: "str | None" = None
+    function: str | None = None
+    section_pos: int | None = None
+    key_pos: int | None = None
+    section_literal: str | None = None
+    key_literal: str | None = None
     cfg: str = "kanban"
 
 
@@ -644,7 +644,7 @@ def _assignment_values(code: str, name: str) -> list[str]:
     values: list[str] = []
     assign = re.compile(rf"(?<![{_WORD_CHARS}$]){re.escape(name)}=(?!=)")
     for match in assign.finditer(code):
-        words = shell_words(code[match.end():], 1)
+        words = shell_words(code[match.end() :], 1)
         values.append(words[0] if words else "")
     loop = re.compile(rf"\bfor\s+{re.escape(name)}\s+in\s+([^;\n]*)")
     for match in loop.finditer(code):
@@ -658,7 +658,7 @@ def _pattern_parts(word: str) -> list[tuple[str, bool]]:
     pos = 0
     for match in _VAR_RE.finditer(word):
         if match.start() > pos:
-            parts.append((word[pos:match.start()], False))
+            parts.append((word[pos : match.start()], False))
         parts.append((match.group(0), True))
         pos = match.end()
     if pos < len(word):
@@ -677,7 +677,7 @@ def resolved_values(word: str, scope: str) -> list[str]:
     return sorted(resolved) or [text]
 
 
-def positional_index(word: str, scope: str) -> "int | None":
+def positional_index(word: str, scope: str) -> int | None:
     """Return N when *word* is, or is assigned only from, positional parameter N."""
     values = resolved_values(word, scope)
     if len(values) != 1:
@@ -702,16 +702,18 @@ def word_alternatives(word: str, scope: str) -> list[str]:
         if len(parts) == 1 and parts[0][1]:
             alternative = "(.+)"
         else:
-            alternative = "".join(
-                "(?:.+)" if is_var else re.escape(part) for part, is_var in parts
-            )
+            alternative = "".join("(?:.+)" if is_var else re.escape(part) for part, is_var in parts)
         if alternative not in alternatives:
             alternatives.append(alternative)
     return alternatives
 
 
 def _file_kind(
-    reader: str, file_word: str, section_word: str, kanban_sections: set[str], project_sections: set[str],
+    reader: str,
+    file_word: str,
+    section_word: str,
+    kanban_sections: set[str],
+    project_sections: set[str],
 ) -> str:
     """Return the file a shell read reads: ``kanban``, ``project`` or ``other``.
 
@@ -765,8 +767,11 @@ class ShellScan(NamedTuple):
 
 
 def scan_shell(
-    text: str, rel: str, kanban_sections: set[str], registry_span: "tuple[int, int] | None" = None,
-    project_sections: "set[str] | None" = None,
+    text: str,
+    rel: str,
+    kanban_sections: set[str],
+    registry_span: tuple[int, int] | None = None,
+    project_sections: set[str] | None = None,
 ) -> ShellScan:
     """Scan shell *text* for kanban.cfg and project.cfg reads.
 
@@ -784,7 +789,7 @@ def scan_shell(
     code = "\n".join(c for _, c in lines)
     literal: list[ReadSite] = []
     dynamic: list[DynamicSite] = []
-    function: "str | None" = None
+    function: str | None = None
     function_start = 0
     for index, (number, line) in enumerate(lines):
         definition = _FUNC_DEF_RE.match(line)
@@ -792,22 +797,22 @@ def scan_shell(
             function, function_start = definition.group(1) or definition.group(2), index
         elif line.rstrip() == "}":
             function = None
-        scope = "\n".join(c for _, c in lines[function_start:index + 1]) if function else code
+        scope = "\n".join(c for _, c in lines[function_start : index + 1]) if function else code
         calls: list[tuple[str, str, str]] = []
         call_count = 0
         for match in _READ_INI_RE.finditer(line):
-            words = shell_words(line[match.end():], 3)
+            words = shell_words(line[match.end() :], 3)
             if len(words) == 3:
                 kind = _file_kind(match.group(1), words[0], words[1], kanban_sections, project_sections)
                 calls.append((words[1], words[2], kind))
                 call_count += 1
         for match in _CONFIG_GET_RE.finditer(line):
-            words = shell_words(line[match.end():], 2)
+            words = shell_words(line[match.end() :], 2)
             if len(words) == 2:
                 calls.append((words[0], words[1], "kanban"))
                 call_count += 1
         for match in _TIERED_RESOLVER_RE.finditer(line):
-            reads = tiered_resolver_reads(line[match.end():])
+            reads = tiered_resolver_reads(line[match.end() :])
             if reads:
                 calls.extend(reads)
                 call_count += 1
@@ -830,12 +835,20 @@ def scan_shell(
             key_pos = positional_index(key_word, scope) if function else None
             for section_alt in section_alts:
                 for key_alt in key_alts:
-                    dynamic.append(DynamicSite(
-                        re.compile(section_alt), re.compile(key_alt), rel, number,
-                        function if (section_pos or key_pos) else None, section_pos, key_pos,
-                        section if "$" not in section else None, key if "$" not in key else None,
-                        kind,
-                    ))
+                    dynamic.append(
+                        DynamicSite(
+                            re.compile(section_alt),
+                            re.compile(key_alt),
+                            rel,
+                            number,
+                            function if (section_pos or key_pos) else None,
+                            section_pos,
+                            key_pos,
+                            section if "$" not in section else None,
+                            key if "$" not in key else None,
+                            kind,
+                        )
+                    )
     return ShellScan(literal, dynamic, code, lines)
 
 
@@ -852,8 +865,9 @@ class _PyScope(NamedTuple):
     parser_reads: dict[str, ast.expr]
 
 
-def _iter_elements(iterable: ast.expr, assigns: dict[str, list[ast.expr]],
-                   appends: dict[str, list[ast.expr]]) -> list[ast.expr]:
+def _iter_elements(
+    iterable: ast.expr, assigns: dict[str, list[ast.expr]], appends: dict[str, list[ast.expr]]
+) -> list[ast.expr]:
     """The element expressions a ``for`` loop over *iterable* may bind.
 
     A tuple, list or set literal gives its elements; a name gives the
@@ -889,13 +903,20 @@ def _scope_names(body_nodes: list[ast.AST], params: frozenset[str]) -> _PyScope:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         assigns.setdefault(target.id, []).append(node.value)
-            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and isinstance(node.target, ast.Name) \
-                    and node.value is not None:
+            elif (
+                isinstance(node, (ast.AnnAssign, ast.AugAssign))
+                and isinstance(node.target, ast.Name)
+                and node.value is not None
+            ):
                 assigns.setdefault(node.target.id, []).append(node.value)
             elif isinstance(node, (ast.For, ast.AsyncFor)):
                 loops.append(node)
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                    and isinstance(node.func.value, ast.Name) and node.args:
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.args
+            ):
                 if node.func.attr == "read":
                     parser_reads.setdefault(node.func.value.id, node.args[0])
                 elif node.func.attr == "append":
@@ -914,14 +935,14 @@ def _scope_names(body_nodes: list[ast.AST], params: frozenset[str]) -> _PyScope:
     return _PyScope(params, assigns, parser_reads)
 
 
-def _function_params(func: "ast.FunctionDef | ast.AsyncFunctionDef") -> frozenset[str]:
+def _function_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
     args = func.args
     names = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs]
     names += [a.arg for a in (args.vararg, args.kwarg) if a is not None]
     return frozenset(names)
 
 
-def _name_kind(text: str) -> "str | None":
+def _name_kind(text: str) -> str | None:
     """``kanban`` / ``project`` when *text* names that cfg file, else None."""
     if _KANBAN_FILE_RE.search(text):
         return "kanban"
@@ -963,7 +984,7 @@ def _py_cfg_kinds(expr: ast.expr, scope: _PyScope, module: _PyScope, depth: int 
     return {"either"} if param or kinds else set()
 
 
-def _py_literal(expr: ast.expr, scope: _PyScope, module: _PyScope) -> "str | None":
+def _py_literal(expr: ast.expr, scope: _PyScope, module: _PyScope) -> str | None:
     """The string *expr* is: a literal, or a name assigned one literal in *scope* or at module level."""
     if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
         return expr.value
@@ -975,7 +996,7 @@ def _py_literal(expr: ast.expr, scope: _PyScope, module: _PyScope) -> "str | Non
     return None
 
 
-def _parser_path(receiver: ast.expr, scope: _PyScope) -> "ast.expr | None":
+def _parser_path(receiver: ast.expr, scope: _PyScope) -> ast.expr | None:
     """The PATH a parser variable was loaded from in *scope*, or the parameter itself."""
     if not isinstance(receiver, ast.Name):
         return None
@@ -991,9 +1012,9 @@ def _parser_path(receiver: ast.expr, scope: _PyScope) -> "ast.expr | None":
     return None
 
 
-def _py_call_arg(call: ast.Call, index: int, keyword: str) -> "ast.expr | None":
+def _py_call_arg(call: ast.Call, index: int, keyword: str) -> ast.expr | None:
     """The argument *call* passes at position *index*, or as ``keyword=``; None when absent."""
-    if index < len(call.args) and not any(isinstance(a, ast.Starred) for a in call.args[:index + 1]):
+    if index < len(call.args) and not any(isinstance(a, ast.Starred) for a in call.args[: index + 1]):
         return call.args[index]
     for kw in call.keywords:
         if kw.arg == keyword:
@@ -1001,7 +1022,7 @@ def _py_call_arg(call: ast.Call, index: int, keyword: str) -> "ast.expr | None":
     return None
 
 
-def _py_tiered_kinds(project_root: "ast.expr | None") -> set[str]:
+def _py_tiered_kinds(project_root: ast.expr | None) -> set[str]:
     """The files a ``resolve_tiered_cfg_value`` call reads: both, or kanban.cfg alone.
 
     A literal ``None`` or ``""`` PROJECT_ROOT skips the project tier; any
@@ -1022,7 +1043,8 @@ def _class_fields(tree: ast.Module) -> dict[str, list[str]]:
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             fields[node.name] = [
-                stmt.target.id for stmt in node.body
+                stmt.target.id
+                for stmt in node.body
                 if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
             ]
     return fields
@@ -1037,16 +1059,20 @@ def _loop_rows(name: str, body: list[ast.AST], scope: _PyScope, module: _PyScope
     rows: list[ast.expr] = list(scope.assigns.get(name, []))
     for top in body:
         for node in ast.walk(top):
-            if isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name) \
-                    and node.target.id == name:
+            if (
+                isinstance(node, (ast.For, ast.AsyncFor))
+                and isinstance(node.target, ast.Name)
+                and node.target.id == name
+            ):
                 iterable = node.iter
                 local = isinstance(iterable, ast.Name) and iterable.id in scope.assigns
                 rows.extend(_iter_elements(iterable, scope.assigns if local else module.assigns, {}))
     return rows
 
 
-def _py_arg_values(expr: ast.expr, scope: _PyScope, module: _PyScope, body: list[ast.AST],
-                   fields: dict[str, list[str]]) -> list[str]:
+def _py_arg_values(
+    expr: ast.expr, scope: _PyScope, module: _PyScope, body: list[ast.AST], fields: dict[str, list[str]]
+) -> list[str]:
     """The strings a call argument may be.
 
     A literal or a constant (:func:`_py_literal`) is itself. ``ROW.FIELD``,
@@ -1075,8 +1101,7 @@ def _py_arg_values(expr: ast.expr, scope: _PyScope, module: _PyScope, body: list
     return values
 
 
-def _param_position(node: ast.expr, scope: _PyScope,
-                    func: "ast.FunctionDef | ast.AsyncFunctionDef | None") -> "int | None":
+def _param_position(node: ast.expr, scope: _PyScope, func: ast.FunctionDef | ast.AsyncFunctionDef | None) -> int | None:
     """*node*'s index among *func*'s positional parameters, when it is one the body never reassigns."""
     if func is None or not isinstance(node, ast.Name) or node.id in scope.assigns:
         return None
@@ -1099,9 +1124,13 @@ def scan_python(text: str, rel: str) -> list[ReadSite]:
         frozenset(),
     )
     FuncNode = "ast.FunctionDef | ast.AsyncFunctionDef | None"
-    scopes: list[tuple[_PyScope, list[ast.AST], FuncNode]] = [(module, [
-        n for n in tree.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ], None)]
+    scopes: list[tuple[_PyScope, list[ast.AST], FuncNode]] = [
+        (
+            module,
+            [n for n in tree.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))],
+            None,
+        )
+    ]
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             scopes.append((_scope_names(node.body, _function_params(node)), node.body, node))
@@ -1124,8 +1153,8 @@ def scan_python(text: str, rel: str) -> list[ReadSite]:
                     continue
                 func = node.func
                 name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-                path: "ast.expr | None" = None
-                kinds: "set[str] | None" = None
+                path: ast.expr | None = None
+                kinds: set[str] | None = None
                 if name in _PY_PATH_READERS and len(node.args) >= 3:
                     path, section_node, key_node = node.args[0], node.args[1], node.args[2]
                 elif name in _PY_PARSER_GETTERS and isinstance(func, ast.Attribute) and len(node.args) >= 2:
@@ -1153,9 +1182,13 @@ def scan_python(text: str, rel: str) -> list[ReadSite]:
                             position = None if literal is not None else _param_position(side, scope, enclosing)
                             arg = None if position is None else _py_call_arg(call, position, side.id)
                             sides.append(
-                                [literal] if literal is not None
-                                else [] if arg is None
-                                else _py_arg_values(arg, caller_scope, module, caller_body, fields)
+                                [literal]
+                                if literal is not None
+                                else (
+                                    []
+                                    if arg is None
+                                    else _py_arg_values(arg, caller_scope, module, caller_body, fields)
+                                )
                             )
                         resolved.append((call.lineno, sides[0], sides[1]))
                 else:
@@ -1214,14 +1247,16 @@ def _call_args(name: str, corpus: list[tuple[str, int, str]], count: int) -> lis
             # A one-line definition ("f() { g x y; }") calls on its body.
             if "{" not in line:
                 continue
-            line = line[line.index("{") + 1:]
+            line = line[line.index("{") + 1 :]
         for match in call.finditer(line):
-            out.append((rel, number, shell_words(line[match.end():], count)))
+            out.append((rel, number, shell_words(line[match.end() :], count)))
     return out
 
 
 def caller_reads(
-    site: DynamicSite, corpus: list[tuple[str, int, str]], candidates: set[tuple[str, str]],
+    site: DynamicSite,
+    corpus: list[tuple[str, int, str]],
+    candidates: set[tuple[str, str]],
 ) -> tuple[list[ReadSite], set[tuple[str, str]]]:
     """Resolve a site whose section or key is a positional parameter, through its callers.
 
@@ -1235,7 +1270,7 @@ def caller_reads(
     sites: list[ReadSite] = []
     keys: set[tuple[str, str]] = set()
     for rel, number, words in _call_args(site.function, corpus, count):
-        values: list["str | None"] = []
+        values: list[str | None] = []
         for pos, fixed in ((site.section_pos, site.section_literal), (site.key_pos, site.key_literal)):
             if pos is None:
                 values.append(fixed)
@@ -1249,7 +1284,8 @@ def caller_reads(
             sites.append(ReadSite(section, key, rel, number, site.cfg))
             continue
         keys.update(
-            (s, k) for s, k in candidates
+            (s, k)
+            for s, k in candidates
             if (s == section if section is not None else site.section_re.fullmatch(s))
             and (k == key if key is not None else site.key_re.fullmatch(k))
         )
@@ -1271,8 +1307,8 @@ class Result(NamedTuple):
     read_keys: set[tuple[str, str]]
     literal_sites: list[ReadSite]
     findings: list[Finding]
-    project_read_keys: "set[tuple[str, str]] | None" = None
-    notes: "list[str] | None" = None
+    project_read_keys: set[tuple[str, str]] | None = None
+    notes: list[str] | None = None
 
 
 def _edit_remedy(rel: str, line: int) -> str:
@@ -1362,13 +1398,13 @@ class StatedDefault(NamedTuple):
     """
 
     form: str
-    value: "str | None"
+    value: str | None
 
 
 def stated_default(block: list[str], key: str) -> StatedDefault:
     """Read the default *block* states for *key* (see the module docstring's ``missing_default``)."""
     text = [line.lstrip("#; \t") for line in block]
-    stated_raw: "str | None" = None
+    stated_raw: str | None = None
     for index, line in enumerate(text):
         match = _DEFAULT_RE.search(line)
         if match is None and _DEFAULT_WORD_RE.search(line) and index + 1 < len(text):
@@ -1407,7 +1443,7 @@ class TemplateView(NamedTuple):
     file: str  # the file a finding's remedy opens
     lines: list[str]
     entries: list[TemplateEntry]
-    remedy_line: "int | None" = None  # a fixed line to open, for rendered text
+    remedy_line: int | None = None  # a fixed line to open, for rendered text
 
 
 def _registry_entries(path: Path, display: str) -> dict:
@@ -1431,21 +1467,36 @@ def check_template_defaults(view: TemplateView, registry: dict) -> list[Finding]
         stated = stated_default(comment_block(view.lines, entry.line), entry.key)
         reg = registry.get((entry.section, entry.key))
         if not stated.form:
-            findings.append(Finding(
-                "missing_default", entry.section, entry.key, view.file, view.remedy_line or entry.line,
-                f"[{entry.section}] {entry.key} at {where} has no comment stating its default; add a "
-                "'Default: X' line (or 'Shipped value:', 'Inherits ...', 'No in-code default')",
-                remedy,
-            ))
+            findings.append(
+                Finding(
+                    "missing_default",
+                    entry.section,
+                    entry.key,
+                    view.file,
+                    view.remedy_line or entry.line,
+                    f"[{entry.section}] {entry.key} at {where} has no comment stating its default; add a "
+                    "'Default: X' line (or 'Shipped value:', 'Inherits ...', 'No in-code default')",
+                    remedy,
+                )
+            )
         registry_default = normalize_default(reg.default) if reg is not None and reg.default_checked else None
-        if stated.value is not None and registry_default is not None \
-                and stated.value.casefold() != registry_default.casefold():
-            findings.append(Finding(
-                "default_mismatch", entry.section, entry.key, view.file, view.remedy_line or entry.line,
-                f"[{entry.section}] {entry.key} at {where} states default {stated.value!r} but "
-                f"{reg.source_display}'s Key Registry records {registry_default!r}; correct whichever is wrong",
-                remedy,
-            ))
+        if (
+            stated.value is not None
+            and registry_default is not None
+            and stated.value.casefold() != registry_default.casefold()
+        ):
+            findings.append(
+                Finding(
+                    "default_mismatch",
+                    entry.section,
+                    entry.key,
+                    view.file,
+                    view.remedy_line or entry.line,
+                    f"[{entry.section}] {entry.key} at {where} states default {stated.value!r} but "
+                    f"{reg.source_display}'s Key Registry records {registry_default!r}; correct whichever is wrong",
+                    remedy,
+                )
+            )
         if entry.commented:
             if reg is not None:
                 expected = registry_default
@@ -1455,19 +1506,26 @@ def check_template_defaults(view: TemplateView, registry: dict) -> list[Finding]
             # An empty commented value ("# key =") shows no value at all,
             # so it cannot mislead about the one in force.
             if expected is not None and entry.value and value.casefold() != expected.casefold():
-                findings.append(Finding(
-                    "commented_value_not_default", entry.section, entry.key, view.file,
-                    view.remedy_line or entry.line,
-                    f"[{entry.section}] {entry.key} at {where} is commented as {entry.value!r}, but a "
-                    f"commented line shows the value in force and the default is {expected!r}; show the "
-                    "default there and move the override into the comment as an example",
-                    remedy,
-                ))
+                findings.append(
+                    Finding(
+                        "commented_value_not_default",
+                        entry.section,
+                        entry.key,
+                        view.file,
+                        view.remedy_line or entry.line,
+                        f"[{entry.section}] {entry.key} at {where} is commented as {entry.value!r}, but a "
+                        f"commented line shows the value in force and the default is {expected!r}; show the "
+                        "default there and move the override into the comment as an example",
+                        remedy,
+                    )
+                )
     return findings
 
 
 def misplaced_keys(
-    sites: list[ReadSite], present: "set[tuple[str, str]]", entries: list[TemplateEntry],
+    sites: list[ReadSite],
+    present: set[tuple[str, str]],
+    entries: list[TemplateEntry],
 ) -> dict[tuple[str, str], tuple[ReadSite, TemplateEntry]]:
     """Reads whose key a template carries only under another section.
 
@@ -1489,7 +1547,11 @@ def misplaced_keys(
 
 def _wrong_section_finding(view: TemplateView, site: ReadSite, entry: TemplateEntry) -> Finding:
     return Finding(
-        "wrong_section", entry.section, entry.key, view.file, view.remedy_line or entry.line,
+        "wrong_section",
+        entry.section,
+        entry.key,
+        view.file,
+        view.remedy_line or entry.line,
         f"{entry.key} sits under [{entry.section}] at {view.display}:{entry.line}, but its reader "
         f"({site.file}:{site.line}) reads [{site.section}] {site.key}; move it under a [{site.section}] header",
         _edit_remedy(view.file, view.remedy_line or entry.line),
@@ -1501,7 +1563,7 @@ def _wrong_section_finding(view: TemplateView, site: ReadSite, entry: TemplateEn
 # ---------------------------------------------------------------------------
 
 
-def _render_scratch_parent() -> "str | None":
+def _render_scratch_parent() -> str | None:
     """The directory the render's temp dir is made in.
 
     The framework temp root from
@@ -1521,7 +1583,7 @@ def _render_scratch_parent() -> "str | None":
     return str(parent)
 
 
-def render_project_cfg_text(root: Path) -> tuple["str | None", str]:
+def render_project_cfg_text(root: Path) -> tuple[str | None, str]:
     """Render the project.cfg ``create_project`` writes, in a child interpreter.
 
     The child imports the scanned tree's own generator, runs with a fresh
@@ -1539,7 +1601,11 @@ def render_project_cfg_text(root: Path) -> tuple["str | None", str]:
         try:
             proc = subprocess.run(
                 [sys.executable, "-c", _RENDER_PROGRAM, str(root / SCAN_TOP), RENDER_PROJECT_NAME],
-                capture_output=True, text=True, timeout=RENDER_TIMEOUT_SECONDS, cwd=scratch, env=env,
+                capture_output=True,
+                text=True,
+                timeout=RENDER_TIMEOUT_SECONDS,
+                cwd=scratch,
+                env=env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             return None, f"could not run: {exc}"
@@ -1566,7 +1632,9 @@ def _definition_line(path: Path, name: str) -> int:
 
 
 def unconsumed_exports(
-    sites: list[ReadSite], non_export_keys: "set[tuple[str, str]]", texts: dict[str, list[str]],
+    sites: list[ReadSite],
+    non_export_keys: set[tuple[str, str]],
+    texts: dict[str, list[str]],
 ) -> list[tuple[ReadSite, str]]:
     """Keys whose every read is an export no scanned code mentions again.
 
@@ -1607,7 +1675,7 @@ def unconsumed_exports(
 # ---------------------------------------------------------------------------
 
 
-def _project_example_path(root: Path) -> "Path | None":
+def _project_example_path(root: Path) -> Path | None:
     for rel in PROJECT_EXAMPLE_RELS:
         if (root / rel).is_file():
             return root / rel
@@ -1711,28 +1779,46 @@ def run(root: Path) -> Result:
             continue
         edit_line = sections_at.get(section, 1)
         where = f"under [{section}]" if section in sections_at else f"in a new [{section}] section"
-        findings.append(Finding(
-            "read_not_scaffolded", section, key, site.file, site.line,
-            f"[{section}] {key} is read from kanban.cfg here but {EXAMPLE_REL} does not "
-            f"scaffold it; add a comment naming its default and a '{key} = ' line {where}",
-            _edit_remedy(EXAMPLE_REL, edit_line),
-        ))
+        findings.append(
+            Finding(
+                "read_not_scaffolded",
+                section,
+                key,
+                site.file,
+                site.line,
+                f"[{section}] {key} is read from kanban.cfg here but {EXAMPLE_REL} does not "
+                f"scaffold it; add a comment naming its default and a '{key} = ' line {where}",
+                _edit_remedy(EXAMPLE_REL, edit_line),
+            )
+        )
     for (section, key), line in sorted(example.items(), key=lambda item: item[1]):
         if (section, key) not in read_keys and (section, key) not in misplaced_entries:
-            findings.append(Finding(
-                "example_not_read", section, key, EXAMPLE_REL, line,
-                f"[{section}] {key} is scaffolded in {EXAMPLE_REL} but no code reads it; "
-                "remove it, or wire the reader its comment names",
-                _edit_remedy(EXAMPLE_REL, line),
-            ))
+            findings.append(
+                Finding(
+                    "example_not_read",
+                    section,
+                    key,
+                    EXAMPLE_REL,
+                    line,
+                    f"[{section}] {key} is scaffolded in {EXAMPLE_REL} but no code reads it; "
+                    "remove it, or wire the reader its comment names",
+                    _edit_remedy(EXAMPLE_REL, line),
+                )
+            )
     for (section, key), line in sorted(registry.items(), key=lambda item: item[1]):
         if (section, key) not in read_keys:
-            findings.append(Finding(
-                "registry_not_read", section, key, REGISTRY_REL, line,
-                f"{section}:{key} is in {REGISTRY_ARRAY} but no code reads it; remove it from "
-                "the array and the Key Registry comment, or wire its reader",
-                _edit_remedy(REGISTRY_REL, line),
-            ))
+            findings.append(
+                Finding(
+                    "registry_not_read",
+                    section,
+                    key,
+                    REGISTRY_REL,
+                    line,
+                    f"{section}:{key} is in {REGISTRY_ARRAY} but no code reads it; remove it from "
+                    "the array and the Key Registry comment, or wire its reader",
+                    _edit_remedy(REGISTRY_REL, line),
+                )
+            )
     findings.extend(check_template_defaults(kanban_view, kanban_entries))
 
     # --- project.cfg ---------------------------------------------------------
@@ -1742,8 +1828,9 @@ def run(root: Path) -> Result:
         merged_entries = dict(kanban_entries)
         merged_entries.update(project_entries)
         project_lines = _read_lines(project_example_path)
-        project_view = TemplateView(project_example_rel, project_example_rel, project_lines,
-                                    template_entries(project_lines))
+        project_view = TemplateView(
+            project_example_rel, project_example_rel, project_lines, template_entries(project_lines)
+        )
         project_sites = [s for s in literal_sites if s.cfg == "project"]
         project_misplaced = misplaced_keys(project_sites, set(project_example), project_view.entries)
         for site, entry in project_misplaced.values():
@@ -1752,7 +1839,7 @@ def run(root: Path) -> Result:
         template_findings = check_template_defaults(project_view, merged_entries)
         findings.extend(template_findings)
 
-        generated: "set[tuple[str, str]] | None" = None
+        generated: set[tuple[str, str]] | None = None
         generator_path = root / GENERATOR_REL
         generator_line = _definition_line(generator_path, GENERATOR_FUNCTION)
         if not generator_path.is_file():
@@ -1760,16 +1847,25 @@ def run(root: Path) -> Result:
         else:
             rendered, reason = render_project_cfg_text(root)
             if rendered is None:
-                findings.append(Finding(
-                    "project_cfg_render_failed", "", "", GENERATOR_REL, generator_line,
-                    f"{GENERATOR_FUNCTION} in {GENERATOR_REL} could not render a project.cfg ({reason}); "
-                    "the create_project output was not compared",
-                    f"python3 {SELF_REL}",
-                ))
+                findings.append(
+                    Finding(
+                        "project_cfg_render_failed",
+                        "",
+                        "",
+                        GENERATOR_REL,
+                        generator_line,
+                        f"{GENERATOR_FUNCTION} in {GENERATOR_REL} could not render a project.cfg ({reason}); "
+                        "the create_project output was not compared",
+                        f"python3 {SELF_REL}",
+                    )
+                )
             else:
                 generated_lines = rendered.splitlines()
                 generated_view = TemplateView(
-                    GENERATOR_DISPLAY, GENERATOR_REL, generated_lines, template_entries(generated_lines),
+                    GENERATOR_DISPLAY,
+                    GENERATOR_REL,
+                    generated_lines,
+                    template_entries(generated_lines),
                     remedy_line=generator_line,
                 )
                 generated = {(e.section, e.key) for e in generated_view.entries}
@@ -1798,39 +1894,58 @@ def run(root: Path) -> Result:
                 continue
             fix_file, fix_line = (
                 (project_example_rel, example_section_lines(project_example_path).get(section, 1))
-                if (section, key) not in project_example else (GENERATOR_REL, generator_line)
+                if (section, key) not in project_example
+                else (GENERATOR_REL, generator_line)
             )
-            findings.append(Finding(
-                "project_cfg_read_not_scaffolded", section, key, site.file, site.line,
-                f"[{section}] {key} is read from project.cfg here but {' and '.join(missing)} "
-                f"does not carry it; add it under [{section}] with a comment naming its default",
-                _edit_remedy(fix_file, fix_line),
-            ))
+            findings.append(
+                Finding(
+                    "project_cfg_read_not_scaffolded",
+                    section,
+                    key,
+                    site.file,
+                    site.line,
+                    f"[{section}] {key} is read from project.cfg here but {' and '.join(missing)} "
+                    f"does not carry it; add it under [{section}] with a comment naming its default",
+                    _edit_remedy(fix_file, fix_line),
+                )
+            )
         for (section, key), line in sorted(project_example.items(), key=lambda item: item[1]):
             if (section, key) in project_read_keys or (section, key) in project_misplaced_entries:
                 continue
-            findings.append(Finding(
-                "project_cfg_example_not_read", section, key, project_example_rel, line,
-                f"[{section}] {key} is scaffolded in {project_example_rel} but nothing reads it from "
-                "project.cfg; remove it, or wire the reader its comment names",
-                _edit_remedy(project_example_rel, line),
-            ))
+            findings.append(
+                Finding(
+                    "project_cfg_example_not_read",
+                    section,
+                    key,
+                    project_example_rel,
+                    line,
+                    f"[{section}] {key} is scaffolded in {project_example_rel} but nothing reads it from "
+                    "project.cfg; remove it, or wire the reader its comment names",
+                    _edit_remedy(project_example_rel, line),
+                )
+            )
 
     # --- reads that only feed an export nothing consumes ----------------------
     non_export_keys = {(s.section, s.key) for s in literal_sites if not s.export} | dynamic_keys
     for site, variable in unconsumed_exports(literal_sites, non_export_keys, texts):
-        findings.append(Finding(
-            "read_but_unconsumed", site.section, site.key, site.file, site.line,
-            f"[{site.section}] {site.key} is read only to export {variable}, which no scanned code "
-            f"mentions anywhere else; remove the export (and the key, if nothing else needs it) or "
-            f"wire the reader of {variable}",
-            _edit_remedy(site.file, site.line),
-        ))
+        findings.append(
+            Finding(
+                "read_but_unconsumed",
+                site.section,
+                site.key,
+                site.file,
+                site.line,
+                f"[{site.section}] {site.key} is read only to export {variable}, which no scanned code "
+                f"mentions anywhere else; remove the export (and the key, if nothing else needs it) or "
+                f"wire the reader of {variable}",
+                _edit_remedy(site.file, site.line),
+            )
+        )
 
     return Result(len(files), kanban_read_keys, read_keys, literal_sites, findings, project_read_keys, notes)
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the config-key coverage lint, printing each finding and writing ``--findings-file``.
 
     ``--list-read`` prints the keys read from kanban.cfg instead. Exit codes: 0 always, whatever was found (quality class); 2 usage error (argparse).
@@ -1852,14 +1967,17 @@ def main(argv: "list[str] | None" = None) -> int:
         help="repository root holding kanban.cfg_example and team/ (default: this checkout)",
     )
     parser.add_argument("--findings-file", default=None, help="write findings as a JSON array here")
-    parser.add_argument("--list-read", action="store_true",
-                        help="print every section:key read from kanban.cfg and exit")
+    parser.add_argument(
+        "--list-read", action="store_true", help="print every section:key read from kanban.cfg and exit"
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.root).resolve()
     if not (root / EXAMPLE_REL).is_file():
-        print(f"lint_{LINT_NAME}: no {EXAMPLE_REL} under {root}; nothing to check "
-              f"(pass --root with the repository root)")
+        print(
+            f"lint_{LINT_NAME}: no {EXAMPLE_REL} under {root}; nothing to check "
+            f"(pass --root with the repository root)"
+        )
         return 0
     result = run(root)
 
@@ -1872,9 +1990,11 @@ def main(argv: "list[str] | None" = None) -> int:
         print(f"lint_{LINT_NAME}: note: {note}")
     for finding in result.findings:
         print(f"lint_{LINT_NAME}: {finding.file}:{finding.line}: {finding.kind}: {finding.summary}")
-    print(f"lint_{LINT_NAME}: totals: {result.files_scanned} file(s) scanned; "
-          f"{len(result.read_keys)} key(s) read; {len(result.findings)} finding(s)"
-          + (" (non-blocking finding)" if result.findings else ""))
+    print(
+        f"lint_{LINT_NAME}: totals: {result.files_scanned} file(s) scanned; "
+        f"{len(result.read_keys)} key(s) read; {len(result.findings)} finding(s)"
+        + (" (non-blocking finding)" if result.findings else "")
+    )
     if result.findings:
         print("\nTo fix:")
         print(f"  1. cd {root}")
@@ -1889,8 +2009,7 @@ def main(argv: "list[str] | None" = None) -> int:
         out = Path(args.findings_file)
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(json.dumps([f.to_dict() for f in result.findings], indent=2) + "\n",
-                           encoding="utf-8")
+            out.write_text(json.dumps([f.to_dict() for f in result.findings], indent=2) + "\n", encoding="utf-8")
         except OSError as exc:
             print(f"lint_{LINT_NAME}: could not write findings file {out}: {exc}", file=sys.stderr)
     return 0

@@ -124,11 +124,7 @@ def _seed_root(root: pathlib.Path) -> None:
 
 def _snapshot(root: pathlib.Path) -> dict[str, bytes]:
     """Every regular file under <root>, keyed by its root-relative path."""
-    return {
-        str(path.relative_to(root)): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+    return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def _sandbox_env(tmp_path: pathlib.Path, root: pathlib.Path) -> dict:
@@ -181,42 +177,36 @@ def _assert_refused_before_deposit(
     before: dict[str, bytes],
 ) -> None:
     """The run refused through the error contract and touched nothing."""
-    assert result.returncode != 0, (
-        "a source tree without the stamp helper must be refused (non-zero exit)\n"
-        + _diagnostic(result)
-    )
+    assert (
+        result.returncode != 0
+    ), "a source tree without the stamp helper must be refused (non-zero exit)\n" + _diagnostic(result)
     assert "command not found" not in result.stdout + result.stderr, (
         "the refusal must come before the stamp step, not from calling a "
         "function the missing helper would have defined\n" + _diagnostic(result)
     )
 
     contract = parse_error_contract(result.stderr)
-    assert contract is not None, (
-        "the refusal must carry the error / message / remedy contract on stderr\n"
-        + _diagnostic(result)
-    )
+    assert (
+        contract is not None
+    ), "the refusal must carry the error / message / remedy contract on stderr\n" + _diagnostic(result)
     remedy = contract["remedy"].splitlines()[0].strip() if contract["remedy"] else ""
-    assert contract["error"] == expected_error, (
-        f"expected error key {expected_error!r}, got {contract['error']!r}\n"
-        + _diagnostic(result)
-    )
-    assert str(missing_helper) in contract["message"], (
-        f"the message must name the missing helper path {missing_helper}\n"
-        + _diagnostic(result)
-    )
+    assert (
+        contract["error"] == expected_error
+    ), f"expected error key {expected_error!r}, got {contract['error']!r}\n" + _diagnostic(result)
+    assert (
+        str(missing_helper) in contract["message"]
+    ), f"the message must name the missing helper path {missing_helper}\n" + _diagnostic(result)
     assert remedy, "the remedy field must not be blank\n" + _diagnostic(result)
-    assert not _PLACEHOLDER_RE.search(remedy), (
-        f"the remedy must be runnable as printed (no angle-bracket placeholder): {remedy!r}\n"
-        + _diagnostic(result)
-    )
+    assert not _PLACEHOLDER_RE.search(
+        remedy
+    ), f"the remedy must be runnable as printed (no angle-bracket placeholder): {remedy!r}\n" + _diagnostic(result)
 
     after = _snapshot(root)
     assert after == before, (
         "nothing may be deposited before the refusal; files under the root changed: "
         f"added={sorted(set(after) - set(before))} "
         f"removed={sorted(set(before) - set(after))} "
-        f"modified={sorted(k for k in set(before) & set(after) if before[k] != after[k])}\n"
-        + _diagnostic(result)
+        f"modified={sorted(k for k in set(before) & set(after) if before[k] != after[k])}\n" + _diagnostic(result)
     )
 
 

@@ -134,7 +134,7 @@ def _observed_probe_value(output: str) -> str | None:
     tail = m.group(1).strip()
     prefix = f"{_PROBE_VAR}="
     if tail.startswith(prefix):
-        return tail[len(prefix):].strip()
+        return tail[len(prefix) :].strip()
     return tail
 
 
@@ -149,9 +149,7 @@ def _run_case(
     (assert marker_file.exists() is False to prove the stub never saw a
     real task-dispatch invocation)."""
     kanban_root = build_synthetic_kanban_root(tmp_path, agent=_AGENT)
-    stub_bin_dir, marker_file = build_stub_provider_cli(
-        tmp_path, probe_env_vars=(_PROBE_VAR,)
-    )
+    stub_bin_dir, marker_file = build_stub_provider_cli(tmp_path, probe_env_vars=(_PROBE_VAR,))
     home_dir = tmp_path / "home"
     home_dir.mkdir(parents=True, exist_ok=True)
     temp_dir = tmp_path / "pgai_temp"
@@ -165,9 +163,7 @@ def _run_case(
         stub_bin_dir=stub_bin_dir,
         extra_env=extra_env,
     )
-    result = run_wake_entrypoint(
-        kanban_root, cwd=foreign_cwd, env=env, agent=_AGENT
-    )
+    result = run_wake_entrypoint(kanban_root, cwd=foreign_cwd, env=env, agent=_AGENT)
     return result, marker_file, foreign_cwd, env
 
 
@@ -186,8 +182,7 @@ def test_default_budget_derives_ceiling_through_real_entry_point(
     result, marker_file, foreign_cwd, env = _run_case(tmp_path)
 
     assert result.returncode == 0, (
-        f"wake entry point exited {result.returncode} from cwd={foreign_cwd}.\n"
-        f"combined output:\n{result.combined}"
+        f"wake entry point exited {result.returncode} from cwd={foreign_cwd}.\n" f"combined output:\n{result.combined}"
     )
     assert not marker_file.exists(), (
         f"stub provider CLI received an unexpected invocation (a real task "
@@ -223,9 +218,7 @@ def test_derivation_tracks_changed_budget_through_real_entry_point(
         extra_env={"MAX_TASK_SECONDS": "600", "KILL_GRACE_SECONDS": "60"},
     )
 
-    assert result.returncode == 0, (
-        f"wake entry point exited {result.returncode}.\ncombined output:\n{result.combined}"
-    )
+    assert result.returncode == 0, f"wake entry point exited {result.returncode}.\ncombined output:\n{result.combined}"
     assert not marker_file.exists()
 
     m = _DERIVED_RE.search(result.combined)
@@ -249,21 +242,15 @@ def test_operator_override_left_untouched_through_real_entry_point(
     the wake path ever reaches the derivation) is not overwritten by the
     real entry point. The direct derivation log line never fires; the
     probe-stub channel is the only way to observe the surviving value."""
-    result, marker_file, foreign_cwd, env = _run_case(
-        tmp_path, extra_env={"BASH_MAX_TIMEOUT_MS": "999999"}
-    )
+    result, marker_file, foreign_cwd, env = _run_case(tmp_path, extra_env={"BASH_MAX_TIMEOUT_MS": "999999"})
 
-    assert result.returncode == 0, (
-        f"wake entry point exited {result.returncode}.\ncombined output:\n{result.combined}"
-    )
+    assert result.returncode == 0, f"wake entry point exited {result.returncode}.\ncombined output:\n{result.combined}"
     assert not marker_file.exists()
 
-    assert _OVERRIDE_LOG in result.combined, (
-        f"expected the operator-override log line; got:\n{result.combined}"
-    )
-    assert not _DERIVED_RE.search(result.combined), (
-        f"derivation ran despite an operator override being present:\n{result.combined}"
-    )
+    assert _OVERRIDE_LOG in result.combined, f"expected the operator-override log line; got:\n{result.combined}"
+    assert not _DERIVED_RE.search(
+        result.combined
+    ), f"derivation ran despite an operator override being present:\n{result.combined}"
 
     probe = _observed_probe_value(result.combined)
     assert probe == "999999", (
@@ -288,17 +275,13 @@ def test_disabled_watchdog_derives_nothing_through_real_entry_point(
         tmp_path, extra_env={"MAX_TASK_SECONDS": "0", "KILL_GRACE_SECONDS": "30"}
     )
 
-    assert result.returncode == 0, (
-        f"wake entry point exited {result.returncode}.\ncombined output:\n{result.combined}"
-    )
+    assert result.returncode == 0, f"wake entry point exited {result.returncode}.\ncombined output:\n{result.combined}"
     assert not marker_file.exists()
 
-    assert _WATCHDOG_DISABLED_LOG in result.combined, (
-        f"expected the disabled-watchdog log line; got:\n{result.combined}"
-    )
-    assert not _DERIVED_RE.search(result.combined), (
-        f"derivation ran despite MAX_TASK_SECONDS=0:\n{result.combined}"
-    )
+    assert (
+        _WATCHDOG_DISABLED_LOG in result.combined
+    ), f"expected the disabled-watchdog log line; got:\n{result.combined}"
+    assert not _DERIVED_RE.search(result.combined), f"derivation ran despite MAX_TASK_SECONDS=0:\n{result.combined}"
 
     probe = _observed_probe_value(result.combined)
     assert probe == "<unset>", (
@@ -330,17 +313,13 @@ def test_broken_wiring_fails_acceptance_layer_but_not_mechanism_fixture(
     real dev-tree file this test never modifies.
     """
     kanban_root = build_synthetic_kanban_root(tmp_path, agent=_AGENT)
-    stub_bin_dir, marker_file = build_stub_provider_cli(
-        tmp_path, probe_env_vars=(_PROBE_VAR,)
-    )
+    stub_bin_dir, marker_file = build_stub_provider_cli(tmp_path, probe_env_vars=(_PROBE_VAR,))
     home_dir = tmp_path / "home"
     home_dir.mkdir(parents=True, exist_ok=True)
     temp_dir = tmp_path / "pgai_temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
     foreign_cwd = make_foreign_cwd(tmp_path)
-    env = scrubbed_wake_env(
-        kanban_root, temp_dir=temp_dir, home_dir=home_dir, stub_bin_dir=stub_bin_dir
-    )
+    env = scrubbed_wake_env(kanban_root, temp_dir=temp_dir, home_dir=home_dir, stub_bin_dir=stub_bin_dir)
 
     # --- Break the wiring in the COPY only. The real dev-tree file at
     # TEAM_DIR / scripts/lib/wake_common.sh is never opened for writing. ---
@@ -353,14 +332,10 @@ def test_broken_wiring_fails_acceptance_layer_but_not_mechanism_fixture(
         f"not a real test failure: the wiring line in wake_common.sh moved "
         f"or was reworded and this test needs updating to match."
     )
-    broken_text = original_text.replace(
-        source_line, f"# BROKEN-FOR-ACCEPTANCE-TEST: {source_line}", 1
-    )
+    broken_text = original_text.replace(source_line, f"# BROKEN-FOR-ACCEPTANCE-TEST: {source_line}", 1)
     wake_common_copy.write_text(broken_text, encoding="utf-8")
 
-    broken_result = run_wake_entrypoint(
-        kanban_root, cwd=foreign_cwd, env=env, agent=_AGENT
-    )
+    broken_result = run_wake_entrypoint(kanban_root, cwd=foreign_cwd, env=env, agent=_AGENT)
 
     # --- Outcome 1 (quoted): the acceptance layer fails. ---
     assert broken_result.returncode != 0, (
@@ -478,9 +453,7 @@ def test_full_run_leaves_live_kanban_root_and_crontab_untouched(
         )
 
     def _crontab_snapshot() -> str:
-        r = subprocess.run(
-            [_REAL_CRONTAB_BIN, "-l"], capture_output=True, text=True, timeout=15
-        )
+        r = subprocess.run([_REAL_CRONTAB_BIN, "-l"], capture_output=True, text=True, timeout=15)
         return r.stdout if r.returncode == 0 else f"<no crontab: rc={r.returncode}>"
 
     crontab_before = _crontab_snapshot()
@@ -498,8 +471,7 @@ def test_full_run_leaves_live_kanban_root_and_crontab_untouched(
 
     synthetic_root_str = str(env["PGAI_AGENT_KANBAN_ROOT_PATH"])
     assert synthetic_root_str != str(live_root), (
-        "the synthetic kanban root resolved to the same path as the live "
-        "root -- the harness itself is broken."
+        "the synthetic kanban root resolved to the same path as the live " "root -- the harness itself is broken."
     )
 
     leaked = []
@@ -516,6 +488,5 @@ def test_full_run_leaves_live_kanban_root_and_crontab_untouched(
 
     crontab_after = _crontab_snapshot()
     assert crontab_after == crontab_before, (
-        f"the real crontab changed across this fixture's run.\n"
-        f"before:\n{crontab_before}\nafter:\n{crontab_after}"
+        f"the real crontab changed across this fixture's run.\n" f"before:\n{crontab_before}\nafter:\n{crontab_after}"
     )

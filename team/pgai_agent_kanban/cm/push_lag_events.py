@@ -51,7 +51,6 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass
-from typing import List, Optional
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -88,13 +87,13 @@ class RcBranchDecision:
     reason: str = ""
 
 
-def _event_blocks(text: str) -> List[List[str]]:
+def _event_blocks(text: str) -> list[list[str]]:
     """The body lines of every ``## Push Lag Event`` section, in file order.
 
     Each body is read by the one section reader; its span only moves the
     read past that event to the next one under the same repeated heading.
     """
-    blocks: List[List[str]] = []
+    blocks: list[list[str]] = []
     rest = text.replace("\r\n", "\n")
     while True:
         body = ts.read_section(rest, _EVENT_HEADING)
@@ -102,10 +101,10 @@ def _event_blocks(text: str) -> List[List[str]]:
         if body is None or span is None:
             return blocks
         blocks.append(body.splitlines())
-        rest = rest[span.body_end:]
+        rest = rest[span.body_end :]
 
 
-def _field(lines: List[str], pattern: "re.Pattern[str]") -> str:
+def _field(lines: list[str], pattern: re.Pattern[str]) -> str:
     for line in lines:
         match = pattern.match(line)
         if match:
@@ -124,14 +123,14 @@ def _is_release_version(value: str) -> bool:
     return True
 
 
-def rc_branch_decisions(text: str, remote: str, branch_prefix: str) -> List[RcBranchDecision]:
+def rc_branch_decisions(text: str, remote: str, branch_prefix: str) -> list[RcBranchDecision]:
     """Decide, for every ``deletion failed`` item in *text*, delete or skip.
 
     *remote* is the git remote the caller would delete from; *branch_prefix*
     is the project's ``branch_prefix`` ("" for none). Duplicate items (the
     same branch named by more than one event) are reported once.
     """
-    decisions: List[RcBranchDecision] = []
+    decisions: list[RcBranchDecision] = []
     seen = set()
     for lines in _event_blocks(text):
         version = _field(lines, _VERSION_RE)
@@ -162,7 +161,7 @@ def rc_branch_decisions(text: str, remote: str, branch_prefix: str) -> List[RcBr
     return decisions
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the ``rc-branch-deletes`` command; return the exit code.
 
     Prints one tab-separated decision line per failed RC-branch deletion in

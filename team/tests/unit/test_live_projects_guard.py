@@ -98,9 +98,19 @@ def _run_child_session(
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env=extra)
     return subprocess.run(
         [
-            sys.executable, "-m", "pytest",
-            "-p", "no:cacheprovider", "-p", "no:randomly", "-p", "tests.conftest",
-            "--rootdir", str(test_dir), "-q", str(test_dir / "test_planted.py"),
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "no:randomly",
+            "-p",
+            "tests.conftest",
+            "--rootdir",
+            str(test_dir),
+            "-q",
+            str(test_dir / "test_planted.py"),
         ],
         capture_output=True,
         text=True,

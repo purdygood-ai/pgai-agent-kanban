@@ -120,9 +120,7 @@ def _heading_iteration_order(tmp_path: pathlib.Path, seed: str) -> list[list[str
         env=_scrubbed_env(tmp_path, seed),
         timeout=60,
     )
-    assert result.returncode == 0, (
-        f"heading-order probe failed under PYTHONHASHSEED={seed}:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"heading-order probe failed under PYTHONHASHSEED={seed}:\n{result.stderr}"
     return json.loads(result.stdout)
 
 
@@ -141,12 +139,8 @@ def _fixture_tree(tmp_path: pathlib.Path, name: str) -> tuple[pathlib.Path, path
             f"**Release Date:** 2026-01-01\n"
             f"**Released By:** test\n\n"
         )
-        (notes_dir / f"{version}.md").write_text(
-            header + textwrap.dedent(body), encoding="utf-8"
-        )
-    (notes_dir / "PUBLISHED").write_text(
-        "v1.0.0\nv1.16.2\nv1.23.0\n", encoding="utf-8"
-    )
+        (notes_dir / f"{version}.md").write_text(header + textwrap.dedent(body), encoding="utf-8")
+    (notes_dir / "PUBLISHED").write_text("v1.0.0\nv1.16.2\nv1.23.0\n", encoding="utf-8")
     bugs_dir = base / "bugs"
     shutil.copytree(_FIXTURE_BUGS_DIR, bugs_dir)
     return base / "repo", bugs_dir
@@ -169,11 +163,7 @@ def _render(tmp_path: pathlib.Path, seed: str) -> subprocess.CompletedProcess[by
 def test_render_is_byte_identical_under_two_hash_seeds(tmp_path: pathlib.Path) -> None:
     baseline_order = _heading_iteration_order(tmp_path, _BASELINE_SEED)
     other_seed = next(
-        (
-            seed
-            for seed in _CANDIDATE_SEEDS
-            if _heading_iteration_order(tmp_path, seed) != baseline_order
-        ),
+        (seed for seed in _CANDIDATE_SEEDS if _heading_iteration_order(tmp_path, seed) != baseline_order),
         None,
     )
     assert other_seed is not None, (

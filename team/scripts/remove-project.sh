@@ -38,7 +38,7 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
@@ -47,7 +47,7 @@ if [[ ! -d "$KANBAN_ROOT" ]]; then
     exit 3
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/operator_args.sh
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/pp_run_ops.sh

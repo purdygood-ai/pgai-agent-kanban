@@ -107,20 +107,29 @@ _SUBPROCESS_TIMEOUT_SECONDS = 150
 # guidelines.md, Anti-pattern 2), mirroring test_chain_lock_
 # reverification.py's own _LEAK_PREFIXES.
 _LEAK_PREFIXES = (
-    "PGAI_", "PP_", "KANBAN_ROOT", "CLAUDE_", "AI_AGENT", "STOP_FILE",
-    "TMPDIR", "MAX_TASK_SECONDS", "MAX_RUNTIME_SECONDS", "MAX_TASKS_PER_WAKE",
-    "MAX_PROJECT_SECONDS", "KILL_GRACE_SECONDS", "PAUSE_BETWEEN_TASKS",
-    "STOP_ON_BLOCKED", "AI_AUTH_MODE", "BASH_MAX_TIMEOUT_MS", "DASHBOARD_",
+    "PGAI_",
+    "PP_",
+    "KANBAN_ROOT",
+    "CLAUDE_",
+    "AI_AGENT",
+    "STOP_FILE",
+    "TMPDIR",
+    "MAX_TASK_SECONDS",
+    "MAX_RUNTIME_SECONDS",
+    "MAX_TASKS_PER_WAKE",
+    "MAX_PROJECT_SECONDS",
+    "KILL_GRACE_SECONDS",
+    "PAUSE_BETWEEN_TASKS",
+    "STOP_ON_BLOCKED",
+    "AI_AUTH_MODE",
+    "BASH_MAX_TIMEOUT_MS",
+    "DASHBOARD_",
     "PM_MAX_TASKS",
 )
 
 
 def _clean_base_env() -> dict[str, str]:
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)
-    }
+    env = {k: v for k, v in os.environ.items() if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)}
     # Every [wake] tunable a wake exports, LOCK_WAIT_SECONDS included, so
     # the sandbox kanban.cfg's lock_wait_seconds = 0 governs both chains.
     return scrub_wake_tunable_env(env)
@@ -172,16 +181,12 @@ def _build_kanban_root(
         "lock_wait_seconds = 0\n",
         encoding="utf-8",
     )
-    (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8")
 
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {project_name}\n"
-        "workflow_type = document\n",
+        "[project]\n" f"project_name = {project_name}\n" "workflow_type = document\n",
         encoding="utf-8",
     )
     queues_dir = proj / "tasks" / "queues"
@@ -194,9 +199,7 @@ def _build_kanban_root(
     for task_id in task_ids:
         _write_stub_task(proj / "tasks", task_id)
     lines = "\n".join(f"- [ ] {task_id} — stub task" for task_id in task_ids)
-    (queues_dir / f"{_AGENT}_backlog.md").write_text(
-        f"# {_AGENT} backlog\n\n{lines}\n", encoding="utf-8"
-    )
+    (queues_dir / f"{_AGENT}_backlog.md").write_text(f"# {_AGENT} backlog\n\n{lines}\n", encoding="utf-8")
 
     (root / "logs").mkdir(parents=True, exist_ok=True)
     (root / "locks").mkdir(parents=True, exist_ok=True)
@@ -228,7 +231,7 @@ def _lock_field(lock_file: pathlib.Path, key: str) -> str:
         return ""
     for line in text.splitlines():
         if line.startswith(f"{key}="):
-            return line[len(key) + 1:].strip()
+            return line[len(key) + 1 :].strip()
     return ""
 
 
@@ -238,15 +241,13 @@ def _lock_pid(lock_file: pathlib.Path) -> str:
 
 
 def _task_status_text(kanban_root: pathlib.Path, task_id: str) -> str:
-    return (kanban_root / "projects" / _PROJECT / "tasks" / task_id / "status.md").read_text(
-        encoding="utf-8"
-    )
+    return (kanban_root / "projects" / _PROJECT / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
 
 
 def _queue_text(kanban_root: pathlib.Path) -> str:
-    return (
-        kanban_root / "projects" / _PROJECT / "tasks" / "queues" / f"{_AGENT}_backlog.md"
-    ).read_text(encoding="utf-8")
+    return (kanban_root / "projects" / _PROJECT / "tasks" / "queues" / f"{_AGENT}_backlog.md").read_text(
+        encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,19 +392,18 @@ def test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons(
         chain_l = _Chain("L", kanban_root, _wake_env(kanban_root, stubs / "L-bin"))
         chain_l.wait_for(f"task {_TASK_L1}: transitioned to WORKING", timeout=60)
         assert lock_file.exists(), (
-            f"chain L must hold the lock file while its subagent runs.\n"
-            f"chain L output:\n{chain_l.output()}"
+            f"chain L must hold the lock file while its subagent runs.\n" f"chain L output:\n{chain_l.output()}"
         )
         l_pid = _lock_pid(lock_file)
         assert l_pid, f"chain L's provenance must name its pid.\n{lock_file.read_text()}"
         # The chain took the lock with task=none; dispatching L1 names it,
         # and the acquisition time recorded with the lock is kept.
-        assert _lock_field(lock_file, "task") == _TASK_L1, (
-            f"chain L's provenance must name the task it dispatched.\n{lock_file.read_text()}"
-        )
-        assert _lock_field(lock_file, "acquired_at"), (
-            f"chain L's provenance must keep its acquired_at.\n{lock_file.read_text()}"
-        )
+        assert (
+            _lock_field(lock_file, "task") == _TASK_L1
+        ), f"chain L's provenance must name the task it dispatched.\n{lock_file.read_text()}"
+        assert _lock_field(
+            lock_file, "acquired_at"
+        ), f"chain L's provenance must keep its acquired_at.\n{lock_file.read_text()}"
 
         # --- 2. Seed the loss: an external reap pulls L's file out from
         #        under it; chain W acquires the free path for real. ---
@@ -411,17 +411,15 @@ def test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons(
         chain_w = _Chain("W", kanban_root, _wake_env(kanban_root, stubs / "W-bin"))
         chain_w.wait_for(f"task {_TASK_W1}: transitioned to WORKING", timeout=60)
         assert lock_file.exists(), (
-            f"chain W must hold the lock file while its subagent runs.\n"
-            f"chain W output:\n{chain_w.output()}"
+            f"chain W must hold the lock file while its subagent runs.\n" f"chain W output:\n{chain_w.output()}"
         )
         w_pid = _lock_pid(lock_file)
         assert w_pid and w_pid != l_pid, (
-            f"chain W's provenance must name W's own pid (L was {l_pid!r}).\n"
-            f"{lock_file.read_text()}"
+            f"chain W's provenance must name W's own pid (L was {l_pid!r}).\n" f"{lock_file.read_text()}"
         )
-        assert _lock_field(lock_file, "task") == _TASK_W1, (
-            f"chain W's provenance must name the task it dispatched.\n{lock_file.read_text()}"
-        )
+        assert (
+            _lock_field(lock_file, "task") == _TASK_W1
+        ), f"chain W's provenance must name the task it dispatched.\n{lock_file.read_text()}"
         w_inode = lock_file.stat().st_ino
 
         # --- 3. L's subagent finishes; L stops at its merge boundary and
@@ -429,12 +427,10 @@ def test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons(
         l_rc = chain_l.wait_exit(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
         l_out = chain_l.output()
         assert l_rc == 0, (
-            f"a lost lock is a clean stop, not a crash: chain L must exit 0 "
-            f"(got {l_rc}).\nchain L output:\n{l_out}"
+            f"a lost lock is a clean stop, not a crash: chain L must exit 0 " f"(got {l_rc}).\nchain L output:\n{l_out}"
         )
         assert "error:   lock.provenance.reverify_lost" in l_out and "'merge'" in l_out, (
-            f"chain L must narrate the loss at the merge phase boundary.\n"
-            f"chain L output:\n{l_out}"
+            f"chain L must narrate the loss at the merge phase boundary.\n" f"chain L output:\n{l_out}"
         )
         assert f"task {_TASK_L1}: chain stopping before finalize/merge-verification" in l_out
         assert "abandoning this process's own fd without touching the lock file" in l_out, (
@@ -443,8 +439,7 @@ def test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons(
             f"chain L output:\n{l_out}"
         )
         assert "pgai_lock_release_all_held" not in l_out, (
-            f"chain L's exit sweep must have nothing left to release after "
-            f"the abandon.\nchain L output:\n{l_out}"
+            f"chain L's exit sweep must have nothing left to release after " f"the abandon.\nchain L output:\n{l_out}"
         )
         assert lock_file.exists() and lock_file.stat().st_ino == w_inode, (
             f"chain L's exit must leave chain W's lock file (inode {w_inode}) "
@@ -472,32 +467,26 @@ def test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons(
         s_out = s_result.stdout + s_result.stderr
         assert s_result.returncode == 0, f"chain S exited non-zero.\nchain S output:\n{s_out}"
         assert f"repo lock held by holder={_AGENT} pid={w_pid}" in s_out and "deferring" in s_out, (
-            f"chain S must log the healthy deferring path naming chain W as "
-            f"the holder.\nchain S output:\n{s_out}"
+            f"chain S must log the healthy deferring path naming chain W as " f"the holder.\nchain S output:\n{s_out}"
         )
         assert f"starting (agent={_AGENT}" not in s_out, (
-            f"chain S must never enter the project chain while W holds the "
-            f"lock.\nchain S output:\n{s_out}"
+            f"chain S must never enter the project chain while W holds the " f"lock.\nchain S output:\n{s_out}"
         )
-        assert not (stubs / "S-control" / "call_count").exists(), (
-            "chain S must never have dispatched a subagent"
-        )
+        assert not (stubs / "S-control" / "call_count").exists(), "chain S must never have dispatched a subagent"
 
         # --- 5. W's finalize completes on this first dispatch. ---
         w_rc = chain_w.wait_exit(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
         w_out = chain_w.output()
         assert w_rc == 0, f"chain W exited non-zero.\nchain W output:\n{w_out}"
         assert f"finished task {_TASK_W1} with state DONE" in w_out, (
-            f"chain W's finalize must run for {_TASK_W1} on the first dispatch.\n"
-            f"chain W output:\n{w_out}"
+            f"chain W's finalize must run for {_TASK_W1} on the first dispatch.\n" f"chain W output:\n{w_out}"
         )
         assert "repo lock ownership lost" not in w_out and "reverify_lost" not in w_out, (
-            f"chain W must never observe a loss: it held the lock throughout.\n"
-            f"chain W output:\n{w_out}"
+            f"chain W must never observe a loss: it held the lock throughout.\n" f"chain W output:\n{w_out}"
         )
-        assert f"stale-active: {_TASK_W1}" not in w_out and "resetting to [ ]/BACKLOG" not in w_out, (
-            f"no stale-active reset may touch {_TASK_W1}.\nchain W output:\n{w_out}"
-        )
+        assert (
+            f"stale-active: {_TASK_W1}" not in w_out and "resetting to [ ]/BACKLOG" not in w_out
+        ), f"no stale-active reset may touch {_TASK_W1}.\nchain W output:\n{w_out}"
         assert f"- [x] {_TASK_W1}" in _queue_text(kanban_root), (
             f"{_TASK_W1}'s [A] marker must have become [x].\n"
             f"queue:\n{_queue_text(kanban_root)}\nchain W output:\n{w_out}"
@@ -507,9 +496,7 @@ def test_lock_held_through_agent_sibling_defers_and_losing_chain_abandons(
 
         # W released its own lock normally at its chain's end; nothing
         # survives on disk.
-        assert not lock_file.exists(), (
-            "the lock file must not survive chain W's own end-of-chain release"
-        )
+        assert not lock_file.exists(), "the lock file must not survive chain W's own end-of-chain release"
     finally:
         for chain in (chain_l, chain_w):
             if chain is not None:

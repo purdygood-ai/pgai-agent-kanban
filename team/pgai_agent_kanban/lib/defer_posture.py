@@ -73,7 +73,7 @@ import dataclasses
 import os
 import pathlib
 import re
-from typing import Optional, Union
+from typing import Union
 
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.project_cfg import resolve_tiered_cfg_value
@@ -245,7 +245,7 @@ def is_well_formed_until(value: str) -> bool:
     return _WELL_FORMED_UNTIL_RE.fullmatch(value) is not None
 
 
-def _first_until_line(path: PathLike) -> Optional[str]:
+def _first_until_line(path: PathLike) -> str | None:
     """Return the first ``until=`` line's value with surrounding blanks trimmed.
 
     ``None`` when the file has no such line or cannot be read. The value is
@@ -371,9 +371,7 @@ def _validate(key: str, value: str, cfg: str) -> None:
     )
 
 
-def _tiered_value(
-    key: str, root: str, project_root: str, project_cfg: str, kanban_cfg: str
-) -> PostureValue:
+def _tiered_value(key: str, root: str, project_root: str, project_cfg: str, kanban_cfg: str) -> PostureValue:
     """Resolve one ``[release]`` key through project.cfg > kanban.cfg > default.
 
     The walk is the shared resolver's; this module only validates the
@@ -382,9 +380,7 @@ def _tiered_value(
     *project_cfg* or *kanban_cfg*, the paths refusals print), and a lower
     tier is never consulted after it.
     """
-    found = resolve_tiered_cfg_value(
-        root, project_root, "release", key, DEFAULTS[key], legacy=False
-    )
+    found = resolve_tiered_cfg_value(root, project_root, "release", key, DEFAULTS[key], legacy=False)
     if found.tier == TIER_PROJECT_CFG:
         _validate(key, found.value, project_cfg)
     elif found.tier == TIER_KANBAN_CFG:
@@ -397,7 +393,7 @@ def _tiered_value(
 # ---------------------------------------------------------------------------
 
 
-def resolve_defer_posture(kanban_root: PathLike, project: Optional[str] = None) -> DeferPosture:
+def resolve_defer_posture(kanban_root: PathLike, project: str | None = None) -> DeferPosture:
     """Return the deferral posture in force for *project*.
 
     Args:
@@ -456,7 +452,7 @@ def resolve_defer_posture(kanban_root: PathLike, project: Optional[str] = None) 
     )
 
 
-def posture_mode(posture: Optional[DeferPosture]) -> str:
+def posture_mode(posture: DeferPosture | None) -> str:
     """Return ``"on"``, ``"off"`` or ``"malformed"`` for a resolved posture.
 
     *posture* is ``None`` when resolution refused; that reads as
@@ -472,7 +468,7 @@ def posture_mode(posture: Optional[DeferPosture]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def severity_rank(value: str) -> Optional[int]:
+def severity_rank(value: str) -> int | None:
     """Return 1-4 for a recognised severity rung, or ``None``.
 
     Matched case-insensitively after trimming surrounding whitespace and then

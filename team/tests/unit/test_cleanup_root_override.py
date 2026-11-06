@@ -139,12 +139,8 @@ def test_disagreeing_roots_refuse_dual_channel_and_leave_decoy_untouched(
 
     # The decoy "live" root is byte-identical to before the invocation.
     after = _snapshot(decoy_root)
-    assert before == after, (
-        f"decoy root changed: added={after - before}, removed={before - after}"
-    )
-    assert (
-        decoy_root / "logs" / "agents" / "existing.log"
-    ).read_text() == "pre-existing content\n"
+    assert before == after, f"decoy root changed: added={after - before}, removed={before - after}"
+    assert (decoy_root / "logs" / "agents" / "existing.log").read_text() == "pre-existing content\n"
 
 
 def test_disagreeing_roots_refuse_even_without_dry_run(tmp_path: pathlib.Path) -> None:
@@ -170,9 +166,7 @@ def test_disagreeing_roots_refuse_even_without_dry_run(tmp_path: pathlib.Path) -
 
     assert result.returncode != 0
     after = _snapshot(decoy_root)
-    assert before == after, (
-        f"decoy root changed: added={after - before}, removed={before - after}"
-    )
+    assert before == after, f"decoy root changed: added={after - before}, removed={before - after}"
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +174,7 @@ def test_disagreeing_roots_refuse_even_without_dry_run(tmp_path: pathlib.Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_missing_kanban_root_is_derived_from_override_and_stays_sandboxed(
-    tmp_path: pathlib.Path, monkeypatch
-) -> None:
+def test_missing_kanban_root_is_derived_from_override_and_stays_sandboxed(tmp_path: pathlib.Path, monkeypatch) -> None:
     """Following the role-file sandboxing procedure literally -- repointing
     only PGAI_AGENT_KANBAN_ROOT_PATH -- must actually sandbox the run when
     KANBAN_ROOT was never set in the environment to begin with."""
@@ -220,9 +212,7 @@ def test_missing_kanban_root_is_derived_from_override_and_stays_sandboxed(
 # ---------------------------------------------------------------------------
 
 
-def test_both_roots_unset_fails_closed_without_home_fallback(
-    tmp_path: pathlib.Path, monkeypatch
-) -> None:
+def test_both_roots_unset_fails_closed_without_home_fallback(tmp_path: pathlib.Path, monkeypatch) -> None:
     """With neither variable set, cleanup.sh must still fail closed rather
     than silently operating against $HOME/pgai_agent_kanban. HOME is pointed
     at a decoy directory so a regression in the fail-closed guard cannot
@@ -324,12 +314,8 @@ def test_tasks_dir_export_reaching_past_sandboxed_roots_refuses_and_leaves_decoy
     # The decoy terminal task folder is byte-identical to before the
     # invocation -- no step reached it.
     after = _snapshot(decoy_tasks_dir)
-    assert before == after, (
-        f"decoy tasks dir changed: added={after - before}, removed={before - after}"
-    )
-    assert (
-        decoy_tasks_dir / "CLAUDE-old-terminal-task" / "status.md"
-    ).read_text() == "## State\nDONE\n"
+    assert before == after, f"decoy tasks dir changed: added={after - before}, removed={before - after}"
+    assert (decoy_tasks_dir / "CLAUDE-old-terminal-task" / "status.md").read_text() == "## State\nDONE\n"
 
 
 # ---------------------------------------------------------------------------
@@ -349,9 +335,7 @@ def _seed_decoy_project_root(project_root: pathlib.Path) -> None:
     )
     req_dir = project_root / "requirements"
     req_dir.mkdir()
-    (req_dir / "v1.0.0-shipped.md").write_text(
-        "# Requirements\n\n## Target Version\nv1.0.0\n"
-    )
+    (req_dir / "v1.0.0-shipped.md").write_text("# Requirements\n\n## Target Version\nv1.0.0\n")
 
 
 def test_project_root_export_reaching_past_sandboxed_roots_refuses_and_leaves_decoy_untouched(
@@ -405,9 +389,7 @@ def test_project_root_export_reaching_past_sandboxed_roots_refuses_and_leaves_de
 
     # The decoy project state is byte-identical to before the invocation.
     after = _snapshot(decoy_project_root)
-    assert before == after, (
-        f"decoy project root changed: added={after - before}, removed={before - after}"
-    )
+    assert before == after, f"decoy project root changed: added={after - before}, removed={before - after}"
     assert (
         decoy_project_root / "requirements" / "v1.0.0-shipped.md"
     ).read_text() == "# Requirements\n\n## Target Version\nv1.0.0\n"

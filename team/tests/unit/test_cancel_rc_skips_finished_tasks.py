@@ -58,7 +58,9 @@ def _require_git() -> None:
 def _git(repo: pathlib.Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
 
 
@@ -85,12 +87,8 @@ def _build_kanban_root(tmp_path: pathlib.Path, repo: pathlib.Path) -> pathlib.Pa
     (root / "logs").mkdir()
     (root / "tmp").mkdir()
 
-    (root / "kanban.cfg").write_text(
-        "[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8"
-    )
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text("[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8")
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     (proj / "project.cfg").write_text(
         "[project]\n"
         f"project_name = {_PROJECT}\n"
@@ -122,12 +120,9 @@ def _add_task(root: pathlib.Path, task_id: str, state_block: str) -> None:
     """Create a task referencing _VERSION whose ## State section is *state_block*."""
     task_dir = root / "projects" / _PROJECT / "tasks" / task_id
     task_dir.mkdir(parents=True)
-    (task_dir / "README.md").write_text(
-        f"# Task: {task_id}\n\n## Release Version\n{_VERSION}\n", encoding="utf-8"
-    )
+    (task_dir / "README.md").write_text(f"# Task: {task_id}\n\n## Release Version\n{_VERSION}\n", encoding="utf-8")
     (task_dir / "status.md").write_text(
-        f"# Status\n\n## Task\n{task_id}\n\n{state_block}"
-        "## Summary\nfixture\n\n## Needs Human\nno\n",
+        f"# Status\n\n## Task\n{task_id}\n\n{state_block}" "## Summary\nfixture\n\n## Needs Human\nno\n",
         encoding="utf-8",
     )
 
@@ -160,8 +155,14 @@ def _run_cancel_rc(tmp_path: pathlib.Path, root: pathlib.Path, repo: pathlib.Pat
     (tmp_path / "home").mkdir(exist_ok=True)
     argv = ["bash", str(_CANCEL_RC), "--project", _PROJECT, "--key", _VERSION, "--yes"]
     proc = subprocess.Popen(
-        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(foreign_cwd), start_new_session=True,
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(foreign_cwd),
+        start_new_session=True,
     )
     try:
         stdout, stderr = proc.communicate(timeout=_TIMEOUT_SECONDS)
@@ -183,10 +184,10 @@ def _listed_pending(stdout: str) -> set[str]:
     if heading not in lines:
         return set()
     listed: set[str] = set()
-    for line in lines[lines.index(heading) + 1:]:
+    for line in lines[lines.index(heading) + 1 :]:
         if not line.startswith("  - "):
             break
-        listed.add(line[len("  - "):].split(" ", 1)[0])
+        listed.add(line[len("  - ") :].split(" ", 1)[0])
     return listed
 
 

@@ -90,27 +90,25 @@ def test_release_against_a_taken_over_path_abandons_and_leaves_the_new_file(
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "RC=0" in result.stdout
-    assert "EXISTS=yes" in result.stdout, (
-        f"the new holder's lock file must survive the release.\nstdout: {result.stdout}"
-    )
-    assert "INO_SAME=yes" in result.stdout, (
-        f"the new holder's file must be the same inode, not recreated.\nstdout: {result.stdout}"
-    )
-    assert "pid=424242" in result.stdout and "holder=chain-b" in result.stdout, (
-        f"the new holder's provenance must be intact.\nstdout: {result.stdout}"
-    )
-    assert "BOOK_FDS=0 BOOK_PIDS=0" in result.stdout, (
-        f"the releasing process must drop its own bookkeeping.\nstdout: {result.stdout}"
-    )
-    assert "FD_OPEN=no" in result.stdout, (
-        f"the releasing process must close its own fd.\nstdout: {result.stdout}"
-    )
-    assert "lock.provenance.release_not_owner" in result.stderr, (
-        f"expected the dual-channel narration.\nstderr: {result.stderr}"
-    )
-    assert "424242" in result.stderr and "chain-b" in result.stderr, (
-        f"the narration must name the current holder's record.\nstderr: {result.stderr}"
-    )
+    assert (
+        "EXISTS=yes" in result.stdout
+    ), f"the new holder's lock file must survive the release.\nstdout: {result.stdout}"
+    assert (
+        "INO_SAME=yes" in result.stdout
+    ), f"the new holder's file must be the same inode, not recreated.\nstdout: {result.stdout}"
+    assert (
+        "pid=424242" in result.stdout and "holder=chain-b" in result.stdout
+    ), f"the new holder's provenance must be intact.\nstdout: {result.stdout}"
+    assert (
+        "BOOK_FDS=0 BOOK_PIDS=0" in result.stdout
+    ), f"the releasing process must drop its own bookkeeping.\nstdout: {result.stdout}"
+    assert "FD_OPEN=no" in result.stdout, f"the releasing process must close its own fd.\nstdout: {result.stdout}"
+    assert (
+        "lock.provenance.release_not_owner" in result.stderr
+    ), f"expected the dual-channel narration.\nstderr: {result.stderr}"
+    assert (
+        "424242" in result.stderr and "chain-b" in result.stderr
+    ), f"the narration must name the current holder's record.\nstderr: {result.stderr}"
     assert "release-locks.sh" in result.stderr
 
 
@@ -142,8 +140,11 @@ def test_exit_sweep_of_a_process_that_lost_its_lock_leaves_the_live_holder_alone
         exit 0
     """)
     loser = subprocess.Popen(
-        ["bash", "-c", loser_script], cwd=str(_repo_root()),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        ["bash", "-c", loser_script],
+        cwd=str(_repo_root()),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     holder = None
     try:
@@ -168,18 +169,18 @@ def test_exit_sweep_of_a_process_that_lost_its_lock_leaves_the_live_holder_alone
         # The loser now exits; its sweep runs against a path it no longer owns.
         loser_out, loser_err = loser.communicate(timeout=10)
         assert loser.returncode == 0, f"stdout:\n{loser_out}\nstderr:\n{loser_err}"
-        assert "pgai_lock_release_all_held" in loser_err, (
-            f"the sweep must have run for the parked lock.\nstderr: {loser_err}"
-        )
-        assert "lock.provenance.release_not_owner" in loser_err, (
-            f"the sweep's release must have narrated the abandon.\nstderr: {loser_err}"
-        )
+        assert (
+            "pgai_lock_release_all_held" in loser_err
+        ), f"the sweep must have run for the parked lock.\nstderr: {loser_err}"
+        assert (
+            "lock.provenance.release_not_owner" in loser_err
+        ), f"the sweep's release must have narrated the abandon.\nstderr: {loser_err}"
 
         assert lock_file.exists(), "the live holder's lock file must survive the loser's exit"
         assert lock_file.stat().st_ino == holder_ino, "the live holder's inode must be untouched"
-        assert lock_file.read_text(encoding="utf-8") == holder_record, (
-            "the live holder's provenance must be byte-identical after the loser's exit"
-        )
+        assert (
+            lock_file.read_text(encoding="utf-8") == holder_record
+        ), "the live holder's provenance must be byte-identical after the loser's exit"
 
         # The property that matters to the fleet: the lock is STILL held.
         # A fresh waiter must be contended (RC=1), not handed the lock.
@@ -228,13 +229,11 @@ def test_own_release_still_leaves_no_trace_and_is_silent(tmp_path: pathlib.Path)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "RC=0" in result.stdout
-    assert "EXISTS=no" in result.stdout, (
-        f"a clean release of an owned lock must leave no file.\nstdout: {result.stdout}"
-    )
+    assert (
+        "EXISTS=no" in result.stdout
+    ), f"a clean release of an owned lock must leave no file.\nstdout: {result.stdout}"
     assert "BOOK_FDS=0 BOOK_PIDS=0" in result.stdout
-    assert "release_not_owner" not in result.stderr, (
-        f"the owned path must not narrate.\nstderr: {result.stderr}"
-    )
+    assert "release_not_owner" not in result.stderr, f"the owned path must not narrate.\nstderr: {result.stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -263,14 +262,13 @@ def test_release_after_the_lock_file_vanished_does_not_recreate_it(
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "RC=0" in result.stdout
     assert "EXISTS=no" in result.stdout, (
-        f"release must not recreate a lock file that was removed out from under it.\n"
-        f"stdout: {result.stdout}"
+        f"release must not recreate a lock file that was removed out from under it.\n" f"stdout: {result.stdout}"
     )
     assert "BOOK_FDS=0" in result.stdout
     assert "lock.provenance.release_not_owner" in result.stderr
-    assert "no lock file at the path" in result.stderr, (
-        f"the narration must say what it found at the path.\nstderr: {result.stderr}"
-    )
+    assert (
+        "no lock file at the path" in result.stderr
+    ), f"the narration must say what it found at the path.\nstderr: {result.stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -298,12 +296,11 @@ def test_second_release_touches_nothing_at_the_path(tmp_path: pathlib.Path) -> N
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "RC=0" in result.stdout
-    assert "pid=424242" in result.stdout and "holder=chain-b" in result.stdout, (
-        f"the successor's record must survive a repeated release.\nstdout: {result.stdout}"
-    )
+    assert (
+        "pid=424242" in result.stdout and "holder=chain-b" in result.stdout
+    ), f"the successor's record must survive a repeated release.\nstdout: {result.stdout}"
     assert "release_not_owner" not in result.stderr, (
-        f"a repeat release of an already-released lock is a silent no-op.\n"
-        f"stderr: {result.stderr}"
+        f"a repeat release of an already-released lock is a silent no-op.\n" f"stderr: {result.stderr}"
     )
 
 
@@ -332,6 +329,6 @@ def test_abandon_drops_pid_bookkeeping_with_fd_bookkeeping(tmp_path: pathlib.Pat
     assert "BEFORE_FDS=1 BEFORE_PIDS=1" in result.stdout
     assert "AFTER_FDS=0 AFTER_PIDS=0" in result.stdout
     assert "EXISTS=yes" in result.stdout, "abandon never touches the on-disk file"
-    assert "pgai_lock_release_all_held" not in result.stderr, (
-        f"nothing may be left for the exit sweep after an abandon.\nstderr: {result.stderr}"
-    )
+    assert (
+        "pgai_lock_release_all_held" not in result.stderr
+    ), f"nothing may be left for the exit sweep after an abandon.\nstderr: {result.stderr}"

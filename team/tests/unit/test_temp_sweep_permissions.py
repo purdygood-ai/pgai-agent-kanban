@@ -117,9 +117,7 @@ def test_cleanup_tests_removes_read_only_leftover_and_returns_0(
         "the sweep must not abort the caller under set -euo pipefail: "
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert not tests_root.exists(), (
-        f"tests/ subtree was not fully removed: {tests_root} still exists"
-    )
+    assert not tests_root.exists(), f"tests/ subtree was not fully removed: {tests_root} still exists"
 
 
 def test_cleanup_tests_removes_nested_read_only_leftover(
@@ -233,12 +231,10 @@ def test_cleanup_tests_narrates_and_returns_1_when_recovery_cannot_help(
     # names the specific leftover; temp.sh's own summary line names the
     # swept tests/ subtree as a whole -- both land on stderr.
     assert str(leftover) in result.stderr, (
-        "the failure must name the exact path it could not remove: "
-        f"stderr: {result.stderr!r}"
+        "the failure must name the exact path it could not remove: " f"stderr: {result.stderr!r}"
     )
     assert str(tests_root) in result.stderr, (
-        "the failure must also name the tests/ subtree the sweep was "
-        f"asked to clear: stderr: {result.stderr!r}"
+        "the failure must also name the tests/ subtree the sweep was " f"asked to clear: stderr: {result.stderr!r}"
     )
 
 
@@ -302,12 +298,10 @@ def test_cleanup_tests_root_equals_tests_path_guard_is_present_in_source() -> No
     lib_path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "lib" / "temp.sh"
     source_text = lib_path.read_text()
     assert '[[ "$tests_path" == "$root" ]]' in source_text, (
-        "pgai_temp_cleanup_tests's tests-path-equals-root guard condition "
-        "is missing or was reworded"
+        "pgai_temp_cleanup_tests's tests-path-equals-root guard condition " "is missing or was reworded"
     )
     assert (
-        "refusing to remove the temp root itself" in source_text
-        and "tests path resolved to root" in source_text
+        "refusing to remove the temp root itself" in source_text and "tests path resolved to root" in source_text
     ), "the tests-path-equals-root guard's refusal message was changed"
 
 
@@ -363,8 +357,7 @@ exit 0
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "VERDICT_UNCHANGED_BY_SWEEP" in result.stdout, (
-        f"script aborted before its own exit 0: stdout: {result.stdout!r}\n"
-        f"stderr: {result.stderr!r}"
+        f"script aborted before its own exit 0: stdout: {result.stdout!r}\n" f"stderr: {result.stderr!r}"
     )
     # gated_runner_run_quality_lint prints the wrapped command's own
     # captured stdout+stderr verbatim to its caller's stdout, and narrates
@@ -372,15 +365,12 @@ exit 0
     # so the lint name is on stderr and the specific path (from
     # pgai_temp_cleanup_tests's own diagnostics, captured verbatim) is on
     # stdout.
-    assert "scratch_sweep" in result.stderr, (
-        f"the finding must be narrated, naming the lint: stderr: {result.stderr!r}"
-    )
-    assert "non-blocking" in result.stderr, (
-        f"the narration must say the finding did not block: stderr: {result.stderr!r}"
-    )
+    assert "scratch_sweep" in result.stderr, f"the finding must be narrated, naming the lint: stderr: {result.stderr!r}"
+    assert (
+        "non-blocking" in result.stderr
+    ), f"the narration must say the finding did not block: stderr: {result.stderr!r}"
     assert str(leftover) in result.stdout, (
-        "the narration must name the exact path the sweep could not clear: "
-        f"stdout: {result.stdout!r}"
+        "the narration must name the exact path the sweep could not clear: " f"stdout: {result.stdout!r}"
     )
 
 
@@ -454,9 +444,7 @@ exit 0
 
     assert result.returncode == 0, result.stdout + result.stderr
     findings = [
-        json.loads(line.removeprefix("FINDING="))
-        for line in result.stdout.splitlines()
-        if line.startswith("FINDING=")
+        json.loads(line.removeprefix("FINDING=")) for line in result.stdout.splitlines() if line.startswith("FINDING=")
     ]
     assert [(f["lint"], f["kind"], f["path"]) for f in findings] == [
         ("scratch_sweep", "scratch-leftover", str(leftover))

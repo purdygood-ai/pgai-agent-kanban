@@ -61,7 +61,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from typing import Optional
 
 import pytest
 from tests.fixtures.binary_guard import require_binary
@@ -83,6 +82,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="cm-release-synthetic")
+
 
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
@@ -125,20 +125,24 @@ def _init_git_repo_with_remote(
 
     subprocess.run(
         ["git", "init", "--bare", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     subprocess.run(
         ["git", "-C", str(repo_path), "init", f"--initial-branch={main_branch}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     (repo_path / "README.md").write_text("# Synthetic release test repo\n", encoding="utf-8")
@@ -147,22 +151,25 @@ def _init_git_repo_with_remote(
     (repo_path / "release-notes").mkdir(parents=True, exist_ok=True)
     (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
-        ["git", "-C", str(repo_path), "add", "README.md",
-         "release-notes/PUBLISHED"],
-        capture_output=True, check=True,
+        ["git", "-C", str(repo_path), "add", "README.md", "release-notes/PUBLISHED"],
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "Initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", main_branch],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -197,10 +204,7 @@ def _build_kanban_root(
     )
 
     (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\n"
-        "priority=1\n"
-        "description=Synthetic release test project\n"
-        "enabled=true\n",
+        f"[project:{project_name}]\n" "priority=1\n" "description=Synthetic release test project\n" "enabled=true\n",
         encoding="utf-8",
     )
 
@@ -246,9 +250,7 @@ def _build_kanban_root(
 
     src_cm_dir = _KANBAN_PY_DIR / "cm"
     for py_file in src_cm_dir.glob("*.py"):
-        (cm_py_dir / py_file.name).write_text(
-            py_file.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
     copy_section_reader_modules(cm_py_dir.parent)
 
     return root
@@ -258,8 +260,8 @@ def _build_cm_script_env(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    repo_root: Optional[pathlib.Path] = None,
-    extra_env: Optional[dict] = None,
+    repo_root: pathlib.Path | None = None,
+    extra_env: dict | None = None,
 ) -> dict:
     """Build the environment `_run_cm_script` hands to its child process.
 
@@ -299,10 +301,10 @@ def _run_cm_script(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    repo_root: Optional[pathlib.Path] = None,
-    extra_env: Optional[dict] = None,
+    repo_root: pathlib.Path | None = None,
+    extra_env: dict | None = None,
     timeout: int = 90,
-    cwd: Optional[pathlib.Path] = None,
+    cwd: pathlib.Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a CM script against a temporary kanban root.
 
@@ -312,12 +314,18 @@ def _run_cm_script(
     stderr.
     """
     env = _build_cm_script_env(
-        kanban_root, project_name, repo_root=repo_root, extra_env=extra_env,
+        kanban_root,
+        project_name,
+        repo_root=repo_root,
+        extra_env=extra_env,
     )
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=env,
-        cwd=str(cwd if cwd is not None else kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cwd if cwd is not None else kanban_root),
+        timeout=timeout,
     )
 
 
@@ -325,7 +333,9 @@ def _git_local(repo_path: pathlib.Path, *args: str) -> str:
     """Run a git command in *repo_path* and return stripped stdout."""
     result = subprocess.run(
         ["git", "-C", str(repo_path)] + list(args),
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -334,7 +344,8 @@ def _git_branch_exists_local(repo_path: pathlib.Path, branch: str) -> bool:
     """Return True when *branch* exists as a local branch in *repo_path*."""
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/heads/{branch}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
@@ -343,7 +354,8 @@ def _git_tag_exists(repo_path: pathlib.Path, tag: str) -> bool:
     """Return True when *tag* exists in *repo_path*."""
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/tags/{tag}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
@@ -354,7 +366,7 @@ def _commit_on_branch(
     filename: str,
     content: str,
     message: str,
-    return_branch: Optional[str] = None,
+    return_branch: str | None = None,
 ) -> None:
     """Check out *branch*, write *filename* with *content*, commit, then return to *return_branch*.
 
@@ -392,7 +404,8 @@ class TestRunCmScriptEnvironmentScrub:
             monkeypatch.setenv(name, "1")
 
         built_env = _build_cm_script_env(
-            tmp_path / "kanban_root", "scrub_guard_project",
+            tmp_path / "kanban_root",
+            "scrub_guard_project",
         )
 
         for name in AGENT_SCOPED_ENV_NAMES:
@@ -413,7 +426,8 @@ class TestRunCmScriptEnvironmentScrub:
 
         opted_in = {name: "1" for name in AGENT_SCOPED_ENV_NAMES}
         built_env = _build_cm_script_env(
-            tmp_path / "kanban_root", "scrub_guard_project",
+            tmp_path / "kanban_root",
+            "scrub_guard_project",
             extra_env=opted_in,
         )
 
@@ -433,9 +447,7 @@ class TestRunCmScriptEnvironmentScrub:
 class TestCleanRelease:
     """Case (a): end-to-end clean release with no mid-RC divergence on main."""
 
-    def test_clean_release_produces_tag_notes_and_cleans_rc_branch(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_clean_release_produces_tag_notes_and_cleans_rc_branch(self, tmp_path: pathlib.Path) -> None:
         """Open RC, add coder work, release cleanly — all five assertions must hold.
 
         Asserts:
@@ -455,41 +467,46 @@ class TestCleanRelease:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Step 1: Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         rc_branch = f"rc/{version}"
         assert _git_branch_exists_local(repo_path, rc_branch), (
-            f"RC branch '{rc_branch}' was not created.\n"
-            f"stdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+            f"RC branch '{rc_branch}' was not created.\n" f"stdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         )
 
         # Step 2: Simulate coder work — add a unique file on the RC branch.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_clean.txt", "clean feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_clean.txt",
+            "clean feature content\n",
             "feat: add feature for clean release",
             return_branch="main",
         )
 
         # Step 3: Run cm-release.sh.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_release.returncode == 0, (
-            f"cm-release.sh failed.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
-        )
+        assert (
+            result_release.returncode == 0
+        ), f"cm-release.sh failed.\nstdout: {result_release.stdout}\nstderr: {result_release.stderr}"
 
         combined_output = result_release.stdout + result_release.stderr
 
@@ -508,9 +525,9 @@ class TestCleanRelease:
 
         # Assertion 3: release-notes commit exists on main.
         rn_committed = subprocess.run(
-            ["git", "-C", str(repo_path), "ls-tree", "--name-only", "HEAD",
-             f"release-notes/{version}.md"],
-            capture_output=True, text=True,
+            ["git", "-C", str(repo_path), "ls-tree", "--name-only", "HEAD", f"release-notes/{version}.md"],
+            capture_output=True,
+            text=True,
         )
         assert f"release-notes/{version}.md" in rn_committed.stdout, (
             f"release-notes/{version}.md was not committed to main HEAD.\n"
@@ -550,9 +567,7 @@ def _ledger_bug(name: str, status: str) -> str:
 class TestFixedInWriteback:
     """Step 16b stamps ## Fixed In on this release's bugs, from any cwd."""
 
-    def test_release_from_shadowing_cwd_stamps_only_bugs_this_release_closed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_from_shadowing_cwd_stamps_only_bugs_this_release_closed(self, tmp_path: pathlib.Path) -> None:
         """Release run from a directory whose child ``pgai_agent_kanban/`` is
         not a Python package (the kanban root seen from its parent), with
         PYTHONPATH empty so only the release engine's own path composition
@@ -571,20 +586,26 @@ class TestFixedInWriteback:
         bare_remote = tmp_path / "bare_remote.git"
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
         proj = kanban_root / "projects" / project_name
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         _commit_on_branch(
-            repo_path, f"rc/{version}", "feature_fixed_in.txt", "fix\n",
-            "fix: resolve the bundled defect", return_branch="main",
+            repo_path,
+            f"rc/{version}",
+            "feature_fixed_in.txt",
+            "fix\n",
+            "fix: resolve the bundled defect",
+            return_branch="main",
         )
 
         # Ledger: one bug bundled into this RC, one closed by an earlier release.
@@ -615,8 +636,13 @@ class TestFixedInWriteback:
         (shadow_parent / "pgai_agent_kanban" / "projects").mkdir(parents=True)
 
         result = _run_cm_script(
-            _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
-            extra_env={"PYTHONPATH": ""}, cwd=shadow_parent,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
+            extra_env={"PYTHONPATH": ""},
+            cwd=shadow_parent,
         )
         output = result.stdout + result.stderr
         assert result.returncode == 0, f"cm-release.sh failed.\n{output}"
@@ -655,9 +681,7 @@ class TestConflictingMidRcMainCommit:
     and the existing Trigger-5 HALT fires.
     """
 
-    def test_conflicting_mid_rc_commit_triggers_halt_and_preserves_main(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_conflicting_mid_rc_commit_triggers_halt_and_preserves_main(self, tmp_path: pathlib.Path) -> None:
         """Conflicting commit on main mid-RC causes Trigger-5 HALT; main's commit survives.
 
         Scenario:
@@ -679,37 +703,43 @@ class TestConflictingMidRcMainCommit:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Create a shared file on main that both branches will modify differently.
         _commit_on_branch(
-            repo_path, "main",
-            "shared.txt", "line A\nline B\nline C\n",
+            repo_path,
+            "main",
+            "shared.txt",
+            "line A\nline B\nline C\n",
             "chore: add shared file before RC",
         )
         # Push so origin is up to date for cm-open-rc.sh's fetch/pull.
         subprocess.run(
             ["git", "-C", str(repo_path), "push", "origin", "main"],
-            capture_output=True, check=True,
+            capture_output=True,
+            check=True,
         )
 
         # Step 1: Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         rc_branch = f"rc/{version}"
 
         # Step 2: Coder modifies shared.txt on the RC branch.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "shared.txt", "line A\nline B — RC version\nline C\n",
+            repo_path,
+            rc_branch,
+            "shared.txt",
+            "line A\nline B — RC version\nline C\n",
             "feat: RC modifies shared.txt",
             return_branch="main",
         )
@@ -718,8 +748,10 @@ class TestConflictingMidRcMainCommit:
         # while the RC is in flight.  This simulates the scenario -X theirs used
         # to silently absorb — with the strategy removed it must now HALT.
         _commit_on_branch(
-            repo_path, "main",
-            "shared.txt", "line A\nline B — main operator version\nline C\n",
+            repo_path,
+            "main",
+            "shared.txt",
+            "line A\nline B — main operator version\nline C\n",
             "fix: operator commits conflicting change to main mid-RC",
         )
 
@@ -729,8 +761,11 @@ class TestConflictingMidRcMainCommit:
 
         # Step 4: Attempt cm-release.sh — must HALT on squash conflict.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         # Assertion 1: non-zero exit.
@@ -742,8 +777,7 @@ class TestConflictingMidRcMainCommit:
         # Assertion 2: HALT message cites the squash conflict (Trigger 5).
         combined_output = result_release.stdout + result_release.stderr
         assert "Trigger 5" in combined_output, (
-            "Expected 'Trigger 5' in release output (squash conflict HALT).\n"
-            f"output: {combined_output}"
+            "Expected 'Trigger 5' in release output (squash conflict HALT).\n" f"output: {combined_output}"
         )
 
         # Assertion 3: no tag was created.
@@ -788,9 +822,7 @@ class TestNonConflictingMidRcMainCommit:
     without duplicating the full fixture.
     """
 
-    def test_non_conflicting_mid_rc_commit_fires_fidelity_gate(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_non_conflicting_mid_rc_commit_fires_fidelity_gate(self, tmp_path: pathlib.Path) -> None:
         """Non-conflicting commit on main mid-RC causes fidelity gate HALT; no tag created.
 
         Scenario:
@@ -815,25 +847,28 @@ class TestNonConflictingMidRcMainCommit:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Step 1: Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         rc_branch = f"rc/{version}"
 
         # Step 2: Coder adds a file on the RC branch.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_nc.txt", "non-conflicting feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_nc.txt",
+            "non-conflicting feature content\n",
             "feat: add feature on RC branch",
             return_branch="main",
         )
@@ -842,15 +877,20 @@ class TestNonConflictingMidRcMainCommit:
         # This commit cannot conflict with the squash but will make main's tree differ
         # from rc/<version> after the squash, triggering the fidelity gate.
         _commit_on_branch(
-            repo_path, "main",
-            "hotfix_nc.txt", "non-conflicting hotfix content\n",
+            repo_path,
+            "main",
+            "hotfix_nc.txt",
+            "non-conflicting hotfix content\n",
             "fix: operator adds non-conflicting hotfix to main mid-RC",
         )
 
         # Step 4: Run cm-release.sh — squash succeeds but fidelity gate fires.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         # Assertion 1: non-zero exit (fidelity gate HALT).
@@ -861,12 +901,8 @@ class TestNonConflictingMidRcMainCommit:
 
         # Assertion 2: fidelity-gate divergence indicator in output.
         combined_output = result_release.stdout + result_release.stderr
-        assert (
-            "DIVERGENCE" in combined_output
-            or "fidelity gate" in combined_output.lower()
-        ), (
-            "Expected divergence or fidelity gate indicator in release output.\n"
-            f"output: {combined_output}"
+        assert "DIVERGENCE" in combined_output or "fidelity gate" in combined_output.lower(), (
+            "Expected divergence or fidelity gate indicator in release output.\n" f"output: {combined_output}"
         )
 
         # Assertion 3: no tag was created.
@@ -925,13 +961,11 @@ def _assert_changelog_fresh_at_commit(
     #
     # Determine which version files are present at commit_ref.
     ls_result = subprocess.run(
-        ["git", "-C", str(repo_path), "ls-tree", "--name-only", commit_ref,
-         "release-notes/"],
-        capture_output=True, text=True,
+        ["git", "-C", str(repo_path), "ls-tree", "--name-only", commit_ref, "release-notes/"],
+        capture_output=True,
+        text=True,
     )
-    release_notes_entries = [
-        e.strip() for e in ls_result.stdout.splitlines() if e.strip()
-    ]
+    release_notes_entries = [e.strip() for e in ls_result.stdout.splitlines() if e.strip()]
 
     # Build a minimal file-system snapshot that changelog_writer can read.
     # We use the repo_path directly but at this point in the test the working
@@ -950,7 +984,8 @@ def _assert_changelog_fresh_at_commit(
     regen_result = subprocess.run(
         [
             sys.executable,
-            "-m", "pgai_agent_kanban.cm.changelog_writer",
+            "-m",
+            "pgai_agent_kanban.cm.changelog_writer",
             str(repo_path),
             str(bugs_dir),
         ],
@@ -1014,9 +1049,7 @@ class TestChangelogFreshnessAfterRelease:
     subprocess as belt-and-braces (mirroring the cm-release.sh invocation).
     """
 
-    def test_changelog_fresh_at_tip_and_tag_after_release_with_writer_notes(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_changelog_fresh_at_tip_and_tag_after_release_with_writer_notes(self, tmp_path: pathlib.Path) -> None:
         """Full release with WRITER-authored notes: changelog fresh at tip and tag; tag == tip.
 
         Scenario:
@@ -1045,9 +1078,7 @@ class TestChangelogFreshnessAfterRelease:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Create the bugs directory that cm-release.sh Step 11b passes to
         # changelog_writer.  An empty directory means no known issues — the
@@ -1058,12 +1089,15 @@ class TestChangelogFreshnessAfterRelease:
 
         # Step 1: Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         rc_branch = f"rc/{version}"
         assert _git_branch_exists_local(repo_path, rc_branch), (
@@ -1073,8 +1107,10 @@ class TestChangelogFreshnessAfterRelease:
 
         # Step 2: Simulate coder work on the RC branch.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_polish.txt", "polish regression test feature\n",
+            repo_path,
+            rc_branch,
+            "feature_polish.txt",
+            "polish regression test feature\n",
             "feat: add feature for polish regression test",
             return_branch=None,  # stay on rc_branch
         )
@@ -1104,12 +1140,9 @@ class TestChangelogFreshnessAfterRelease:
             ## Known Issues
             None
             """)
-        (repo_path / "release-notes" / f"{version}.md").write_text(
-            writer_notes, encoding="utf-8"
-        )
+        (repo_path / "release-notes" / f"{version}.md").write_text(writer_notes, encoding="utf-8")
         _git_local(repo_path, "add", f"release-notes/{version}.md")
-        _git_local(repo_path, "commit", "-m",
-                   f"docs: WRITER release notes for {version}")
+        _git_local(repo_path, "commit", "-m", f"docs: WRITER release notes for {version}")
 
         # Return to main for the release run (cm-release.sh checks out main itself,
         # but starting from main avoids any detached HEAD confusion).
@@ -1117,12 +1150,14 @@ class TestChangelogFreshnessAfterRelease:
 
         # Step 4: Run cm-release.sh.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
-            f"cm-release.sh failed.\n"
-            f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
+            f"cm-release.sh failed.\n" f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         )
 
         # Verify we are on main at the tip.
@@ -1166,9 +1201,9 @@ class TestChangelogFreshnessAfterRelease:
         # commit (README.md reference update), which is also the branch tip —
         # no subsequent commits are added.
         describe_result = subprocess.run(
-            ["git", "-C", str(repo_path), "describe", "--tags", "--exact-match",
-             "HEAD"],
-            capture_output=True, text=True,
+            ["git", "-C", str(repo_path), "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
         )
         # --exact-match exits 0 only when HEAD is directly at a tag; exits 128 otherwise.
         assert describe_result.returncode == 0, (
@@ -1228,7 +1263,8 @@ def _build_partial_release_state(
 
     # Add coder work on the RC branch.
     _commit_on_branch(
-        repo_path, rc_branch,
+        repo_path,
+        rc_branch,
         f"feature_{stop_after}_resume.txt",
         f"resume test feature content for {stop_after}\n",
         f"feat: add feature for {stop_after} resume test",
@@ -1238,11 +1274,13 @@ def _build_partial_release_state(
     # Squash the RC branch content onto main (Step 6 + 7).
     subprocess.run(
         ["git", "-C", str(repo_path), "merge", "--squash", rc_branch],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", f"Release {version}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     if stop_after == "squash":
@@ -1262,11 +1300,13 @@ def _build_partial_release_state(
     (release_notes_dir / f"{version}.md").write_text(notes_stub, encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_path), "add", f"release-notes/{version}.md"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", f"Add release notes for {version}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     if stop_after == "notes":
@@ -1284,7 +1324,8 @@ def _build_partial_release_state(
     cl_result = subprocess.run(
         [
             sys.executable,
-            "-m", "pgai_agent_kanban.cm.changelog_writer",
+            "-m",
+            "pgai_agent_kanban.cm.changelog_writer",
             str(repo_path),
             str(bugs_dir),
         ],
@@ -1300,11 +1341,13 @@ def _build_partial_release_state(
     (repo_path / "CHANGELOG.md").write_text(cl_result.stdout, encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_path), "add", "CHANGELOG.md"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", f"Update CHANGELOG.md for {version}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     # stop_after == 'changelog' — return without creating the tag.
@@ -1327,15 +1370,21 @@ class TestResumeFromPartialRun:
         "version, project_name, stop_after",
         [
             pytest.param(
-                "v0.5.0", "resume-post-squash-test", "squash",
+                "v0.5.0",
+                "resume-post-squash-test",
+                "squash",
                 id="post_squash_no_notes_no_changelog_no_tag",
             ),
             pytest.param(
-                "v0.6.0", "resume-post-notes-test", "notes",
+                "v0.6.0",
+                "resume-post-notes-test",
+                "notes",
                 id="post_notes_no_changelog_no_tag",
             ),
             pytest.param(
-                "v0.7.0", "resume-post-changelog-test", "changelog",
+                "v0.7.0",
+                "resume-post-changelog-test",
+                "changelog",
                 id="post_changelog_no_tag",
             ),
         ],
@@ -1375,38 +1424,46 @@ class TestResumeFromPartialRun:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Step 1: Open the RC branch.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         rc_branch = f"rc/{version}"
 
         # Step 2: Build partial git state (simulate release.sh dying at stop_after).
         _build_partial_release_state(
-            repo_path, kanban_root, project_name, version, stop_after=stop_after,
+            repo_path,
+            kanban_root,
+            project_name,
+            version,
+            stop_after=stop_after,
         )
 
         # Verify the partial state looks right before resuming.
-        assert _git_branch_exists_local(repo_path, rc_branch), (
-            f"RC branch '{rc_branch}' must still exist in partial state '{stop_after}'."
-        )
-        assert not _git_tag_exists(repo_path, version), (
-            f"Tag '{version}' must NOT exist before the resume run (partial state '{stop_after}')."
-        )
+        assert _git_branch_exists_local(
+            repo_path, rc_branch
+        ), f"RC branch '{rc_branch}' must still exist in partial state '{stop_after}'."
+        assert not _git_tag_exists(
+            repo_path, version
+        ), f"Tag '{version}' must NOT exist before the resume run (partial state '{stop_after}')."
 
         # Step 3: Re-invoke release.sh — must complete end-to-end.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             f"cm-release.sh failed on resume from partial state '{stop_after}'.\n"
@@ -1427,13 +1484,9 @@ class TestResumeFromPartialRun:
         )
 
         # Assertion 3: release-state Active RC cleared.
-        release_state_path = (
-            kanban_root / "projects" / project_name / "release-state.md"
-        )
+        release_state_path = kanban_root / "projects" / project_name / "release-state.md"
         release_state_text = release_state_path.read_text(encoding="utf-8")
-        assert "Active RC" in release_state_text, (
-            "release-state.md must contain '## Active RC' after resume run."
-        )
+        assert "Active RC" in release_state_text, "release-state.md must contain '## Active RC' after resume run."
         # The Active RC field must be 'none' (cleared by Step 12).
         lines = release_state_text.splitlines()
         active_rc_value = ""
@@ -1468,7 +1521,7 @@ def _commit_in_repo_hook(
     script_body: str,
     message: str,
     *,
-    return_branch: Optional[str] = None,
+    return_branch: str | None = None,
 ) -> None:
     """Check out *branch*, write an executable in-repo hook for *phase*, commit it.
 
@@ -1504,9 +1557,7 @@ class TestVerifyBeforeDestroy:
     fired, so a rigged failure here left nothing to cleanly re-run against.
     """
 
-    def test_rigged_pre_tag_hook_leaves_world_untouched_then_fix_and_rerun_ships(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_rigged_pre_tag_hook_leaves_world_untouched_then_fix_and_rerun_ships(self, tmp_path: pathlib.Path) -> None:
         """Rigged pre-tag hook failure preserves all state; fix-and-rerun tags cleanly.
 
         Scenario:
@@ -1532,29 +1583,31 @@ class TestVerifyBeforeDestroy:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="true"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="true")
 
         # Step 1: Open the RC (pushed to the origin fixture remote).
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
 
         rc_branch = f"rc/{version}"
         assert _git_branch_exists_local(repo_path, rc_branch), (
-            f"RC branch '{rc_branch}' was not created.\n"
-            f"stdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+            f"RC branch '{rc_branch}' was not created.\n" f"stdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         )
-        origin_has_rc = subprocess.run(
-            ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads",
-             "origin", rc_branch],
-            capture_output=True,
-        ).returncode == 0
+        origin_has_rc = (
+            subprocess.run(
+                ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads", "origin", rc_branch],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
         assert origin_has_rc, (
             f"RC branch '{rc_branch}' was not pushed to the origin fixture remote "
             "by cm-open-rc.sh (push_to_remote=true)."
@@ -1562,12 +1615,16 @@ class TestVerifyBeforeDestroy:
 
         # Step 2: Coder work, plus a pre-tag hook rigged to fail.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_vbd.txt", "verify-before-destroy feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_vbd.txt",
+            "verify-before-destroy feature content\n",
             "feat: add feature for verify-before-destroy test",
         )
         _commit_in_repo_hook(
-            repo_path, rc_branch, "pre-tag",
+            repo_path,
+            rc_branch,
+            "pre-tag",
             "#!/usr/bin/env bash\nexit 1\n",
             "chore: add pre-tag hook rigged to fail",
             return_branch="main",
@@ -1575,15 +1632,16 @@ class TestVerifyBeforeDestroy:
 
         # Step 3: Snapshot pre-release state.
         main_pre_release_sha = _git_local(repo_path, "rev-parse", "main")
-        release_state_path = (
-            kanban_root / "projects" / project_name / "release-state.md"
-        )
+        release_state_path = kanban_root / "projects" / project_name / "release-state.md"
         release_state_pre_release = release_state_path.read_text(encoding="utf-8")
 
         # Step 4: Run cm-release.sh — the rigged pre-tag hook must HALT it.
         result_release_1 = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release_1.returncode != 0, (
             "cm-release.sh must exit non-zero when the pre-tag hook is rigged to fail.\n"
@@ -1596,11 +1654,13 @@ class TestVerifyBeforeDestroy:
             "failing — destructive steps ran before verification completed.\n"
             f"stdout: {result_release_1.stdout}\nstderr: {result_release_1.stderr}"
         )
-        origin_still_has_rc = subprocess.run(
-            ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads",
-             "origin", rc_branch],
-            capture_output=True,
-        ).returncode == 0
+        origin_still_has_rc = (
+            subprocess.run(
+                ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads", "origin", rc_branch],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
         assert origin_still_has_rc, (
             f"RC branch '{rc_branch}' was deleted on origin despite the pre-tag gate "
             "failing.\n"
@@ -1628,7 +1688,9 @@ class TestVerifyBeforeDestroy:
         # manual git surgery on main, the RC branch, or release-state.md: this
         # commit is the entire "operator" action between the two runs.
         _commit_in_repo_hook(
-            repo_path, rc_branch, "pre-tag",
+            repo_path,
+            rc_branch,
+            "pre-tag",
             "#!/usr/bin/env bash\nexit 0\n",
             "fix: pre-tag hook no longer exits non-zero",
             return_branch="main",
@@ -1636,8 +1698,11 @@ class TestVerifyBeforeDestroy:
 
         # Step 7: Re-run cm-release.sh — must complete end-to-end this time.
         result_release_2 = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release_2.returncode == 0, (
             "cm-release.sh must complete after the pre-tag hook is fixed, with no "
@@ -1652,11 +1717,13 @@ class TestVerifyBeforeDestroy:
             f"RC branch '{rc_branch}' still exists locally after the successful rerun.\n"
             f"stdout: {result_release_2.stdout}\nstderr: {result_release_2.stderr}"
         )
-        origin_has_rc_after = subprocess.run(
-            ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads",
-             "origin", rc_branch],
-            capture_output=True,
-        ).returncode == 0
+        origin_has_rc_after = (
+            subprocess.run(
+                ["git", "-C", str(repo_path), "ls-remote", "--exit-code", "--heads", "origin", rc_branch],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
         assert not origin_has_rc_after, (
             f"RC branch '{rc_branch}' still exists on origin after the successful rerun.\n"
             f"stdout: {result_release_2.stdout}\nstderr: {result_release_2.stderr}"
@@ -1672,9 +1739,9 @@ class TestVerifyBeforeDestroy:
             "narration in the successful release's output.\n"
             f"stdout: {stdout_2}"
         )
-        assert "[Step 10] Deleting" in stdout_2, (
-            f"Expected the RC-branch-deletion step log line in stdout.\nstdout: {stdout_2}"
-        )
+        assert (
+            "[Step 10] Deleting" in stdout_2
+        ), f"Expected the RC-branch-deletion step log line in stdout.\nstdout: {stdout_2}"
         verification_line_pos = stdout_2.index("verification complete")
         destructive_step_pos = stdout_2.index("[Step 10] Deleting")
         assert verification_line_pos < destructive_step_pos, (
@@ -1699,9 +1766,7 @@ class TestHookResolutionIsRcBranchAware:
     dev tree checked out anywhere without affecting hook resolution.
     """
 
-    def test_pre_squash_hook_resolves_from_rc_branch_not_checked_out_branch(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_pre_squash_hook_resolves_from_rc_branch_not_checked_out_branch(self, tmp_path: pathlib.Path) -> None:
         """Dev tree parked on an unrelated branch; pre-squash hook still resolves from the RC.
 
         Scenario:
@@ -1729,28 +1794,33 @@ class TestHookResolutionIsRcBranchAware:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Step 1: Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
 
         # Step 2: Coder work + the RC branch's own pre-squash hook.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_hookres.txt", "hook resolution test feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_hookres.txt",
+            "hook resolution test feature content\n",
             "feat: add feature for hook resolution test",
         )
         _commit_in_repo_hook(
-            repo_path, rc_branch, "pre-squash",
+            repo_path,
+            rc_branch,
+            "pre-squash",
             "#!/usr/bin/env bash\ntouch rc_hook_ran.txt\n",
             "chore: add pre-squash hook that marks the RC branch ran",
         )
@@ -1758,7 +1828,9 @@ class TestHookResolutionIsRcBranchAware:
         # Step 3: An unrelated branch (off main) with DIFFERENT hook content.
         _git_local(repo_path, "checkout", "-b", "unrelated-branch", "main")
         _commit_in_repo_hook(
-            repo_path, "unrelated-branch", "pre-squash",
+            repo_path,
+            "unrelated-branch",
+            "pre-squash",
             "#!/usr/bin/env bash\ntouch unrelated_hook_ran.txt\n",
             "chore: add pre-squash hook that marks the unrelated branch ran",
         )
@@ -1766,8 +1838,11 @@ class TestHookResolutionIsRcBranchAware:
         # check out main or the RC branch before invoking cm-release.sh.
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             "cm-release.sh must complete even when the dev tree is parked on an "
@@ -1785,6 +1860,86 @@ class TestHookResolutionIsRcBranchAware:
             "NOT be a function of whatever the dev tree currently has checked out.\n"
             f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Release run by a relative script path from the kanban root
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseByRelativeScriptPath:
+    """release.sh named by a relative path from the kanban root, the way a CM
+    task runs it (`bash scripts/cm/release.sh --project <name>`), reaches its
+    pre-squash hook and runs it. The hook runner changes into the dev tree
+    before it calls pp_run_ops, so this holds only while the shared libraries
+    find their own tree when they are sourced rather than when called.
+
+    The sandbox kanban root is laid out like a live install: its scripts/ and
+    pgai_agent_kanban/ are links to this tree's own copies, so the relative
+    path the release is started by is literally scripts/cm/release.sh.
+    """
+
+    def test_relative_release_script_path_runs_the_pre_squash_hook(self, tmp_path: pathlib.Path) -> None:
+        version = "v0.22.0"
+        project_name = "relative-release-path-test"
+
+        bare_remote = tmp_path / "bare_remote.git"
+        repo_path = tmp_path / "dev_repo"
+        _init_git_repo_with_remote(repo_path, bare_remote)
+
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
+        shutil.rmtree(kanban_root / "pgai_agent_kanban")
+        (kanban_root / "pgai_agent_kanban").symlink_to(_KANBAN_PY_DIR.resolve(), target_is_directory=True)
+        (kanban_root / "scripts").symlink_to(_SCRIPTS_DIR.resolve(), target_is_directory=True)
+
+        result_open = _run_cm_script(
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
+        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
+        rc_branch = f"rc/{version}"
+
+        _commit_on_branch(
+            repo_path,
+            rc_branch,
+            "feature_relative_path.txt",
+            "relative release path feature content\n",
+            "feat: add feature for the relative release path fixture",
+            return_branch="main",
+        )
+        _commit_in_repo_hook(
+            repo_path,
+            rc_branch,
+            "pre-squash",
+            "#!/usr/bin/env bash\necho 'pre-squash hook output'\n",
+            "chore: add pre-squash hook that prints one line",
+        )
+
+        result_release = _run_cm_script(
+            pathlib.Path("scripts") / "cm" / "release.sh",
+            ["--project", project_name],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
+            cwd=kanban_root,
+        )
+        output = result_release.stdout + result_release.stderr
+
+        assert "could not derive own-tree root" not in output, (
+            "The hook runner lost pp_run_ops.sh's own tree after changing into the " f"dev tree.\noutput:\n{output}"
+        )
+        assert "[hook cm-release-pre-squash] pre-squash hook output" in output, (
+            "The pre-squash hook did not run, or its output was not prefixed " f"with the hook name.\noutput:\n{output}"
+        )
+        assert result_release.returncode == 0, f"cm-release.sh run by a relative path must ship.\noutput:\n{output}"
+        assert _git_tag_exists(
+            repo_path, version
+        ), f"Release tag '{version}' not found after cm-release.sh.\noutput:\n{output}"
 
 
 # ---------------------------------------------------------------------------
@@ -1822,9 +1977,7 @@ class TestHookOrderRecurrence:
     operations land on the branch that gets squashed into main.
     """
 
-    def test_pre_squash_hook_commit_lands_on_rc_branch_and_survives_squash(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_pre_squash_hook_commit_lands_on_rc_branch_and_survives_squash(self, tmp_path: pathlib.Path) -> None:
         """Pre-squash hook commits a version file; dev tree parked on an unrelated branch.
 
         Scenario:
@@ -1853,31 +2006,36 @@ class TestHookOrderRecurrence:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         # Step 1: Open the RC.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
 
         # Step 2: Coder work on the RC branch.
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_hookorder.txt", "hook order recurrence test feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_hookorder.txt",
+            "hook order recurrence test feature content\n",
             "feat: add feature for hook order recurrence test",
         )
 
         # Step 3: A pre-squash hook that WRITES AND COMMITS a version file —
         # the exact shape of a real version-bump hook, not a marker touch.
         _commit_in_repo_hook(
-            repo_path, rc_branch, "pre-squash",
+            repo_path,
+            rc_branch,
+            "pre-squash",
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "echo '9.9.9' > MANIFEST_VERSION\n"
@@ -1893,8 +2051,11 @@ class TestHookOrderRecurrence:
         unrelated_tip_before_release = _git_local(repo_path, "rev-parse", "unrelated-branch")
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
         assert result_release.returncode == 0, (
             "cm-release.sh must complete even when the dev tree is parked on an "
@@ -2024,7 +2185,10 @@ def _run_project_paths_check(kanban_root: pathlib.Path, script: str) -> subproce
     """)
     return subprocess.run(
         ["bash", "-c", full_script],
-        capture_output=True, text=True, env=base_env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        timeout=30,
     )
 
 
@@ -2054,9 +2218,7 @@ class TestHaltScopeRecurrence:
     global gate never sees it, and sibling projects are never touched.
     """
 
-    def test_project_release_failure_writes_project_scoped_halt_only(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_project_release_failure_writes_project_scoped_halt_only(self, tmp_path: pathlib.Path) -> None:
         """A rigged pre-squash hook HALTs project A; project B stays dispatchable.
 
         Scenario:
@@ -2094,9 +2256,7 @@ class TestHaltScopeRecurrence:
         repo_a = tmp_path / "dev_repo_a"
         _init_git_repo_with_remote(repo_a, bare_remote_a)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_a, repo_a, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_a, repo_a, push_to_remote="false")
 
         bare_remote_b = tmp_path / "bare_remote_b.git"
         repo_b = tmp_path / "dev_repo_b"
@@ -2106,21 +2266,28 @@ class TestHaltScopeRecurrence:
         # Step 2: Open project A's RC, add coder work, and rig the
         # pre-squash hook to fail — a genuine HALT trigger.
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_a, repo_root=repo_a,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_a,
+            repo_root=repo_a,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
 
         _commit_on_branch(
-            repo_a, rc_branch,
-            "feature_haltscope.txt", "halt scope recurrence test feature content\n",
+            repo_a,
+            rc_branch,
+            "feature_haltscope.txt",
+            "halt scope recurrence test feature content\n",
             "feat: add feature for halt scope recurrence test",
         )
         _commit_in_repo_hook(
-            repo_a, rc_branch, "pre-squash",
+            repo_a,
+            rc_branch,
+            "pre-squash",
             "#!/usr/bin/env bash\necho 'rigged failure' >&2\nexit 1\n",
             "chore: add pre-squash hook rigged to fail",
             return_branch="main",
@@ -2135,8 +2302,11 @@ class TestHaltScopeRecurrence:
 
         # Step 3: Run cm-release.sh for project A — the rigged hook must HALT it.
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_a, repo_root=repo_a,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_a,
+            repo_root=repo_a,
         )
         assert result_release.returncode != 0, (
             "cm-release.sh must exit non-zero when the pre-squash hook is rigged to fail.\n"
@@ -2188,7 +2358,9 @@ class TestHaltScopeRecurrence:
         # cross-project freeze.
         startup_gate = subprocess.run(
             ["bash", "-c", f'[[ -f "{kanban_root}/HALT" ]] && echo GATE_TRIPPED || echo GATE_CLEAR'],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert "GATE_CLEAR" in startup_gate.stdout, (
             "wake_common_run's startup-level global HALT gate would have "
@@ -2210,9 +2382,7 @@ class TestHaltScopeRecurrence:
 
 _FIXTURES_DIR = _TEAM_DIR / "tests" / "fixtures"
 _HANDS_FREE_DEMO_RUNNER = _FIXTURES_DIR / "hands_free_demo_runner.sh"
-_HANDS_FREE_DEMO_GREEN_PYTEST = (
-    _FIXTURES_DIR / "hands_free_demo_green" / "fixture_hands_free_demo_green_checks.py"
-)
+_HANDS_FREE_DEMO_GREEN_PYTEST = _FIXTURES_DIR / "hands_free_demo_green" / "fixture_hands_free_demo_green_checks.py"
 _TEMP_LIB = _SCRIPTS_DIR / "lib" / "temp.sh"
 
 
@@ -2245,7 +2415,9 @@ def _make_scan_dir() -> pathlib.Path:
         # literal here — see scripts/lib/temp.sh's pgai_temp_dir()).
         resolved = subprocess.run(
             ["bash", "-c", f"source {str(_TEMP_LIB)!r} && pgai_temp_dir"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         ).stdout.strip()
         framework_temp_root = resolved or "/".join(["", "tmp", "pgai_kanban_tmp"])
     scan_scratch_root = pathlib.Path(framework_temp_root) / "hands-free-demo-scan"
@@ -2281,10 +2453,7 @@ def _build_tester_task(
         encoding="utf-8",
     )
     (task_dir / "status.md").write_text(
-        "# Status\n\n"
-        f"## Task\n{task_id}\n\n"
-        "## Role\nTESTER\n\n"
-        f"## State\n{state}\n",
+        "# Status\n\n" f"## Task\n{task_id}\n\n" "## Role\nTESTER\n\n" f"## State\n{state}\n",
         encoding="utf-8",
     )
     (task_dir / "artifacts" / "report.md").write_text(
@@ -2326,9 +2495,7 @@ class TestHandsFreeDemoEndToEnd:
          ships the release with release-notes Status FUNCTIONAL.
     """
 
-    def test_quality_class_finding_flows_hands_free_to_functional_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_quality_class_finding_flows_hands_free_to_functional_release(self, tmp_path: pathlib.Path) -> None:
         """Deliberate notes-prose finding + green tests -> FUNCTIONAL release, hands-free.
 
         Asserts:
@@ -2368,12 +2535,18 @@ class TestHandsFreeDemoEndToEnd:
 
             result_runner = subprocess.run(
                 [
-                    "bash", str(_HANDS_FREE_DEMO_RUNNER),
-                    "--prose-dir", str(prose_dir),
-                    "--pytest-path", str(_HANDS_FREE_DEMO_GREEN_PYTEST),
-                    "--findings-file", str(findings_file),
+                    "bash",
+                    str(_HANDS_FREE_DEMO_RUNNER),
+                    "--prose-dir",
+                    str(prose_dir),
+                    "--pytest-path",
+                    str(_HANDS_FREE_DEMO_GREEN_PYTEST),
+                    "--findings-file",
+                    str(findings_file),
                 ],
-                capture_output=True, text=True, timeout=90,
+                capture_output=True,
+                text=True,
+                timeout=90,
             )
         finally:
             shutil.rmtree(prose_dir, ignore_errors=True)
@@ -2396,12 +2569,10 @@ class TestHandsFreeDemoEndToEnd:
         )
         findings_doc = json.loads(findings_file.read_text(encoding="utf-8"))
         provenance_findings = [
-            f for f in findings_doc.get("findings", [])
-            if f.get("lint") == "hygiene" and f.get("class") == "provenance"
+            f for f in findings_doc.get("findings", []) if f.get("lint") == "hygiene" and f.get("class") == "provenance"
         ]
         assert provenance_findings, (
-            "Expected a deliberate hygiene provenance finding in the "
-            f"findings file. Got: {findings_doc}"
+            "Expected a deliberate hygiene provenance finding in the " f"findings file. Got: {findings_doc}"
         )
 
         # --- Step 2: file the bug the finding cites, and write the TESTER report ---
@@ -2409,9 +2580,7 @@ class TestHandsFreeDemoEndToEnd:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         bugs_dir = kanban_root / "projects" / project_name / "bugs"
         bugs_dir.mkdir(parents=True, exist_ok=True)
@@ -2446,7 +2615,10 @@ class TestHandsFreeDemoEndToEnd:
 
         tester_task_id = "TESTER-20260808-900-hands-free-demo"
         _build_tester_task(
-            kanban_root, project_name, tester_task_id, version,
+            kanban_root,
+            project_name,
+            tester_task_id,
+            version,
             state="DONE",
             recommendation="PASS",
             systemic_risk="low",
@@ -2459,23 +2631,31 @@ class TestHandsFreeDemoEndToEnd:
 
         # --- Step 3: open the RC, land coder work, and release hands-free ---
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_hands_free_demo.txt", "hands-free demo feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_hands_free_demo.txt",
+            "hands-free demo feature content\n",
             "feat: add feature for the hands-free demo release",
             return_branch="main",
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         # --- Assertion 3: cm-release.sh ships hands-free ---
@@ -2487,9 +2667,7 @@ class TestHandsFreeDemoEndToEnd:
         )
 
         # --- Assertion 4: release-notes Status is FUNCTIONAL ---
-        release_notes = (repo_path / "release-notes" / f"{version}.md").read_text(
-            encoding="utf-8"
-        )
+        release_notes = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
         assert "FUNCTIONAL" in release_notes, (
             "Expected release-notes Status FUNCTIONAL (green suites + "
             "non-blocking lint findings -> Ship FUNCTIONAL per CM.md's "
@@ -2532,9 +2710,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
     proves for the prose surface.
     """
 
-    def test_code_surface_ledger_comment_flows_hands_free_to_functional_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_code_surface_ledger_comment_flows_hands_free_to_functional_release(self, tmp_path: pathlib.Path) -> None:
         """Deliberate code-comment ledger-ID finding + green tests -> FUNCTIONAL release, hands-free.
 
         Asserts:
@@ -2562,7 +2738,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
         try:
             (code_dir / "fixture_retry_loop_helper.py").write_text(
                 '"""Fixture module standing in for a code-surface file the '
-                'quality-class provenance lint scans at verification '
+                "quality-class provenance lint scans at verification "
                 'time."""\n\n\n'
                 "def retry_loop_helper() -> None:\n"
                 "    # Fix landed per CODER-20260101-042 in the retry loop.\n"
@@ -2574,12 +2750,18 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
 
             result_runner = subprocess.run(
                 [
-                    "bash", str(_HANDS_FREE_DEMO_RUNNER),
-                    "--code-dir", str(code_dir),
-                    "--pytest-path", str(_HANDS_FREE_DEMO_GREEN_PYTEST),
-                    "--findings-file", str(findings_file),
+                    "bash",
+                    str(_HANDS_FREE_DEMO_RUNNER),
+                    "--code-dir",
+                    str(code_dir),
+                    "--pytest-path",
+                    str(_HANDS_FREE_DEMO_GREEN_PYTEST),
+                    "--findings-file",
+                    str(findings_file),
                 ],
-                capture_output=True, text=True, timeout=90,
+                capture_output=True,
+                text=True,
+                timeout=90,
             )
         finally:
             shutil.rmtree(code_dir, ignore_errors=True)
@@ -2602,21 +2784,17 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
         )
         findings_doc = json.loads(findings_file.read_text(encoding="utf-8"))
         provenance_findings = [
-            f for f in findings_doc.get("findings", [])
-            if f.get("lint") == "hygiene" and f.get("class") == "provenance"
+            f for f in findings_doc.get("findings", []) if f.get("lint") == "hygiene" and f.get("class") == "provenance"
         ]
         assert provenance_findings, (
-            "Expected a deliberate hygiene provenance finding in the "
-            f"findings file. Got: {findings_doc}"
+            "Expected a deliberate hygiene provenance finding in the " f"findings file. Got: {findings_doc}"
         )
         finding_cause = provenance_findings[0].get("cause", "")
         assert "fixture_retry_loop_helper.py" in finding_cause, (
-            "Expected the finding cause to name the planted code file.\n"
-            f"cause: {finding_cause}"
+            "Expected the finding cause to name the planted code file.\n" f"cause: {finding_cause}"
         )
         assert "CODER-20260101-042" in finding_cause, (
-            "Expected the finding cause to cite the planted ledger-ID "
-            f"token.\ncause: {finding_cause}"
+            "Expected the finding cause to cite the planted ledger-ID " f"token.\ncause: {finding_cause}"
         )
 
         # --- Step 2: file the bug the finding cites, and write the TESTER report ---
@@ -2624,9 +2802,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         bugs_dir = kanban_root / "projects" / project_name / "bugs"
         bugs_dir.mkdir(parents=True, exist_ok=True)
@@ -2661,7 +2837,10 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
 
         tester_task_id = "TESTER-20260808-901-hands-free-demo-code-surface"
         _build_tester_task(
-            kanban_root, project_name, tester_task_id, version,
+            kanban_root,
+            project_name,
+            tester_task_id,
+            version,
             state="DONE",
             recommendation="PASS",
             systemic_risk="low",
@@ -2675,15 +2854,19 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
 
         # --- Step 3: open the RC, land coder work, and release hands-free ---
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
         _commit_on_branch(
-            repo_path, rc_branch,
+            repo_path,
+            rc_branch,
             "feature_hands_free_demo_code_surface.txt",
             "hands-free demo code-surface feature content\n",
             "feat: add feature for the hands-free demo code-surface release",
@@ -2691,8 +2874,11 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         # --- Assertion 3: cm-release.sh ships hands-free ---
@@ -2705,9 +2891,7 @@ class TestHandsFreeDemoCodeSurfaceLitterEndToEnd:
         )
 
         # --- Assertion 4: release-notes Status is FUNCTIONAL ---
-        release_notes = (repo_path / "release-notes" / f"{version}.md").read_text(
-            encoding="utf-8"
-        )
+        release_notes = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
         assert "FUNCTIONAL" in release_notes, (
             "Expected release-notes Status FUNCTIONAL (green suites + "
             "non-blocking lint findings -> Ship FUNCTIONAL per CM.md's "
@@ -2736,9 +2920,7 @@ def _assert_dual_channel_triple(output: str, error_key: str) -> None:
     """Assert *output* contains a well-formed error/message/remedy triple
     for *error_key*, in the house shape from error_contract.sh.
     """
-    assert f"error:   {error_key}" in output, (
-        f"Expected 'error:   {error_key}' in output.\noutput:\n{output}"
-    )
+    assert f"error:   {error_key}" in output, f"Expected 'error:   {error_key}' in output.\noutput:\n{output}"
     assert "message: " in output, f"Expected a 'message: ' line in output.\noutput:\n{output}"
     assert "remedy:  " in output, f"Expected a 'remedy:  ' line in output.\noutput:\n{output}"
 
@@ -2751,9 +2933,7 @@ class TestDualChannelForcedHookFailure:
     team/roles/CM.md's "HALT triggers" list.
     """
 
-    def test_forced_pre_squash_hook_failure_emits_dual_channel_triple(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_forced_pre_squash_hook_failure_emits_dual_channel_triple(self, tmp_path: pathlib.Path) -> None:
         """A pre-squash hook rigged to exit 1 halts the release with a
         dual-channel error/message/remedy triple naming Trigger 4.
 
@@ -2772,34 +2952,42 @@ class TestDualChannelForcedHookFailure:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
 
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_dual_channel_hook.txt", "dual-channel hook-failure test feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_dual_channel_hook.txt",
+            "dual-channel hook-failure test feature content\n",
             "feat: add feature for the dual-channel hook-failure fixture",
             return_branch="main",
         )
         _commit_in_repo_hook(
-            repo_path, rc_branch, "pre-squash",
+            repo_path,
+            rc_branch,
+            "pre-squash",
             "#!/usr/bin/env bash\necho 'rigged pre-squash hook failure' >&2\nexit 1\n",
             "chore: add pre-squash hook rigged to fail",
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         assert result_release.returncode != 0, (
@@ -2808,9 +2996,7 @@ class TestDualChannelForcedHookFailure:
         )
 
         combined_output = result_release.stdout + result_release.stderr
-        _assert_dual_channel_triple(
-            combined_output, "cm-release.trigger-4.pre-squash-hook-failed"
-        )
+        _assert_dual_channel_triple(combined_output, "cm-release.trigger-4.pre-squash-hook-failed")
         # The message names the hook and explains the failure in plain
         # language alongside the bare rc= exit code (not just the number).
         assert "cm-release-pre-squash hook exited non-zero" in combined_output, (
@@ -2828,9 +3014,7 @@ class TestDualChannelForcedGateRefusal:
     whose verification could not complete.
     """
 
-    def test_forced_tester_blocked_gate_refusal_emits_dual_channel_triple(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_forced_tester_blocked_gate_refusal_emits_dual_channel_triple(self, tmp_path: pathlib.Path) -> None:
         """A TESTER task left in State=BLOCKED halts the release with a
         dual-channel error/message/remedy triple naming Trigger 1.
 
@@ -2849,34 +3033,43 @@ class TestDualChannelForcedGateRefusal:
         repo_path = tmp_path / "dev_repo"
         _init_git_repo_with_remote(repo_path, bare_remote)
 
-        kanban_root = _build_kanban_root(
-            tmp_path, project_name, repo_path, push_to_remote="false"
-        )
+        kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
         result_open = _run_cm_script(
-            _OPEN_RC_SCRIPT, [version],
-            kanban_root, project_name, repo_root=repo_path,
+            _OPEN_RC_SCRIPT,
+            [version],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
-        assert result_open.returncode == 0, (
-            f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-        )
+        assert (
+            result_open.returncode == 0
+        ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
         rc_branch = f"rc/{version}"
         _commit_on_branch(
-            repo_path, rc_branch,
-            "feature_dual_channel_gate.txt", "dual-channel gate-refusal test feature content\n",
+            repo_path,
+            rc_branch,
+            "feature_dual_channel_gate.txt",
+            "dual-channel gate-refusal test feature content\n",
             "feat: add feature for the dual-channel gate-refusal fixture",
             return_branch="main",
         )
 
         tester_task_id = "TESTER-20260808-901-dual-channel-gate-refusal"
         _build_tester_task(
-            kanban_root, project_name, tester_task_id, version,
+            kanban_root,
+            project_name,
+            tester_task_id,
+            version,
             state="BLOCKED",
         )
 
         result_release = _run_cm_script(
-            _RELEASE_SCRIPT, [],
-            kanban_root, project_name, repo_root=repo_path,
+            _RELEASE_SCRIPT,
+            [],
+            kanban_root,
+            project_name,
+            repo_root=repo_path,
         )
 
         assert result_release.returncode != 0, (
@@ -2885,9 +3078,7 @@ class TestDualChannelForcedGateRefusal:
         )
 
         combined_output = result_release.stdout + result_release.stderr
-        _assert_dual_channel_triple(
-            combined_output, "cm-release.trigger-1.tester-blocked"
-        )
+        _assert_dual_channel_triple(combined_output, "cm-release.trigger-1.tester-blocked")
         assert tester_task_id in combined_output, (
             "Expected the message to name the specific BLOCKED TESTER task in "
             f"plain language.\noutput:\n{combined_output}"
@@ -2989,7 +3180,11 @@ class _PushGateCase:
         )
         return subprocess.run(
             ["bash", str(script), *args],
-            capture_output=True, text=True, env=env, cwd=str(self.root), timeout=180,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(self.root),
+            timeout=180,
         )
 
     def network_calls(self) -> list[str]:
@@ -3006,14 +3201,18 @@ class _PushGateCase:
         open_calls = self.network_calls()
         if opened.returncode == 0:
             _commit_on_branch(
-                self.repo, f"rc/{version}", "gate_feature.txt", "gate feature\n",
-                "feat: push gate fixture feature", return_branch="main",
+                self.repo,
+                f"rc/{version}",
+                "gate_feature.txt",
+                "gate feature\n",
+                "feat: push gate fixture feature",
+                return_branch="main",
             )
         released = self.run(_RELEASE_SCRIPT, []) if opened.returncode == 0 else None
         return opened, open_calls, released
 
 
-def _out(result: Optional[subprocess.CompletedProcess]) -> str:
+def _out(result: subprocess.CompletedProcess | None) -> str:
     return "" if result is None else result.stdout + result.stderr
 
 
@@ -3043,21 +3242,19 @@ class TestReleasePathPushGate:
         assert opened.returncode == 0, f"{shape}: open-rc failed\n{_out(opened)}"
         assert open_calls == [], f"{shape}: open-rc made a git network call\n{_out(opened)}"
         open_skips = _gate_skip_lines(_out(opened))
-        assert len(open_skips) == 1 and token in open_skips[0], (
-            f"{shape}: expected one open-rc {_PUSH_GATE_SKIP} line naming {token!r}\n{_out(opened)}"
-        )
+        assert (
+            len(open_skips) == 1 and token in open_skips[0]
+        ), f"{shape}: expected one open-rc {_PUSH_GATE_SKIP} line naming {token!r}\n{_out(opened)}"
         assert open_skips[0].startswith("[cm-open-rc] "), open_skips[0]
 
-        assert released is not None and released.returncode == 0, (
-            f"{shape}: release failed\n{_out(released)}"
-        )
-        assert case.network_calls() == [], (
-            f"{shape}: the release made a git network call: {case.network_calls()}\n{_out(released)}"
-        )
+        assert released is not None and released.returncode == 0, f"{shape}: release failed\n{_out(released)}"
+        assert (
+            case.network_calls() == []
+        ), f"{shape}: the release made a git network call: {case.network_calls()}\n{_out(released)}"
         release_skips = _gate_skip_lines(_out(released))
-        assert len(release_skips) == 1 and token in release_skips[0], (
-            f"{shape}: expected one release {_PUSH_GATE_SKIP} line naming {token!r}\n{_out(released)}"
-        )
+        assert (
+            len(release_skips) == 1 and token in release_skips[0]
+        ), f"{shape}: expected one release {_PUSH_GATE_SKIP} line naming {token!r}\n{_out(released)}"
         assert release_skips[0].startswith("[cm-release] "), release_skips[0]
         assert _git_tag_exists(case.repo, version), _out(released)
         assert _git_local(case.origin, "for-each-ref") == ""
@@ -3069,13 +3266,13 @@ class TestReleasePathPushGate:
         opened, open_calls, released = case.open_and_release(version)
 
         assert opened.returncode == 0, _out(opened)
-        assert any(f"rc/{version}" in l.split() for l in open_calls if "push" in l.split()), (
-            f"open-rc must push the rc branch; stub log: {open_calls}\n{_out(opened)}"
-        )
+        assert any(
+            f"rc/{version}" in l.split() for l in open_calls if "push" in l.split()
+        ), f"open-rc must push the rc branch; stub log: {open_calls}\n{_out(opened)}"
         assert released is not None and released.returncode == 0, _out(released)
-        assert any(f"refs/tags/{version}" in l.split() for l in case.pushes()), (
-            f"the release must push its tag by its ref; stub log: {case.network_calls()}\n{_out(released)}"
-        )
+        assert any(
+            f"refs/tags/{version}" in l.split() for l in case.pushes()
+        ), f"the release must push its tag by its ref; stub log: {case.network_calls()}\n{_out(released)}"
         assert _gate_skip_lines(_out(opened) + _out(released)) == []
         assert "Push policy: push_to_remote=true" in _out(released)
 
@@ -3094,9 +3291,9 @@ class TestReleasePathPushGate:
         tag_pushes = [l for l in case.pushes() if "--tags" in l.split() or "refs/tags/" in l]
         assert tag_pushes, f"the release must push its tag; stub log: {case.network_calls()}\n{_out(released)}"
         for line in tag_pushes:
-            assert line.split()[-1] == f"refs/tags/{version}", (
-                f"a tag push must name only the release tag ref: {line!r}\n{_out(released)}"
-            )
+            assert (
+                line.split()[-1] == f"refs/tags/{version}"
+            ), f"a tag push must name only the release tag ref: {line!r}\n{_out(released)}"
         assert not any(unrelated in l for l in case.pushes()), case.network_calls()
 
     def test_push_to_remote_false_stays_local(self, tmp_path: pathlib.Path) -> None:

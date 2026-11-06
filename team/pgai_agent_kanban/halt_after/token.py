@@ -19,7 +19,6 @@ only parses.
 
 import logging
 import re
-import sys
 
 logger = logging.getLogger(__name__)
 

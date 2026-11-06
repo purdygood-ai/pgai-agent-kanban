@@ -50,7 +50,8 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import Callable, Generator, Iterator, NamedTuple, Optional
+from typing import NamedTuple
+from collections.abc import Callable, Generator, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -226,7 +227,7 @@ class _CallCase(NamedTuple):
     route: str
     function: str
     body: dict
-    seed: Optional[Callable[[pathlib.Path], None]]
+    seed: Callable[[pathlib.Path], None] | None
     expected_args: Callable[[pathlib.Path], tuple]
     expected_kwargs: dict
 
@@ -248,40 +249,86 @@ def _seed_campaign(root: pathlib.Path) -> None:
 
 
 _CALL_CASES = [
-    _CallCase("/operations/halt", "halt", {"project": _PROJECT}, None,
-              lambda root: (_PROJECT,), {}),
-    _CallCase("/operations/unhalt", "unhalt", {"project": _PROJECT}, _seed_project_halt,
-              lambda root: (_PROJECT,), {}),
-    _CallCase("/operations/halt-global", "halt_global", {}, None,
-              lambda root: (), {}),
-    _CallCase("/operations/unhalt-global", "unhalt_global", {}, _seed_root_halt,
-              lambda root: (), {}),
-    _CallCase("/operations/halt-after", "halt_after", {"project": _PROJECT, "until": "v1.2.3"}, None,
-              lambda root: (_PROJECT, "rc:v1.2.3"), {}),
-    _CallCase("/operations/defer", "defer", {"project": _PROJECT, "until": "1.2.3"}, None,
-              lambda root: (_PROJECT, "1.2.3"), {}),
-    _CallCase("/operations/undefer", "undefer", {"project": _PROJECT}, _seed_campaign,
-              lambda root: (_PROJECT,), {}),
-    _CallCase("/operations/set-version-ceiling", "set_version_ceiling",
-              {"project": _PROJECT, "minor": 5, "show": True}, None,
-              lambda root: (_PROJECT,),
-              {"show": True, "minor": 5, "major": None, "no_minor": False, "no_major": False}),
-    _CallCase("/operations/switch-provider", "switch_provider", {"provider": "claude"}, None,
-              lambda root: ("claude",), {}),
-    _CallCase("/operations/intake", "deposit_intake",
-              {"project": _PROJECT, "filename": _INTAKE_NAME, "content": _INTAKE_CONTENT}, None,
-              None, {}),  # the source path is checked by content below
-    _CallCase("/operations/close", "close_item",
-              {"project": _PROJECT, "key": _BACKLOG_TASK, "state": "wont-do", "note": "dup"}, None,
-              lambda root: (_PROJECT, _BACKLOG_TASK), {"state": "wont-do", "note": "dup"}),
-    _CallCase("/operations/wontdo", "wontdo_item", {"project": _PROJECT, "key": _BACKLOG_TASK}, None,
-              lambda root: (_PROJECT, _BACKLOG_TASK), {}),
-    _CallCase("/operations/delete", "delete_item",
-              {"project": _PROJECT, "key": _BACKLOG_TASK, "force": True}, None,
-              lambda root: (_PROJECT, _BACKLOG_TASK), {"force": True}),
-    _CallCase("/operations/reset", "reset_item",
-              {"project": _PROJECT, "key": _BACKLOG_TASK, "keep_artifacts": True}, None,
-              lambda root: (_PROJECT, _BACKLOG_TASK), {"keep_artifacts": True, "force": False}),
+    _CallCase("/operations/halt", "halt", {"project": _PROJECT}, None, lambda root: (_PROJECT,), {}),
+    _CallCase("/operations/unhalt", "unhalt", {"project": _PROJECT}, _seed_project_halt, lambda root: (_PROJECT,), {}),
+    _CallCase("/operations/halt-global", "halt_global", {}, None, lambda root: (), {}),
+    _CallCase("/operations/unhalt-global", "unhalt_global", {}, _seed_root_halt, lambda root: (), {}),
+    _CallCase(
+        "/operations/halt-after",
+        "halt_after",
+        {"project": _PROJECT, "until": "v1.2.3"},
+        None,
+        lambda root: (_PROJECT, "rc:v1.2.3"),
+        {},
+    ),
+    _CallCase(
+        "/operations/defer",
+        "defer",
+        {"project": _PROJECT, "until": "1.2.3"},
+        None,
+        lambda root: (_PROJECT, "1.2.3"),
+        {},
+    ),
+    _CallCase("/operations/undefer", "undefer", {"project": _PROJECT}, _seed_campaign, lambda root: (_PROJECT,), {}),
+    _CallCase(
+        "/operations/set-version-ceiling",
+        "set_version_ceiling",
+        {"project": _PROJECT, "minor": 5, "show": True},
+        None,
+        lambda root: (_PROJECT,),
+        {"show": True, "minor": 5, "major": None, "no_minor": False, "no_major": False},
+    ),
+    _CallCase(
+        "/operations/switch-provider", "switch_provider", {"provider": "claude"}, None, lambda root: ("claude",), {}
+    ),
+    _CallCase(
+        "/operations/intake",
+        "deposit_intake",
+        {"project": _PROJECT, "filename": _INTAKE_NAME, "content": _INTAKE_CONTENT},
+        None,
+        None,
+        {},
+    ),  # the source path is checked by content below
+    _CallCase(
+        "/operations/close",
+        "close_item",
+        {"project": _PROJECT, "key": _BACKLOG_TASK, "state": "wont-do", "note": "dup"},
+        None,
+        lambda root: (_PROJECT, _BACKLOG_TASK),
+        {"state": "wont-do", "note": "dup"},
+    ),
+    _CallCase(
+        "/operations/wontdo",
+        "wontdo_item",
+        {"project": _PROJECT, "key": _BACKLOG_TASK},
+        None,
+        lambda root: (_PROJECT, _BACKLOG_TASK),
+        {},
+    ),
+    _CallCase(
+        "/operations/delete",
+        "delete_item",
+        {"project": _PROJECT, "key": _BACKLOG_TASK, "force": True},
+        None,
+        lambda root: (_PROJECT, _BACKLOG_TASK),
+        {"force": True},
+    ),
+    _CallCase(
+        "/operations/reset",
+        "reset_item",
+        {"project": _PROJECT, "key": _BACKLOG_TASK, "keep_artifacts": True},
+        None,
+        lambda root: (_PROJECT, _BACKLOG_TASK),
+        {"keep_artifacts": True, "force": False, "discard_branch": False},
+    ),
+    _CallCase(
+        "/operations/reset",
+        "reset_item",
+        {"project": _PROJECT, "key": _BACKLOG_TASK, "discard_branch": True},
+        None,
+        lambda root: (_PROJECT, _BACKLOG_TASK),
+        {"keep_artifacts": False, "force": False, "discard_branch": True},
+    ),
 ]
 
 
@@ -359,7 +406,7 @@ class _NarrationCase(NamedTuple):
     script: str
     body: dict
     cli_args: Callable[[pathlib.Path], list[str]]
-    seed: Optional[Callable[[pathlib.Path], None]]
+    seed: Callable[[pathlib.Path], None] | None
 
 
 def _intake_source(root: pathlib.Path) -> pathlib.Path:
@@ -370,39 +417,91 @@ def _intake_source(root: pathlib.Path) -> pathlib.Path:
 
 
 _NARRATION_CASES = [
-    _NarrationCase("/operations/halt", "halt.sh", {"project": _PROJECT},
-                   lambda root: ["--project", _PROJECT], None),
-    _NarrationCase("/operations/halt", "halt.sh", {"project": _PROJECT},
-                   lambda root: ["--project", _PROJECT], _seed_project_halt),
-    _NarrationCase("/operations/unhalt", "unhalt.sh", {"project": _PROJECT},
-                   lambda root: ["--project", _PROJECT], _seed_project_halt),
-    _NarrationCase("/operations/unhalt", "unhalt.sh", {"project": _PROJECT},
-                   lambda root: ["--project", _PROJECT], None),
+    _NarrationCase("/operations/halt", "halt.sh", {"project": _PROJECT}, lambda root: ["--project", _PROJECT], None),
+    _NarrationCase(
+        "/operations/halt", "halt.sh", {"project": _PROJECT}, lambda root: ["--project", _PROJECT], _seed_project_halt
+    ),
+    _NarrationCase(
+        "/operations/unhalt",
+        "unhalt.sh",
+        {"project": _PROJECT},
+        lambda root: ["--project", _PROJECT],
+        _seed_project_halt,
+    ),
+    _NarrationCase(
+        "/operations/unhalt", "unhalt.sh", {"project": _PROJECT}, lambda root: ["--project", _PROJECT], None
+    ),
     _NarrationCase("/operations/halt-global", "halt-global.sh", {}, lambda root: [], None),
     _NarrationCase("/operations/unhalt-global", "unhalt-global.sh", {}, lambda root: [], _seed_root_halt),
-    _NarrationCase("/operations/halt-after", "halt-after.sh", {"project": _PROJECT, "until": "v9.8.7"},
-                   lambda root: ["--project", _PROJECT, "--until", "v9.8.7"], None),
-    _NarrationCase("/operations/halt-after", "halt-after.sh", {"project": _PROJECT, "key": "coder"},
-                   lambda root: ["--project", _PROJECT, "--key", "coder"], None),
-    _NarrationCase("/operations/defer", "defer.sh", {"project": _PROJECT, "until": "v1.2.3"},
-                   lambda root: ["--project", _PROJECT, "--until", "v1.2.3"], None),
-    _NarrationCase("/operations/defer", "defer.sh", {"project": _PROJECT, "until": "v1.2.3"},
-                   lambda root: ["--project", _PROJECT, "--until", "v1.2.3"], _seed_campaign),
-    _NarrationCase("/operations/undefer", "undefer.sh", {"project": _PROJECT},
-                   lambda root: ["--project", _PROJECT], _seed_campaign),
-    _NarrationCase("/operations/undefer", "undefer.sh", {"project": _PROJECT},
-                   lambda root: ["--project", _PROJECT], None),
-    _NarrationCase("/operations/intake", "intake.sh",
-                   {"project": _PROJECT, "filename": _INTAKE_NAME, "content": _INTAKE_CONTENT},
-                   lambda root: ["--project", _PROJECT, str(_intake_source(root))], None),
-    _NarrationCase("/operations/close", "close.sh", {"project": _PROJECT, "key": _BACKLOG_TASK},
-                   lambda root: ["--project", _PROJECT, "--key", _BACKLOG_TASK], None),
-    _NarrationCase("/operations/wontdo", "wontdo.sh", {"project": _PROJECT, "key": _BACKLOG_TASK},
-                   lambda root: ["--project", _PROJECT, "--key", _BACKLOG_TASK], None),
-    _NarrationCase("/operations/delete", "delete.sh", {"project": _PROJECT, "key": _DONE_TASK},
-                   lambda root: ["--project", _PROJECT, "--key", _DONE_TASK], None),
-    _NarrationCase("/operations/reset", "reset.sh", {"project": _PROJECT, "key": _DONE_TASK},
-                   lambda root: ["--project", _PROJECT, "--key", _DONE_TASK], None),
+    _NarrationCase(
+        "/operations/halt-after",
+        "halt-after.sh",
+        {"project": _PROJECT, "until": "v9.8.7"},
+        lambda root: ["--project", _PROJECT, "--until", "v9.8.7"],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/halt-after",
+        "halt-after.sh",
+        {"project": _PROJECT, "key": "coder"},
+        lambda root: ["--project", _PROJECT, "--key", "coder"],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/defer",
+        "defer.sh",
+        {"project": _PROJECT, "until": "v1.2.3"},
+        lambda root: ["--project", _PROJECT, "--until", "v1.2.3"],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/defer",
+        "defer.sh",
+        {"project": _PROJECT, "until": "v1.2.3"},
+        lambda root: ["--project", _PROJECT, "--until", "v1.2.3"],
+        _seed_campaign,
+    ),
+    _NarrationCase(
+        "/operations/undefer", "undefer.sh", {"project": _PROJECT}, lambda root: ["--project", _PROJECT], _seed_campaign
+    ),
+    _NarrationCase(
+        "/operations/undefer", "undefer.sh", {"project": _PROJECT}, lambda root: ["--project", _PROJECT], None
+    ),
+    _NarrationCase(
+        "/operations/intake",
+        "intake.sh",
+        {"project": _PROJECT, "filename": _INTAKE_NAME, "content": _INTAKE_CONTENT},
+        lambda root: ["--project", _PROJECT, str(_intake_source(root))],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/close",
+        "close.sh",
+        {"project": _PROJECT, "key": _BACKLOG_TASK},
+        lambda root: ["--project", _PROJECT, "--key", _BACKLOG_TASK],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/wontdo",
+        "wontdo.sh",
+        {"project": _PROJECT, "key": _BACKLOG_TASK},
+        lambda root: ["--project", _PROJECT, "--key", _BACKLOG_TASK],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/delete",
+        "delete.sh",
+        {"project": _PROJECT, "key": _DONE_TASK},
+        lambda root: ["--project", _PROJECT, "--key", _DONE_TASK],
+        None,
+    ),
+    _NarrationCase(
+        "/operations/reset",
+        "reset.sh",
+        {"project": _PROJECT, "key": _DONE_TASK},
+        lambda root: ["--project", _PROJECT, "--key", _DONE_TASK],
+        None,
+    ),
 ]
 
 
@@ -457,7 +556,7 @@ class _RefusalCase(NamedTuple):
     script: str
     body: dict
     cli_args: Callable[[pathlib.Path], list[str]]
-    seed: Optional[Callable[[pathlib.Path], None]]
+    seed: Callable[[pathlib.Path], None] | None
     fallback_key: str
     remedy_prefix: str = _CLI_REMEDY_PREFIX
     #: The HTTP status the refusal maps to (adapter.http_status_for): 409 for a
@@ -474,21 +573,49 @@ def _remove_project_dir(root: pathlib.Path) -> None:
 _REFUSAL_CASES = [
     # halt family: the project is registered but its directory is gone, so
     # ops.write.halt raises OpsError and the wrapper adds its failure line.
-    _RefusalCase("halt", "/operations/halt", "halt.sh", {"project": _PROJECT},
-                 lambda root: ["--project", _PROJECT], _remove_project_dir, "halt.refused"),
+    _RefusalCase(
+        "halt",
+        "/operations/halt",
+        "halt.sh",
+        {"project": _PROJECT},
+        lambda root: ["--project", _PROJECT],
+        _remove_project_dir,
+        "halt.refused",
+    ),
     # intake: an unroutable file name is a Refused from deposit_intake (exit 2).
-    _RefusalCase("intake", "/operations/intake", "intake.sh",
-                 {"project": _PROJECT, "filename": "notes.md", "content": "x\n"},
-                 lambda root: ["--project", _PROJECT, str(_unroutable_source(root))], None, "intake.refused",
-                 _INTAKE_RESEND_PREFIX, 409),
+    _RefusalCase(
+        "intake",
+        "/operations/intake",
+        "intake.sh",
+        {"project": _PROJECT, "filename": "notes.md", "content": "x\n"},
+        lambda root: ["--project", _PROJECT, str(_unroutable_source(root))],
+        None,
+        "intake.refused",
+        _INTAKE_RESEND_PREFIX,
+        409,
+    ),
     # status family: deleting a non-terminal task without force is the guard's Refused (exit 2).
-    _RefusalCase("status", "/operations/delete", "delete.sh", {"project": _PROJECT, "key": _BACKLOG_TASK},
-                 lambda root: ["--project", _PROJECT, "--key", _BACKLOG_TASK], None, "delete.refused",
-                 http_status=409),
+    _RefusalCase(
+        "status",
+        "/operations/delete",
+        "delete.sh",
+        {"project": _PROJECT, "key": _BACKLOG_TASK},
+        lambda root: ["--project", _PROJECT, "--key", _BACKLOG_TASK],
+        None,
+        "delete.refused",
+        http_status=409,
+    ),
     # reset: a WORKING task is refused (exit 2).
-    _RefusalCase("reset", "/operations/reset", "reset.sh", {"project": _PROJECT, "key": _WORKING_TASK},
-                 lambda root: ["--project", _PROJECT, "--key", _WORKING_TASK], None, "reset.refused",
-                 http_status=409),
+    _RefusalCase(
+        "reset",
+        "/operations/reset",
+        "reset.sh",
+        {"project": _PROJECT, "key": _WORKING_TASK},
+        lambda root: ["--project", _PROJECT, "--key", _WORKING_TASK],
+        None,
+        "reset.refused",
+        http_status=409,
+    ),
 ]
 
 
@@ -528,49 +655,56 @@ def test_ops_error_reaches_the_caller_as_the_shell_paths_dual_channel_envelope(
     "route, script, body, cli_args, http_status",
     [
         pytest.param(
-            "/operations/close", "close.sh",
+            "/operations/close",
+            "close.sh",
             {"project": _PROJECT, "key": _BACKLOG_TASK, "state": "bogus"},
             ["--project", _PROJECT, "--key", _BACKLOG_TASK, "--state", "bogus"],
             422,
             id="close-invalid-state",
         ),
         pytest.param(
-            "/operations/close", "close.sh",
+            "/operations/close",
+            "close.sh",
             {"project": _PROJECT, "key": _BACKLOG_TASK, "state": "superseded"},
             ["--project", _PROJECT, "--key", _BACKLOG_TASK, "--state", "superseded"],
             422,
             id="close-retired-superseded-state",
         ),
         pytest.param(
-            "/operations/halt-after", "halt-after.sh",
+            "/operations/halt-after",
+            "halt-after.sh",
             {"project": _PROJECT, "key": "coder", "until": "v1.2.3"},
             ["--project", _PROJECT, "--key", "coder", "--until", "v1.2.3"],
             500,
             id="halt-after-until-with-role-scope",
         ),
         pytest.param(
-            "/operations/halt-after", "halt-after.sh",
+            "/operations/halt-after",
+            "halt-after.sh",
             {"project": _PROJECT, "until": "1.2"},
             ["--project", _PROJECT, "--until", "1.2"],
             422,
             id="halt-after-malformed-until",
         ),
         pytest.param(
-            "/operations/defer", "defer.sh",
+            "/operations/defer",
+            "defer.sh",
             {"project": "ghost", "until": "1.2"},
             ["--project", "ghost", "--until", "1.2"],
             422,
             id="defer-malformed-until-before-project",
         ),
         pytest.param(
-            "/operations/undefer", "undefer.sh",
+            "/operations/undefer",
+            "undefer.sh",
             {"project": "ghost"},
             ["--project", "ghost"],
             404,
             id="undefer-unknown-project",
         ),
         pytest.param(
-            "/operations/wontdo", "wontdo.sh",
+            "/operations/wontdo",
+            "wontdo.sh",
             {"project": _PROJECT, "key": "CODER-20260101-00"},
             ["--project", _PROJECT, "--key", "CODER-20260101-00"],
             404,
@@ -607,7 +741,7 @@ def test_wrapper_level_refusal_matches_the_cli_script(
 def _remedy_line(stderr: str) -> str:
     """The value of the ``remedy:`` line of a CLI dual-channel refusal block."""
     line = next(line for line in stderr.splitlines() if line.startswith("remedy:"))
-    return line[len("remedy:"):].strip()
+    return line[len("remedy:") :].strip()
 
 
 def test_halt_after_scope_refusal_matches_the_cli_script_on_roots_needing_quotes(
@@ -704,6 +838,7 @@ def test_ops_call_records_output_and_suppresses_only_ops_errors() -> None:
     with pytest.raises(ValueError):
         with ops_call():
             raise ValueError("a server fault is not a refusal")
-    assert (sys.stdout, sys.stderr) == (stdout_before, stderr_before), (
-        "the captured streams must be restored when a non-OpsError propagates"
-    )
+    assert (sys.stdout, sys.stderr) == (
+        stdout_before,
+        stderr_before,
+    ), "the captured streams must be restored when a non-OpsError propagates"

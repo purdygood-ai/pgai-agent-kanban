@@ -125,9 +125,7 @@ def find_executable_hits(upgrade_sh_path: Path) -> list[tuple[int, str]]:
     Raises FileNotFoundError if upgrade_sh_path does not exist.
     """
     if not upgrade_sh_path.exists():
-        raise FileNotFoundError(
-            f"upgrade.sh not found at {upgrade_sh_path}"
-        )
+        raise FileNotFoundError(f"upgrade.sh not found at {upgrade_sh_path}")
 
     hits: list[tuple[int, str]] = []
     text = upgrade_sh_path.read_text(encoding="utf-8", errors="replace")
@@ -199,13 +197,12 @@ def main(argv: list[str] | None = None) -> int:
         upgrade_sh = Path(args.upgrade_sh).resolve()
     else:
         # Default: team/scripts/upgrade.sh relative to this script's location.
-        script_dir = Path(__file__).resolve().parent   # team/scripts/
+        script_dir = Path(__file__).resolve().parent  # team/scripts/
         upgrade_sh = script_dir / "upgrade.sh"
 
     if not upgrade_sh.exists():
         print(
-            f"ERROR: upgrade.sh not found at {upgrade_sh}\n"
-            "Use --upgrade-sh to specify an alternative path.",
+            f"ERROR: upgrade.sh not found at {upgrade_sh}\n" "Use --upgrade-sh to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
@@ -231,8 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     findings = [
         quality_finding(
             _LINT_NAME,
-            f"{rel}:{lineno} carries a retired temp-copy guard identifier on an "
-            f"executable line: {line.strip()}",
+            f"{rel}:{lineno} carries a retired temp-copy guard identifier on an " f"executable line: {line.strip()}",
             f"sed -i '{lineno}d' {upgrade_sh} && {relint}",
             file=rel,
             line=lineno,

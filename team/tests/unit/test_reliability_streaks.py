@@ -120,17 +120,26 @@ def _fixture_human_then_any(root: Path) -> None:
     """A human block in v1.0.0 resolved on 10-10 06:00, then an any block in
     v1.2.0 resolved on 10-12 06:00."""
     _ship_all(root)
-    _write_ledger(root, [
-        _start("v1.0.0", "task:T-human", "2026-10-10T01:00:00+00:00",
-               **{"class": "any", "cause": "chain", "reason_code": "agent_unclassified"}),
-        _escalate("v1.0.0", "task:T-human", "2026-10-10T02:00:00+00:00"),
-        _end("v1.0.0", "task:T-human", "2026-10-10T06:00:00+00:00",
-             **{"class": "human", "reason_code": "reset"}),
-        _start("v1.2.0", "task:T-any", "2026-10-12T01:00:00+00:00",
-               **{"class": "any", "cause": "chain", "reason_code": "provider_401"}),
-        _end("v1.2.0", "task:T-any", "2026-10-12T06:00:00+00:00",
-             **{"class": "any", "reason_code": "requeue"}),
-    ])
+    _write_ledger(
+        root,
+        [
+            _start(
+                "v1.0.0",
+                "task:T-human",
+                "2026-10-10T01:00:00+00:00",
+                **{"class": "any", "cause": "chain", "reason_code": "agent_unclassified"},
+            ),
+            _escalate("v1.0.0", "task:T-human", "2026-10-10T02:00:00+00:00"),
+            _end("v1.0.0", "task:T-human", "2026-10-10T06:00:00+00:00", **{"class": "human", "reason_code": "reset"}),
+            _start(
+                "v1.2.0",
+                "task:T-any",
+                "2026-10-12T01:00:00+00:00",
+                **{"class": "any", "cause": "chain", "reason_code": "provider_401"},
+            ),
+            _end("v1.2.0", "task:T-any", "2026-10-12T06:00:00+00:00", **{"class": "any", "reason_code": "requeue"}),
+        ],
+    )
 
 
 def _fixture_operator_halt_last(root: Path) -> None:
@@ -147,26 +156,36 @@ def _fixture_operator_halt_last(root: Path) -> None:
 
 def _fixture_operator_only(root: Path) -> None:
     _ship_all(root)
-    _write_ledger(root, [
-        _start("v1.1.0", "halt:project", "2026-10-11T01:00:00+00:00", cause="operator"),
-        _end("v1.1.0", "halt:project", "2026-10-11T02:00:00+00:00"),
-    ])
+    _write_ledger(
+        root,
+        [
+            _start("v1.1.0", "halt:project", "2026-10-11T01:00:00+00:00", cause="operator"),
+            _end("v1.1.0", "halt:project", "2026-10-11T02:00:00+00:00"),
+        ],
+    )
 
 
 def _fixture_old_shape_only(root: Path) -> None:
     _ship_all(root)
-    _write_ledger(root, [
-        _start("v1.3.0", "halt:project", "2026-10-13T01:00:00+00:00"),
-        _end("v1.3.0", "halt:project", "2026-10-13T02:00:00+00:00"),
-    ])
+    _write_ledger(
+        root,
+        [
+            _start("v1.3.0", "halt:project", "2026-10-13T01:00:00+00:00"),
+            _end("v1.3.0", "halt:project", "2026-10-13T02:00:00+00:00"),
+        ],
+    )
 
 
 def _fixture_open_any_block(root: Path) -> None:
     _fixture_human_then_any(root)
     ledger = _metrics_dir(root) / "blocked-intervals.jsonl"
     with ledger.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(_start(NO_RC_VERSION, "task:T-open", "2026-10-16T01:00:00+00:00",
-                                       reason_code="agent_unclassified")) + "\n")
+        handle.write(
+            json.dumps(
+                _start(NO_RC_VERSION, "task:T-open", "2026-10-16T01:00:00+00:00", reason_code="agent_unclassified")
+            )
+            + "\n"
+        )
 
 
 def _fixture_open_human_block(root: Path) -> None:
@@ -185,12 +204,15 @@ def _fixture_out_of_order_close(root: Path) -> None:
     resolved: uncapped, Clean would count that RC while Hands-off may not —
     the shape the Clean <= Hands-off cap exists for."""
     _write_rollup(root, "v1.0.0", "2026-10-15T12:00:00+00:00")
-    _write_ledger(root, [
-        _start("v1.0.0", "task:T-human", "2026-10-10T01:00:00+00:00", **{"class": "human"}),
-        _end("v1.0.0", "task:T-human", "2026-10-10T06:00:00+00:00", **{"class": "human"}),
-        _start(NO_RC_VERSION, "task:T-any", "2026-10-11T01:00:00+00:00"),
-        _end(NO_RC_VERSION, "task:T-any", "2026-10-11T06:00:00+00:00"),
-    ])
+    _write_ledger(
+        root,
+        [
+            _start("v1.0.0", "task:T-human", "2026-10-10T01:00:00+00:00", **{"class": "human"}),
+            _end("v1.0.0", "task:T-human", "2026-10-10T06:00:00+00:00", **{"class": "human"}),
+            _start(NO_RC_VERSION, "task:T-any", "2026-10-11T01:00:00+00:00"),
+            _end(NO_RC_VERSION, "task:T-any", "2026-10-11T06:00:00+00:00"),
+        ],
+    )
 
 
 ALL_FIXTURES = [
@@ -234,12 +256,15 @@ def test_block_that_only_reached_class_any_resets_clean_but_not_hands_off(tmp_pa
 
 def test_human_block_resets_both_streaks(tmp_path: Path) -> None:
     _ship_all(tmp_path)
-    _write_ledger(tmp_path, [
-        _start("v1.0.0", "task:T-any", "2026-10-10T01:00:00+00:00"),
-        _end("v1.0.0", "task:T-any", "2026-10-10T02:00:00+00:00"),
-        _start("v1.3.0", "task:T-human", "2026-10-13T01:00:00+00:00", **{"class": "human"}),
-        _end("v1.3.0", "task:T-human", "2026-10-13T02:00:00+00:00", **{"class": "human"}),
-    ])
+    _write_ledger(
+        tmp_path,
+        [
+            _start("v1.0.0", "task:T-any", "2026-10-10T01:00:00+00:00"),
+            _end("v1.0.0", "task:T-any", "2026-10-10T02:00:00+00:00"),
+            _start("v1.3.0", "task:T-human", "2026-10-13T01:00:00+00:00", **{"class": "human"}),
+            _end("v1.3.0", "task:T-human", "2026-10-13T02:00:00+00:00", **{"class": "human"}),
+        ],
+    )
 
     result = _result(tmp_path)
 
@@ -282,10 +307,13 @@ def test_operator_only_ledger_reports_no_block_on_record(tmp_path: Path) -> None
 
 def test_blocks_own_rc_is_not_counted_in_rcs(tmp_path: Path) -> None:
     _ship_all(tmp_path)
-    _write_ledger(tmp_path, [
-        _start("v1.1.0", "task:T", "2026-10-11T01:00:00+00:00"),
-        _end("v1.1.0", "task:T", "2026-10-11T02:00:00+00:00"),
-    ])
+    _write_ledger(
+        tmp_path,
+        [
+            _start("v1.1.0", "task:T", "2026-10-11T01:00:00+00:00"),
+            _end("v1.1.0", "task:T", "2026-10-11T02:00:00+00:00"),
+        ],
+    )
 
     clean = _result(tmp_path)["clean"]
 
@@ -296,10 +324,13 @@ def test_blocks_own_rc_is_not_counted_in_rcs(tmp_path: Path) -> None:
 
 def test_block_raised_with_no_active_rc_has_no_own_rc_to_exclude(tmp_path: Path) -> None:
     _ship_all(tmp_path)
-    _write_ledger(tmp_path, [
-        _start(NO_RC_VERSION, "halt:project", "2026-10-11T01:00:00+00:00"),
-        _end(NO_RC_VERSION, "halt:project", "2026-10-11T02:00:00+00:00"),
-    ])
+    _write_ledger(
+        tmp_path,
+        [
+            _start(NO_RC_VERSION, "halt:project", "2026-10-11T01:00:00+00:00"),
+            _end(NO_RC_VERSION, "halt:project", "2026-10-11T02:00:00+00:00"),
+        ],
+    )
 
     clean = _result(tmp_path)["clean"]
 
@@ -312,10 +343,13 @@ def test_only_shipped_rollups_with_closed_at_are_counted(tmp_path: Path) -> None
     _write_rollup(tmp_path, "v1.1.0", "2026-10-11T12:00:00+00:00", outcome="cancelled")
     _write_rollup(tmp_path, "v1.2.0", None)
     (_metrics_dir(tmp_path) / "rc" / "v1.3.0.json").write_text("{not json", encoding="utf-8")
-    _write_ledger(tmp_path, [
-        _start("v0.9.0", "task:T", "2026-10-01T01:00:00+00:00"),
-        _end("v0.9.0", "task:T", "2026-10-01T02:00:00+00:00"),
-    ])
+    _write_ledger(
+        tmp_path,
+        [
+            _start("v0.9.0", "task:T", "2026-10-01T01:00:00+00:00"),
+            _end("v0.9.0", "task:T", "2026-10-01T02:00:00+00:00"),
+        ],
+    )
 
     assert _result(tmp_path)["clean"]["rcs"] == 1
 
@@ -454,8 +488,7 @@ def test_append_through_ledger_write_api_rewrites_reliability_json(tmp_path: Pat
     ledger = str(_metrics_dir(tmp_path) / "blocked-intervals.jsonl")
     out = _metrics_dir(tmp_path) / "reliability.json"
 
-    append_block_start(ledger, "v1.4.0", "task:T", "2026-10-14T01:00:00+00:00",
-                       reason_code="agent_unclassified")
+    append_block_start(ledger, "v1.4.0", "task:T", "2026-10-14T01:00:00+00:00", reason_code="agent_unclassified")
     after_start = _read_json(out)
     assert after_start["project"] == PROJECT
     assert after_start["clean"]["status"] == STATUS_OPEN
@@ -464,8 +497,7 @@ def test_append_through_ledger_write_api_rewrites_reliability_json(tmp_path: Pat
     mark_block_escalated(ledger, "v1.4.0", "task:T", "2026-10-14T02:00:00+00:00")
     assert _read_json(out)["hands_off"]["status"] == STATUS_OPEN
 
-    append_block_end(ledger, "v1.4.0", "task:T", "2026-10-14T03:00:00+00:00",
-                     block_class="human", reason_code="reset")
+    append_block_end(ledger, "v1.4.0", "task:T", "2026-10-14T03:00:00+00:00", block_class="human", reason_code="reset")
     after_end = _read_json(out)
     for name in ("hands_off", "clean"):
         assert after_end[name]["status"] == STATUS_RESOLVED
@@ -517,7 +549,12 @@ def _run_cli(tmp_path: Path, *args: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.metrics.reliability", *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 

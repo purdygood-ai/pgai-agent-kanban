@@ -8,7 +8,12 @@
 # acceptance criterion in the requirements brief.
 #
 # What this script asserts:
-#   AC-a  A worktree existed under $(pgai_temp_dir)/worktrees/ during the task.
+#   AC-a  A worktree existed under the per-project worktree root during the
+#         task: $(pgai_temp_dir)/projects/<project>/worktrees/<task_id>, as
+#         pgai_worktree_base in lib/worktree.sh lays it out for a project
+#         context (PP_project_name, which pp_load_config exports). The script
+#         pins its own fixture project; a [paths] worktree_base in kanban.cfg,
+#         an explicit full-path override, replaces the expected root.
 #   AC-b  After the task the worktree directory is gone and git worktree prune
 #         reports nothing to clean up.
 #   AC-c  The feature branch's commits landed on the canonical local RC branch
@@ -44,12 +49,12 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Locate this script and source shared helpers
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 _TEMP_SH="${_SCRIPT_DIR}/lib/temp.sh"
 if [[ ! -f "$_TEMP_SH" ]]; then
@@ -74,24 +79,11 @@ unset _WORKTREE_SH
 # ---------------------------------------------------------------------------
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 VERBOSE=false
-PASS_COUNT=0
-FAIL_COUNT=0
-
-# ---------------------------------------------------------------------------
-# Color helpers (only when stdout is a tty)
-# ---------------------------------------------------------------------------
-if [[ -t 1 ]]; then
-    C_RED=$'\033[0;31m'
-    C_GREEN=$'\033[0;32m'
-    C_YELLOW=$'\033[0;33m'
-    C_RESET=$'\033[0m'
-else
-    C_RED="" C_GREEN="" C_YELLOW="" C_RESET=""
-fi
-
-pass() { echo "${C_GREEN}PASS${C_RESET}: $*"; (( PASS_COUNT++ )) || true; }
-fail() { echo "${C_RED}FAIL${C_RESET}: $*"; (( FAIL_COUNT++ )) || true; }
-warn() { echo "${C_YELLOW}WARN${C_RESET}: $*"; }
+# PASS_COUNT / FAIL_COUNT, the C_* colours and pass / fail / warn
+# (lib/verify_harness.sh).
+# shellcheck source=lib/verify_harness.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/verify_harness.sh"
+verify_harness_init
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -150,6 +142,18 @@ done
 _TMP_BEFORE="$(ls -A /tmp 2>/dev/null | grep -E 'pgai_kanban' || true)"
 
 # ---------------------------------------------------------------------------
+# Project context: every wake task runs with PP_project_name set (exported by
+# pp_load_config), and pgai_worktree_base roots that project's worktrees at
+# $(pgai_temp_dir)/projects/<PP_project_name>/worktrees. Pin a fixture
+# project so the expected root never depends on which project the caller's
+# environment happens to name, and drop the env-var full-path override so
+# the per-project layout is what gets exercised.
+# ---------------------------------------------------------------------------
+unset PGAI_WORKTREE_BASE
+export PP_project_name="verify-worktree-isolation-$$"
+_FIXTURE_PROJECT_TEMP_DIR="$(pgai_temp_dir)/projects/${PP_project_name}"
+
+# ---------------------------------------------------------------------------
 # Create fixture under framework temp root — cleaned up on EXIT
 # ---------------------------------------------------------------------------
 _FIXTURE_ROOT="$(pgai_mktemp_d worktree_isolation_verify)"
@@ -158,6 +162,10 @@ cleanup_fixture() {
     local exit_code=$?
     if [[ -d "$_FIXTURE_ROOT" ]]; then
         rm -rf "$_FIXTURE_ROOT"
+    fi
+    # The fixture project's worktree root, created by pgai_worktree_base.
+    if [[ -d "$_FIXTURE_PROJECT_TEMP_DIR" ]]; then
+        rm -rf "$_FIXTURE_PROJECT_TEMP_DIR"
     fi
     exit "$exit_code"
 }
@@ -168,6 +176,7 @@ echo "  verify-worktree-isolation.sh"
 echo "  kanban root   : $KANBAN_ROOT"
 echo "  fixture root  : $_FIXTURE_ROOT"
 echo "  framework tmp : $(pgai_temp_dir)"
+echo "  project       : ${PP_project_name}"
 echo "==================================================================="
 echo ""
 
@@ -211,7 +220,24 @@ FEATURE_BRANCH="feature/${TASK_ID}"
 
 # Resolve the framework temp dir once for this run so assertions can check it.
 FRAMEWORK_TEMP_DIR="$(pgai_temp_dir)"
-EXPECTED_WORKTREE_PATH="${FRAMEWORK_TEMP_DIR}/worktrees/${TASK_ID}"
+
+# The expected worktree root, worked out here rather than by calling
+# pgai_worktree_base, so a change to that resolver shows up as a FAIL.
+_CFG_WORKTREE_BASE=""
+if [[ -n "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" && -r "${PGAI_AGENT_KANBAN_ROOT_PATH}/kanban.cfg" ]]; then
+    if ! command -v read_ini >/dev/null 2>&1; then
+        # shellcheck source=lib/ini_parser.sh
+        source "${_SCRIPT_DIR}/lib/ini_parser.sh"
+    fi
+    _CFG_WORKTREE_BASE="$(read_ini "${PGAI_AGENT_KANBAN_ROOT_PATH}/kanban.cfg" paths worktree_base "")"
+fi
+if [[ -n "$_CFG_WORKTREE_BASE" ]]; then
+    EXPECTED_WORKTREE_ROOT="$_CFG_WORKTREE_BASE"
+    echo "  (note: kanban.cfg [paths] worktree_base overrides the per-project root: ${EXPECTED_WORKTREE_ROOT})"
+else
+    EXPECTED_WORKTREE_ROOT="${FRAMEWORK_TEMP_DIR}/projects/${PP_project_name}/worktrees"
+fi
+EXPECTED_WORKTREE_PATH="${EXPECTED_WORKTREE_ROOT}/${TASK_ID}"
 
 # ---- Step 1: create the worktree ----
 echo "--- Creating worktree for task ${TASK_ID} ..."
@@ -225,19 +251,20 @@ if [[ $CREATE_EXIT -ne 0 ]]; then
     fail "AC-a: create_task_worktree exited $CREATE_EXIT — cannot continue scenario 1"
     echo ""
 else
-    # AC-a: worktree must exist under $(pgai_temp_dir)/worktrees/
-    echo "--- AC-a: checking worktree exists under \$(pgai_temp_dir)/worktrees/ ..."
+    # AC-a: worktree must exist under the per-project worktree root
+    echo "--- AC-a: checking worktree exists under ${EXPECTED_WORKTREE_ROOT}/ ..."
     if [[ -d "$CREATED_PATH" ]]; then
         pass "AC-a: worktree directory exists at ${CREATED_PATH}"
     else
         fail "AC-a: worktree directory not found at ${CREATED_PATH}"
     fi
 
-    # AC-a (path check): worktree must be under framework temp, not under the canonical dev tree
-    if [[ "$CREATED_PATH" == "${FRAMEWORK_TEMP_DIR}/worktrees/"* ]]; then
-        pass "AC-a (path): worktree is under \$(pgai_temp_dir)/worktrees/ (not canonical tree)"
+    # AC-a (path check): the worktree sits at <per-project root>/<task_id>,
+    # under the framework temp root and not under the canonical dev tree.
+    if [[ "$CREATED_PATH" == "$EXPECTED_WORKTREE_PATH" ]]; then
+        pass "AC-a (path): worktree is at the per-project root, ${EXPECTED_WORKTREE_PATH} (not canonical tree)"
     else
-        fail "AC-a (path): worktree path '${CREATED_PATH}' is NOT under ${FRAMEWORK_TEMP_DIR}/worktrees/"
+        fail "AC-a (path): worktree path '${CREATED_PATH}' is NOT the per-project location ${EXPECTED_WORKTREE_PATH}"
     fi
 
     # ---- Step 2: commit a file in the worktree (simulated CODER work) ----
@@ -338,7 +365,7 @@ build_fixture_repo "$FIXTURE_REPO_B"
 
 TASK_ID_B="verify-worktree-blocked-path-$$"
 FEATURE_BRANCH_B="feature/${TASK_ID_B}"
-EXPECTED_WORKTREE_PATH_B="${FRAMEWORK_TEMP_DIR}/worktrees/${TASK_ID_B}"
+EXPECTED_WORKTREE_PATH_B="${EXPECTED_WORKTREE_ROOT}/${TASK_ID_B}"
 
 # Create the worktree
 echo "--- Creating worktree for BLOCKED task ${TASK_ID_B} ..."
@@ -356,6 +383,11 @@ else
         echo "  worktree created at: ${CREATED_PATH_B}"
     else
         fail "AC-f: pre-condition failed — worktree not created at ${CREATED_PATH_B}"
+    fi
+    if [[ "$CREATED_PATH_B" == "$EXPECTED_WORKTREE_PATH_B" ]]; then
+        pass "AC-a (path): BLOCKED-path worktree is at the per-project root, ${EXPECTED_WORKTREE_PATH_B}"
+    else
+        fail "AC-a (path): BLOCKED-path worktree '${CREATED_PATH_B}' is NOT the per-project location ${EXPECTED_WORKTREE_PATH_B}"
     fi
 
     # Commit some partial work (partial CODER work before BLOCKED detection)

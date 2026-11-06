@@ -53,7 +53,7 @@ import os
 import pathlib
 import re
 import subprocess
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pytest
 
@@ -105,7 +105,7 @@ def _auto_ship_line(trigger: int, error_key: str) -> str:
 class Lane:
     """One fixture project: its repo, kanban root and project directory."""
 
-    def __init__(self, tmp_path: pathlib.Path, posture: Optional[str], version: str):
+    def __init__(self, tmp_path: pathlib.Path, posture: str | None, version: str):
         self.version = version
         self.repo = tmp_path / "dev_repo"
         _init_git_repo_with_remote(self.repo, tmp_path / "bare_remote.git")
@@ -130,11 +130,12 @@ class Lane:
     def rc_work(self, filename: str = "feature.txt") -> None:
         _commit_on_branch(self.repo, self.rc_branch, filename, "RC work\n", "feat: RC work", return_branch="main")
 
-    def release(self, extra_env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    def release(self, extra_env: dict | None = None) -> subprocess.CompletedProcess:
         return _run_cm_script(_RELEASE_SCRIPT, [], self.root, _PROJECT, repo_root=self.repo, extra_env=extra_env)
 
-    def tester_task(self, *, state: str = "DONE", recommendation: str = "PASS",
-                    systemic_risk: str = "low", findings: str = "") -> None:
+    def tester_task(
+        self, *, state: str = "DONE", recommendation: str = "PASS", systemic_risk: str = "low", findings: str = ""
+    ) -> None:
         task_dir = self.proj / "tasks" / _TESTER_TASK
         (task_dir / "artifacts").mkdir(parents=True, exist_ok=True)
         (task_dir / "README.md").write_text(
@@ -161,7 +162,7 @@ class Lane:
         )
         return path
 
-    def halt_key(self) -> Optional[str]:
+    def halt_key(self) -> str | None:
         halt = self.proj / "HALT"
         if not halt.is_file():
             return None
@@ -221,7 +222,7 @@ _UNIT_LANE_SYMPTOM = "The parallel unit lane collects different tests in each wo
 _INLINE_SYMPTOM = "Inline Python in shell scripts remains above the reduction target."
 
 
-def _trigger_2_lane(tmp_path: pathlib.Path, posture: Optional[str]) -> Lane:
+def _trigger_2_lane(tmp_path: pathlib.Path, posture: str | None) -> Lane:
     lane = Lane(tmp_path, posture, "v0.5.0")
     lane.open_rc()
     lane.rc_work()
@@ -262,7 +263,10 @@ def test_trigger_two_ships_non_functional_under_always_and_records_the_event(tmp
     assert "Filed Bug" not in events[0]
     validate = subprocess.run(
         ["python3", "-m", "pgai_agent_kanban.cm.read_state_field", "--validate", str(lane.proj / "release-state.md")],
-        capture_output=True, text=True, cwd=str(_TEAM_DIR), env={**os.environ, "PYTHONPATH": str(_TEAM_DIR)},
+        capture_output=True,
+        text=True,
+        cwd=str(_TEAM_DIR),
+        env={**os.environ, "PYTHONPATH": str(_TEAM_DIR)},
     )
     assert validate.returncode == 0, f"{validate.stdout}\n{validate.stderr}"
 
@@ -286,7 +290,7 @@ _CONVERGENCE_SYMPTOM = "Two shell verbs still have no module behind them."
 _STALE_SYMPTOM = "One test still asserts the old route list."
 
 
-def _trigger_3_lane(tmp_path: pathlib.Path, posture: Optional[str]) -> Lane:
+def _trigger_3_lane(tmp_path: pathlib.Path, posture: str | None) -> Lane:
     lane = Lane(tmp_path, posture, "v0.6.0")
     lane.open_rc()
     lane.rc_work()
@@ -333,11 +337,12 @@ def test_trigger_three_ships_non_functional_under_always_and_stamps_known_issues
     assert events[0]["TESTER Task"] == _TESTER_TASK
 
 
-def _trigger_8_lane(tmp_path: pathlib.Path, posture: Optional[str]) -> Lane:
+def _trigger_8_lane(tmp_path: pathlib.Path, posture: str | None) -> Lane:
     lane = Lane(tmp_path, posture, "v0.4.0")
     for version in ("v0.1.0", "v0.2.0", "v0.3.0"):
         (lane.repo / "release-notes" / f"{version}.md").write_text(
-            f"# Release Notes: {_PROJECT} {version}\n\n## Status\nNON-FUNCTIONAL\n", encoding="utf-8",
+            f"# Release Notes: {_PROJECT} {version}\n\n## Status\nNON-FUNCTIONAL\n",
+            encoding="utf-8",
         )
     _git_local(lane.repo, "add", "release-notes")
     _git_local(lane.repo, "commit", "-m", "docs: three earlier release notes")
@@ -382,50 +387,58 @@ def test_trigger_eight_files_one_pattern_bug_and_ships_under_always(tmp_path, po
 # ---------------------------------------------------------------------------
 
 
-def _blocked_tester(lane: Lane) -> Optional[dict]:
+def _blocked_tester(lane: Lane) -> dict | None:
     lane.open_rc()
     lane.rc_work()
     lane.tester_task(state="BLOCKED", systemic_risk="high")
     return None
 
 
-def _working_tester(lane: Lane) -> Optional[dict]:
+def _working_tester(lane: Lane) -> dict | None:
     lane.open_rc()
     lane.rc_work()
     lane.tester_task(state="WORKING")
     return None
 
 
-def _failing_pre_squash_hook(lane: Lane) -> Optional[dict]:
+def _failing_pre_squash_hook(lane: Lane) -> dict | None:
     lane.open_rc()
     lane.rc_work()
     _commit_in_repo_hook(
-        lane.repo, lane.rc_branch, "pre-squash", "#!/usr/bin/env bash\nexit 1\n",
-        "chore: pre-squash hook that fails", return_branch="main",
+        lane.repo,
+        lane.rc_branch,
+        "pre-squash",
+        "#!/usr/bin/env bash\nexit 1\n",
+        "chore: pre-squash hook that fails",
+        return_branch="main",
     )
     return None
 
 
-def _squash_conflict(lane: Lane) -> Optional[dict]:
+def _squash_conflict(lane: Lane) -> dict | None:
     _commit_on_branch(lane.repo, "main", "shared.txt", "line A\nline B\n", "chore: shared file")
     lane.open_rc()
-    _commit_on_branch(lane.repo, lane.rc_branch, "shared.txt", "line A\nline B (RC)\n", "feat: RC edit", return_branch="main")
+    _commit_on_branch(
+        lane.repo, lane.rc_branch, "shared.txt", "line A\nline B (RC)\n", "feat: RC edit", return_branch="main"
+    )
     _commit_on_branch(lane.repo, "main", "shared.txt", "line A\nline B (main)\n", "fix: conflicting main edit")
     return None
 
 
-def _notes_without_status(lane: Lane) -> Optional[dict]:
+def _notes_without_status(lane: Lane) -> dict | None:
     lane.open_rc()
     lane.rc_work()
     _git_local(lane.repo, "checkout", lane.rc_branch)
-    (lane.repo / "release-notes" / f"{lane.version}.md").write_text("# Release Notes\n\nNo status heading.\n", encoding="utf-8")
+    (lane.repo / "release-notes" / f"{lane.version}.md").write_text(
+        "# Release Notes\n\nNo status heading.\n", encoding="utf-8"
+    )
     _git_local(lane.repo, "add", f"release-notes/{lane.version}.md")
     _git_local(lane.repo, "commit", "-m", "docs: notes without a status heading")
     _git_local(lane.repo, "checkout", "main")
     return None
 
 
-def _strict_pollution(lane: Lane) -> Optional[dict]:
+def _strict_pollution(lane: Lane) -> dict | None:
     lane.open_rc()
     _git_local(lane.repo, "checkout", lane.rc_branch)
     (lane.repo / "artifacts").mkdir(exist_ok=True)
@@ -436,7 +449,7 @@ def _strict_pollution(lane: Lane) -> Optional[dict]:
     return {"CM_SQUASH_STRICT_POLLUTION_GUARD": "true"}
 
 
-def _fidelity_divergence(lane: Lane) -> Optional[dict]:
+def _fidelity_divergence(lane: Lane) -> dict | None:
     lane.open_rc()
     lane.rc_work()
     _commit_on_branch(lane.repo, "main", "hotfix.txt", "hotfix\n", "fix: non-conflicting main commit")
@@ -452,7 +465,7 @@ _HALT_SCENARIOS: dict = {
 }
 
 
-def _run_halt_scenario(tmp_path: pathlib.Path, posture: Optional[str], build: Callable) -> Lane:
+def _run_halt_scenario(tmp_path: pathlib.Path, posture: str | None, build: Callable) -> Lane:
     lane = Lane(tmp_path, posture, "v0.7.0")
     extra_env = build(lane)
     lane.result = lane.release(extra_env=extra_env)

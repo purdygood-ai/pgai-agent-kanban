@@ -43,6 +43,7 @@ try:
     )
 except ImportError:
     import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib.bug_scanner import (  # type: ignore[no-redef]
         scan_bugs_directory,
@@ -420,9 +421,7 @@ def test_claim_next_bug_id_records_explicit_claimed_by_in_ledger(
     .bug-claims.log ledger, alongside the claimed bug ID."""
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
-    bug_id, _, lock_path = claim_next_bug_id(
-        str(bugs_dir), "explicit-claimant", claimed_by="verifier-session-alpha"
-    )
+    bug_id, _, lock_path = claim_next_bug_id(str(bugs_dir), "explicit-claimant", claimed_by="verifier-session-alpha")
     try:
         ledger = bugs_dir / ".bug-claims.log"
         assert ledger.exists(), "claim_next_bug_id did not create the durable claims ledger."
@@ -570,9 +569,7 @@ def test_resolve_bugs_dir_returns_explicit_path_unchanged() -> None:
     assert result == "/custom/bugs"
 
 
-def test_resolve_bugs_dir_uses_project_root_env(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_bugs_dir_uses_project_root_env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """resolve_bugs_dir uses PGAI_PROJECT_ROOT env var when no explicit path given."""
     monkeypatch.setenv("PGAI_PROJECT_ROOT", str(tmp_path))
     monkeypatch.delenv("PGAI_AGENT_KANBAN_ROOT_PATH", raising=False)
@@ -606,13 +603,10 @@ def test_scan_highest_bug_num_ignores_date_first_filename(
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
     _write_bug(bugs_dir, "BUG-0009-well-formed")
-    (bugs_dir / "BUG-20260803-001-date-first-bad.md").write_text(
-        "## Status\nopen\n", encoding="utf-8"
-    )
+    (bugs_dir / "BUG-20260803-001-date-first-bad.md").write_text("## Status\nopen\n", encoding="utf-8")
     highest = _scan_highest_bug_num(bugs_dir)
     assert highest == 9, (
-        f"Expected the date-first filename to be excluded from the scan "
-        f"(highest=9); got highest={highest}"
+        f"Expected the date-first filename to be excluded from the scan " f"(highest=9); got highest={highest}"
     )
 
 
@@ -623,13 +617,10 @@ def test_scan_highest_bug_num_ignores_under_padded_filename(
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
     _write_bug(bugs_dir, "BUG-0036-well-formed")
-    (bugs_dir / "BUG-37-under-padded-bad.md").write_text(
-        "## Status\nopen\n", encoding="utf-8"
-    )
+    (bugs_dir / "BUG-37-under-padded-bad.md").write_text("## Status\nopen\n", encoding="utf-8")
     highest = _scan_highest_bug_num(bugs_dir)
     assert highest == 36, (
-        f"Expected the under-padded filename to be excluded from the scan "
-        f"(highest=36); got highest={highest}"
+        f"Expected the under-padded filename to be excluded from the scan " f"(highest=36); got highest={highest}"
     )
 
 
@@ -666,9 +657,7 @@ def test_claim_next_bug_id_recovers_correct_next_id_with_malformed_file_present(
     bugs_dir.mkdir()
     _write_bug(bugs_dir, "BUG-0009-lower")
     _write_bug(bugs_dir, "BUG-0036-higher")
-    (bugs_dir / "BUG-20260803-001-date-first-bad.md").write_text(
-        "## Status\nopen\n", encoding="utf-8"
-    )
+    (bugs_dir / "BUG-20260803-001-date-first-bad.md").write_text("## Status\nopen\n", encoding="utf-8")
     bug_id, bug_path, lock_path = claim_next_bug_id(str(bugs_dir), "next-slot")
     try:
         assert bug_id == "BUG-0037", bug_id
@@ -689,9 +678,7 @@ def test_claim_next_bug_id_skips_number_held_by_contract_invalid_name(
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
     (bugs_dir / "BUG-0001-first-bug.md").write_text("## Status\nopen\n", encoding="utf-8")
-    (bugs_dir / "BUG-0002-v1.2.3-notes-count.md").write_text(
-        "## Status\nopen\n", encoding="utf-8"
-    )
+    (bugs_dir / "BUG-0002-v1.2.3-notes-count.md").write_text("## Status\nopen\n", encoding="utf-8")
     bug_id, bug_path, lock_path = claim_next_bug_id(str(bugs_dir), "probe-slug")
     release_bug_id_claim(lock_path)
     assert bug_id == "BUG-0003", bug_id

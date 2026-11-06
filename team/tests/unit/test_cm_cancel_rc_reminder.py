@@ -28,15 +28,14 @@ from __future__ import annotations
 import pathlib
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent   # team/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _CANCEL_RC = _TEAM_DIR / "pgai_agent_kanban" / "cm" / "cancel.py"
 
 
 def _cancel_rc_source() -> str:
     """Return the full source text of pgai_agent_kanban/cm/cancel.py."""
     assert _CANCEL_RC.exists(), (
-        f"cm/cancel.py not found at {_CANCEL_RC}.\n"
-        "The file must exist and be tracked by git."
+        f"cm/cancel.py not found at {_CANCEL_RC}.\n" "The file must exist and be tracked by git."
     )
     return _CANCEL_RC.read_text(encoding="utf-8")
 
@@ -49,10 +48,7 @@ def test_bundle_close_command_present() -> None:
     bundle-close line.
     """
     source = _cancel_rc_source()
-    bundle_close_lines = [
-        line for line in source.splitlines()
-        if "close.sh" in line and "--state wont-do" in line
-    ]
+    bundle_close_lines = [line for line in source.splitlines() if "close.sh" in line and "--state wont-do" in line]
     assert bundle_close_lines, (
         "No line in cm/cancel.py contains both 'close.sh' and '--state wont-do'.\n"
         "The post-cancel reminder must include the bundle-close command so the operator\n"
@@ -70,20 +66,11 @@ def test_bundle_close_command_names_project_and_key() -> None:
     suffix — all other flags must be present or clearly derivable.
     """
     source = _cancel_rc_source()
-    bundle_close_lines = [
-        line for line in source.splitlines()
-        if "close.sh" in line and "--state wont-do" in line
-    ]
-    assert bundle_close_lines, (
-        "No bundle-close line found — see test_bundle_close_command_present."
-    )
+    bundle_close_lines = [line for line in source.splitlines() if "close.sh" in line and "--state wont-do" in line]
+    assert bundle_close_lines, "No bundle-close line found — see test_bundle_close_command_present."
     line = bundle_close_lines[0]
-    assert "--project" in line, (
-        f"Bundle-close line missing '--project' flag.\nLine: {line!r}"
-    )
-    assert "--key" in line, (
-        f"Bundle-close line missing '--key' flag.\nLine: {line!r}"
-    )
+    assert "--project" in line, f"Bundle-close line missing '--project' flag.\nLine: {line!r}"
+    assert "--key" in line, f"Bundle-close line missing '--key' flag.\nLine: {line!r}"
 
 
 def test_rearming_note_present() -> None:
@@ -93,10 +80,7 @@ def test_rearming_note_present() -> None:
     that leaving the bundle live re-arms the discovery re-selection path.
     """
     source = _cancel_rc_source()
-    rearming_lines = [
-        line for line in source.splitlines()
-        if "re-arms" in line and "re-selection" in line
-    ]
+    rearming_lines = [line for line in source.splitlines() if "re-arms" in line and "re-selection" in line]
     assert rearming_lines, (
         "No line in cm/cancel.py contains both 're-arms' and 're-selection'.\n"
         "The post-cancel reminder must warn that leaving the bundle live re-arms\n"
@@ -121,13 +105,10 @@ def test_bundle_close_reminder_is_unconditional() -> None:
     lines = _cancel_rc_source().splitlines()
 
     bundle_close_idx = next(
-        (i for i, ln in enumerate(lines)
-         if "close.sh" in ln and "--state wont-do" in ln),
+        (i for i, ln in enumerate(lines) if "close.sh" in ln and "--state wont-do" in ln),
         None,
     )
-    assert bundle_close_idx is not None, (
-        "No bundle-close line found — see test_bundle_close_command_present."
-    )
+    assert bundle_close_idx is not None, "No bundle-close line found — see test_bundle_close_command_present."
 
     pending_if_idx = max(
         (i for i, ln in enumerate(lines[:bundle_close_idx]) if ln.strip() == "if pending:"),

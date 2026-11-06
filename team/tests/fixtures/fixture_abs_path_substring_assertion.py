@@ -37,6 +37,5 @@ def _assert_project_less_routing(resolved_path: str, kanban_root: pathlib.Path) 
     kanban_root).
     """
     assert "/projects/" not in resolved_path, (
-        f"Project-less debug log was incorrectly routed to a project directory: "
-        f"{resolved_path}"
+        f"Project-less debug log was incorrectly routed to a project directory: " f"{resolved_path}"
     )

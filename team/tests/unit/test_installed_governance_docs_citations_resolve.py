@@ -187,9 +187,7 @@ _STAMP_VERSION = "v0.0.0-docs-reachability-check"
 # bytecode caches, and every "tests" directory (neither script's copy
 # steps read a tests subtree; excluding it keeps a fixture copy
 # proportionate).
-_SOURCE_COPY_IGNORE = shutil.ignore_patterns(
-    ".git", "__pycache__", "*.pyc", ".pytest_cache", "tests"
-)
+_SOURCE_COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".pytest_cache", "tests")
 
 # Loose match for a root-variable command path: $VAR/<path> or
 # ${VAR}/<path>, VAR one of the two kanban-root variables, ending in a
@@ -199,9 +197,8 @@ _SOURCE_COPY_IGNORE = shutil.ignore_patterns(
 # instead of the command-path defect this dimension targets. The single
 # capture group is the relative path portion, so .findall() on this
 # pattern yields relative paths directly, ready to resolve against a root.
-_ROOT_VAR_PATH_RE = re.compile(
-    r"\$\{?(?:PGAI_AGENT_KANBAN_ROOT_PATH|KANBAN_ROOT)\}?/([A-Za-z0-9._/-]+\.(?:sh|py))"
-)
+_ROOT_VAR_PATH_RE = re.compile(r"\$\{?(?:PGAI_AGENT_KANBAN_ROOT_PATH|KANBAN_ROOT)\}?/([A-Za-z0-9._/-]+\.(?:sh|py))")
+
 
 @dataclass
 class _RootVariablePathReport:
@@ -225,10 +222,7 @@ class _RootVariablePathReport:
             for source, named in self.unreachable:
                 lines.append(f"  - {source} names {named!r}, which is not installed")
         else:
-            lines.append(
-                "Every root-variable command path resolved to a file under the "
-                "installed root."
-            )
+            lines.append("Every root-variable command path resolved to a file under the " "installed root.")
         return "\n".join(lines)
 
 
@@ -432,8 +426,7 @@ def test_every_installed_governance_docs_citation_resolves_under_fresh_install(
 
     result = _run_install(_REAL_INSTALL_SH, kanban_root=kanban_root, home=home)
     assert result.returncode == 0, (
-        f"install.sh must succeed before the reachability checks can run.\n"
-        f"{_combined_output(result)}"
+        f"install.sh must succeed before the reachability checks can run.\n" f"{_combined_output(result)}"
     )
 
     docs_report = _find_unreachable_docs_citations(kanban_root)
@@ -467,9 +460,7 @@ def test_every_installed_governance_docs_citation_resolves_under_fresh_install(
     )
 
 
-def test_repository_relative_team_scripts_reference_produces_no_root_variable_finding() -> (
-    None
-):
+def test_repository_relative_team_scripts_reference_produces_no_root_variable_finding() -> None:
     """A bare repository-relative team/scripts/... mention in prose — no
     $PGAI_AGENT_KANBAN_ROOT_PATH or $KANBAN_ROOT prefix in front of it — is
     correct as written (team/ does not exist on an installed root; the
@@ -556,9 +547,7 @@ def test_citation_to_undelivered_document_is_reported_as_unreachable(
         f"citations. This means the check failed to catch the exact gap "
         f"this red-case test injects.\n{report.describe()}"
     )
-    unreachable_sources = [
-        finding.source for finding in report.findings if finding.cited == bogus_citation
-    ]
+    unreachable_sources = [finding.source for finding in report.findings if finding.cited == bogus_citation]
     assert any(source.endswith("TESTER.md") for source in unreachable_sources), (
         f"Expected the unreachable citation to be attributed to roles/TESTER.md "
         f"(where the fixture injected it), got: {unreachable_sources}"
@@ -633,9 +622,7 @@ def test_root_variable_command_path_to_undelivered_file_is_reported_as_unreachab
         f"paths. This means the check failed to catch the exact gap this "
         f"red-case test injects.\n{report.describe()}"
     )
-    unreachable_sources = [
-        source for source, named in report.unreachable if named == bogus_rel_path
-    ]
+    unreachable_sources = [source for source, named in report.unreachable if named == bogus_rel_path]
     assert any(source.endswith("TESTER.md") for source in unreachable_sources), (
         f"Expected the unreachable path to be attributed to roles/TESTER.md "
         f"(where the fixture injected it), got: {unreachable_sources}"
@@ -681,15 +668,13 @@ def test_every_installed_governance_docs_citation_resolves_under_upgraded_root(
 
     docs_dir = kanban_root / "docs"
     assert docs_dir.is_dir(), (
-        "Setup: install.sh must deliver docs/ before this test can simulate "
-        "an install without docs/ by removing it."
+        "Setup: install.sh must deliver docs/ before this test can simulate " "an install without docs/ by removing it."
     )
     shutil.rmtree(docs_dir)
 
     installed_upgrade_sh = kanban_root / "scripts" / "upgrade.sh"
     assert installed_upgrade_sh.is_file(), (
-        "Setup: install.sh must deliver scripts/upgrade.sh for the phase-1 "
-        "bootstrap to exist."
+        "Setup: install.sh must deliver scripts/upgrade.sh for the phase-1 " "bootstrap to exist."
     )
 
     upgrade_result = _run_upgrade(
@@ -700,8 +685,7 @@ def test_every_installed_governance_docs_citation_resolves_under_upgraded_root(
         pgai_temp=pgai_temp,
     )
     assert upgrade_result.returncode == 0, (
-        f"upgrade.sh must succeed before the citation check can run.\n"
-        f"{_combined_output(upgrade_result)}"
+        f"upgrade.sh must succeed before the citation check can run.\n" f"{_combined_output(upgrade_result)}"
     )
 
     report = _find_unreachable_docs_citations(kanban_root)
@@ -770,8 +754,7 @@ def test_citation_undelivered_by_upgrade_route_is_reported_as_unreachable(
 
     install_result = _run_install(_REAL_INSTALL_SH, kanban_root=kanban_root, home=home)
     assert install_result.returncode == 0, (
-        f"Setup: the fixture install must succeed.\n"
-        f"{_combined_output(install_result)}"
+        f"Setup: the fixture install must succeed.\n" f"{_combined_output(install_result)}"
     )
     shutil.rmtree(kanban_root / "docs")
 

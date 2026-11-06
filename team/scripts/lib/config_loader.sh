@@ -114,11 +114,26 @@
 #                                         bound, in lines, for the schedule
 #                                         window's event band)
 #   session_name            OPTIONAL  pgai-kanban-dashboard  (read by
-#                                         team/scripts/dashboard/create.sh and
-#                                         kill.sh via read_ini; tmux session
+#                                         team/scripts/dashboard/lib/session_name.sh
+#                                         via read_ini for create.sh, attach.sh,
+#                                         detach.sh and kill.sh; tmux session
 #                                         name for the dashboard)
 #   refresh_seconds         OPTIONAL  5  (read by team/scripts/dashboard/create.sh
 #                                         via read_ini; pane refresh cadence)
+#   operator_workbench_pct  OPTIONAL  40  (read by
+#                                         team/scripts/dashboard/create.sh via
+#                                         read_ini; operator window workbench
+#                                         width in percent, 0 disables it)
+#   operator_workbench_min_cols  OPTIONAL  160  (read by
+#                                         team/scripts/dashboard/create.sh via
+#                                         read_ini; narrow-window guard: no
+#                                         workbench below this window width,
+#                                         re-checked on every window resize)
+#   operator_board_agents  OPTIONAL  merged  (read by
+#                                         team/scripts/dashboard/create.sh via
+#                                         read_ini; operator window board
+#                                         columns: merged (one AGENTS column)
+#                                         or split (the five role columns))
 #   color_done              OPTIONAL  green  (this and the eight color_* keys
 #                                         below are read by the
 #                                         team/scripts/dashboard/ show-*.sh and
@@ -133,6 +148,26 @@
 #   color_header            OPTIONAL  cyan
 #   color_halt              OPTIONAL  red
 #   color_ok                OPTIONAL  green
+#   status_max_width        OPTIONAL  320  (exported as
+#                                         PGAI_DASHBOARD_STATUS_MAX_WIDTH by
+#                                         config_export_tunables, environment
+#                                         first; width budget of the status
+#                                         lines status-bottom.sh and
+#                                         status-right.sh render)
+#   arm_timeout_seconds     OPTIONAL  20  (exported as
+#                                         PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS by
+#                                         config_export_tunables, environment
+#                                         first; seconds create.sh waits with
+#                                         no further pane reporting armed)
+#
+# [discovery] — exported by config_export_tunables (environment first)
+#   settle_seconds          OPTIONAL  60  (PGAI_DISCOVERY_SETTLE_SECONDS: an
+#                                         intake file younger than this is
+#                                         left for the next tick; 0 disables)
+#   reject_threshold        OPTIONAL  3   (PGAI_DISCOVERY_REJECT_THRESHOLD:
+#                                         rejections before a file is
+#                                         quarantined; also the attention
+#                                         pane's warning bound)
 #
 # [docker]
 #   docker_exe              OPTIONAL  docker  (read by
@@ -172,7 +207,7 @@
 #                                            by team/pgai_agent_kanban/api/config.py)
 #
 # [governance]
-#   budget_bytes_coder      OPTIONAL  77824  (read by
+#   budget_bytes_coder      OPTIONAL  81920  (read by
 #                                             team/scripts/lint_governance_byte_budgets.sh
 #                                             via read_ini; per-role byte
 #                                             ceiling for the assembled
@@ -182,7 +217,7 @@
 #                                             current re-baselined ceiling,
 #                                             not a load-time fallback.)
 #   budget_bytes_tester     OPTIONAL  126976
-#   budget_bytes_po         OPTIONAL  73728
+#   budget_bytes_po         OPTIONAL  81920
 #   budget_bytes_pm         OPTIONAL  98304
 #   budget_bytes_writer     OPTIONAL  86016
 #   budget_bytes_cm         OPTIONAL  114688
@@ -289,6 +324,7 @@
 #   retention_days          OPTIONAL  30
 #   trivial_log_bytes       OPTIONAL  1700
 #   trivial_log_hours       OPTIONAL  6
+#   task_retention_days     OPTIONAL  7
 #
 # [release]  — deferral-posture keys. Shared by kanban.cfg
 #              (framework-wide default) and a project's own project.cfg
@@ -381,6 +417,11 @@
 #                                         because [release] is the one section
 #                                         genuinely shared by both cfg files —
 #                                         see the section header above.)
+#   deep_verify_freshness_window_days  OPTIONAL  7  (kanban.cfg only; exported
+#                                         as PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS
+#                                         by config_export_tunables, environment
+#                                         first; days a built deep-verify record
+#                                         stays fresh for the pre-release check)
 #   deep_verify_offhours_window  OPTIONAL  03:00-03:59  (HH:MM-HH:MM UTC; NOT
 #                                         read/validated by load_config() —
 #                                         read by pp_deep_verify_offhours_
@@ -454,6 +495,22 @@
 #                                         harness lists the images and
 #                                         builds nothing. An undeclared name
 #                                         is refused by the harness.)
+#   hook_timeout_seconds    OPTIONAL  900 (NOT read/validated by
+#                                         load_config() below — read from
+#                                         kanban.cfg only by cm/release.sh
+#                                         (for _run_release_hook in
+#                                         lib/cm/release_hook_runner.sh) and
+#                                         by team/pgai_agent_kanban/cm/ship.py.
+#                                         The default is defined once, in
+#                                         pgai_agent_kanban.lib.hook_timeout;
+#                                         bash reads it through
+#                                         config_release_hook_timeout_seconds_default.
+#                                         Seconds a release hook, and its
+#                                         resolver, may run before its
+#                                         process group is stopped and the
+#                                         hook fails with rc=124. A positive
+#                                         whole number; anything else warns
+#                                         and the default is used.)
 #
 # [locks]  — the second section shared by kanban.cfg (framework-wide
 #            default) and a project's own project.cfg (per-project
@@ -555,6 +612,19 @@
 #                                         HALT may be cleared to an inbox
 #                                         entry. An unrecognized value
 #                                         refuses, dual-channel.)
+#   verb_timeout_seconds    OPTIONAL  3600 (NOT read/validated by
+#                                         load_config() below — read from
+#                                         kanban.cfg only by
+#                                         resolve_verb_timeout_seconds() in
+#                                         team/pgai_agent_kanban/overwatch/
+#                                         resolution_stage.py. Seconds one
+#                                         verb script the resolution stage
+#                                         runs may take before its process
+#                                         group is stopped and the verb
+#                                         fails with reason code
+#                                         overwatch.verb-timeout. A positive
+#                                         whole number; anything else warns
+#                                         and the default is used.)
 #
 # [archive]  — the fourth section shared by kanban.cfg (framework-wide
 #              default) and a project's own project.cfg (per-project
@@ -628,6 +698,11 @@
 #                                              unchanged. Absent or blank =
 #                                              10.)
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_CONFIG_LOADER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _CONFIG_LOADER_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # Bootstrap: ensure read_ini is available.
 # If ini_parser.sh has already been sourced (the normal case when wake_common.sh
@@ -685,10 +760,13 @@ _CONFIG_LOADER_KNOWN_KEYS=(
     dashboard:max_rows_per_project dashboard:max_rows
     dashboard:dashboard_status_glyph dashboard:snapshot_ttl_seconds
     dashboard:event_band_read_bound_lines dashboard:session_name
-    dashboard:refresh_seconds dashboard:color_done dashboard:color_working
+    dashboard:refresh_seconds dashboard:operator_workbench_pct
+    dashboard:operator_workbench_min_cols dashboard:operator_board_agents
+    dashboard:color_done dashboard:color_working
     dashboard:color_blocked dashboard:color_waiting dashboard:color_label
     dashboard:color_dim dashboard:color_header dashboard:color_halt
-    dashboard:color_ok
+    dashboard:color_ok dashboard:status_max_width dashboard:arm_timeout_seconds
+    discovery:settle_seconds discovery:reject_threshold
     docker:docker_exe docker:container_name docker:image
     docker:container_stop_timeout_seconds
     api:host api:port api:shell_out_timeout_seconds
@@ -710,19 +788,21 @@ _CONFIG_LOADER_KNOWN_KEYS=(
     models.codex:default models.codex:pm models.codex:coder
     models.codex:writer models.codex:tester models.codex:cm models.codex:po
     cleanup:retention_days cleanup:trivial_log_bytes cleanup:trivial_log_hours
+    cleanup:task_retention_days
     release:deferred_bugs release:deferred_bug_level release:defer_piggyback
     release:deferred_max_age_days release:deferred_max_count
     release:bundle_mixing release:ride_along_max
     release:deep_verify release:max_rc_retries
     release:deep_verify_offhours_window release:overwatch_resolve
+    release:deep_verify_freshness_window_days
     release:ship_posture release:ship_posture_confirm_remote
-    release:container_images
+    release:container_images release:hook_timeout_seconds
     locks:stale_lock_reap_after_wake_periods
     overwatch:block_triage overwatch:requeue_budget
     overwatch:leaked_listener_min_age_seconds
     overwatch:runaway_releases_per_hour overwatch:runaway_rc_cycles_per_day
     overwatch:runaway_reason_repeats overwatch:runaway_inbox_entries_per_day
-    overwatch:halt_after_auto_resume
+    overwatch:halt_after_auto_resume overwatch:verb_timeout_seconds
     archive:archive_count
     testing:workers testing:coverage testing:pre_merge_affected_cap
     install:crontab_backups_keep
@@ -938,7 +1018,144 @@ _config_loader_warn_unknown_entries() {
 }
 
 # ---------------------------------------------------------------------------
-# _config_loader_export_wake_integer <cfg> <key> <env_name> <default>
+# _config_loader_global_dev_tree <cfg>
+#
+# Prints the global dev tree for <cfg>: PGAI_DEV_TREE_PATH, else <cfg>'s
+# [paths] dev_tree_path, else nothing, with blanks and one pair of quotes
+# removed. The chain is pgai_agent_kanban.lib.dev_tree's -- the one
+# resolve_global_dev_tree (dev_tree.sh) runs -- asked through the
+# pp_run_ops.sh beside this file, in a subshell, so it resolves with this
+# tree's own package whatever pp_run_ops the caller defined.
+#
+# Unlike resolve_global_dev_tree, which prints nothing either way, this
+# says whether the resolver ran: 0 with the value (possibly empty) on
+# stdout, or 1 with nothing on stdout when pp_run_ops.sh is missing or the
+# module fails (the module's own error reaches stderr).
+# ---------------------------------------------------------------------------
+_config_loader_global_dev_tree() {
+    local cfg="$1"
+    (
+        # shellcheck source=pp_run_ops.sh
+        source "${_CONFIG_LOADER_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/pp_run_ops.sh" 2>/dev/null &&
+            PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-}" \
+            PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-}" \
+            pp_run_ops pgai_agent_kanban.lib.dev_tree global --kanban-cfg "$cfg"
+    )
+}
+
+# ---------------------------------------------------------------------------
+# _config_loader_warn_unresolved_dev_tree <cfg>
+#
+# One WARNING, never a refusal, for the case load_config cannot resolve the
+# global dev tree: when <cfg> carries a [paths] dev_tree_path line, it names
+# that line, the resolver that could not run, and the command that checks
+# it, so the configured value is not dropped without a trace. [paths]
+# dev_tree_path is OPTIONAL, and every consumer that needs a dev tree gates
+# on require_dev_tree (dev_tree.sh), so the wake is not stopped here.
+# Prints nothing when <cfg> has no such line.
+# ---------------------------------------------------------------------------
+_config_loader_warn_unresolved_dev_tree() {
+    local cfg="$1" section key lib="${_CONFIG_LOADER_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}"
+    while IFS=$'\t' read -r section key; do
+        [[ "$section" == "paths" && "$key" == "dev_tree_path" ]] || continue
+        echo "config_loader: load_config: WARNING: [paths] dev_tree_path in ${cfg} was not read: the dev-tree resolver (pgai_agent_kanban.lib.dev_tree, run through ${lib}/pp_run_ops.sh) could not run, so PGAI_DEV_TREE_PATH is left empty. Check it with: bash -c 'source \"${lib}/pp_run_ops.sh\" && pp_run_ops pgai_agent_kanban.lib.dev_tree global --kanban-cfg \"${cfg}\"'" >&2
+        return 0
+    done < <(list_ini_keys "$cfg")
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _config_wake_budget_default <key>
+#
+# Prints the default for [wake] <key> (max_task_seconds or
+# max_runtime_seconds) as plain decimal digits. The value is defined once,
+# in pgai_agent_kanban.lib.wake_budget, which the Python readers import;
+# this asks that module through pp_run_ops, sourcing pp_run_ops.sh from
+# this directory when the caller has not. Reads no file and no environment.
+#
+# Returns 0 with the value on stdout; non-zero with nothing on stdout and
+# the reason on stderr when the module cannot be run.
+# ---------------------------------------------------------------------------
+_config_wake_budget_default() {
+    local key="$1" value
+    if ! declare -F pp_run_ops >/dev/null 2>&1; then
+        # shellcheck source=pp_run_ops.sh
+        source "${_CONFIG_LOADER_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/pp_run_ops.sh"
+    fi
+    if ! value="$(pp_run_ops pgai_agent_kanban.lib.wake_budget default "$key")" || [[ ! "$value" =~ ^[0-9]+$ ]]; then
+        echo "config_loader: config_wake_${key}_default: could not read the [wake] ${key} default from pgai_agent_kanban.lib.wake_budget; check that 'pp_run_ops pgai_agent_kanban.lib.wake_budget default ${key}' prints a number." >&2
+        return 1
+    fi
+    printf '%s\n' "$value"
+}
+
+# ---------------------------------------------------------------------------
+# config_wake_max_task_seconds_default
+#
+# Prints the Key Registry default for [wake] max_task_seconds (90 minutes),
+# read from pgai_agent_kanban.lib.wake_budget (_config_wake_budget_default).
+# load_config exports MAX_TASK_SECONDS from it when neither the environment
+# nor kanban.cfg sets the key, and the wake's task-budget stage
+# (wake_task_budget.sh, wd_configured_max_task_seconds) falls back to it
+# when MAX_TASK_SECONDS is unset or blank -- never to 0, which is an
+# explicit setting that disables the per-task bound. Reads no file and no
+# environment; non-zero with the reason on stderr when the module cannot
+# be run.
+# ---------------------------------------------------------------------------
+config_wake_max_task_seconds_default() {
+    _config_wake_budget_default max_task_seconds
+}
+
+# ---------------------------------------------------------------------------
+# config_wake_max_runtime_seconds_default
+#
+# Prints the Key Registry default for [wake] max_runtime_seconds (4 hours),
+# the whole-batch budget, read from pgai_agent_kanban.lib.wake_budget
+# (_config_wake_budget_default). load_config exports MAX_RUNTIME_SECONDS
+# from it when neither the environment nor kanban.cfg sets the key, and the
+# wake's budget stage (wake_task_budget.sh,
+# wd_configured_max_runtime_seconds), wake_bootstrap.sh and
+# lock_provenance.sh's chain-budget floor fall back to it when
+# MAX_RUNTIME_SECONDS is unset or blank -- never to 0, which is an explicit
+# setting that disables the batch bound. Reads no file and no environment;
+# non-zero with the reason on stderr when the module cannot be run.
+# ---------------------------------------------------------------------------
+config_wake_max_runtime_seconds_default() {
+    _config_wake_budget_default max_runtime_seconds
+}
+
+# ---------------------------------------------------------------------------
+# config_release_hook_timeout_seconds_default
+#
+# Prints the default for [release] hook_timeout_seconds -- the seconds a
+# release lifecycle hook may run before its process group is stopped -- as
+# plain decimal digits. The value is defined once, in
+# pgai_agent_kanban.lib.hook_timeout (hook_timeout_default_seconds), which
+# the Python readers import; this accessor asks that module through
+# pp_run_ops, sourcing pp_run_ops.sh from this directory when the caller has
+# not. cm/release.sh uses it when the key is absent, blank or not a positive
+# whole number, and release_hook_runner.sh's _run_release_hook when
+# CM_HOOK_TIMEOUT_SECONDS is unset or blank. Reads no file and no
+# environment.
+#
+# Returns 0 with the value on stdout; non-zero with nothing on stdout and
+# the reason on stderr when the module cannot be run.
+# ---------------------------------------------------------------------------
+config_release_hook_timeout_seconds_default() {
+    if ! declare -F pp_run_ops >/dev/null 2>&1; then
+        # shellcheck source=pp_run_ops.sh
+        source "${_CONFIG_LOADER_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/pp_run_ops.sh"
+    fi
+    local value
+    if ! value="$(pp_run_ops pgai_agent_kanban.lib.hook_timeout default)" || [[ ! "$value" =~ ^[0-9]+$ ]]; then
+        echo "config_loader: config_release_hook_timeout_seconds_default: could not read the [release] hook_timeout_seconds default from pgai_agent_kanban.lib.hook_timeout; check that 'pp_run_ops pgai_agent_kanban.lib.hook_timeout default' prints a number." >&2
+        return 1
+    fi
+    printf '%s\n' "$value"
+}
+
+# ---------------------------------------------------------------------------
+# _config_loader_export_wake_integer <cfg> <key> <env_name> <default> [<default_fn>]
 #
 # Resolve one [wake] integer key with the loader's standard precedence
 # (env var already set > cfg value > default), refuse anything that is not
@@ -946,16 +1163,29 @@ _config_loader_warn_unknown_entries() {
 # reads as absent and takes the default, exactly as a removed or
 # commented-out line does.
 #
+# <default_fn>, when given with an empty <default>, names the accessor that
+# prints the default (config_wake_max_runtime_seconds_default, for one). It
+# runs only when the default is needed -- neither the environment nor the
+# cfg supplies the key, or a refusal's remedy wants it -- so an explicit
+# setting loads without it.
+#
 # BLOCK-WORTHY (docs/blocking-site-census.md): every one of these keys
 # feeds bash arithmetic in the wake loop, so a value carrying a unit
 # suffix, a sign, or trailing text would either abort a batch mid-run with
 # an arithmetic error or bound it by a number nobody chose. Refusing at
 # load time, before any task is selected, is the earlier and louder of the
 # two failures. The remedy carries the digits the value started with when
-# it had any (300s -> 300), else the key's default.
+# it had any (300s -> 300), else the key's default; when that default
+# cannot be read either, it removes the setting (unset, or delete the cfg
+# line) so the default applies, and never writes an empty value.
+#
+# BLOCK-WORTHY, the same invariant: a key nothing supplies whose default
+# accessor cannot run has no number to bound the wake with, so it refuses
+# as config_loader.wake.default_unreadable, naming the accessor and the
+# command that checks it -- not a cfg value, which is absent.
 # ---------------------------------------------------------------------------
 _config_loader_export_wake_integer() {
-    local cfg="$1" key="$2" env_name="$3" default="$4"
+    local cfg="$1" key="$2" env_name="$3" default="$4" default_fn="${5:-}"
     local value source remedy suggested from_env="false"
 
     if [[ -n "${!env_name:-}" ]]; then
@@ -964,17 +1194,35 @@ _config_loader_export_wake_integer() {
         from_env="true"
     else
         value="$(read_ini "$cfg" wake "$key" "")"
-        [[ -n "$value" ]] || value="$default"
         source="[wake] ${key} in ${cfg}"
+        if [[ -z "$value" ]]; then
+            if [[ -z "$default" && -n "$default_fn" ]] && ! default="$("$default_fn")"; then
+                local lib="${_CONFIG_LOADER_LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}"
+                # BLOCK-WORTHY: with no value and no readable default there is
+                # no number to bound the wake loop with.
+                pgai_emit_error_contract \
+                    "config_loader.wake.default_unreadable" \
+                    "config_loader: load_config: the [wake] ${key} default could not be read: neither ${env_name} nor [wake] ${key} in ${cfg} is set, and the default's accessor ${default_fn} (which runs ${lib}/pp_run_ops.sh) could not run. Restore pp_run_ops.sh and the pgai_agent_kanban package beside this loader, or set ${env_name} or [wake] ${key} explicitly." \
+                    "bash -c 'source \"${lib}/config_loader.sh\" && ${default_fn}'"
+                # CENSUS-ANCHOR: config-loader-wake-default-01
+                return 1
+            fi
+            value="$default"
+        fi
     fi
 
     if [[ ! "$value" =~ ^[0-9]+$ ]]; then
         suggested="${value%%[^0-9]*}"
+        if [[ -z "$suggested" && -z "$default" && -n "$default_fn" ]]; then
+            default="$("$default_fn" 2>/dev/null)" || default=""
+        fi
         [[ -n "$suggested" ]] || suggested="$default"
         if [[ "$from_env" == "true" ]]; then
             remedy="export ${env_name}=${suggested}"
+            [[ -n "$suggested" ]] || remedy="unset ${env_name}"
         else
             remedy="sed -i 's/^[[:space:]]*${key}[[:space:]]*=.*/${key} = ${suggested}/' \"${cfg}\""
+            [[ -n "$suggested" ]] || remedy="sed -i '/^[[:space:]]*${key}[[:space:]]*=/d' \"${cfg}\""
         fi
         pgai_emit_error_contract \
             "config_loader.wake.not_an_integer" \
@@ -1092,7 +1340,7 @@ pgai_provider_effort_values() {
     local provider="${1:-}"
     [[ "$provider" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
     local lib
-    lib="$(dirname "${BASH_SOURCE[0]}")/provider_${provider}.sh"
+    lib="${_CONFIG_LOADER_LIB_DIR}/provider_${provider}.sh"
     [[ -f "$lib" ]] || return 1
     local line values
     local decl_re='^[[:space:]]*PROVIDER_EFFORT_VALUES[[:space:]]*=[[:space:]]*["'\'']?([^"'\''#]*)'
@@ -1290,9 +1538,21 @@ load_config() {
     # downstream consumers that require a dev tree use require_dev_tree() from
     # scripts/lib/dev_tree.sh. No disk-existence check here — the loader
     # validates config shape, not infrastructure state.
+    #
+    # Resolved by the one global dev-tree resolver
+    # (_config_loader_global_dev_tree), so the export is exactly what
+    # resolve_global_dev_tree answers for the same cfg -- quotes and blanks
+    # removed, the environment first. When the resolver cannot run, an
+    # already-set PGAI_DEV_TREE_PATH stands as given, and a [paths]
+    # dev_tree_path line it could not read draws one WARNING
+    # (_config_loader_warn_unresolved_dev_tree) instead of being dropped.
     local _dev_tree_path
-    _dev_tree_path="$(read_ini "$cfg" paths dev_tree_path "")"
-    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-${_dev_tree_path}}"
+    if _dev_tree_path="$(_config_loader_global_dev_tree "$cfg")"; then
+        export PGAI_DEV_TREE_PATH="${_dev_tree_path}"
+    else
+        export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-}"
+        [[ -n "$PGAI_DEV_TREE_PATH" ]] || _config_loader_warn_unresolved_dev_tree "$cfg"
+    fi
 
     # PGAI_AGENT_KANBAN_TEMP_DIR comes from temp.sh's pgai_temp_dir in its
     # explicit-config form: an override already set in the environment wins
@@ -1317,8 +1577,11 @@ load_config() {
     # [chain] pm_mode → PGAI_KANBAN_PM_MODE
     config_export_pm_mode "$cfg"
 
+    # [discovery], [dashboard] and [release] tunables → PGAI_* (environment first)
+    config_export_tunables "$cfg"
+
     # [dashboard] rows_per_column → DASHBOARD_ROWS_PER_COLUMN
-    DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "$cfg" dashboard rows_per_column 21)}"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "$cfg")"
     export DASHBOARD_ROWS_PER_COLUMN
 
     # [dashboard] dashboard_status_glyph → DASHBOARD_STATUS_GLYPH
@@ -1349,8 +1612,9 @@ load_config() {
     # [wake] max_runtime_seconds → MAX_RUNTIME_SECONDS
     # Whole-batch wall-clock budget; the outermost of the three runtime
     # ceilings, which must nest task < project <= batch (see max_task_seconds
-    # and max_project_seconds below).
-    _config_loader_export_wake_integer "$cfg" max_runtime_seconds MAX_RUNTIME_SECONDS 14400 || return 1
+    # and max_project_seconds below). The default is
+    # config_wake_max_runtime_seconds_default.
+    _config_loader_export_wake_integer "$cfg" max_runtime_seconds MAX_RUNTIME_SECONDS "" config_wake_max_runtime_seconds_default || return 1
 
     # [wake] pause_between_tasks → PAUSE_BETWEEN_TASKS
     _config_loader_export_wake_integer "$cfg" pause_between_tasks PAUSE_BETWEEN_TASKS 5 || return 1
@@ -1382,8 +1646,8 @@ load_config() {
     # project or the batch.  A value at or above either enclosing ceiling
     # (equality included) draws a startup WARNING from run_project_chain.
     # 0 disables this per-task bound alone; the remaining project and batch
-    # budgets still cap the task.
-    _config_loader_export_wake_integer "$cfg" max_task_seconds MAX_TASK_SECONDS 5400 || return 1
+    # budgets still cap the task.  The default is config_wake_max_task_seconds_default.
+    _config_loader_export_wake_integer "$cfg" max_task_seconds MAX_TASK_SECONDS "" config_wake_max_task_seconds_default || return 1
 
     # [wake] max_project_seconds → MAX_PROJECT_SECONDS
     # Per-project runtime cap.  Each project gets its own elapsed clock:
@@ -1744,6 +2008,67 @@ config_export_pm_mode() {
 }
 
 # ---------------------------------------------------------------------------
+# config_export_tunables [kanban.cfg]
+#
+# The one read of each operator tunable below that an environment variable
+# may also set. For each, a non-empty value already in the environment wins;
+# otherwise the key is read from <kanban.cfg>, else its default. Each is
+# exported, so a child process inherits the resolved value.
+#
+#   [discovery] settle_seconds       -> PGAI_DISCOVERY_SETTLE_SECONDS          (60)
+#   [discovery] reject_threshold     -> PGAI_DISCOVERY_REJECT_THRESHOLD        (3)
+#   [dashboard] status_max_width     -> PGAI_DASHBOARD_STATUS_MAX_WIDTH        (320)
+#   [dashboard] arm_timeout_seconds  -> PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS     (20)
+#   [release] deep_verify_freshness_window_days
+#                                    -> PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS (7)
+#
+# <kanban.cfg> defaults to the file the most recent load_config recorded,
+# else $KANBAN_ROOT/kanban.cfg (then $PGAI_AGENT_KANBAN_ROOT_PATH's); a file
+# that does not exist resolves every key to its default. Values are passed
+# through as written; each consumer validates its own. Always returns 0.
+# ---------------------------------------------------------------------------
+config_export_tunables() {
+    local cfg="${1:-${_CONFIG_LOADER_CFG_PATH:-${KANBAN_ROOT:-${PGAI_AGENT_KANBAN_ROOT_PATH:-}}/kanban.cfg}}"
+    export PGAI_DISCOVERY_SETTLE_SECONDS="${PGAI_DISCOVERY_SETTLE_SECONDS:-$(read_ini "$cfg" discovery settle_seconds 60)}"
+    export PGAI_DISCOVERY_REJECT_THRESHOLD="${PGAI_DISCOVERY_REJECT_THRESHOLD:-$(read_ini "$cfg" discovery reject_threshold 3)}"
+    export PGAI_DASHBOARD_STATUS_MAX_WIDTH="${PGAI_DASHBOARD_STATUS_MAX_WIDTH:-$(read_ini "$cfg" dashboard status_max_width 320)}"
+    export PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS="${PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS:-$(read_ini "$cfg" dashboard arm_timeout_seconds 20)}"
+    export PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS="${PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS:-$(read_ini "$cfg" release deep_verify_freshness_window_days 7)}"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# config_dashboard_rows_per_column [<kanban.cfg> | --default]
+#
+# Prints the rows each dashboard board column renders: DASHBOARD_ROWS_PER_COLUMN
+# when it is set and non-blank, else [dashboard] rows_per_column from
+# <kanban.cfg>, else 21 -- the one place that default is written. Every
+# dashboard script that needs the row count calls this; none reads the key
+# itself.
+#
+# <kanban.cfg> defaults to the file the most recent load_config recorded; an
+# empty path or one naming no file reads as a cfg without the key. The value
+# is printed as found: the callers that validate it (create.sh,
+# column-render.sh) fall back to `config_dashboard_rows_per_column --default`,
+# which prints the default alone, ignoring the environment and every cfg.
+#
+# Returns read_ini's status: non-zero, with its reason on stderr, only when
+# <kanban.cfg> exists but cannot be read.
+# ---------------------------------------------------------------------------
+config_dashboard_rows_per_column() {
+    local cfg="${1-${_CONFIG_LOADER_CFG_PATH:-}}"
+    local value
+    if [[ "$cfg" == "--default" ]]; then
+        cfg=""
+    elif [[ -n "${DASHBOARD_ROWS_PER_COLUMN:-}" ]]; then
+        printf '%s\n' "$DASHBOARD_ROWS_PER_COLUMN"
+        return 0
+    fi
+    value="$(read_ini "$cfg" dashboard rows_per_column 21)" || return
+    printf '%s\n' "$value"
+}
+
+# ---------------------------------------------------------------------------
 # config_get <section> <key> [default]
 #
 # Explicit accessor for a single kanban.cfg key.
@@ -1948,6 +2273,7 @@ config_testing_pre_merge_affected_cap() {
 #   [cleanup] retention_days     -> PGAI_CLEANUP_RETENTION_DAYS     (default 30)
 #   [cleanup] trivial_log_bytes  -> PGAI_CLEANUP_TRIVIAL_LOG_BYTES  (default 1700)
 #   [cleanup] trivial_log_hours  -> PGAI_CLEANUP_TRIVIAL_LOG_HOURS  (default 6)
+#   [cleanup] task_retention_days -> PGAI_CLEANUP_TASK_RETENTION_DAYS (default 7)
 #
 # Precedence, highest first: a non-empty value already in the environment,
 # the [cleanup] key, the default. A blank cfg value reads as absent, and a
@@ -2008,6 +2334,14 @@ config_cleanup_tunables() {
         PGAI_CLEANUP_TRIVIAL_LOG_HOURS="${PGAI_CLEANUP_TRIVIAL_LOG_HOURS:-6}"
     fi
     export PGAI_CLEANUP_TRIVIAL_LOG_HOURS
+
+    if [[ -z "${PGAI_CLEANUP_TASK_RETENTION_DAYS:-}" ]]; then
+        PGAI_CLEANUP_TASK_RETENTION_DAYS=""
+        [[ "$have_cfg" == "true" ]] \
+            && PGAI_CLEANUP_TASK_RETENTION_DAYS="$(read_ini "$cfg" cleanup task_retention_days "" || true)"
+        PGAI_CLEANUP_TASK_RETENTION_DAYS="${PGAI_CLEANUP_TASK_RETENTION_DAYS:-7}"
+    fi
+    export PGAI_CLEANUP_TASK_RETENTION_DAYS
 
     return 0
 }

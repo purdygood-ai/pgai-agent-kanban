@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 __all__ = [
     "AGGREGATOR_REL_PATH",
@@ -57,7 +57,7 @@ def aggregator_path(tree_root: _PathLike) -> Path:
     return Path(tree_root) / AGGREGATOR_REL_PATH
 
 
-def kanban_tree_candidates(kanban_root: Optional[_PathLike]) -> tuple[Path, ...]:
+def kanban_tree_candidates(kanban_root: _PathLike | None) -> tuple[Path, ...]:
     """The kanban trees a lookup for *kanban_root* reads, in order.
 
     *kanban_root* first, when given, then :data:`OWN_TREE_ROOT`; a tree
@@ -71,7 +71,7 @@ def kanban_tree_candidates(kanban_root: Optional[_PathLike]) -> tuple[Path, ...]
     return tuple(trees)
 
 
-def _first_existing(kanban_root: Optional[_PathLike], rel_path: Path) -> Optional[Path]:
+def _first_existing(kanban_root: _PathLike | None, rel_path: Path) -> Path | None:
     for tree in kanban_tree_candidates(kanban_root):
         candidate = tree / rel_path
         if candidate.is_file():
@@ -79,11 +79,11 @@ def _first_existing(kanban_root: Optional[_PathLike], rel_path: Path) -> Optiona
     return None
 
 
-def find_pricing_table(kanban_root: Optional[_PathLike]) -> Optional[Path]:
+def find_pricing_table(kanban_root: _PathLike | None) -> Path | None:
     """The pricing table a report for *kanban_root* reads, or None when no candidate tree has one."""
     return _first_existing(kanban_root, PRICING_REL_PATH)
 
 
-def find_aggregator(kanban_root: Optional[_PathLike]) -> Optional[Path]:
+def find_aggregator(kanban_root: _PathLike | None) -> Path | None:
     """The token aggregator a report for *kanban_root* runs, or None when no candidate tree has one."""
     return _first_existing(kanban_root, AGGREGATOR_REL_PATH)

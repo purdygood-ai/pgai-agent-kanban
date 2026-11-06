@@ -93,11 +93,10 @@ def test_call_site_precedes_reconcile_stale_active_in_both_siblings() -> None:
     """
     for path in (_CLAUDE_SH, _CODEX_SH):
         content = path.read_text(encoding="utf-8")
-        call_idx = content.index("run_overwatch_resolution_stage \"$project_name\"")
+        call_idx = content.index('run_overwatch_resolution_stage "$project_name"')
         reconcile_idx = content.index("reconcile_stale_active", call_idx)
         assert call_idx < reconcile_idx, (
-            f"run_overwatch_resolution_stage call does not precede "
-            f"reconcile_stale_active in {path}"
+            f"run_overwatch_resolution_stage call does not precede " f"reconcile_stale_active in {path}"
         )
 
 
@@ -159,8 +158,12 @@ def test_rc_task_set_never_includes_a_task_naming_only_a_longer_version(tmp_path
     tasks = tmp_path / "tasks"
     _task(tasks, "CODER-20260101-001-a", "# Task\n\n## Release Version\nv1.4.10\n", "BACKLOG")
     _task(tasks, "CODER-20260101-002-b", "# Task\n\n## Release Version\nv1.4.1\n", "BACKLOG")
-    _task(tasks, "WRITER-20260101-003-c",
-          "# Task\n\n## Inputs\n- requirements/v1.4.1-bugfix-bundle-20260101.md\n", "WORKING")
+    _task(
+        tasks,
+        "WRITER-20260101-003-c",
+        "# Task\n\n## Inputs\n- requirements/v1.4.1-bugfix-bundle-20260101.md\n",
+        "WORKING",
+    )
     _task(tasks, "CODER-20260101-004-d", "# Task\n\nSee ai_v1.4.1.2 and v11.4.1.\n", "BACKLOG")
 
     assert find_rc_task_ids(str(tasks), "v1.4.1") == ["CODER-20260101-002-b", "WRITER-20260101-003-c"]
@@ -206,17 +209,23 @@ def test_wake_skips_the_resolution_stage_while_another_firing_holds_the_lock(tmp
         echo STAGE_DONE
     """)
 
-    result = run_bash(tmp_path, script, extra_env={
-        "KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
-    })
+    result = run_bash(
+        tmp_path,
+        script,
+        extra_env={
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+        },
+    )
 
     assert "STAGE_DONE" in result.stdout, result.stderr
     assert calls.read_text(encoding="utf-8").count("pgai_agent_kanban.overwatch.resolution_stage") == 1
     log = (root / "logs" / "overwatch-resolution-stage.log").read_text(encoding="utf-8")
     assert "overwatch.firing_lock_held" in log
     assert "\tfiring-skipped:lock-held\t" in (root / "projects" / "demo" / "overwatch" / "actions.log").read_text(
-        encoding="utf-8")
+        encoding="utf-8"
+    )
 
 
 def test_a_parked_lane_question_resumes_with_the_installed_unhalt_script(tmp_path) -> None:

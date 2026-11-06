@@ -72,9 +72,7 @@ class ArchiveMoveError(Exception):
         destination: Where it was to go.
     """
 
-    def __init__(
-        self, error: str, message: str, remedy: str, source: pathlib.Path, destination: pathlib.Path
-    ) -> None:
+    def __init__(self, error: str, message: str, remedy: str, source: pathlib.Path, destination: pathlib.Path) -> None:
         self.error = error
         self.message = message
         self.remedy = remedy

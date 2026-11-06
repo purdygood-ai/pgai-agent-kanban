@@ -26,7 +26,6 @@ import hashlib
 import os
 import pathlib
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -44,6 +43,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="cm-release-known-issue-carry-forward")
+
 
 # ---------------------------------------------------------------------------
 # Path helpers — mirrors test_cm_release_synthetic.py's own resolution.
@@ -71,15 +71,18 @@ def _init_git_repo_with_remote(
     subprocess.run(["git", "init", "--bare", str(bare_remote)], capture_output=True, check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "init", f"--initial-branch={main_branch}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     (repo_path / "README.md").write_text("# Synthetic release test repo\n", encoding="utf-8")
@@ -87,19 +90,23 @@ def _init_git_repo_with_remote(
     (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_path), "add", "README.md", "release-notes/PUBLISHED"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "Initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", main_branch],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -110,8 +117,7 @@ def _build_kanban_root(
     root.mkdir(parents=True, exist_ok=True)
 
     (root / "kanban.cfg").write_text(
-        "[paths]\n\n[chain]\npm_mode = automatic\n\n"
-        "[wake]\nmax_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
+        "[paths]\n\n[chain]\npm_mode = automatic\n\n" "[wake]\nmax_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
         encoding="utf-8",
     )
     (root / "projects.cfg").write_text(
@@ -148,8 +154,13 @@ def _build_kanban_root(
 
 
 def _run_cm_script(
-    script_path: pathlib.Path, args: list[str], kanban_root: pathlib.Path, project_name: str,
-    *, repo_root: Optional[pathlib.Path] = None, timeout: int = 90,
+    script_path: pathlib.Path,
+    args: list[str],
+    kanban_root: pathlib.Path,
+    project_name: str,
+    *,
+    repo_root: pathlib.Path | None = None,
+    timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
@@ -161,13 +172,20 @@ def _run_cm_script(
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=base_env, cwd=str(kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=timeout,
     )
 
 
 def _git_local(repo_path: pathlib.Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo_path)] + list(args), capture_output=True, text=True, check=True,
+        ["git", "-C", str(repo_path)] + list(args),
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -175,14 +193,19 @@ def _git_local(repo_path: pathlib.Path, *args: str) -> str:
 def _git_tag_exists(repo_path: pathlib.Path, tag: str) -> bool:
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/tags/{tag}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
 
 def _commit_on_branch(
-    repo_path: pathlib.Path, branch: str, filename: str, content: str, message: str,
-    return_branch: Optional[str] = None,
+    repo_path: pathlib.Path,
+    branch: str,
+    filename: str,
+    content: str,
+    message: str,
+    return_branch: str | None = None,
 ) -> None:
     _git_local(repo_path, "checkout", branch)
     (repo_path / filename).write_text(content, encoding="utf-8")
@@ -197,8 +220,13 @@ def _sha256(path: pathlib.Path) -> str:
 
 
 def _build_tester_task_with_known_issue_finding(
-    kanban_root: pathlib.Path, project_name: str, task_id: str, release_version: str,
-    *, filed_as: str, state: str = "DONE",
+    kanban_root: pathlib.Path,
+    project_name: str,
+    task_id: str,
+    release_version: str,
+    *,
+    filed_as: str,
+    state: str = "DONE",
 ) -> pathlib.Path:
     """Synthetic TESTER task whose report carries one systemic_risk=high
     finding shaped exactly as read_ship_policy_finding_dimensions and
@@ -238,7 +266,10 @@ def _build_tester_task_with_known_issue_finding(
 
 
 def _write_bug(
-    bugs_dir: pathlib.Path, bug_id: str, slug: str, symptom: str,
+    bugs_dir: pathlib.Path,
+    bug_id: str,
+    slug: str,
+    symptom: str,
 ) -> pathlib.Path:
     bugs_dir.mkdir(parents=True, exist_ok=True)
     path = bugs_dir / f"{bug_id}-{slug}.md"
@@ -286,23 +317,30 @@ def test_known_issue_ship_stamps_writer_authored_notes_and_bug_marker(tmp_path: 
 
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     causing_bug = _write_bug(
-        bugs_dir, "BUG-0042", "legacy-artefact-defect",
+        bugs_dir,
+        "BUG-0042",
+        "legacy-artefact-defect",
         "The legacy artefact importer crashes on a malformed header it has never actually exercised in production.",
     )
     other_bug = _write_bug(
-        bugs_dir, "BUG-0099", "unrelated-open-item",
+        bugs_dir,
+        "BUG-0099",
+        "unrelated-open-item",
         "An unrelated cosmetic issue with no bearing on this release.",
     )
     other_bug_sha_before = _sha256(other_bug)
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
 
     _commit_on_branch(
-        repo_path, rc_branch, "feature_known_issue.txt", "known-issue ship feature content\n",
+        repo_path,
+        rc_branch,
+        "feature_known_issue.txt",
+        "known-issue ship feature content\n",
         "feat: add feature for known-issue ship test",
     )
 
@@ -325,7 +363,11 @@ def test_known_issue_ship_stamps_writer_authored_notes_and_bug_marker(tmp_path: 
 
     tester_task_id = "TESTER-20260908-900-known-issue-writer-notes"
     _build_tester_task_with_known_issue_finding(
-        kanban_root, project_name, tester_task_id, version, filed_as="BUG-0042",
+        kanban_root,
+        project_name,
+        tester_task_id,
+        version,
+        filed_as="BUG-0042",
     )
 
     result_release = _run_cm_script(_RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path)
@@ -336,16 +378,14 @@ def test_known_issue_ship_stamps_writer_authored_notes_and_bug_marker(tmp_path: 
     )
 
     notes_text = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
-    assert "## Status\nKNOWN-ISSUE" in notes_text, (
-        f"Expected '## Status' KNOWN-ISSUE in stamped release notes.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "## Status\nKNOWN-ISSUE" in notes_text
+    ), f"Expected '## Status' KNOWN-ISSUE in stamped release notes.\nnotes:\n{notes_text}"
     assert "malformed header" in notes_text, (
-        "Expected the '## Known Issues' section to name the causing finding by "
-        f"substance.\nnotes:\n{notes_text}"
+        "Expected the '## Known Issues' section to name the causing finding by " f"substance.\nnotes:\n{notes_text}"
     )
     assert "BUG-0042" not in notes_text, (
-        "The bare internal ticket ID must never appear in rendered release notes.\n"
-        f"notes:\n{notes_text}"
+        "The bare internal ticket ID must never appear in rendered release notes.\n" f"notes:\n{notes_text}"
     )
     assert "<Issue title>" not in notes_text, (
         "The WRITER boilerplate placeholder must be replaced, not left alongside "
@@ -354,16 +394,13 @@ def test_known_issue_ship_stamps_writer_authored_notes_and_bug_marker(tmp_path: 
 
     bug_text = causing_bug.read_text(encoding="utf-8")
     assert f"## Known Issue Carry Forward\n{version}" in bug_text, (
-        f"Expected the causing bug to carry the known-issue marker for {version}.\n"
-        f"bug file:\n{bug_text}"
+        f"Expected the causing bug to carry the known-issue marker for {version}.\n" f"bug file:\n{bug_text}"
     )
-    assert "## Status\nopen" in bug_text, (
-        f"The causing bug's own Status must remain open.\nbug file:\n{bug_text}"
-    )
+    assert "## Status\nopen" in bug_text, f"The causing bug's own Status must remain open.\nbug file:\n{bug_text}"
 
-    assert _sha256(other_bug) == other_bug_sha_before, (
-        "An unrelated bug file must be left byte-identical by a known-issue ship."
-    )
+    assert (
+        _sha256(other_bug) == other_bug_sha_before
+    ), "An unrelated bug file must be left byte-identical by a known-issue ship."
 
     assert _git_tag_exists(repo_path, version), (
         f"Release tag '{version}' not found after cm-release.sh.\n"
@@ -415,17 +452,22 @@ def test_known_issue_ship_names_finding_in_auto_generated_notes(tmp_path: pathli
 
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     causing_bug = _write_bug(
-        bugs_dir, "BUG-0007", "startup-race-condition",
+        bugs_dir,
+        "BUG-0007",
+        "startup-race-condition",
         "A rare startup race condition causes the scheduler to skip its first tick under heavy load.",
     )
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_known_issue_auto.txt", "auto-notes known-issue ship feature\n",
+        repo_path,
+        rc_branch,
+        "feature_known_issue_auto.txt",
+        "auto-notes known-issue ship feature\n",
         "feat: add feature for auto-notes known-issue ship test",
         return_branch="main",
     )
@@ -434,7 +476,11 @@ def test_known_issue_ship_names_finding_in_auto_generated_notes(tmp_path: pathli
 
     tester_task_id = "TESTER-20260908-901-known-issue-auto-notes"
     _build_tester_task_with_known_issue_finding(
-        kanban_root, project_name, tester_task_id, version, filed_as="BUG-0007",
+        kanban_root,
+        project_name,
+        tester_task_id,
+        version,
+        filed_as="BUG-0007",
     )
 
     result_release = _run_cm_script(_RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path)
@@ -445,21 +491,19 @@ def test_known_issue_ship_names_finding_in_auto_generated_notes(tmp_path: pathli
     )
 
     notes_text = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
-    assert "## Status\nKNOWN-ISSUE" in notes_text, (
-        f"Expected auto-generated notes to carry '## Status' KNOWN-ISSUE.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "## Status\nKNOWN-ISSUE" in notes_text
+    ), f"Expected auto-generated notes to carry '## Status' KNOWN-ISSUE.\nnotes:\n{notes_text}"
     assert "startup race condition" in notes_text, (
-        "Expected the auto-generated notes to name the causing finding by "
-        f"substance.\nnotes:\n{notes_text}"
+        "Expected the auto-generated notes to name the causing finding by " f"substance.\nnotes:\n{notes_text}"
     )
-    assert "BUG-0007" not in notes_text, (
-        f"The bare internal ticket ID must never appear in rendered notes.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "BUG-0007" not in notes_text
+    ), f"The bare internal ticket ID must never appear in rendered notes.\nnotes:\n{notes_text}"
 
     bug_text = causing_bug.read_text(encoding="utf-8")
     assert f"## Known Issue Carry Forward\n{version}" in bug_text, (
-        f"Expected the causing bug to carry the known-issue marker for {version}.\n"
-        f"bug file:\n{bug_text}"
+        f"Expected the causing bug to carry the known-issue marker for {version}.\n" f"bug file:\n{bug_text}"
     )
 
 
@@ -481,18 +525,23 @@ def test_functional_ship_writes_no_known_issue_marker_on_any_bug(tmp_path: pathl
 
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     bystander_bug = _write_bug(
-        bugs_dir, "BUG-0003", "bystander-open-item",
+        bugs_dir,
+        "BUG-0003",
+        "bystander-open-item",
         "An unrelated open bug that has nothing to do with this release.",
     )
     bystander_sha_before = _sha256(bystander_bug)
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_functional.txt", "functional ship feature content\n",
+        repo_path,
+        rc_branch,
+        "feature_functional.txt",
+        "functional ship feature content\n",
         "feat: add feature for functional ship test",
         return_branch="main",
     )
@@ -523,13 +572,12 @@ def test_functional_ship_writes_no_known_issue_marker_on_any_bug(tmp_path: pathl
     )
 
     notes_text = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
-    assert "## Status\nFUNCTIONAL" in notes_text, (
-        f"Expected '## Status' FUNCTIONAL for a green report.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "## Status\nFUNCTIONAL" in notes_text
+    ), f"Expected '## Status' FUNCTIONAL for a green report.\nnotes:\n{notes_text}"
 
     assert _sha256(bystander_bug) == bystander_sha_before, (
-        "A FUNCTIONAL ship must never write the known-issue carry-forward "
-        "marker onto any bug file."
+        "A FUNCTIONAL ship must never write the known-issue carry-forward " "marker onto any bug file."
     )
     assert "## Known Issue Carry Forward" not in bystander_bug.read_text(encoding="utf-8")
 
@@ -548,18 +596,23 @@ def test_known_bugs_ship_writes_no_known_issue_marker_on_any_bug(tmp_path: pathl
 
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     filed_bug = _write_bug(
-        bugs_dir, "BUG-0004", "low-risk-cited-item",
+        bugs_dir,
+        "BUG-0004",
+        "low-risk-cited-item",
         "A low-severity cosmetic defect cited by the TESTER recommendation.",
     )
     filed_bug_sha_before = _sha256(filed_bug)
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_known_bugs.txt", "known-bugs ship feature content\n",
+        repo_path,
+        rc_branch,
+        "feature_known_bugs.txt",
+        "known-bugs ship feature content\n",
         "feat: add feature for known-bugs ship test",
         return_branch="main",
     )
@@ -595,9 +648,9 @@ def test_known_bugs_ship_writes_no_known_issue_marker_on_any_bug(tmp_path: pathl
     )
 
     notes_text = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
-    assert "## Status\nKNOWN-BUGS" in notes_text, (
-        f"Expected '## Status' KNOWN-BUGS for a low-risk SHIP-WITH-CONCERNS report.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "## Status\nKNOWN-BUGS" in notes_text
+    ), f"Expected '## Status' KNOWN-BUGS for a low-risk SHIP-WITH-CONCERNS report.\nnotes:\n{notes_text}"
 
     assert _sha256(filed_bug) == filed_bug_sha_before, (
         "A KNOWN-BUGS ship must never write the known-issue carry-forward "
@@ -638,19 +691,24 @@ def test_bugs_skipped_section_is_rendered_through_the_scrub_not_hand_typed(tmp_p
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     bug_paths = [
         _write_bug(
-            bugs_dir, f"BUG-06{i:02d}", f"{prefix.lower()}-leak",
+            bugs_dir,
+            f"BUG-06{i:02d}",
+            f"{prefix.lower()}-leak",
             f"A defect quoting task {prefix}-20260910-777-some-task inline in its own text.",
         )
         for i, prefix in enumerate(_AGENT_PREFIXES)
     ]
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_bugs_skipped.txt", "bugs-skipped render path feature content\n",
+        repo_path,
+        rc_branch,
+        "feature_bugs_skipped.txt",
+        "bugs-skipped render path feature content\n",
         "feat: add feature for bugs-skipped render path test",
     )
 
@@ -707,17 +765,16 @@ def test_bugs_skipped_section_is_rendered_through_the_scrub_not_hand_typed(tmp_p
     )
 
     notes_text = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
-    assert "## Status\nKNOWN-BUGS" in notes_text, (
-        f"Expected '## Status' KNOWN-BUGS for a low-risk SHIP-WITH-CONCERNS report.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "## Status\nKNOWN-BUGS" in notes_text
+    ), f"Expected '## Status' KNOWN-BUGS for a low-risk SHIP-WITH-CONCERNS report.\nnotes:\n{notes_text}"
     assert "placeholder" not in notes_text, (
         "The hand-authored placeholder table row must be replaced by the "
         f"rendered table, not left alongside it.\nnotes:\n{notes_text}"
     )
     for prefix in _AGENT_PREFIXES:
         assert f"{prefix}-20260910" not in notes_text, (
-            f"A {prefix}-prefixed kanban task ID survived in the stamped "
-            f"release notes.\nnotes:\n{notes_text}"
+            f"A {prefix}-prefixed kanban task ID survived in the stamped " f"release notes.\nnotes:\n{notes_text}"
         )
     for bug_path in bug_paths:
         assert bug_path.name.split("-")[0] + "-" + bug_path.name.split("-")[1] not in notes_text, (
@@ -768,17 +825,21 @@ def test_bugs_skipped_section_is_rendered_on_the_auto_generated_notes_path(
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     for i, prefix in enumerate(_AGENT_PREFIXES):
         _write_bug(
-            bugs_dir, f"BUG-08{i:02d}", f"{prefix.lower()}-autogen-leak",
+            bugs_dir,
+            f"BUG-08{i:02d}",
+            f"{prefix.lower()}-autogen-leak",
             f"A defect quoting task {prefix}-20260910-888-some-task inline in its own text.",
         )
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_bugs_skipped_autogen.txt",
+        repo_path,
+        rc_branch,
+        "feature_bugs_skipped_autogen.txt",
         "auto-generated bugs-skipped render path feature content\n",
         "feat: add feature for auto-generated bugs-skipped render path test",
         return_branch="main",
@@ -830,9 +891,9 @@ def test_bugs_skipped_section_is_rendered_on_the_auto_generated_notes_path(
     )
     notes_text = notes_path.read_text(encoding="utf-8")
 
-    assert "## Status\nKNOWN-BUGS" in notes_text, (
-        f"Expected '## Status' KNOWN-BUGS for a low-risk SHIP-WITH-CONCERNS report.\nnotes:\n{notes_text}"
-    )
+    assert (
+        "## Status\nKNOWN-BUGS" in notes_text
+    ), f"Expected '## Status' KNOWN-BUGS for a low-risk SHIP-WITH-CONCERNS report.\nnotes:\n{notes_text}"
     assert "## Bugs Skipped" in notes_text, (
         "Expected the auto-generated notes file to carry a '## Bugs Skipped' "
         "section — a regression that drops the section entirely must fail "

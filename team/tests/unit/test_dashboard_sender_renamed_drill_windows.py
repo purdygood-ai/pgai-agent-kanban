@@ -34,20 +34,28 @@ _SESSION = "dash-probe"
 
 
 class _Pane:
-    """A process standing in for a pane's shell: records SIGUSR1 to a file, then exits."""
+    """A process standing in for a pane's shell: records SIGUSR1 to a file, then exits.
+
+    It runs in a process group of its own, and the trap stops the ``sleep``
+    it waits on before exiting; ``stop`` kills the whole group, so no
+    ``sleep`` outlives the test whichever way it ends.
+    """
 
     def __init__(self, record: pathlib.Path) -> None:
         self.record = record
         self.proc = subprocess.Popen(
-            ["bash", "-c", f"trap 'echo USR1 > \"{record}\"; exit 0' USR1; sleep 300 & wait"],
+            ["bash", "-c", f"trap 'echo USR1 > \"{record}\"; kill $! 2>/dev/null; exit 0' USR1; sleep 300 & wait"],
+            start_new_session=True,
         )
 
     def signalled(self) -> bool:
         return self.record.exists()
 
     def stop(self) -> None:
-        if self.proc.poll() is None:
-            self.proc.send_signal(signal.SIGTERM)
+        try:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # the group is already gone: the pane and its sleep exited
         self.proc.wait(timeout=10)
 
 
@@ -101,7 +109,10 @@ def _run_sender(tmp_path: pathlib.Path) -> subprocess.CompletedProcess:
     )
     return subprocess.run(
         ["bash", str(_SENDER), "--session", _SESSION, "--kanban-root", str(root)],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
 
 

@@ -45,7 +45,7 @@ from pgai_agent_kanban.deep_verify.schedule import (
     resolve_offhours_window,
 )
 
-_UTC = datetime.timezone.utc
+_UTC = datetime.UTC
 
 
 def _dt(iso: str) -> datetime.datetime:

@@ -46,6 +46,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="verify-rc-state-release-check")
 
+
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
 # ---------------------------------------------------------------------------
@@ -59,7 +60,8 @@ def _init_local_repo(repo_path: pathlib.Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=repo_path, check=True,
+        cwd=repo_path,
+        check=True,
     )
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo_path, check=True)
     (repo_path / "README.md").write_text("fixture\n", encoding="utf-8")
@@ -67,9 +69,7 @@ def _init_local_repo(repo_path: pathlib.Path) -> None:
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo_path, check=True)
 
 
-def _build_kanban_root(
-    parent: pathlib.Path, project_name: str, repo_path: pathlib.Path
-) -> pathlib.Path:
+def _build_kanban_root(parent: pathlib.Path, project_name: str, repo_path: pathlib.Path) -> pathlib.Path:
     """Build a minimal kanban root that verify-rc-state.sh can run against."""
     root = parent / "kanban_root"
     (root / "logs").mkdir(parents=True, exist_ok=True)
@@ -107,16 +107,17 @@ def _write_release_state(project_root: pathlib.Path, body: str) -> None:
     (project_root / "release-state.md").write_text(body, encoding="utf-8")
 
 
-def _run_verify_rc_state(
-    kanban_root: pathlib.Path, project_name: str
-) -> subprocess.CompletedProcess:
+def _run_verify_rc_state(kanban_root: pathlib.Path, project_name: str) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
     base_env["KANBAN_ROOT"] = str(kanban_root)
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     return subprocess.run(
         ["bash", str(_VERIFY_SCRIPT), project_name, "--verbose"],
-        capture_output=True, text=True, env=base_env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        timeout=60,
     )
 
 
@@ -137,10 +138,7 @@ def test_check_a_passes_every_field_for_well_formed_fresh_project(
     kanban_root = _build_kanban_root(tmp_path, "verifytest", repo)
     _write_release_state(
         kanban_root / "projects" / "verifytest",
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n" "## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
     )
 
     result = _run_verify_rc_state(kanban_root, "verifytest")
@@ -166,20 +164,14 @@ def test_check_a_error_message_shares_accepted_forms_text_with_shared_validator(
     kanban_root = _build_kanban_root(tmp_path, "verifytest", repo)
     _write_release_state(
         kanban_root / "projects" / "verifytest",
-        "# Release State\n\n"
-        "## Active RC\nNONE\n\n"
-        "## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n" "## Active RC\nNONE\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
     )
 
     result = _run_verify_rc_state(kanban_root, "verifytest")
 
     assert result.returncode == 1, result.stdout + result.stderr
     accepted_forms = _ACCEPTED_FORMS[FieldKind.VERSION_OR_NONE]
-    matching_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[ERROR]") and "Active RC" in line
-    ]
+    matching_lines = [line for line in result.stdout.splitlines() if line.startswith("[ERROR]") and "Active RC" in line]
     assert matching_lines, result.stdout
     assert accepted_forms in matching_lines[0]
     assert "'NONE'" in matching_lines[0]

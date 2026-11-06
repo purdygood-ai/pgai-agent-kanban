@@ -51,7 +51,12 @@ def _line(stdout: str, prefix: str) -> str:
 
 def _sha(where, ref: str) -> str:
     return subprocess.run(
-        ["git", "rev-parse", ref], cwd=where, check=True, capture_output=True, text=True, env=_base_env(),
+        ["git", "rev-parse", ref],
+        cwd=where,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_base_env(),
     ).stdout.strip()
 
 
@@ -85,8 +90,8 @@ def test_local_only_lane_narration_says_the_refs_stay_local_and_gives_the_manual
     for line in (tag_line, main_line):
         assert "finalize-release.sh" not in line, line
     assert "this run pushes it" not in result.stdout, _diag(result, calls)
-    assert "skipping origin push for finalize-lane: auto-push of main and tags (Step 14)" in result.stdout, (
-        _diag(result, calls)
+    assert "skipping origin push for finalize-lane: auto-push of main and tags (Step 14)" in result.stdout, _diag(
+        result, calls
     )
 
 

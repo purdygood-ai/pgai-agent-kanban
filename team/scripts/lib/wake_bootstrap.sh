@@ -71,6 +71,11 @@
 # the tunables, and the log() function).
 
 wake_bootstrap_init() {
+# The wake entrypoints run strict from their first line. This region sources
+# operator-authored files (shell-env, claude-env, secrets, the INI overrides)
+# that are not written for strict mode, so strict mode is lifted here and
+# re-enabled at the one point below; nothing before this line changes.
+set +euo pipefail
 # --- Env-var name migration guard ---
 # PGAI_AGENT_KANBAN_ROOT_PATH is the canonical name. The legacy shim
 # Only the canonical name PGAI_AGENT_KANBAN_ROOT_PATH is honored.
@@ -343,16 +348,18 @@ _REASONING_TRACE_DEPRECATION_WARNED=false
 # pre-hook that releases this wake's locks (lock_provenance.sh).
 # shellcheck source=scripts/lib/script_common.sh
 source "${SCRIPT_DIR}/../lib/script_common.sh"
-trap cleanup_on_exit EXIT
+# shellcheck source=scripts/lib/exit_trap.sh
+source "${SCRIPT_DIR}/../lib/exit_trap.sh"
+exit_trap_add cleanup_on_exit
 trap cleanup_on_exit SIGTERM SIGINT SIGHUP
 
 # --- Tunables ---
 MAX_TASKS_PER_WAKE="${MAX_TASKS_PER_WAKE:-5}"
-MAX_RUNTIME_SECONDS="${MAX_RUNTIME_SECONDS:-14400}"
+MAX_RUNTIME_SECONDS="${MAX_RUNTIME_SECONDS:-$(config_wake_max_runtime_seconds_default)}"
 PAUSE_BETWEEN_TASKS="${PAUSE_BETWEEN_TASKS:-5}"
 STOP_ON_BLOCKED="${STOP_ON_BLOCKED:-false}"
 STOP_FILE="${STOP_FILE:-${PGAI_AGENT_KANBAN_TEMP_DIR}/wakeup/stop}"
-MAX_TASK_SECONDS="${MAX_TASK_SECONDS:-5400}"
+MAX_TASK_SECONDS="${MAX_TASK_SECONDS:-$(config_wake_max_task_seconds_default)}"
 MAX_PROJECT_SECONDS="${MAX_PROJECT_SECONDS:-${MAX_RUNTIME_SECONDS}}"
 KILL_GRACE_SECONDS="${KILL_GRACE_SECONDS:-30}"
 

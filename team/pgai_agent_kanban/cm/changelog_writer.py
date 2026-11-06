@@ -109,10 +109,7 @@ except ImportError:
     _shadow_dirs: list[str] = []
     if _cached_pkg is not None and getattr(_cached_pkg, "__file__", None) is None:
         _shadow_dirs = [str(p) for p in getattr(_cached_pkg, "__path__", [])]
-        for _mod_name in [
-            n for n in sys.modules
-            if n == "pgai_agent_kanban" or n.startswith("pgai_agent_kanban.")
-        ]:
+        for _mod_name in [n for n in sys.modules if n == "pgai_agent_kanban" or n.startswith("pgai_agent_kanban.")]:
             del sys.modules[_mod_name]
     sys.path.insert(0, str(_OWN_PACKAGE_ROOT))
     try:
@@ -155,8 +152,10 @@ except ImportError:
 from pgai_agent_kanban.archive.layout import CATEGORY_BUGS, archive_layout_for_category_dir  # noqa: E402
 from pgai_agent_kanban.lib.semver import version_sort_key as _parse_version  # noqa: E402
 from pgai_agent_kanban.task_status import read_section  # noqa: E402
+
 # The notes-file date rule, shared with the operator's full CHANGELOG rebuild.
 from pgai_agent_kanban.cm.release_notes_date import read_release_date  # noqa: E402
+
 # The first-sentence split and the commit-id / RC-branch / task-id scrub are
 # the release-notes generator's, so a CHANGELOG line and a release-notes
 # bullet cut and clean the same Symptom the same way.
@@ -192,9 +191,7 @@ _ENTRY_HEADING_RE = re.compile(r"^##\s+(v\d+\.\d+\.\d+)(?:\s|$)")
 _SECTION_HEADING_RE = re.compile(r"^###\s+(.+?)\s*$")
 
 # Sections in release notes that contain implemented (feature) content.
-_IMPLEMENTED_HEADINGS = frozenset(
-    {"features", "what shipped", "implemented"}
-)
+_IMPLEMENTED_HEADINGS = frozenset({"features", "what shipped", "implemented"})
 
 # The release-notes section a requirement bundle's own name can sit under
 # when the notes generator did not place it under Features (see
@@ -202,26 +199,26 @@ _IMPLEMENTED_HEADINGS = frozenset(
 _OTHER_CHANGES_HEADING = "other changes"
 
 # Sections in release notes that contain fixed (bug) content.
-_FIXED_HEADINGS = frozenset(
-    {"bug fixes", "bugs resolved", "fixed"}
-)
+_FIXED_HEADINGS = frozenset({"bug fixes", "bugs resolved", "fixed"})
 
 # Sections in release notes that contain the release summary.
 _SUMMARY_HEADINGS = frozenset({"summary"})
 
 # Section headings to skip when extracting content (we compute these ourselves).
-_SKIP_HEADINGS = frozenset({
-    "known issues",
-    "bugs skipped",
-    "deprecations",
-    "breaking changes",
-    "upgrade notes",
-    "documentation",
-    "other changes",
-    "status",
-    "release date",
-    "released by",
-})
+_SKIP_HEADINGS = frozenset(
+    {
+        "known issues",
+        "bugs skipped",
+        "deprecations",
+        "breaking changes",
+        "upgrade notes",
+        "documentation",
+        "other changes",
+        "status",
+        "release date",
+        "released by",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -231,24 +228,26 @@ _SKIP_HEADINGS = frozenset({
 
 class BugRecord(NamedTuple):
     """Parsed representation of a single bug file."""
-    bug_id: str          # e.g. "BUG-0023"
-    slug: str            # e.g. "BUG-0023-tmux-split-flag"
-    symptom: str         # first non-empty line of ## Symptom section
-    status: str          # open / resolved / wontdo / etc.
-    affects: str         # version string e.g. "v1.0.0", or "" if absent
-    fixed_in: str        # version string e.g. "v1.16.2", or "" if unset
-    public_id: str       # e.g. "KI-1.0.0.1", or "" if not yet assigned
-    wontdo_reason: str   # reason from ## Status if wontdo, else ""
+
+    bug_id: str  # e.g. "BUG-0023"
+    slug: str  # e.g. "BUG-0023-tmux-split-flag"
+    symptom: str  # first non-empty line of ## Symptom section
+    status: str  # open / resolved / wontdo / etc.
+    affects: str  # version string e.g. "v1.0.0", or "" if absent
+    fixed_in: str  # version string e.g. "v1.16.2", or "" if unset
+    public_id: str  # e.g. "KI-1.0.0.1", or "" if not yet assigned
+    wontdo_reason: str  # reason from ## Status if wontdo, else ""
     file_path: pathlib.Path
 
 
 class ReleaseEntry(NamedTuple):
     """Parsed content from a single release-notes/vX.Y.Z.md file."""
-    version: str             # e.g. "v1.16.2"
-    date: str                # e.g. "2026-07-11"
-    summary: str             # one-line summary (first sentence of ## Summary)
+
+    version: str  # e.g. "v1.16.2"
+    date: str  # e.g. "2026-07-11"
+    summary: str  # one-line summary (first sentence of ## Summary)
     implemented_lines: list  # lines from Features / What Shipped sections
-    fixed_bug_ids: list      # BUG-NNNN ids resolved in this release
+    fixed_bug_ids: list  # BUG-NNNN ids resolved in this release
     fixed_other_lines: list  # non-BUG-NNNN fixed items (non-tracked bugs)
 
 
@@ -274,9 +273,7 @@ def _version_lte(v1: str, v2: str) -> bool:
 
 # Pattern that matches a version string: optional 'v' or 'ai_v' prefix,
 # followed by at least one digit-dot-digit component (e.g. v1.2.3, 1.0.0).
-_VERSION_STRING_RE = re.compile(
-    r"^(?:ai_v|v)?[0-9]+(?:\.[0-9]+){1,2}$"
-)
+_VERSION_STRING_RE = re.compile(r"^(?:ai_v|v)?[0-9]+(?:\.[0-9]+){1,2}$")
 
 
 def _looks_like_version_string(value: str) -> bool:
@@ -499,9 +496,7 @@ def parse_bug_file(path: pathlib.Path) -> BugRecord:
     wontdo_reason = ""
     if "wontdo" in status_raw or "won't" in status_raw or "wont" in status_raw:
         # Look for a reason after the status keyword
-        reason_match = re.search(
-            r"won'?t\s*(?:do|fix)[:\s]+(.+)", status_raw, re.IGNORECASE
-        )
+        reason_match = re.search(r"won'?t\s*(?:do|fix)[:\s]+(.+)", status_raw, re.IGNORECASE)
         if reason_match:
             wontdo_reason = reason_match.group(1).strip()
 
@@ -541,10 +536,7 @@ def archived_bug_paths(bugs_dir: pathlib.Path) -> list[pathlib.Path]:
     if layout is None or not layout.bugs.is_dir():
         return []
     live_numbers = {_bug_file_number(p) for p in bugs_dir.glob("BUG-*.md")}
-    return [
-        p for p in layout.bugs.glob("BUG-*.md")
-        if p.is_file() and _bug_file_number(p) not in live_numbers
-    ]
+    return [p for p in layout.bugs.glob("BUG-*.md") if p.is_file() and _bug_file_number(p) not in live_numbers]
 
 
 def load_bugs(bugs_dir: pathlib.Path, include_archive: bool = False) -> list[BugRecord]:
@@ -568,9 +560,7 @@ def load_bugs(bugs_dir: pathlib.Path, include_archive: bool = False) -> list[Bug
             records.append(parse_bug_file(path))
         except Exception as exc:  # noqa: BLE001
             # Log but do not abort — a corrupt bug file should not kill the build
-            print(
-                f"Warning: could not parse {path}: {exc}", file=sys.stderr
-            )
+            print(f"Warning: could not parse {path}: {exc}", file=sys.stderr)
     return records
 
 
@@ -655,7 +645,7 @@ def _join_bullet_continuations(lines: list[str]) -> list[str]:
     return bullets
 
 
-def _requirement_bullets(version: str, other_changes: "list[str] | None") -> list[str]:
+def _requirement_bullets(version: str, other_changes: list[str] | None) -> list[str]:
     """The Other Changes bullets of *version*'s notes that name its requirement.
 
     A release built from a requirements document is named, in its own
@@ -770,9 +760,7 @@ def _earliest_published_gte(version: str, published: list[str]) -> str:
     return min(candidates, key=_parse_version)
 
 
-def _bug_intersects_published(
-    bug: BugRecord, published: list[str]
-) -> bool:
+def _bug_intersects_published(bug: BugRecord, published: list[str]) -> bool:
     """Return True if the bug's affected range intersects the PUBLISHED list.
 
     The bug must have a verified ## Affects field that parses as a version
@@ -824,9 +812,7 @@ def _text_with_public_id(text: str, public_id: str) -> str:
         # Section exists — replace its content
         existing_content = match.group(2)
         # Extract just the non-comment part
-        content_no_comment = re.sub(
-            r"<!--[\s\S]*?-->", "", existing_content
-        ).strip()
+        content_no_comment = re.sub(r"<!--[\s\S]*?-->", "", existing_content).strip()
         if not content_no_comment:
             # Empty body — insert the value after the heading and any comments
             # Find the comment block in the existing content
@@ -834,11 +820,7 @@ def _text_with_public_id(text: str, public_id: str) -> str:
             if comment_match:
                 # Insert after the comment
                 comment_end = match.start(2) + comment_match.end()
-                new_text = (
-                    text[: comment_end]
-                    + f"\n{public_id}\n"
-                    + text[comment_end:]
-                )
+                new_text = text[:comment_end] + f"\n{public_id}\n" + text[comment_end:]
             else:
                 # No comment block — the value goes directly under the
                 # heading, with one blank line before whatever section
@@ -951,7 +933,7 @@ def _text_without_public_id(text: str) -> str:
     if new_body == body:
         return text  # Already clean — byte-identical.
 
-    return text[: match.start()] + heading + new_body + text[match.end():]
+    return text[: match.start()] + heading + new_body + text[match.end() :]
 
 
 def _known_issue_title(symptom: str) -> str:
@@ -1163,6 +1145,7 @@ class PublishedChangelog(NamedTuple):
             bug that legitimately carries an ID from one that was handed an
             ID the artifact already publishes for a different entry.
     """
+
     ids: set[str]
     lines: dict[tuple[str, str], list[tuple[str, str]]]
     titles: dict[str, list[str]]
@@ -1340,10 +1323,7 @@ def regenerate(
     # A bug is disclosable iff:
     #   1. It has a verified ## Affects field that parses as a version string
     #   2. Its affected range intersects the published manifest
-    disclosable: list[BugRecord] = [
-        b for b in all_bugs
-        if _bug_intersects_published(b, published_manifest)
-    ]
+    disclosable: list[BugRecord] = [b for b in all_bugs if _bug_intersects_published(b, published_manifest)]
 
     # --- Assign Public IDs (modifies bug files on first assignment) ---
     # First pass: reserve every ID already spent.  That is every ID persisted
@@ -1365,10 +1345,7 @@ def regenerate(
     # A bug persisting an ID the artifact publishes for a different title was
     # handed a spent ID.  The published line is history and stays; the bug is
     # queued for a fresh ID exactly like one that never had an ID.
-    reissue = [
-        b for b in disclosable
-        if b.public_id and _holds_spent_id(b, published_artifact)
-    ]
+    reissue = [b for b in disclosable if b.public_id and _holds_spent_id(b, published_artifact)]
 
     # Second pass: assign IDs to bugs that lack one, in a stable order
     # (sort by affects version ascending, then by bug_id ascending to break ties).
@@ -1393,17 +1370,12 @@ def regenerate(
     if new_ids:
         all_bugs = load_bugs(bugs_dir, include_archive=True)
         bugs_by_id = {b.bug_id: b for b in all_bugs}
-        disclosable = [
-            b for b in all_bugs
-            if _bug_intersects_published(b, published_manifest)
-        ]
+        disclosable = [b for b in all_bugs if _bug_intersects_published(b, published_manifest)]
 
     # --- Build reverse index: public_id → BugRecord ---
     # Used by _render_fixed_items to join titles for bare KI IDs sourced from
     # release-notes Bugs-Resolved sections (e.g. "KI-1.0.0.1 — resolved").
-    public_id_to_bug: dict[str, BugRecord] = {
-        b.public_id: b for b in all_bugs if b.public_id
-    }
+    public_id_to_bug: dict[str, BugRecord] = {b.public_id: b for b in all_bugs if b.public_id}
     carried_ids: set[str] = set(public_id_to_bug)
 
     # --- Parse release notes ---
@@ -1438,15 +1410,9 @@ def regenerate(
 
         # Fixed section — classification is load-bearing:
         # a bundle with BUG items must never produce Fixed: None
-        fixed_items = _render_fixed_items(
-            entry, bugs_by_id, published_manifest, public_id_to_bug
-        )
+        fixed_items = _render_fixed_items(entry, bugs_by_id, published_manifest, public_id_to_bug)
         # A published Fixed line whose bug file is gone is history: keep it.
-        fixed_items.extend(
-            _kept_published_lines(
-                published_artifact, entry.version, "Fixed", fixed_items, carried_ids
-            )
-        )
+        fixed_items.extend(_kept_published_lines(published_artifact, entry.version, "Fixed", fixed_items, carried_ids))
         if not fixed_items and entry.fixed_bug_ids:
             # Should never happen: BUG items in release notes but no rendered output.
             # This indicates a bug file lookup failure — emit a placeholder.
@@ -1478,10 +1444,7 @@ def regenerate(
         ki_text = _render_section("Known Issues", ki_lines_for_entry)
 
         # Detail link
-        detail_link = (
-            f"*Details: [release-notes/{entry.version}.md]"
-            f"(release-notes/{entry.version}.md)*"
-        )
+        detail_link = f"*Details: [release-notes/{entry.version}.md]" f"(release-notes/{entry.version}.md)*"
 
         # Assemble entry
         entry_parts = [entry_header]
@@ -1540,15 +1503,13 @@ def _main() -> None:
     """
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Regenerate CHANGELOG.md from release-notes and bug ledger."
-    )
+    parser = argparse.ArgumentParser(description="Regenerate CHANGELOG.md from release-notes and bug ledger.")
     parser.add_argument("repo_root", help="Root of the git repository.")
     parser.add_argument(
         "bugs_dir",
         help="Directory containing BUG-*.md files. For a live project's ledger "
-             "(<kanban_root>/projects/<project>/bugs) the bugs archived from it "
-             "are read too; a live file wins.",
+        "(<kanban_root>/projects/<project>/bugs) the bugs archived from it "
+        "are read too; a live file wins.",
     )
     parser.add_argument(
         "versions",

@@ -84,9 +84,17 @@ def _write(path: pathlib.Path, text: str) -> None:
 
 def _git(repo: pathlib.Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-        env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"},
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.com",
+        },
     )
 
 
@@ -100,17 +108,22 @@ def registry_root(tmp_path: pathlib.Path) -> pathlib.Path:
     """Four projects covering every per-project answer the gather gives."""
     root = tmp_path / "registry"
     _write(root / "kanban.cfg", "[dashboard]\nmax_rows = 12\n")
-    _write(root / "projects.cfg", (
-        "[project:alpha]\npriority=2\ndashboard_color=#112233\ndashboard_max_rows=3\n\n"
-        "[project:bravo]\npriority=1\ndashboard_max_rows=200\n\n"
-        "[project:charlie]\npriority=2\ndashboard_max_rows=abc\n\n"
-        "[project:delta]\nenabled=true\n"
-    ))
+    _write(
+        root / "projects.cfg",
+        (
+            "[project:alpha]\npriority=2\ndashboard_color=#112233\ndashboard_max_rows=3\n\n"
+            "[project:bravo]\npriority=1\ndashboard_max_rows=200\n\n"
+            "[project:charlie]\npriority=2\ndashboard_max_rows=abc\n\n"
+            "[project:delta]\nenabled=true\n"
+        ),
+    )
     projects = root / "projects"
     # alpha: no project.cfg, so its last release comes from release-state.md.
-    _write(projects / "alpha" / "release-state.md",
-           "# Release State\n\n## Active RC\nv1.3.0\n\n## RC Opened At\nnone\n\n"
-           "## RC Opened By Task\nnone\n\n## Last Released\nv1.2.0\n")
+    _write(
+        projects / "alpha" / "release-state.md",
+        "# Release State\n\n## Active RC\nv1.3.0\n\n## RC Opened At\nnone\n\n"
+        "## RC Opened By Task\nnone\n\n## Last Released\nv1.2.0\n",
+    )
     # bravo: a git dev tree whose merged tags give the last release.
     repo = tmp_path / "bravo-dev"
     repo.mkdir()
@@ -126,8 +139,10 @@ def registry_root(tmp_path: pathlib.Path) -> pathlib.Path:
     _write(projects / "charlie" / "release-state.md", "# Release State\n\n## Active RC\nsoon\n")
     _write(projects / "charlie" / "DEFER-LOW-BUGS", "until=v9.9.9\n")
     for number, severity, status in ((1, "low", "open"), (2, "high", "open"), (3, "low", "done")):
-        _write(projects / "charlie" / "bugs" / f"BUG-00{number}-x.md",
-               f"# BUG\n\n**Severity:** {severity}\n\n## Status\n{status}\n")
+        _write(
+            projects / "charlie" / "bugs" / f"BUG-00{number}-x.md",
+            f"# BUG\n\n**Severity:** {severity}\n\n## Status\n{status}\n",
+        )
     # delta: a campaign file with no until= line (malformed posture).
     _write(projects / "delta" / "DEFER-LOW-BUGS", "# no target\n")
     (projects / "delta" / "bugs").mkdir(parents=True)
@@ -155,20 +170,29 @@ PY
 """
     env = {key: value for key, value in os.environ.items() if key not in AMBIENT_LEAK_ENV_VARS_TO_CLEAR}
     env.pop("DASHBOARD_MAX_ROWS", None)
-    env.update({"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-                "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "scratch"), "PGAI_GIT_LOCAL_ONLY": "1",
-                "PYTHONPATH": str(_TEAM_DIR)})
+    env.update(
+        {
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "scratch"),
+            "PGAI_GIT_LOCAL_ONLY": "1",
+            "PYTHONPATH": str(_TEAM_DIR),
+        }
+    )
     if max_rows:
         env["DASHBOARD_MAX_ROWS"] = max_rows
-    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env,
-                            timeout=120, cwd=str(_TEAM_DIR))
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=120, cwd=str(_TEAM_DIR)
+    )
     assert result.returncode == 0, result.stderr
     return result.stdout
 
 
 @pytest.mark.parametrize("max_rows", ["", "15"])
 def test_in_process_gather_matches_the_bash_gather(
-    registry_root: pathlib.Path, tmp_path: pathlib.Path, max_rows: str,
+    registry_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    max_rows: str,
 ) -> None:
     bash_out = _bash_gather_sources(registry_root, tmp_path, max_rows)
     glyphs = {"GLYPH_DEFERRED_BUG": "✋", "GLYPH_DEFER_WARNING": "⚠️"}
@@ -197,10 +221,23 @@ def test_a_colon_legacy_registry_is_handed_back_to_the_bash_gather(tmp_path: pat
 
     snapshot = tmp_path / "board-x.json"
     result = subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.dashboard.column_render", "board-build",
-         f"--snapshot={snapshot}", "--gather=tree", f"--kanban-root={root}",
-         "--subcommand=input", "--column-type=bugs", "--width=29"],
-        capture_output=True, text=True, cwd=str(_TEAM_DIR), timeout=60, check=False,
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.dashboard.column_render",
+            "board-build",
+            f"--snapshot={snapshot}",
+            "--gather=tree",
+            f"--kanban-root={root}",
+            "--subcommand=input",
+            "--column-type=bugs",
+            "--width=29",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 5, result.stderr
     assert result.stdout == ""
@@ -215,17 +252,32 @@ def test_a_colon_legacy_registry_is_handed_back_to_the_bash_gather(tmp_path: pat
 
 def test_board_widths_set_each_kind_and_a_column_entry_wins() -> None:
     widths = board_snapshot.parse_board_widths(" input=29 , queue=26, cm=30, bogus=4, pm=x, coder=0 ")
-    assert widths == {"bugs": 29, "priorities": 29, "requirements": 29, "pm": 26,
-                      "coder": 26, "writer": 26, "tester": 26, "cm": 30}
+    assert widths == {
+        "bugs": 29,
+        "priorities": 29,
+        "requirements": 29,
+        "pm": 26,
+        "coder": 26,
+        "writer": 26,
+        "tester": 26,
+        "cm": 30,
+    }
     assert board_snapshot.parse_board_widths("") == {}
 
 
 def test_bash_reader_and_python_writer_agree_on_the_pre_render_name(tmp_path: pathlib.Path) -> None:
     snapshot = tmp_path / "board-abc123.json"
     result = subprocess.run(
-        ["bash", "-c", f"source '{_SCRIPTS}/lib/dashboard/column_render_board.sh'; "
-                       f"column_render_board_prerender_path '{snapshot}' coder 26"],
-        capture_output=True, text=True, timeout=30, check=False,
+        [
+            "bash",
+            "-c",
+            f"source '{_SCRIPTS}/lib/dashboard/column_render_board.sh'; "
+            f"column_render_board_prerender_path '{snapshot}' coder 26",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(board_snapshot.prerender_path(snapshot, "coder", 26))
@@ -244,14 +296,18 @@ def board_root(tmp_path: pathlib.Path) -> pathlib.Path:
     project = build_synthetic_board(root, with_queues=True)
     (root / "pgai_agent_kanban").symlink_to(_PKG_DIR, target_is_directory=True)
     for number, status in ((2, "wont-do"), (3, "done"), (4, "running"), (5, "blocked")):
-        _write(project / "bugs" / f"BUG-000{number}-pre-{status}.md",
-               f"# BUG-000{number}\n\n**Severity:** high\n\n## Status\n{status}\n")
+        _write(
+            project / "bugs" / f"BUG-000{number}-pre-{status}.md",
+            f"# BUG-000{number}\n\n**Severity:** high\n\n## Status\n{status}\n",
+        )
     _write(project / "priority" / "PRIORITY-0001-pre.md", "# P\n\n## Status\nopen\n")
     for version in ("v1.0.0", "v1.2.0", "v1.3.0"):
         _write(project / "requirements" / f"{version}-pre.md", f"# {version}\n\n## Target Version\n{version}\n")
-    _write(project / "release-state.md",
-           "# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
-           "## RC Opened By Task\npre-fixture\n\n## Last Released\nv1.1.0\n")
+    _write(
+        project / "release-state.md",
+        "# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
+        "## RC Opened By Task\npre-fixture\n\n## Last Released\nv1.1.0\n",
+    )
     for agent in ("pm", "writer", "tester", "cm"):
         task = f"{agent.upper()}-20260102-001-pre-task"
         _write(project / "tasks" / task / "status.md", "## State\nWORKING\n")
@@ -265,8 +321,7 @@ def _python_spy(tmp_path: pathlib.Path) -> tuple:
     spy_dir.mkdir(exist_ok=True)
     log = tmp_path / "python-starts.log"
     spy = spy_dir / "python3"
-    spy.write_text(f"#!/usr/bin/env bash\necho start >> '{log}'\nexec '{sys.executable}' \"$@\"\n",
-                   encoding="utf-8")
+    spy.write_text(f"#!/usr/bin/env bash\necho start >> '{log}'\nexec '{sys.executable}' \"$@\"\n", encoding="utf-8")
     spy.chmod(0o755)
     return spy_dir, log
 
@@ -277,13 +332,15 @@ def _env(root: pathlib.Path, scratch: pathlib.Path, *, color: bool, ttl: int = 6
         env.pop(key, None)
     for key in ("NO_COLOR", "DASHBOARD_MAX_ROWS", "DASHBOARD_STATUS_GLYPH"):
         env.pop(key, None)
-    env.update({
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "KANBAN_ROOT": str(root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch),
-        "PGAI_DASHBOARD_SNAPSHOT_TTL_SECONDS": str(ttl),
-        "TERM": "xterm-256color",
-    })
+    env.update(
+        {
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch),
+            "PGAI_DASHBOARD_SNAPSHOT_TTL_SECONDS": str(ttl),
+            "TERM": "xterm-256color",
+        }
+    )
     if not color:
         env["NO_COLOR"] = "1"
     if path_prefix:
@@ -294,9 +351,19 @@ def _env(root: pathlib.Path, scratch: pathlib.Path, *, color: bool, ttl: int = 6
 def _render(root: pathlib.Path, env: dict, args: list, label: str, *, widths: bool = True):
     extra = ["--board-widths", _BOARD_WIDTHS] if widths else []
     return run_dashboard_script(
-        ["bash", str(root / "scripts" / "dashboard" / "column-render.sh"), *args,
-         "--label", label, "--kanban-root", str(root), "--all-projects", *extra],
-        env=env, timeout=60,
+        [
+            "bash",
+            str(root / "scripts" / "dashboard" / "column-render.sh"),
+            *args,
+            "--label",
+            label,
+            "--kanban-root",
+            str(root),
+            "--all-projects",
+            *extra,
+        ],
+        env=env,
+        timeout=60,
     )
 
 
@@ -320,7 +387,8 @@ def _direct_outputs(root: pathlib.Path, tmp_path: pathlib.Path, *, color: bool, 
     snap.unlink()
     pathlib.Path(f"{snap}.lock").write_text(
         f"holder=dashboard\npid={os.getpid()}\nop=board-snapshot-build\ntask=none\n"
-        "acquired_at=2026-01-01T00:00:00Z\n", encoding="utf-8",
+        "acquired_at=2026-01-01T00:00:00Z\n",
+        encoding="utf-8",
     )
     outputs = {}
     for args, label in columns:
@@ -334,7 +402,9 @@ def _direct_outputs(root: pathlib.Path, tmp_path: pathlib.Path, *, color: bool, 
 
 @pytest.mark.parametrize("color", [True, False], ids=["color", "no-color"])
 def test_a_declared_tick_gathers_once_starts_python_once_and_matches_direct_renders(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, color: bool,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    color: bool,
 ) -> None:
     scratch = tmp_path / "shared"
     spy_dir, log = _python_spy(tmp_path)
@@ -354,7 +424,9 @@ def test_a_declared_tick_gathers_once_starts_python_once_and_matches_direct_rend
 
 @pytest.mark.parametrize("damage", ["stale", "deleted", "replaced"])
 def test_a_pre_render_is_never_served_without_its_snapshot(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, damage: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    damage: str,
 ) -> None:
     scratch = tmp_path / "shared"
     env = _env(board_root, scratch, color=True)
@@ -385,7 +457,8 @@ def test_a_pre_render_is_never_served_without_its_snapshot(
 
 
 def test_an_undeclared_width_renders_from_the_snapshot_without_regathering(
-    board_root: pathlib.Path, tmp_path: pathlib.Path,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     scratch = tmp_path / "shared"
     env = _env(board_root, scratch, color=True)
@@ -434,17 +507,31 @@ source '{_SCRIPTS}/dashboard/lib/defer_scope.sh'; source '{_SCRIPTS}/lib/dashboa
 column_render_defer_multi_line "$1" solo "$2"
 """
     env = {key: value for key, value in os.environ.items() if key not in AMBIENT_LEAK_ENV_VARS_TO_CLEAR}
-    env.update({"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-                "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "scratch"), "PYTHONPATH": str(_TEAM_DIR)})
-    result = subprocess.run(["bash", "-c", script, "bash", str(root), str(bugs_dir)], capture_output=True,
-                            text=True, env=env, timeout=60, cwd=str(_TEAM_DIR))
+    env.update(
+        {
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "scratch"),
+            "PYTHONPATH": str(_TEAM_DIR),
+        }
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "bash", str(root), str(bugs_dir)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        cwd=str(_TEAM_DIR),
+    )
     assert result.returncode == 0, result.stderr
     return result.stdout
 
 
 @pytest.mark.parametrize("fault", sorted(_MALFORMED_POSTURES))
 def test_a_malformed_posture_gathers_the_line_the_bash_full_path_builds(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, fault: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
 ) -> None:
     root = tmp_path / "registry"
     _write(root / "projects.cfg", "[project:solo]\nenabled=true\n")
@@ -472,7 +559,9 @@ def test_a_malformed_posture_gathers_the_line_the_bash_full_path_builds(
 
 @pytest.mark.parametrize("color", [True, False], ids=["color", "no-color"])
 def test_a_malformed_campaign_serves_a_bugs_pre_render_identical_to_its_direct_render(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, color: bool,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    color: bool,
 ) -> None:
     project = board_root / "projects" / PROJECT_NAME
     _write(defer_posture.campaign_file_path(project), "# no target\n")

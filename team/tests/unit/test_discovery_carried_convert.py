@@ -64,17 +64,21 @@ def _env(root: pathlib.Path) -> dict[str, str]:
 
 def _item(project_root: pathlib.Path, subdir: str, name: str, status: str) -> pathlib.Path:
     path = project_root / subdir / name
-    path.write_text(f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n",
-                    encoding="utf-8")
+    path.write_text(
+        f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n", encoding="utf-8"
+    )
     return path
 
 
-def _bundle(project_root: pathlib.Path, name: str, status: str, items: list[pathlib.Path],
-            pm_task: str = "none") -> pathlib.Path:
+def _bundle(
+    project_root: pathlib.Path, name: str, status: str, items: list[pathlib.Path], pm_task: str = "none"
+) -> pathlib.Path:
     path = project_root / "requirements" / name
     lines = "".join(f"- {item.name} (`{item}`)\n" for item in items)
-    path.write_text(f"# {name[:-3]}\n\n## Status\n{status}\n\n## PM Task\n{pm_task}\n\n## Bundled Items\n\n{lines}",
-                    encoding="utf-8")
+    path.write_text(
+        f"# {name[:-3]}\n\n## Status\n{status}\n\n## PM Task\n{pm_task}\n\n## Bundled Items\n\n{lines}",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -87,13 +91,17 @@ def _pm_status(project_root: pathlib.Path, summary: str, task: str = _PM_TASK) -
 def _status(path: pathlib.Path) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     index = next(i for i, line in enumerate(lines) if line.strip().lower() == "## status")
-    return next(line.strip() for line in lines[index + 1:] if line.strip())
+    return next(line.strip() for line in lines[index + 1 :] if line.strip())
 
 
 def _run(root: pathlib.Path, module: str, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", module, *args],
-        capture_output=True, text=True, env=_env(root), cwd=str(root), timeout=60,
+        capture_output=True,
+        text=True,
+        env=_env(root),
+        cwd=str(root),
+        timeout=60,
     )
 
 
@@ -115,8 +123,9 @@ def test_scan_prints_no_path_for_a_needs_operator_bug_and_names_it_on_stderr(tmp
     waiting = _item(project_root, "bugs", "BUG-9401-waiting-thing.md", "needs-operator")
     open_bug = _item(project_root, "bugs", "BUG-9402-open-thing.md", "open")
 
-    result = _run(project_root.parent.parent, "pgai_agent_kanban.discovery.items", "scan",
-                  str(project_root / "bugs"), "BUG-")
+    result = _run(
+        project_root.parent.parent, "pgai_agent_kanban.discovery.items", "scan", str(project_root / "bugs"), "BUG-"
+    )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [str(open_bug.resolve())]
@@ -131,8 +140,9 @@ def test_scan_leaves_a_carried_bug_out_and_writes_nothing(tmp_path) -> None:
     _bundle(project_root, "v9.9.9-bugfix-bundle-20990101.md", "done", [bug])
     before = _tree_bytes(project_root)
 
-    result = _run(project_root.parent.parent, "pgai_agent_kanban.discovery.items", "scan",
-                  str(project_root / "bugs"), "BUG-")
+    result = _run(
+        project_root.parent.parent, "pgai_agent_kanban.discovery.items", "scan", str(project_root / "bugs"), "BUG-"
+    )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
@@ -155,8 +165,11 @@ def test_carried_items_reads_the_newest_closed_bundle_and_its_pm_reason(tmp_path
     # v9.9.10 is newer than v9.9.9 by version, though it sorts first as text.
     _bundle(project_root, "v9.9.10-bugfix-bundle-20990102.md", "wont-do", [bug, in_flight], _PM_TASK)
     _bundle(project_root, "v9.9.11-bugfix-bundle-20990103.md", "running", [in_flight])
-    _pm_status(project_root, "Agent: PM. One ticket written. BUG-9404 is left out: the operator must pick the "
-                             "port. BUG-94041 is unrelated. Nothing else.")
+    _pm_status(
+        project_root,
+        "Agent: PM. One ticket written. BUG-9404 is left out: the operator must pick the "
+        "port. BUG-94041 is unrelated. Nothing else.",
+    )
 
     found = carried.carried_items(project_root / "bugs")
 
@@ -171,10 +184,16 @@ def test_carried_items_reads_the_newest_closed_bundle_and_its_pm_reason(tmp_path
 @pytest.mark.parametrize(
     ("pm_task", "summary", "expected"),
     [
-        (_PM_TASK, "Agent: PM. BUG-9408 needs the operator's retry limit.",
-         f"Reason recorded by PM task {_PM_TASK}: BUG-9408 needs the operator's retry limit."),
-        (_PM_TASK, "Agent: PM. Plan written.",
-         f"No reason was recorded: PM task {_PM_TASK}'s status.md does not name BUG-9408."),
+        (
+            _PM_TASK,
+            "Agent: PM. BUG-9408 needs the operator's retry limit.",
+            f"Reason recorded by PM task {_PM_TASK}: BUG-9408 needs the operator's retry limit.",
+        ),
+        (
+            _PM_TASK,
+            "Agent: PM. Plan written.",
+            f"No reason was recorded: PM task {_PM_TASK}'s status.md does not name BUG-9408.",
+        ),
         ("none", None, "No reason was recorded: bundle v9.9.9-bugfix-bundle-20990101.md names no PM task."),
     ],
     ids=["reason-recorded", "pm-task-silent", "no-pm-task"],
@@ -280,8 +299,7 @@ def test_list_prints_each_carried_item_and_its_bundle(tmp_path) -> None:
     bug = _item(project_root, "bugs", "BUG-9413-carried-thing.md", "running")
     bundle = _bundle(project_root, "v9.9.9-bugfix-bundle-20990101.md", "done", [bug])
 
-    result = _run(project_root.parent.parent, "pgai_agent_kanban.discovery.carried", "list",
-                  str(project_root / "bugs"))
+    result = _run(project_root.parent.parent, "pgai_agent_kanban.discovery.carried", "list", str(project_root / "bugs"))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [f"{bug.resolve()}\t{bundle}"]

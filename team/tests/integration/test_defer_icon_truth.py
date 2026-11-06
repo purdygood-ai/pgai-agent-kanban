@@ -37,7 +37,6 @@ import pathlib
 import re
 import subprocess
 import textwrap
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Path constants (resolve from this file's own location)
@@ -66,9 +65,7 @@ def _operator_env(kanban_root: pathlib.Path, *, no_color: bool, term: str = "xte
     return env
 
 
-def _run_status_bottom(
-    kanban_root: pathlib.Path, project_name: str, *, no_color: bool
-) -> subprocess.CompletedProcess:
+def _run_status_bottom(kanban_root: pathlib.Path, project_name: str, *, no_color: bool) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(_STATUS_BOTTOM_SH), str(kanban_root), project_name],
         capture_output=True,
@@ -79,7 +76,7 @@ def _run_status_bottom(
     )
 
 
-def _parse_defer_segment(stdout: str) -> Optional[tuple]:
+def _parse_defer_segment(stdout: str) -> tuple | None:
     """Returns (count, level, until_or_None) or None if the segment is
     absent from the status bar's output.
     """
@@ -125,8 +122,8 @@ def _set_defer_posture(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    deferred_bugs: Optional[bool] = None,
-    deferred_bug_level: Optional[str] = None,
+    deferred_bugs: bool | None = None,
+    deferred_bug_level: str | None = None,
 ) -> None:
     cfg_path = kanban_root / "projects" / project_name / "project.cfg"
     lines = ["", "[release]"]
@@ -149,10 +146,7 @@ def _add_bug_file(
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"**Severity:** {severity}\n\n"
-        "## Status\nopen\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"**Severity:** {severity}\n\n" "## Status\nopen\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -179,9 +173,7 @@ def _add_requirements_file(kanban_root: pathlib.Path, project_name: str) -> path
 
 
 def _bundle_files(kanban_root: pathlib.Path, project_name: str) -> list[pathlib.Path]:
-    return list(
-        (kanban_root / "projects" / project_name / "requirements").glob("*-bugfix-bundle-*.md")
-    )
+    return list((kanban_root / "projects" / project_name / "requirements").glob("*-bugfix-bundle-*.md"))
 
 
 def _bug_status(bug_file: pathlib.Path) -> str:
@@ -199,9 +191,7 @@ def _bug_status(bug_file: pathlib.Path) -> str:
 
 
 class TestIconTruthInCfgTierState:
-    def test_status_bar_count_and_level_match_what_discovery_held_back(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_status_bar_count_and_level_match_what_discovery_held_back(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
         held_back = [
@@ -220,9 +210,9 @@ class TestIconTruthInCfgTierState:
         status_result = _run_status_bottom(root, "project-a", no_color=True)
         assert status_result.returncode == 0, status_result.stderr
         segment = _parse_defer_segment(status_result.stdout)
-        assert segment is not None, (
-            f"Expected a BUGS DEFERRED segment in the status bar.\nstdout: {status_result.stdout!r}"
-        )
+        assert (
+            segment is not None
+        ), f"Expected a BUGS DEFERRED segment in the status bar.\nstdout: {status_result.stdout!r}"
         count, level, until = segment
         assert count == len(held_back), (
             f"Status bar reported {count} deferred, but discovery actually held "
@@ -260,9 +250,9 @@ class TestIconTruthInCampaignFileTierState:
         status_result = _run_status_bottom(root, "project-a", no_color=True)
         assert status_result.returncode == 0, status_result.stderr
         segment = _parse_defer_segment(status_result.stdout)
-        assert segment is not None, (
-            f"Expected a BUGS DEFERRED segment in the status bar.\nstdout: {status_result.stdout!r}"
-        )
+        assert (
+            segment is not None
+        ), f"Expected a BUGS DEFERRED segment in the status bar.\nstdout: {status_result.stdout!r}"
         count, level, until = segment
         assert count == len(held_back), (
             f"Status bar reported {count} deferred, but discovery actually held "
@@ -289,23 +279,19 @@ class TestIconTruthInMalformedFileState:
         # rich mode: the warning glyph and the exact offending path.
         rich_result = _run_status_bottom(root, "project-a", no_color=False)
         assert rich_result.returncode == 0, rich_result.stderr
-        assert "⚠" in rich_result.stdout, (
-            f"Expected the warning glyph in rich mode.\nstdout: {rich_result.stdout!r}"
-        )
-        assert str(campaign_file) in rich_result.stdout, (
-            f"Expected the offending file's exact path in rich mode.\nstdout: {rich_result.stdout!r}"
-        )
+        assert "⚠" in rich_result.stdout, f"Expected the warning glyph in rich mode.\nstdout: {rich_result.stdout!r}"
+        assert (
+            str(campaign_file) in rich_result.stdout
+        ), f"Expected the offending file's exact path in rich mode.\nstdout: {rich_result.stdout!r}"
         assert _parse_defer_segment(rich_result.stdout) is None, (
-            "A malformed campaign file must never render a (possibly wrong) "
-            "BUGS DEFERRED count."
+            "A malformed campaign file must never render a (possibly wrong) " "BUGS DEFERRED count."
         )
 
         # NO_COLOR mode: the same path, in plain text, no glyph.
         plain_result = _run_status_bottom(root, "project-a", no_color=True)
         assert plain_result.returncode == 0, plain_result.stderr
         assert f"DEFER CONFIG UNREADABLE: {campaign_file}" in plain_result.stdout, (
-            f"Expected the plain-text warning naming the offending path.\n"
-            f"stdout: {plain_result.stdout!r}"
+            f"Expected the plain-text warning naming the offending path.\n" f"stdout: {plain_result.stdout!r}"
         )
         assert "⚠" not in plain_result.stdout, "NO_COLOR mode must not carry the glyph"
 

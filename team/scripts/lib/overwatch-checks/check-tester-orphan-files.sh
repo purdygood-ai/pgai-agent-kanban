@@ -14,16 +14,19 @@
 #   2. For each matched file:
 #      a. If the file contains BOTH a "## Symptom" section AND a
 #         "## Root Cause" section (case-insensitive), it is "bug-shaped":
-#         - Allocate BUG-NNNN using the next available integer from bugs/BUG-*.md
 #         - Derive a slug from the first non-empty H1 heading (# ...) or
 #           from the filename stem (strip leading vX.Y.Z- prefix, strip .md)
-#         - Create bugs/BUG-NNNN-<slug>.md with the original file's content
 #         - Rename the original priority file to <name>.orphan
+#         - File the original file's content as a bug through intake
+#           (overwatch_deposit_bug), which claims its BUG-NNNN number; when
+#           the deposit fails the rename is undone
 #         - Log the action
 #      b. If the file is NOT bug-shaped (missing Symptom or Root Cause):
 #         - Rename to <name>.orphan
-#         - File a bug report noting the suspicious file
+#         - File a bug report noting the suspicious file, through intake
 #         - Log the action
+#      A report intake refuses as the same defect as a live bug is not filed
+#      again; the file is still quarantined and the live bug is logged.
 #
 # This script is both:
 #   - Sourceable (for the OVERWATCH driver): source this file and call
@@ -47,7 +50,13 @@
 #
 # --dry-run: scans and logs findings but does NOT rename files or create bug entries.
 
-# overwatch_registered_projects: the shared projects.cfg reader.
+# This file's directory, as an absolute path
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CTOF_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CTOF_SELF_DIR=""
+
+# overwatch_registered_projects: the shared projects.cfg reader;
+# overwatch_deposit_bug: filing through intake.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
@@ -57,58 +66,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _ctof_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-tester-orphan-files: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        # Resolve from projects.cfg — never silently fall back to first project.
-        # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
-        # path is only safe for single-project installs.
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-tester-orphan-files: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-tester-orphan-files: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-tester-orphan-files || return 1
     return 0
-}
-
-# ---------------------------------------------------------------------------
-# _ctof_next_bug_number <bugs_dir>
-# Determine the next bug report sequence number by scanning existing BUG-NNNN
-# files in <bugs_dir>. Echoes a zero-padded 4-digit number.
-# ---------------------------------------------------------------------------
-_ctof_next_bug_number() {
-    local bugs_dir="$1"
-    local highest=0
-    local num
-
-    if [[ -d "${bugs_dir}" ]]; then
-        while IFS= read -r f; do
-            num="$(basename "${f}" | grep -oE '^BUG-[0-9]+' | grep -oE '[0-9]+' | head -n1)"
-            if [[ -n "${num}" ]] && (( 10#${num} > highest )); then
-                highest=$(( 10#${num} ))
-            fi
-        done < <(find "${bugs_dir}" -maxdepth 1 -name 'BUG-[0-9]*' -type f 2>/dev/null)
-    fi
-
-    printf '%04d' $(( highest + 1 ))
 }
 
 # ---------------------------------------------------------------------------
@@ -158,7 +117,7 @@ _ctof_derive_slug() {
     h1="$(grep -m1 -E '^#[[:space:]]+' "${file}" 2>/dev/null \
         | sed 's/^#[[:space:]]*//' \
         | tr '[:upper:]' '[:lower:]' \
-        | sed 's/[^a-z0-9]+/-/g; s/^-//; s/-$//' \
+        | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' \
         | head -c 60)"
 
     if [[ -n "${h1}" ]]; then
@@ -190,22 +149,20 @@ _ctof_derive_slug() {
 # Inner function invoked via overwatch_halt_first_fix for one bug-shaped file.
 # Reads from environment:
 #   _CTOF_SRC_FILE   — path to the priority/ file to handle
-#   _CTOF_BUGS_DIR   — path to bugs/
-#   _CTOF_BUG_NUM    — pre-allocated BUG number (zero-padded 4-digit string)
+#   _CTOF_PROJECT    — the project name the bug is filed for
 #   _CTOF_SLUG       — pre-derived slug
 #
 # Actions:
-#   1. Create bugs/BUG-NNNN-<slug>.md from source content
-#   2. Rename source to <src>.orphan
+#   1. Rename source to <src>.orphan
+#   2. File the source content as a bug through intake
+#      (overwatch_deposit_bug); on a failed deposit, undo the rename
 #   3. Log action via overwatch_log_action
 # ---------------------------------------------------------------------------
 _ctof_do_handle_bug_shaped() {
     local src="${_CTOF_SRC_FILE}"
-    local bugs_dir="${_CTOF_BUGS_DIR}"
-    local bug_num="${_CTOF_BUG_NUM}"
+    local project="${_CTOF_PROJECT}"
     local slug="${_CTOF_SLUG}"
 
-    local bug_file="${bugs_dir}/BUG-${bug_num}-${slug}.md"
     local orphan_path="${src}.orphan"
 
     # Backup the source before modifying
@@ -215,29 +172,42 @@ _ctof_do_handle_bug_shaped() {
         return 1
     }
 
-    # Create the bug file with original content plus a header note
+    # Read the original content for the bug report
     local orig_content
     orig_content="$(cat "${src}" 2>/dev/null)" || {
         echo "check-tester-orphan-files: cannot read source file: ${src}" >&2
         return 1
     }
 
-    {
-        printf '# BUG-%s: %s\n\n' "${bug_num}" "${slug}"
+    # Rename source to .orphan
+    if ! mv "${src}" "${orphan_path}" 2>/dev/null; then
+        echo "check-tester-orphan-files: rename failed: ${src} -> ${orphan_path}" >&2
+        return 1
+    fi
+
+    # File the original content as a bug through intake
+    local bug_file="" deposit_rc=0
+    bug_file="$({
         printf '<!-- Migrated from priority/ by OVERWATCH check-tester-orphan-files -->\n'
         printf '<!-- Original path: %s -->\n' "${src}"
         printf '<!-- Migration date: %s -->\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         printf '%s\n' "${orig_content}"
-    } > "${bug_file}" || {
-        echo "check-tester-orphan-files: failed to write bug file: ${bug_file}" >&2
-        return 1
-    }
+    } | overwatch_deposit_bug check-tester-orphan-files "${project}" "${slug}" "${slug}")" || deposit_rc=$?
 
-    # Rename source to .orphan
-    if ! mv "${src}" "${orphan_path}" 2>/dev/null; then
-        echo "check-tester-orphan-files: rename failed: ${src} -> ${orphan_path}" >&2
-        # Try to clean up the bug file we just created
-        rm -f "${bug_file}" 2>/dev/null || true
+    if (( deposit_rc == 2 )); then
+        overwatch_log_action \
+            "check-tester-orphan-files" \
+            "${src}" \
+            "bug-shaped-orphan-already-filed" \
+            "${bpath}" \
+            "Bug-shaped priority file reports the same defect as live bug ${bug_file}; not filed again; original renamed to ${orphan_path}" \
+        || true
+        echo "check-tester-orphan-files: ${src} already filed as ${bug_file} (orphan: ${orphan_path})" >&2
+        return 0
+    elif (( deposit_rc != 0 )); then
+        echo "check-tester-orphan-files: bug deposit failed for ${src}; restoring it from ${orphan_path}" >&2
+        mv "${orphan_path}" "${src}" 2>/dev/null \
+            || echo "check-tester-orphan-files: restore failed; the original is at ${orphan_path}" >&2
         return 1
     fi
 
@@ -259,22 +229,20 @@ _ctof_do_handle_bug_shaped() {
 # Inner function invoked via overwatch_halt_first_fix for a non-bug-shaped file.
 # Reads from environment:
 #   _CTOF_SRC_FILE   — path to the priority/ file to handle
-#   _CTOF_BUGS_DIR   — path to bugs/
-#   _CTOF_BUG_NUM    — pre-allocated BUG number (zero-padded 4-digit string)
+#   _CTOF_PROJECT    — the project name the bug is filed for
 #
 # Actions:
 #   1. Rename source to <src>.orphan
-#   2. File a bug report noting the suspicious file
+#   2. File a bug report noting the suspicious file, through intake
+#      (overwatch_deposit_bug)
 #   3. Log action via overwatch_log_action
 # ---------------------------------------------------------------------------
 _ctof_do_handle_not_bug_shaped() {
     local src="${_CTOF_SRC_FILE}"
-    local bugs_dir="${_CTOF_BUGS_DIR}"
-    local bug_num="${_CTOF_BUG_NUM}"
+    local project="${_CTOF_PROJECT}"
 
     local orphan_path="${src}.orphan"
     local bug_slug="suspicious-priority-file-$(date +%Y%m%d)"
-    local bug_file="${bugs_dir}/BUG-${bug_num}-${bug_slug}.md"
 
     # Backup source before any modification
     local bpath
@@ -290,9 +258,9 @@ _ctof_do_handle_not_bug_shaped() {
     fi
 
     # File a bug noting the suspicious file
-    cat > "${bug_file}" <<EOF
-# BUG-${bug_num}: Suspicious vX.Y.Z-prefixed file found in priority/
-
+    local bug_file="" deposit_rc=0 filed_note
+    bug_file="$(overwatch_deposit_bug check-tester-orphan-files "${project}" "${bug_slug}" \
+        "Suspicious vX.Y.Z-prefixed file found in priority/" <<EOF
 ## Status
 open
 
@@ -324,6 +292,12 @@ Inspect ${orphan_path} and determine whether it should be:
   2. Converted to a priority document (remove the vX.Y.Z- prefix, add Status)
   3. Deleted if it is spurious
 EOF
+)" || deposit_rc=$?
+    case "${deposit_rc}" in
+        0) filed_note="bug filed at ${bug_file}" ;;
+        2) filed_note="already filed as ${bug_file}; not filed again" ;;
+        *) filed_note="bug not filed (intake refused or failed)" ;;
+    esac
 
     # Log the action
     overwatch_log_action \
@@ -331,10 +305,10 @@ EOF
         "${src}" \
         "non-bug-shaped-orphan-quarantined" \
         "${bpath}" \
-        "Non-bug-shaped vX.Y.Z-prefixed priority file quarantined to ${orphan_path}; bug filed at ${bug_file}" \
+        "Non-bug-shaped vX.Y.Z-prefixed priority file quarantined to ${orphan_path}; ${filed_note}" \
     || true
 
-    echo "check-tester-orphan-files: quarantined ${src} -> ${orphan_path}; filed ${bug_file}" >&2
+    echo "check-tester-orphan-files: quarantined ${src} -> ${orphan_path}; ${filed_note}" >&2
     return 0
 }
 
@@ -357,7 +331,6 @@ overwatch_check_tester_orphan_files() {
     local project_name="${OVERWATCH_PROJECT}"
     local project_root="${KANBAN_ROOT}/projects/${project_name}"
     local priority_dir="${project_root}/priority"
-    local bugs_dir="${project_root}/bugs"
 
     if [[ ! -d "${project_root}" ]]; then
         echo "check-tester-orphan-files: project root does not exist: ${project_root}" >&2
@@ -367,7 +340,8 @@ overwatch_check_tester_orphan_files() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CTOF_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-tester-orphan-files: cannot resolve lib dir" >&2
             return 1
         }
@@ -442,24 +416,18 @@ overwatch_check_tester_orphan_files() {
             continue
         fi
 
-        # Allocate next bug number (shared sequence, recalculate each iteration
-        # to account for files written in prior iterations)
-        local bug_num
-        bug_num="$(_ctof_next_bug_number "${bugs_dir}")"
-
         if (( bug_shaped == 1 )); then
             local slug
             slug="$(_ctof_derive_slug "${f}")"
 
             export _CTOF_SRC_FILE="${f}"
-            export _CTOF_BUGS_DIR="${bugs_dir}"
-            export _CTOF_BUG_NUM="${bug_num}"
+            export _CTOF_PROJECT="${project_name}"
             export _CTOF_SLUG="${slug}"
 
             local fix_exit=0
             overwatch_halt_first_fix _ctof_do_handle_bug_shaped || fix_exit=$?
 
-            unset _CTOF_SRC_FILE _CTOF_BUGS_DIR _CTOF_BUG_NUM _CTOF_SLUG
+            unset _CTOF_SRC_FILE _CTOF_PROJECT _CTOF_SLUG
 
             if (( fix_exit == 3 )); then
                 echo "check-tester-orphan-files: HALT_OVERWATCH guard tripped; aborting" >&2
@@ -477,13 +445,12 @@ overwatch_check_tester_orphan_files() {
 
         else
             export _CTOF_SRC_FILE="${f}"
-            export _CTOF_BUGS_DIR="${bugs_dir}"
-            export _CTOF_BUG_NUM="${bug_num}"
+            export _CTOF_PROJECT="${project_name}"
 
             local fix_exit=0
             overwatch_halt_first_fix _ctof_do_handle_not_bug_shaped || fix_exit=$?
 
-            unset _CTOF_SRC_FILE _CTOF_BUGS_DIR _CTOF_BUG_NUM
+            unset _CTOF_SRC_FILE _CTOF_PROJECT
 
             if (( fix_exit == 3 )); then
                 echo "check-tester-orphan-files: HALT_OVERWATCH guard tripped; aborting" >&2

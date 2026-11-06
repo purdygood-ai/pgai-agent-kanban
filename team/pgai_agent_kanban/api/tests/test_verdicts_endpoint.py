@@ -47,7 +47,7 @@ from fastapi.testclient import TestClient
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _API_TESTS_DIR = _THIS_FILE.parent
 _TEAM_DIR = _API_TESTS_DIR.parent.parent.parent  # team/
-_PROJECT_ROOT = _TEAM_DIR.parent                  # project root (contains team/)
+_PROJECT_ROOT = _TEAM_DIR.parent  # project root (contains team/)
 
 _project_root_str = str(_PROJECT_ROOT)
 if _project_root_str not in sys.path:
@@ -79,9 +79,7 @@ def _make_project_dir(kanban_root: pathlib.Path, name: str) -> pathlib.Path:
 def _write_task(project_dir: pathlib.Path, task_id: str, state: str) -> None:
     task_dir = project_dir / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "status.md").write_text(
-        f"## State\n{state}\n\n## Summary\nfixture task\n", encoding="utf-8"
-    )
+    (task_dir / "status.md").write_text(f"## State\n{state}\n\n## Summary\nfixture task\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +119,9 @@ def _make_client(
 
 class TestVerdictsEnvelope:
     def test_empty_kanban_root_returns_empty_verdicts_array(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         with _make_client(tmp_path, monkeypatch) as client:
             resp = client.get("/verdicts")
@@ -131,7 +131,9 @@ class TestVerdictsEnvelope:
         assert body == {"verdicts": [], "warnings": []}
 
     def test_response_is_object_with_verdicts_and_warnings_keys(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         _make_project_dir(tmp_path, "demo")
@@ -151,7 +153,9 @@ class TestVerdictsEnvelope:
 
 class TestVerdictsPriorityOrder:
     def test_verdicts_follow_projects_cfg_priority_order(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Registered in reverse-priority order in the cfg file.
         _write_projects_cfg(tmp_path, [("zeta", 2, True), ("alpha", 1, True)])
@@ -172,7 +176,9 @@ class TestVerdictsPriorityOrder:
 
 class TestVerdictsFieldPresence:
     def test_idle_entry_has_no_task_fields(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         _make_project_dir(tmp_path, "demo")
@@ -190,7 +196,9 @@ class TestVerdictsFieldPresence:
         assert "minutes_in_state" not in entry
 
     def test_running_entry_carries_task_id_state_and_minutes_in_state(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         project_dir = _make_project_dir(tmp_path, "demo")
@@ -206,7 +214,9 @@ class TestVerdictsFieldPresence:
         assert isinstance(entry["minutes_in_state"], int)
 
     def test_blocked_entry_carries_task_id_and_state_but_not_minutes(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         project_dir = _make_project_dir(tmp_path, "demo")
@@ -222,7 +232,9 @@ class TestVerdictsFieldPresence:
         assert "minutes_in_state" not in entry
 
     def test_halted_entry_names_halt_file_and_has_no_task_fields(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         project_dir = _make_project_dir(tmp_path, "demo")
@@ -245,7 +257,9 @@ class TestVerdictsFieldPresence:
 
 class TestVerdictsUnresolvableProject:
     def test_registered_project_with_no_directory_yields_error_entry_not_500(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("ghost", 1, True)])
         # Deliberately do not create projects/ghost/.
@@ -263,7 +277,9 @@ class TestVerdictsUnresolvableProject:
         assert entry["remedy"]
 
     def test_unresolvable_project_is_not_silently_dropped_from_the_walk(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("alpha", 1, True), ("ghost", 2, True)])
         _make_project_dir(tmp_path, "alpha")
@@ -276,7 +292,9 @@ class TestVerdictsUnresolvableProject:
         assert {v["project"] for v in verdicts} == {"alpha", "ghost"}
 
     def test_project_filter_on_unresolvable_but_registered_project_is_200(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("ghost", 1, True)])
 
@@ -296,7 +314,9 @@ class TestVerdictsUnresolvableProject:
 
 class TestVerdictsProjectFilter:
     def test_project_filter_returns_only_that_project(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("alpha", 1, True), ("beta", 2, True)])
         _make_project_dir(tmp_path, "alpha")
@@ -310,7 +330,9 @@ class TestVerdictsProjectFilter:
         assert verdicts[0]["project"] == "beta"
 
     def test_unregistered_project_name_returns_422(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("alpha", 1, True)])
         _make_project_dir(tmp_path, "alpha")
@@ -329,7 +351,9 @@ class TestVerdictsProjectFilter:
 
 class TestVerdictsUnknownQueryParam:
     def test_unknown_query_parameter_produces_a_warning(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         _make_project_dir(tmp_path, "demo")
@@ -342,7 +366,9 @@ class TestVerdictsUnknownQueryParam:
         assert any("bogus" in w for w in warnings), f"expected a warning naming 'bogus', got: {warnings!r}"
 
     def test_no_unknown_parameters_produces_no_warnings(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         _make_project_dir(tmp_path, "demo")
@@ -370,7 +396,9 @@ class TestVerdictsPathConfinement:
         return result
 
     def test_verdicts_does_not_mutate_the_sandbox(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         project_dir = _make_project_dir(tmp_path, "demo")
@@ -409,20 +437,22 @@ def _seed_fresh_lock(kanban_root: pathlib.Path, name: str, record: str) -> None:
 
 class TestVerdictsDetailsReleaseLockHeldTime:
     def test_release_locks_carry_held_seconds_from_acquired_at_and_null_when_not_recorded(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_projects_cfg(tmp_path, [("demo", 1, True)])
         _make_project_dir(tmp_path, "demo")
-        acquired = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
-            seconds=_HELD_THREE_HOURS
-        )
+        acquired = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=_HELD_THREE_HOURS)
         _seed_fresh_lock(
-            tmp_path, "repo-wake-demo.lock",
+            tmp_path,
+            "repo-wake-demo.lock",
             f"holder=coder\npid={os.getpid()}\nop=wake-chain:demo\ntask=none\n"
             f"acquired_at={acquired.strftime('%Y-%m-%dT%H:%M:%SZ')}\n",
         )
         _seed_fresh_lock(
-            tmp_path, "repo-legacy-demo.lock",
+            tmp_path,
+            "repo-legacy-demo.lock",
             f"holder=coder\npid={os.getpid()}\nop=wake-chain:demo\ntask=T-1\n",
         )
 
@@ -437,12 +467,12 @@ class TestVerdictsDetailsReleaseLockHeldTime:
         assert isinstance(held_lock["held_seconds"], int), held_lock
         assert _HELD_THREE_HOURS <= held_lock["held_seconds"] <= _HELD_THREE_HOURS + _CLOCK_SLACK_SECONDS
         assert isinstance(held_lock["age_seconds"], int), held_lock
-        assert 0 <= held_lock["age_seconds"] <= _CLOCK_SLACK_SECONDS, (
-            f"age_seconds is the refresh age (mtime), which was just touched: {held_lock}"
-        )
+        assert (
+            0 <= held_lock["age_seconds"] <= _CLOCK_SLACK_SECONDS
+        ), f"age_seconds is the refresh age (mtime), which was just touched: {held_lock}"
 
         legacy_lock = locks["repo-legacy-demo.lock"]
         assert "held_seconds" in legacy_lock, legacy_lock
-        assert legacy_lock["held_seconds"] is None, (
-            f"a record without acquired_at must never publish an mtime number as held time: {legacy_lock}"
-        )
+        assert (
+            legacy_lock["held_seconds"] is None
+        ), f"a record without acquired_at must never publish an mtime number as held time: {legacy_lock}"

@@ -54,7 +54,6 @@ import shutil
 import signal
 import subprocess
 from dataclasses import dataclass
-from typing import Optional
 
 from tests.fixtures.binary_guard import require_binary
 
@@ -116,7 +115,7 @@ def run_dashboard_script(
     *,
     env: dict[str, str],
     timeout: float,
-    input_text: Optional[str] = None,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run *argv* (a dashboard script invocation) with a bounded timeout that
     can never orphan a grandchild.
@@ -188,7 +187,7 @@ class DashboardFixture:
 
     kanban_root: pathlib.Path
     project_name: str
-    dev_tree_path: Optional[pathlib.Path]
+    dev_tree_path: pathlib.Path | None
 
 
 def _git(repo: pathlib.Path, *args: str) -> None:
@@ -221,7 +220,7 @@ def _make_valid_dev_tree(dev_tree: pathlib.Path) -> None:
 def _resolve_dev_tree_path(
     fixture_root: pathlib.Path,
     dev_tree_mode: str,
-) -> Optional[pathlib.Path]:
+) -> pathlib.Path | None:
     """Build (or point at) a dev tree per dev_tree_mode; return its path or None."""
     if dev_tree_mode == "valid":
         dev_tree = fixture_root / "dev_tree"
@@ -279,12 +278,7 @@ def build_dashboard_project_root(
 
     # --- kanban.cfg ---
     (root / "kanban.cfg").write_text(
-        "# kanban.cfg — dashboard render-path fixture\n"
-        "\n"
-        "[paths]\n"
-        "\n"
-        "[chain]\n"
-        "pm_mode = automatic\n",
+        "# kanban.cfg — dashboard render-path fixture\n" "\n" "[paths]\n" "\n" "[chain]\n" "pm_mode = automatic\n",
         encoding="utf-8",
     )
 
@@ -339,9 +333,7 @@ def build_dashboard_project_root(
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
 
-    dev_tree_line = (
-        f"dev_tree_path = {dev_tree_path}\n" if dev_tree_path is not None else ""
-    )
+    dev_tree_line = f"dev_tree_path = {dev_tree_path}\n" if dev_tree_path is not None else ""
     (proj / "project.cfg").write_text(
         "# project.cfg — dashboard render-path fixture\n"
         "\n"

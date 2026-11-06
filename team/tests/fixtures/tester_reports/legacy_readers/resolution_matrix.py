@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from tests.fixtures.tester_reports.legacy_readers.stop_bug_files import finding_sections
 
@@ -98,7 +97,7 @@ def parse_tester_report_findings(report_text: str) -> list:
 # calls classify_lane() only when a block has already fallen through to
 
 
-def extract_bug_ids(text: Optional[str]) -> list:
+def extract_bug_ids(text: str | None) -> list:
     """Order-preserving, de-duplicated list of BUG-NNNN ids named in *text*
     (the short id only — any trailing slug is not part of the match).
     Returns [] for empty or None text.
@@ -125,4 +124,3 @@ def findings_all_filed(findings: list) -> bool:
         if value in _NOT_FILED_VALUES:
             return False
     return True
-

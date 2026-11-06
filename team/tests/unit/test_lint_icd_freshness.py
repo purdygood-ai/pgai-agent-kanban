@@ -30,7 +30,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
-import sys
 
 import pytest
 
@@ -40,8 +39,8 @@ import pytest
 # Three parent levels up: unit/ -> tests/ -> team/ -> project_root/
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent          # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                     # project_root/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_icd_freshness.py"
 _ICD_ARTIFACT = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
@@ -102,9 +101,7 @@ class TestIcdFreshnessPositive:
             "'bash team/scripts/generate-icd.sh' and commit the result."
         )
 
-    def test_fresh_artifact_prints_ok_message(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_fresh_artifact_prints_ok_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """check_freshness() prints an 'ok' confirmation when the artifact is fresh.
 
         Verifies that the gate emits a positive confirmation message to stdout
@@ -138,9 +135,7 @@ class TestIcdFreshnessBehavioralNegative:
     the real comparison code — exit codes and return values are not mocked.
     """
 
-    def test_byte_modified_artifact_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_byte_modified_artifact_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """check_freshness() returns False when the artifact has been byte-modified.
 
         The test copies docs/api/icd.json to a scratch file under tmp_path,
@@ -209,9 +204,7 @@ class TestIcdFreshnessBehavioralNegative:
             "how to fix the staleness."
         )
 
-    def test_missing_artifact_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_missing_artifact_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """check_freshness() returns False when the artifact file does not exist.
 
         An absent artifact is treated as stale — it has not been generated and
@@ -259,9 +252,12 @@ class TestIcdFreshnessCliFindings:
 
         exit_code = _lint.main(
             [
-                "--icd", str(scratch),
-                "--version-file", str(_ICD_VERSION_FILE),
-                "--findings-file", str(findings_file),
+                "--icd",
+                str(scratch),
+                "--version-file",
+                str(_ICD_VERSION_FILE),
+                "--findings-file",
+                str(findings_file),
             ]
         )
 
@@ -284,9 +280,12 @@ class TestIcdFreshnessCliFindings:
 
         exit_code = _lint.main(
             [
-                "--icd", str(_ICD_ARTIFACT),
-                "--version-file", str(_ICD_VERSION_FILE),
-                "--findings-file", str(findings_file),
+                "--icd",
+                str(_ICD_ARTIFACT),
+                "--version-file",
+                str(_ICD_VERSION_FILE),
+                "--findings-file",
+                str(findings_file),
             ]
         )
 
@@ -311,9 +310,12 @@ def test_regeneration_crash_is_a_could_not_check_finding(
 
     exit_code = _lint.main(
         [
-            "--icd", str(_ICD_ARTIFACT),
-            "--version-file", str(_ICD_VERSION_FILE),
-            "--findings-file", str(findings_file),
+            "--icd",
+            str(_ICD_ARTIFACT),
+            "--version-file",
+            str(_ICD_VERSION_FILE),
+            "--findings-file",
+            str(findings_file),
         ]
     )
 

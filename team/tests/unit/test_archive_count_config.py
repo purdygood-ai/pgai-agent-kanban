@@ -65,7 +65,10 @@ def _kanban_cfg(root: pathlib.Path, value: str) -> pathlib.Path:
 
 
 def _project_cfg(root: pathlib.Path, value: str, name: str = "project.cfg") -> pathlib.Path:
-    return _write(root / "projects" / _PROJECT / name, f"[project]\nproject_name = {_PROJECT}\n\n[archive]\narchive_count = {value}\n")
+    return _write(
+        root / "projects" / _PROJECT / name,
+        f"[project]\nproject_name = {_PROJECT}\n\n[archive]\narchive_count = {value}\n",
+    )
 
 
 # ---------------------------------------------------------------------------

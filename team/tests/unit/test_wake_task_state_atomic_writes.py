@@ -53,9 +53,7 @@ import signal
 import stat
 import subprocess
 import textwrap
-import time
 
-import pytest
 
 from tests.fixtures.log_stub import make_log_stub_fragment
 
@@ -324,7 +322,9 @@ def test_reader_catches_a_truncate_then_write_writer(tmp_path: pathlib.Path) -> 
         proc.communicate(timeout=60)
     assert proc.returncode == 0
     assert offending, "the reader must catch the empty window a truncate-then-write writer exposes"
-    assert any(": ''" in entry for entry in offending), f"expected an empty read among the offenders, got:\n{offending[:5]}"
+    assert any(
+        ": ''" in entry for entry in offending
+    ), f"expected an empty read among the offenders, got:\n{offending[:5]}"
 
 
 # ---------------------------------------------------------------------------
@@ -338,15 +338,21 @@ def test_failed_status_write_leaves_file_and_directory_untouched(tmp_path: pathl
     task_dir = tmp_path / "tasks" / task_id
     task_dir.mkdir(parents=True)
     status_file = task_dir / "status.md"
-    status_file.write_text("# Status\n\n## Task\n" + task_id + "\n\n## Summary\nno state block here\n", encoding="utf-8")
+    status_file.write_text(
+        "# Status\n\n## Task\n" + task_id + "\n\n## Summary\nno state block here\n", encoding="utf-8"
+    )
     before = _read(status_file)
     header = _script_header(tmp_path / "wake.log", tmp_path / "kanban_temp", backlog_file)
 
     result = _run(header + f'set_state "{status_file}" BLOCKED\n')
     assert result.returncode != 0, "set_state must fail when there is no ## State block to rewrite"
-    assert "Could not update ## State block" in result.stderr, f"the producer's own message must reach the caller\n{result.stderr}"
+    assert (
+        "Could not update ## State block" in result.stderr
+    ), f"the producer's own message must reach the caller\n{result.stderr}"
     assert _read(status_file) == before, "a failed write must leave the target byte-identical"
-    assert _scratch_files(task_dir) == [], f"a failed write must remove its scratch file, found {_scratch_files(task_dir)}"
+    assert (
+        _scratch_files(task_dir) == []
+    ), f"a failed write must remove its scratch file, found {_scratch_files(task_dir)}"
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +370,9 @@ def test_rewrite_preserves_target_file_mode(tmp_path: pathlib.Path) -> None:
     result = _run(header + f'set_state "{status_file}" BLOCKED\n')
     assert result.returncode == 0, result.stderr
     assert _field(_read(status_file), "State") == "BLOCKED"
-    assert stat.S_IMODE(status_file.stat().st_mode) == 0o640, "the rename must carry the target's own mode, not mktemp's 0600"
+    assert (
+        stat.S_IMODE(status_file.stat().st_mode) == 0o640
+    ), "the rename must carry the target's own mode, not mktemp's 0600"
 
 
 # ---------------------------------------------------------------------------
@@ -390,18 +398,20 @@ def test_signal_between_writes_rolls_state_back_and_names_both_files(tmp_path: p
         echo "UNREACHED"
     """)
     result = _run(script)
-    assert result.returncode == -signal.SIGTERM, (
-        f"the shell must terminate by the re-raised SIGTERM, got {result.returncode}\nstderr={result.stderr}"
-    )
+    assert (
+        result.returncode == -signal.SIGTERM
+    ), f"the shell must terminate by the re-raised SIGTERM, got {result.returncode}\nstderr={result.stderr}"
     assert "UNREACHED" not in result.stdout, "the interrupted transition must not return to its caller"
     assert "error:   wake.transition.interrupted" in result.stderr, result.stderr
-    assert str(status_file) in result.stderr and str(backlog_file) in result.stderr, (
-        f"the interruption must name both files\nstderr={result.stderr}"
-    )
+    assert (
+        str(status_file) in result.stderr and str(backlog_file) in result.stderr
+    ), f"the interruption must name both files\nstderr={result.stderr}"
     assert _read(status_file) == before_status, "## State must be rolled back byte-for-byte"
     assert _read(backlog_file) == before_queue, "the queue must be untouched"
     _assert_state_and_marker_agree(_read(status_file), _read(backlog_file), task_id)
-    assert list((tmp_path / "kanban_temp").glob("wake_transition_status*")) == [], "the snapshot is consumed by a landed rollback"
+    assert (
+        list((tmp_path / "kanban_temp").glob("wake_transition_status*")) == []
+    ), "the snapshot is consumed by a landed rollback"
 
 
 # ---------------------------------------------------------------------------
@@ -458,11 +468,15 @@ def test_rollback_that_cannot_land_refuses_and_names_the_snapshot(tmp_path: path
     assert "EXIT=[1]" in result.stdout, f"a failed rollback must return non-zero\nstdout={result.stdout}"
     assert "error:   wake.transition.rollback-failed" in result.stderr, result.stderr
     assert "message: " in result.stderr and "remedy:  " in result.stderr
-    assert str(status_file) in result.stderr and str(backlog_file) in result.stderr, (
-        f"the refusal must name both files\nstderr={result.stderr}"
-    )
-    assert "rolled back" not in result.stderr, f"no run may log 'rolled back' after a rollback that did not land\n{result.stderr}"
-    assert "wake.transition.marker-write-failed" not in result.stderr, "the marker-write refusal is only reached once the restore landed"
+    assert (
+        str(status_file) in result.stderr and str(backlog_file) in result.stderr
+    ), f"the refusal must name both files\nstderr={result.stderr}"
+    assert (
+        "rolled back" not in result.stderr
+    ), f"no run may log 'rolled back' after a rollback that did not land\n{result.stderr}"
+    assert (
+        "wake.transition.marker-write-failed" not in result.stderr
+    ), "the marker-write refusal is only reached once the restore landed"
 
     m = re.search(r"snapshot is kept at (\S+)\.", result.stderr)
     assert m is not None, f"the message must name the retained snapshot\n{result.stderr}"
@@ -535,4 +549,6 @@ def test_ensure_status_file_creates_template_without_scratch_litter(tmp_path: pa
     assert _field(_read(status_file), "State") == "BACKLOG"
     assert "created status.md template for task" in result.stdout
     assert _scratch_files(task_dir) == []
-    assert stat.S_IMODE(status_file.stat().st_mode) & 0o044 == 0o044, "a new status.md must be readable beyond its owner (umask default, not mktemp's 0600)"
+    assert (
+        stat.S_IMODE(status_file.stat().st_mode) & 0o044 == 0o044
+    ), "a new status.md must be readable beyond its owner (umask default, not mktemp's 0600)"

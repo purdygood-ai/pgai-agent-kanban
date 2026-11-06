@@ -74,8 +74,9 @@ def _diagnostic(result: BashResult) -> str:
     return f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
 
 
-def _render_flags(tmp_path: pathlib.Path, flags: str, prelude: str = "",
-                  extra_lines: tuple[str, ...] = ()) -> list[str]:
+def _render_flags(
+    tmp_path: pathlib.Path, flags: str, prelude: str = "", extra_lines: tuple[str, ...] = ()
+) -> list[str]:
     """Render help for FLAGS=(<flags>) with *extra_lines* after the flags block."""
     quoted_extras = " ".join("'" + line.replace("'", "'\\''") + "'" for line in extra_lines)
     result = run_bash(
@@ -95,7 +96,7 @@ def _render(tmp_path: pathlib.Path, prelude: str = "") -> list[str]:
 
 
 def _options(lines: list[str]) -> list[str]:
-    return lines[lines.index("Options:") + 1:]
+    return lines[lines.index("Options:") + 1 :]
 
 
 def _flag_token(flag: str) -> re.Pattern[str]:
@@ -106,9 +107,9 @@ def _described_lines(lines: list[str], flag: str) -> list[str]:
     """Lines that name --FLAG and carry text beyond the flag name itself."""
     token = _flag_token(flag)
     return [
-        line for line in lines
-        if token.search(line) and not _BARE_FLAG_LINE.match(line)
-        and "(no description)" not in line
+        line
+        for line in lines
+        if token.search(line) and not _BARE_FLAG_LINE.match(line) and "(no description)" not in line
     ]
 
 
@@ -156,13 +157,11 @@ def test_h_alias_and_described_flags_render_once_with_a_description(
     assert not [line for line in options if _BARE_FLAG_LINE.match(line)], "\n".join(lines)
     assert _BUILTIN_HELP in options, "\n".join(lines)
     for flag in ("force", "help", "archive"):
-        assert _described_lines(options, flag), (
-            f"--{flag} is not listed with a description:\n" + "\n".join(lines)
-        )
+        assert _described_lines(options, flag), f"--{flag} is not listed with a description:\n" + "\n".join(lines)
     assert options.count(_ARCHIVE_LINE) == 1, "\n".join(lines)
-    assert len([line for line in options if _flag_token("archive").search(line)]) == 1, (
-        "--archive must be listed exactly once:\n" + "\n".join(lines)
-    )
+    assert (
+        len([line for line in options if _flag_token("archive").search(line)]) == 1
+    ), "--archive must be listed exactly once:\n" + "\n".join(lines)
 
 
 def test_an_alias_named_on_another_flags_line_counts_as_described(tmp_path: pathlib.Path) -> None:
@@ -221,9 +220,9 @@ def test_operator_script_help_lists_no_h_line_and_describes_every_flag(
     for flag in flags:
         if flag == "h":
             continue
-        assert _described_lines(lines, flag), (
-            f"{script_name} --help lists --{flag} without a description\n" + _diagnostic(result)
-        )
+        assert _described_lines(
+            lines, flag
+        ), f"{script_name} --help lists --{flag} without a description\n" + _diagnostic(result)
 
 
 def test_import_project_help_lists_archive_once(tmp_path: pathlib.Path) -> None:

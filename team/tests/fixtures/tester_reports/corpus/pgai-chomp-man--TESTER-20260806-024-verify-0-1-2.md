@@ -121,7 +121,7 @@ Manual interventions required: none.
    `tasks/queues/*_backlog.md`.
 
 All four checks NO. All four RC commits authored by the pipeline identity
-(`purdygood <operator@example.invalid>`), sequential timestamps 03:35-03:41.
+(`operator <operator@example.invalid>`), sequential timestamps 03:35-03:41.
 
 ## Caveats / Observations (not findings)
 

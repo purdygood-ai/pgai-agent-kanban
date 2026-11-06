@@ -20,7 +20,6 @@ halt scope, per draining token and per bug file. These tests pin:
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
 import subprocess
@@ -59,8 +58,22 @@ def _env(tmp_path: pathlib.Path, **extra: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _SEVERITIES = [
-    "low", "LOW", "Low.", "  high  ", "high.", "medium", "Medium", "critical",
-    "Critical.", "", "weird", "low..", " low .", "lo w", "high\t", ".",
+    "low",
+    "LOW",
+    "Low.",
+    "  high  ",
+    "high.",
+    "medium",
+    "Medium",
+    "critical",
+    "Critical.",
+    "",
+    "weird",
+    "low..",
+    " low .",
+    "lo w",
+    "high\t",
+    ".",
 ]
 _LEVELS = ["low", "medium", "high", "critical", "bogus", ""]
 
@@ -69,14 +82,19 @@ def test_severity_decision_answers_as_discovery_does(tmp_path: pathlib.Path) -> 
     cases = [(sev, lvl) for sev in _SEVERITIES for lvl in _LEVELS]
     script = (
         f'source "{_DISCOVERY_DEFER}" >/dev/null 2>&1\n'
-        'while IFS=$\'\\x1f\' read -r -d $\'\\x1e\' sev lvl; do\n'
+        "while IFS=$'\\x1f' read -r -d $'\\x1e' sev lvl; do\n"
         '  printf \'%s\\n\' "$(_disc_severity_defer_decision "$sev" "$lvl")"\n'
-        'done\n'
+        "done\n"
     )
     stdin = "".join(f"{sev}\x1f{lvl}\x1e" for sev, lvl in cases)
     result = subprocess.run(
-        ["bash", "-c", script], input=stdin, capture_output=True, text=True,
-        env=_env(tmp_path), timeout=60, check=False,
+        ["bash", "-c", script],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path),
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     bash_answers = result.stdout.splitlines()
@@ -127,9 +145,7 @@ def test_halt_rows_report_active_scopes_in_order_with_tokens_in_words(
     (root / "projects" / "beta" / "HALT-AFTER").write_text("not-a-token\n", encoding="utf-8")
     (root / "projects" / "gamma" / "HALT-AFTER").write_text("coder\n", encoding="utf-8")
 
-    scopes = [("GLOBAL", root)] + [
-        (name, root / "projects" / name) for name in ("alpha", "beta", "gamma", "absent")
-    ]
+    scopes = [("GLOBAL", root)] + [(name, root / "projects" / name) for name in ("alpha", "beta", "gamma", "absent")]
     assert status_line.halt_rows(scopes) == [
         ("halted", "GLOBAL", ""),
         ("draining", "alpha", "until v1.2.3"),
@@ -162,13 +178,31 @@ def test_facts_cli_prints_one_separated_line_per_fact(tmp_path: pathlib.Path) ->
 
     result = subprocess.run(
         [
-            sys.executable, "-m", "pgai_agent_kanban.dashboard.status_line", "facts", str(root),
-            "--halt-scope", "GLOBAL", str(root),
-            "--halt-scope", "alpha", str(root / "projects" / "alpha"),
-            "--defer-count", "alpha", "low", str(bugs),
-            "--defer-count", "GLOBAL", "low",
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.dashboard.status_line",
+            "facts",
+            str(root),
+            "--halt-scope",
+            "GLOBAL",
+            str(root),
+            "--halt-scope",
+            "alpha",
+            str(root / "projects" / "alpha"),
+            "--defer-count",
+            "alpha",
+            "low",
+            str(bugs),
+            "--defer-count",
+            "GLOBAL",
+            "low",
         ],
-        cwd=_TEAM_DIR, capture_output=True, text=True, env=_env(tmp_path), timeout=60, check=False,
+        cwd=_TEAM_DIR,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path),
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -231,41 +265,53 @@ def _project_deferral(root: pathlib.Path) -> None:
 _RENDER_CASES = {
     # (fixture, project argument, NO_COLOR?) -> expected line, timestamp masked
     "global-halts-approvals-plain": (
-        _halts_and_approvals, None, True,
+        _halts_and_approvals,
+        None,
+        True,
         "v9.9.9 | PM:auto | [HALT GLOBAL] | [HALT alpha] | [HALT-AFTER:beta coder] | [APPROVAL(2)] | <TS>",
     ),
     "global-halts-approvals-rich": (
-        _halts_and_approvals, None, False,
+        _halts_and_approvals,
+        None,
+        False,
         "📝 v9.9.9 | 🟢 PM:auto | #[fg=red]🛑 HALT GLOBAL#[default] | #[fg=red]🛑 HALT alpha#[default] | "
         "#[fg=yellow]⚠️ HALT-AFTER beta coder#[default] | #[fg=yellow]✋ APPROVAL(2)#[default] | 📅 <TS>",
     ),
     "drill-halts-approvals-plain": (
-        _halts_and_approvals, "alpha", True,
+        _halts_and_approvals,
+        "alpha",
+        True,
         "v9.9.9 | alpha:v0.0.0 | workflow:release | PM:auto | [HALT GLOBAL] | [HALT alpha] | [APPROVAL(2)] | <TS>",
     ),
     "global-halt-after-until-rich": (
-        _global_halt_after, None, False,
+        _global_halt_after,
+        None,
+        False,
         "📝 v9.9.9 | 🟢 PM:auto | #[fg=yellow]⚠️ HALT-AFTER GLOBAL until v1.2.3#[default] | 📅 <TS>",
     ),
     "global-halt-after-until-plain": (
-        _global_halt_after, None, True,
+        _global_halt_after,
+        None,
+        True,
         "v9.9.9 | PM:auto | [HALT-AFTER:GLOBAL until v1.2.3] | <TS>",
     ),
     "drill-bugs-deferred-plain": (
-        _project_deferral, "alpha", True,
+        _project_deferral,
+        "alpha",
+        True,
         "v9.9.9 | alpha:v0.0.0 | workflow:release | PM:auto | BUGS DEFERRED 2 (<=low) | <TS>",
     ),
     "drill-bugs-deferred-rich": (
-        _project_deferral, "alpha", False,
+        _project_deferral,
+        "alpha",
+        False,
         "📝 v9.9.9 | 📝 alpha:v0.0.0 | workflow:release | 🟢 PM:auto | ✋ BUGS DEFERRED 2 (<=low) | 📅 <TS>",
     ),
 }
 
 
 @pytest.mark.parametrize("case", sorted(_RENDER_CASES))
-def test_rendered_line_is_byte_identical_for_the_same_fixture_state(
-    tmp_path: pathlib.Path, case: str
-) -> None:
+def test_rendered_line_is_byte_identical_for_the_same_fixture_state(tmp_path: pathlib.Path, case: str) -> None:
     build, project, no_color, expected = _RENDER_CASES[case]
     root = _fixture_root(tmp_path)
     build(root)
@@ -277,8 +323,6 @@ def test_rendered_line_is_byte_identical_for_the_same_fixture_state(
     if no_color:
         extra["NO_COLOR"] = "1"
     argv = ["bash", str(_STATUS_BOTTOM), str(root)] + ([project] if project else [])
-    result = subprocess.run(
-        argv, capture_output=True, text=True, env=_env(tmp_path, **extra), timeout=120, check=False
-    )
+    result = subprocess.run(argv, capture_output=True, text=True, env=_env(tmp_path, **extra), timeout=120, check=False)
     assert result.returncode == 0, result.stderr
     assert _TIMESTAMP.sub("<TS>", result.stdout) == expected, result.stderr

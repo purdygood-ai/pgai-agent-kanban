@@ -86,13 +86,21 @@ Usage (import):
     scan_inbox_section(kanban_root="/path/to/kanban", use_color=True)
     scan_needs_operator_section(kanban_root="/path/to/kanban", use_color=True)
 
+Unreadable inputs:
+    A file or directory a scanner cannot read or parse is skipped, and the
+    skip is counted. A scanner that skipped any prints one closing line,
+    ``  unreadable: N (first: <path>: <reason>)``, after its own output, so
+    an empty section is never a read failure in disguise.
+
 Exit codes:
-    0 — always (errors in individual task reads are silently skipped)
+    0 — always (an unreadable input is counted on the pane, never fatal)
 """
 
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import functools
 import os
 import pathlib
 import re
@@ -120,6 +128,7 @@ from pgai_agent_kanban.dashboard._rejected import (  # noqa: E402
 )
 from pgai_agent_kanban.dashboard.rejected_listing import RECOVER_HINT  # noqa: E402
 from pgai_agent_kanban.lib import ini  # noqa: E402
+from pgai_agent_kanban.lib.wake_budget import MAX_TASK_SECONDS_DEFAULT  # noqa: E402
 from pgai_agent_kanban.task_status import read_section, section_lines  # noqa: E402
 from pgai_agent_kanban.task_status import section_value as _read_field  # noqa: E402
 
@@ -136,13 +145,69 @@ def _get_read_reason_sidecar():
     if _REJECTED_MODULE is None:
         # Ensure the package root (team/) is importable.
         _this_dir = pathlib.Path(__file__).parent  # .../dashboard/
-        _pkg_root = _this_dir.parent.parent         # .../team/
+        _pkg_root = _this_dir.parent.parent  # .../team/
         _pkg_root_str = str(_pkg_root)
         if _pkg_root_str not in sys.path:
             sys.path.insert(0, _pkg_root_str)
         from pgai_agent_kanban.dashboard._rejected import read_reason_sidecar
+
         _REJECTED_MODULE = read_reason_sidecar
     return _REJECTED_MODULE
+
+
+# ---------------------------------------------------------------------------
+# Unreadable-input count
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class UnreadableInputs:
+    """Inputs one scanner call skipped because they could not be read or parsed.
+
+    Attributes:
+        count: How many were skipped.
+        first: ``<path>: <reason>`` for the first one ("" when count is 0).
+    """
+
+    count: int = 0
+    first: str = ""
+
+
+_UNREADABLE = UnreadableInputs()
+
+
+def unreadable_inputs() -> UnreadableInputs:
+    """The inputs the most recent scanner call skipped as unreadable."""
+    return dataclasses.replace(_UNREADABLE)
+
+
+def _note_unreadable(path: str | os.PathLike[str], exc: BaseException) -> None:
+    """Count one input the running scanner skipped; the first is named."""
+    if _UNREADABLE.count == 0:
+        reason = getattr(exc, "strerror", None) or str(exc) or type(exc).__name__
+        _UNREADABLE.first = f"{path}: {reason}"
+    _UNREADABLE.count += 1
+
+
+def _reports_unreadable(scanner):
+    """Run *scanner* with a fresh count and close its output with the count line.
+
+    The line, ``  unreadable: N (first: <path>: <reason>)``, is printed
+    only when the scanner skipped something, so a clean pane is unchanged.
+    """
+
+    @functools.wraps(scanner)
+    def wrapper(*args, **kwargs):
+        global _UNREADABLE
+        _UNREADABLE = UnreadableInputs()
+        result = scanner(*args, **kwargs)
+        if _UNREADABLE.count:
+            use_color = kwargs.get("use_color", args[1] if len(args) > 1 else False)
+            dim, reset = ("\033[2m", "\033[0m") if use_color else ("", "")
+            print(f"  {dim}unreadable: {_UNREADABLE.count} (first: {_UNREADABLE.first}){reset}")
+        return result
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +250,7 @@ def _is_transient_blocked(status_text: str) -> bool:
     return blocked_reason.upper().startswith("TRANSIENT API ERROR")
 
 
+@_reports_unreadable
 def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
     """Scan task directories for BLOCKED state and print formatted output.
 
@@ -201,13 +267,13 @@ def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
     tasks_root_path = pathlib.Path(tasks_root)
 
     # ANSI codes
-    RESET  = "\033[0m"    if use_color else ""
-    C_RED  = "\033[0;31m" if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_RED = "\033[0;31m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    ARROW  = "▶" if use_color else ">"
+    C_YEL = "\033[0;33m" if use_color else ""
+    ARROW = "▶" if use_color else ">"
 
     found_any = False
     now = int(time.time())
@@ -225,7 +291,8 @@ def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
                 continue
             try:
                 status_text = status_file.read_text(errors="replace")
-            except OSError:
+            except OSError as exc:
+                _note_unreadable(status_file, exc)
                 continue
 
             state = _read_field(status_text, "State").upper()
@@ -244,7 +311,8 @@ def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
                 elapsed_secs = now - mtime
                 blocked_since = datetime.fromtimestamp(mtime).strftime("%H:%M:%S")
                 elapsed_str = _format_elapsed(elapsed_secs)
-            except (OSError, OverflowError, ValueError):
+            except (OSError, OverflowError, ValueError) as exc:
+                _note_unreadable(status_file, exc)
                 blocked_since = "unknown"
                 elapsed_str = ""
 
@@ -273,6 +341,7 @@ def scan_blocked_tasks(tasks_root: str, use_color: bool) -> None:
         print("")
 
 
+@_reports_unreadable
 def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
     """Scan task directories for BLOCKED transient API error tasks.
 
@@ -288,12 +357,12 @@ def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
     tasks_root_path = pathlib.Path(tasks_root)
 
     # ANSI codes — cyan/green palette to signal "retryable, not alarming"
-    RESET  = "\033[0m"     if use_color else ""
-    C_CYAN = "\033[0;36m"  if use_color else ""
-    C_BOLD = "\033[1m"     if use_color else ""
-    C_DIM  = "\033[2m"     if use_color else ""
-    C_YEL  = "\033[0;33m"  if use_color else ""
-    ARROW  = "⟳" if use_color else ">"
+    RESET = "\033[0m" if use_color else ""
+    C_CYAN = "\033[0;36m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
+    C_YEL = "\033[0;33m" if use_color else ""
+    ARROW = "⟳" if use_color else ">"
 
     found_any = False
     now = int(time.time())
@@ -310,7 +379,8 @@ def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
                 continue
             try:
                 status_text = status_file.read_text(errors="replace")
-            except OSError:
+            except OSError as exc:
+                _note_unreadable(status_file, exc)
                 continue
 
             state = _read_field(status_text, "State").upper()
@@ -328,7 +398,8 @@ def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
                 elapsed_secs = now - mtime
                 blocked_since = datetime.fromtimestamp(mtime).strftime("%H:%M:%S")
                 elapsed_str = _format_elapsed(elapsed_secs)
-            except (OSError, OverflowError, ValueError):
+            except (OSError, OverflowError, ValueError) as exc:
+                _note_unreadable(status_file, exc)
                 blocked_since = "unknown"
                 elapsed_str = ""
 
@@ -356,6 +427,7 @@ def scan_transient_tasks(tasks_root: str, use_color: bool) -> None:
 # ---------------------------------------------------------------------------
 # Quarantine alerts scanner
 # ---------------------------------------------------------------------------
+
 
 def _iter_projects(kanban_root: pathlib.Path):
     """Yield (project_name, project_root) for all registered projects.
@@ -395,16 +467,18 @@ def _scan_state_file(state_file: pathlib.Path, threshold: int) -> list[tuple[str
             fname = parts[0]
             try:
                 count = int(parts[1])
-            except ValueError:
+            except ValueError as exc:
+                _note_unreadable(state_file, exc)
                 continue
             reason = parts[3] if len(parts) >= 4 else ""
             if 1 <= count < threshold:
                 results.append((fname, count, reason))
-    except OSError:
-        pass
+    except OSError as exc:
+        _note_unreadable(state_file, exc)
     return results
 
 
+@_reports_unreadable
 def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
     """Scan project directories for quarantine alerts and print formatted output.
 
@@ -431,13 +505,13 @@ def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
     kanban_root_path = pathlib.Path(kanban_root)
 
     # ANSI codes
-    RESET  = "\033[0m"    if use_color else ""
-    C_RED  = "\033[0;31m" if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    WARN   = "⚠"  if use_color else "!"
-    TERM_  = "\U0001f534" if use_color else "X"
+    RESET = "\033[0m" if use_color else ""
+    C_RED = "\033[0;31m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
+    C_YEL = "\033[0;33m" if use_color else ""
+    WARN = "⚠" if use_color else "!"
+    TERM_ = "\U0001f534" if use_color else "X"
 
     found_any = False
 
@@ -484,15 +558,11 @@ def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
                 )
                 for fname, count, reason in warnings:
                     reason_str = f"  {reason}" if reason else ""
-                    print(
-                        f"      {fname}  "
-                        f"({count}/{threshold}){reason_str}"
-                    )
+                    print(f"      {fname}  " f"({count}/{threshold}){reason_str}")
 
             if terminals:
                 print(
-                    f"\n  {C_RED}{TERM_} {proj_name} [{subdir_name}]: "
-                    f"{len(terminals)} file(s) quarantined{RESET}"
+                    f"\n  {C_RED}{TERM_} {proj_name} [{subdir_name}]: " f"{len(terminals)} file(s) quarantined{RESET}"
                 )
                 for fname in terminals:
                     print(f"      {fname}")
@@ -510,6 +580,7 @@ def scan_quarantine(kanban_root: str, use_color: bool, threshold: int) -> None:
 _REASON_TRUNCATE = 60  # max chars for reason column before truncating
 
 
+@_reports_unreadable
 def scan_rejected(kanban_root: str, use_color: bool) -> None:
     """Scan each project's rejected/ directory and print a QUARANTINED FILES section.
 
@@ -535,12 +606,12 @@ def scan_rejected(kanban_root: str, use_color: bool) -> None:
 
     # ANSI codes — reuse the same C_* palette as scan_blocked_tasks /
     # scan_quarantine so the visual language is consistent.
-    RESET  = "\033[0m"    if use_color else ""
-    C_RED  = "\033[0;31m" if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_RED = "\033[0;31m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
+    C_YEL = "\033[0;33m" if use_color else ""
 
     # Collect all rows first so we can suppress the section entirely when empty.
     rows: list[tuple[str, str, str, str, str]] = []  # (project, type, filename, reason, retry)
@@ -550,11 +621,9 @@ def scan_rejected(kanban_root: str, use_color: bool) -> None:
         if not rejected_dir.is_dir():
             continue
         try:
-            entries = sorted(
-                e for e in rejected_dir.iterdir()
-                if e.is_file() and not e.name.startswith(".")
-            )
-        except OSError:
+            entries = sorted(e for e in rejected_dir.iterdir() if e.is_file() and not e.name.startswith("."))
+        except OSError as exc:
+            _note_unreadable(rejected_dir, exc)
             continue
 
         for entry in entries:
@@ -576,7 +645,7 @@ def scan_rejected(kanban_root: str, use_color: bool) -> None:
 
             # Truncate reason to a sensible display width.
             if len(reason_raw) > _REASON_TRUNCATE:
-                reason_display = reason_raw[:_REASON_TRUNCATE - 1] + "…"
+                reason_display = reason_raw[: _REASON_TRUNCATE - 1] + "…"
             else:
                 reason_display = reason_raw
 
@@ -605,6 +674,8 @@ def scan_rejected(kanban_root: str, use_color: bool) -> None:
 # Stale WORKING tasks scanner
 # ---------------------------------------------------------------------------
 
+
+@_reports_unreadable
 def scan_stale_working_tasks(
     tasks_root: str,
     use_color: bool,
@@ -636,12 +707,12 @@ def scan_stale_working_tasks(
     tasks_root_path = pathlib.Path(tasks_root)
 
     # ANSI codes — same palette as scan_blocked_tasks for visual consistency.
-    RESET  = "\033[0m"    if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_YEL = "\033[0;33m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    CLOCK  = "⏰" if use_color else "~"  # alarm clock symbol
+    CLOCK = "⏰" if use_color else "~"  # alarm clock symbol
 
     found_any = False
     now = int(time.time())
@@ -658,7 +729,8 @@ def scan_stale_working_tasks(
                 continue
             try:
                 status_text = status_file.read_text(errors="replace")
-            except OSError:
+            except OSError as exc:
+                _note_unreadable(status_file, exc)
                 continue
 
             state = _read_field(status_text, "State").upper()
@@ -669,7 +741,8 @@ def scan_stale_working_tasks(
             try:
                 mtime = int(status_file.stat().st_mtime)
                 age_secs = now - mtime
-            except (OSError, OverflowError, ValueError):
+            except (OSError, OverflowError, ValueError) as exc:
+                _note_unreadable(status_file, exc)
                 continue
 
             if age_secs <= max_task_seconds:
@@ -684,10 +757,7 @@ def scan_stale_working_tasks(
             role = _read_field(status_text, "Role") or ""
 
             role_str = f" [{role}]" if role else ""
-            print(
-                f"\n{CLOCK} {C_YEL}{C_BOLD}{task_id}{RESET}"
-                f"{C_DIM}{role_str}{RESET}"
-            )
+            print(f"\n{CLOCK} {C_YEL}{C_BOLD}{task_id}{RESET}" f"{C_DIM}{role_str}{RESET}")
             print(
                 f"  Still WORKING since: {C_DIM}{started_at} ({elapsed_str})"
                 f" — age {age_secs}s > threshold {max_task_seconds}s{RESET}"
@@ -699,10 +769,7 @@ def scan_stale_working_tasks(
             print("")
 
     if not found_any:
-        print(
-            f"\n  {C_DIM}(no stale WORKING tasks — "
-            f"all active tasks within {max_task_seconds}s threshold){RESET}"
-        )
+        print(f"\n  {C_DIM}(no stale WORKING tasks — " f"all active tasks within {max_task_seconds}s threshold){RESET}")
         print("")
 
 
@@ -714,6 +781,7 @@ _APPROVAL_PENDING_STATES = frozenset({"WAITING", "BACKLOG"})
 _APPROVAL_SKIP_DIRS = frozenset({"archive", "queues", "plans"})
 
 
+@_reports_unreadable
 def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
     """Scan all registered projects for pending HUMAN-APPROVE tasks and render them.
 
@@ -740,14 +808,14 @@ def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
     kanban_root_path = pathlib.Path(kanban_root)
 
     # ANSI codes — same palette as scan_blocked_tasks for visual consistency.
-    RESET  = "\033[0m"    if use_color else ""
-    C_RED  = "\033[0;31m" if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_RED = "\033[0;31m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    C_GRN  = "\033[0;32m" if use_color else ""
-    HAND   = "✋" if use_color else "!"  # ✋ raised hand
+    C_YEL = "\033[0;33m" if use_color else ""
+    C_GRN = "\033[0;32m" if use_color else ""
+    HAND = "✋" if use_color else "!"  # ✋ raised hand
 
     found_any = False
 
@@ -771,7 +839,8 @@ def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
 
             try:
                 status_text = status_file.read_text(errors="replace")
-            except OSError:
+            except OSError as exc:
+                _note_unreadable(status_file, exc)
                 continue
 
             state = _read_field(status_text, "State").upper()
@@ -789,27 +858,15 @@ def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
                     rv = _read_field(readme_text, "Release Version")
                     if rv:
                         release_ver = rv
-                except OSError:
-                    pass
+                except OSError as exc:
+                    _note_unreadable(readme_file, exc)
 
             # Header row: ✋ task-id [project]
-            print(
-                f"\n{HAND} {C_RED}{C_BOLD}{task_id}{RESET}"
-                f"  {C_DIM}[{proj_name}]{RESET}"
-            )
-            print(
-                f"   RC: {C_CYAN}{release_ver}{RESET}"
-                f"   state: {C_DIM}{state}{RESET}"
-            )
+            print(f"\n{HAND} {C_RED}{C_BOLD}{task_id}{RESET}" f"  {C_DIM}[{proj_name}]{RESET}")
+            print(f"   RC: {C_CYAN}{release_ver}{RESET}" f"   state: {C_DIM}{state}{RESET}")
             # Approve / reject commands
-            print(
-                f"   {C_GRN}Approve:{RESET}  "
-                f"scripts/close.sh --project {proj_name} --key {task_id}"
-            )
-            print(
-                f"   {C_RED}Reject: {RESET}  "
-                f"scripts/wontdo.sh --project {proj_name} --key {task_id}"
-            )
+            print(f"   {C_GRN}Approve:{RESET}  " f"scripts/close.sh --project {proj_name} --key {task_id}")
+            print(f"   {C_RED}Reject: {RESET}  " f"scripts/wontdo.sh --project {proj_name} --key {task_id}")
             print("")
 
     if not found_any:
@@ -822,7 +879,7 @@ def scan_pending_approvals_attention(kanban_root: str, use_color: bool) -> None:
 # ---------------------------------------------------------------------------
 
 _INBOX_QUESTION_TRUNCATE = 100  # max chars of the newest question shown
-_INBOX_DIVIDER_WIDTH = 68       # attention.sh's section divider width
+_INBOX_DIVIDER_WIDTH = 68  # attention.sh's section divider width
 
 
 def _inbox_entry_text(entry, c_cyan: str, c_dim: str, reset: str) -> str:
@@ -839,6 +896,7 @@ def _inbox_entry_text(entry, c_cyan: str, c_dim: str, reset: str) -> str:
     return f"{c_cyan}{entry.entry_id}{reset}  {c_dim}{entry.date}  ({source}){reset}  {question}"
 
 
+@_reports_unreadable
 def scan_inbox_section(kanban_root: str, use_color: bool) -> None:
     """Print the OPERATOR INBOX section: each project's open count and every open entry.
 
@@ -875,13 +933,13 @@ def scan_inbox_section(kanban_root: str, use_color: bool) -> None:
 
     kanban_root_path = pathlib.Path(kanban_root)
 
-    RESET  = "\033[0m"    if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    TRAY   = "\U0001f4e5" if use_color else "?"  # inbox tray symbol
-    RULE   = "─" if use_color else "-"
+    C_YEL = "\033[0;33m" if use_color else ""
+    TRAY = "\U0001f4e5" if use_color else "?"  # inbox tray symbol
+    RULE = "─" if use_color else "-"
 
     blocks: list[list[str]] = []
     for proj_name, _proj_root in _iter_projects(kanban_root_path):
@@ -921,7 +979,7 @@ def scan_inbox_section(kanban_root: str, use_color: bool) -> None:
 _NEEDS_OPERATOR_INTAKE_DIRS = ("bugs", "priority")
 
 
-def _source_names_key(source: str, keys: "set[str]") -> bool:
+def _source_names_key(source: str, keys: set[str]) -> bool:
     """Return True when an inbox entry's *source* names one of *keys*.
 
     The source's first line, stripped, names a key when it equals it or is
@@ -934,6 +992,7 @@ def _source_names_key(source: str, keys: "set[str]") -> bool:
     return any(key == first or key.startswith(first + "-") for key in keys)
 
 
+@_reports_unreadable
 def scan_needs_operator_section(kanban_root: str, use_color: bool) -> None:
     """Print the NEEDS OPERATOR section: each project's needs-operator count and newest question.
 
@@ -969,13 +1028,13 @@ def scan_needs_operator_section(kanban_root: str, use_color: bool) -> None:
 
     kanban_root_path = pathlib.Path(kanban_root)
 
-    RESET  = "\033[0m"    if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    MARK   = "\u2753" if use_color else "?"  # question mark ornament
-    RULE   = "─" if use_color else "-"
+    C_YEL = "\033[0;33m" if use_color else ""
+    MARK = "\u2753" if use_color else "?"  # question mark ornament
+    RULE = "─" if use_color else "-"
 
     blocks: list[list[str]] = []
     for proj_name, proj_root in _iter_projects(kanban_root_path):
@@ -996,11 +1055,13 @@ def scan_needs_operator_section(kanban_root: str, use_color: bool) -> None:
                 newest_text = f"{C_DIM}(no open inbox question){RESET}"
             else:
                 newest_text = _inbox_entry_text(newest, C_CYAN, C_DIM, RESET)
-        blocks.append([
-            f"  {C_YEL}{C_BOLD}{proj_name}{RESET}: {len(keys)} needs-operator",
-            f"    Newest: {newest_text}",
-            f"    {C_DIM}Answer: scripts/inbox.sh --project {proj_name} list{RESET}",
-        ])
+        blocks.append(
+            [
+                f"  {C_YEL}{C_BOLD}{proj_name}{RESET}: {len(keys)} needs-operator",
+                f"    Newest: {newest_text}",
+                f"    {C_DIM}Answer: scripts/inbox.sh --project {proj_name} list{RESET}",
+            ]
+        )
 
     if not blocks:
         # No needs-operator item anywhere -- emit nothing (suppress section entirely).
@@ -1020,19 +1081,23 @@ def scan_needs_operator_section(kanban_root: str, use_color: bool) -> None:
 # ---------------------------------------------------------------------------
 
 # Action names from check-transient-api-error.sh that map to TRANSIENT type.
-_OVERWATCH_TRANSIENT_ACTIONS = frozenset({
-    "transient-auto-requeued",
-    "dry-run-transient-would-requeue",
-})
+_OVERWATCH_TRANSIENT_ACTIONS = frozenset(
+    {
+        "transient-auto-requeued",
+        "dry-run-transient-would-requeue",
+    }
+)
 
 # Action names that map to needs-human type (ceiling reached, bug filed, etc.)
-_OVERWATCH_NEEDS_HUMAN_ACTIONS = frozenset({
-    "transient-ceiling-bug-filed",
-    "dry-run-transient-ceiling-would-bug-file",
-    "worktree-carries-commits-bug-filed",
-    "bug-filed",
-    "auto-fix-aborted",
-})
+_OVERWATCH_NEEDS_HUMAN_ACTIONS = frozenset(
+    {
+        "transient-ceiling-bug-filed",
+        "dry-run-transient-ceiling-would-bug-file",
+        "worktree-carries-commits-bug-filed",
+        "bug-filed",
+        "auto-fix-aborted",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1063,7 +1128,8 @@ def _read_resolving_marker(proj_root: pathlib.Path) -> dict | None:
         return None
     try:
         text = marker.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except OSError as exc:
+        _note_unreadable(marker, exc)
         return None
 
     fields: dict[str, str] = {}
@@ -1106,7 +1172,8 @@ def _read_last_overwatch_decision(release_state_path: pathlib.Path) -> dict | No
         return None
     try:
         text = release_state_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except OSError as exc:
+        _note_unreadable(release_state_path, exc)
         return None
 
     last = read_section(text, "OVERWATCH Decision", last=True)
@@ -1135,7 +1202,8 @@ def _read_active_rc(release_state_path: pathlib.Path) -> str:
         return ""
     try:
         return read_release_state_field(str(release_state_path), "Active RC")
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        _note_unreadable(release_state_path, exc)
         return ""
 
 
@@ -1154,9 +1222,18 @@ def _parse_overwatch_action_log(
         reason    (str):  human-readable explanation
         type      (str):  "TRANSIENT", "needs-human", or "info"
 
+    The record contract is the writers' (overwatch_log_action,
+    resolution_stage.log_action, overwatch-revert.sh, and the bare-/tmp
+    litter report wake_tmp_litter_check_and_report in temp.sh): one record per
+    LF-terminated line, six tab-separated fields. Records are split at LF
+    only, so a vertical tab, form feed or Unicode line separator inside a
+    field stays part of it, and a line's own surrounding whitespace (a CR
+    before the LF included) is trimmed without crossing a tab, so a record
+    with an empty reason is still returned, with reason "".
+
     Records are returned in reverse-chronological order (newest first),
-    capped at max_entries.  Malformed lines (< 6 tab-separated fields) are
-    silently skipped.
+    capped at max_entries.  Blank lines and malformed lines (< 6
+    tab-separated fields) are silently skipped.
 
     Args:
         log_path:    Path to the actions.log file.
@@ -1167,20 +1244,22 @@ def _parse_overwatch_action_log(
 
     entries: list[dict] = []
     try:
-        raw_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        raw_lines = log_path.read_bytes().decode("utf-8", errors="replace").split("\n")
+    except OSError as exc:
+        _note_unreadable(log_path, exc)
         return []
 
     for line in reversed(raw_lines):
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
         parts = line.split("\t")
         if len(parts) < 6:
             continue
-        ts, name, target, action, backup, reason = (
-            parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]
-        )
+        # Trim the line's ends inside its first and last fields only, so an
+        # all-whitespace field never takes a tab with it.
+        parts[0] = parts[0].lstrip()
+        parts[-1] = parts[-1].rstrip()
+        ts, name, target, action, backup, reason = (parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
 
         # Determine type from action name.
         if action in _OVERWATCH_TRANSIENT_ACTIONS:
@@ -1190,15 +1269,17 @@ def _parse_overwatch_action_log(
         else:
             item_type = "info"
 
-        entries.append({
-            "timestamp": ts,
-            "name": name,
-            "target": target,
-            "action": action,
-            "backup": backup,
-            "reason": reason,
-            "type": item_type,
-        })
+        entries.append(
+            {
+                "timestamp": ts,
+                "name": name,
+                "target": target,
+                "action": action,
+                "backup": backup,
+                "reason": reason,
+                "type": item_type,
+            }
+        )
 
         if max_entries > 0 and len(entries) >= max_entries:
             break
@@ -1206,6 +1287,7 @@ def _parse_overwatch_action_log(
     return entries
 
 
+@_reports_unreadable
 def scan_overwatch_section(
     kanban_root: str,
     use_color: bool,
@@ -1259,12 +1341,12 @@ def scan_overwatch_section(
     # ANSI codes — cyan for TRANSIENT (retryable) and for the in-progress
     # resolving state, red for needs-human (alarm), plain bold for a
     # completed decision (informational, not an alarm).
-    RESET  = "\033[0m"    if use_color else ""
-    C_RED  = "\033[0;31m" if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_RED = "\033[0;31m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
+    C_YEL = "\033[0;33m" if use_color else ""
     SHIELD = "\U0001f6e1" if use_color else "W"  # shield symbol for OVERWATCH
 
     found_any = False
@@ -1312,27 +1394,24 @@ def scan_overwatch_section(
             print("")
 
         for entry in visible:
-            ts       = entry["timestamp"]
-            target   = entry["target"]
-            action   = entry["action"]
-            reason   = entry["reason"]
-            etype    = entry["type"]
+            ts = entry["timestamp"]
+            target = entry["target"]
+            action = entry["action"]
+            reason = entry["reason"]
+            etype = entry["type"]
 
             if etype == "TRANSIENT":
                 # Cyan palette: retryable, not alarming.
                 label_color = C_CYAN
-                label       = "TRANSIENT"
-                arrow       = "⟳" if use_color else ">"
+                label = "TRANSIENT"
+                arrow = "⟳" if use_color else ">"
             else:
                 # Red palette: needs operator attention.
                 label_color = C_RED
-                label       = "needs-human"
-                arrow       = "⚠" if use_color else "!"
+                label = "needs-human"
+                arrow = "⚠" if use_color else "!"
 
-            print(
-                f"\n  {arrow} {label_color}{C_BOLD}{label}{RESET}"
-                f"  {C_DIM}{ts}{RESET}"
-            )
+            print(f"\n  {arrow} {label_color}{C_BOLD}{label}{RESET}" f"  {C_DIM}{ts}{RESET}")
             print(f"    target: {target}")
             print(f"    action: {action}")
             if reason and reason != "none":
@@ -1349,6 +1428,7 @@ def scan_overwatch_section(
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     """CLI entry point: select blocked-tasks, quarantine, or rejected-files scanner."""
@@ -1469,11 +1549,12 @@ def main() -> None:
     p_stale.add_argument(
         "--max-task-seconds",
         type=int,
-        default=5400,
+        default=MAX_TASK_SECONDS_DEFAULT,
         metavar="N",
         help=(
             "Age threshold in seconds.  WORKING tasks older than this are "
-            "shown as attention-worthy.  0 disables the check (default: 5400)."
+            "shown as attention-worthy.  0 disables the check (default: %(default)s, "
+            "the [wake] max_task_seconds default)."
         ),
     )
 
@@ -1623,10 +1704,7 @@ def main() -> None:
         type=int,
         default=50,
         metavar="N",
-        help=(
-            "Maximum action log entries to read per project (default: 50). "
-            "0 means unlimited."
-        ),
+        help=("Maximum action log entries to read per project (default: 50). " "0 means unlimited."),
     )
 
     args = parser.parse_args()

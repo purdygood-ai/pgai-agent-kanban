@@ -69,14 +69,14 @@ ACCEPTANCE CRITERIA COVERED
 
 from __future__ import annotations
 
-import datetime as _dt
 import os
 import pathlib
 import re
 import stat
 import subprocess
 
-import pytest
+
+from tests.fixtures.local_timestamps import today_local_iso
 
 # ---------------------------------------------------------------------------
 # Path resolution -- anchored to this file's own location, matching every
@@ -107,17 +107,6 @@ _FULL_ROSTER_CRONTAB = (
     "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
 )
 _ROSTER_ORDER = ["PM", "CODER", "WRITER", "TESTER", "CM", "OVERWATCH", "CLEANUP"]
-
-
-def _today_iso(hour: int, minute: int, second: int) -> str:
-    """An ISO-8601 timestamp for "today" at the given local time, in the
-    same shape team/scripts/lib/wake_bootstrap.sh's log() function writes
-    (`date -Iseconds`) -- date, "T", time, and the host's local UTC
-    offset.
-    """
-    now = _dt.datetime.now().astimezone()
-    stamped = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
-    return stamped.isoformat(timespec="seconds")
 
 
 def _write_log(path: pathlib.Path, lines: list) -> None:
@@ -159,21 +148,15 @@ def _run(args: list, kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
 
 
 def _run_roster_band(kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
-    return _run(
-        ["bash", str(_ROSTER_BAND_SH), "--kanban-root", str(kanban_root)], kanban_root
-    )
+    return _run(["bash", str(_ROSTER_BAND_SH), "--kanban-root", str(kanban_root)], kanban_root)
 
 
 def _run_status_band(kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
-    return _run(
-        ["bash", str(_STATUS_BAND_SH), "--kanban-root", str(kanban_root)], kanban_root
-    )
+    return _run(["bash", str(_STATUS_BAND_SH), "--kanban-root", str(kanban_root)], kanban_root)
 
 
 def _run_event_band(kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
-    return _run(
-        ["bash", str(_EVENT_BAND_SH), "--kanban-root", str(kanban_root)], kanban_root
-    )
+    return _run(["bash", str(_EVENT_BAND_SH), "--kanban-root", str(kanban_root)], kanban_root)
 
 
 # An entry token is matched as a whole word anywhere in stdout -- the roster
@@ -244,9 +227,7 @@ def _install_narrow_pane(tmp_path: pathlib.Path, monkeypatch, width: int, height
 
 
 class TestDefaultGeometryShowsFullRosterInBothBands:
-    def test_roster_band_renders_every_entry_no_overflow_marker(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_roster_band_renders_every_entry_no_overflow_marker(self, tmp_path: pathlib.Path) -> None:
         kanban_root = tmp_path / "kanroot"
         (kanban_root / "logs").mkdir(parents=True)
         _install_crontab(_FULL_ROSTER_CRONTAB)
@@ -256,17 +237,13 @@ class TestDefaultGeometryShowsFullRosterInBothBands:
 
         shown = [tok for tok in _ROSTER_ORDER if _entry_present(result.stdout, tok)]
         assert shown == _ROSTER_ORDER, (
-            f"expected all seven roster entries to render at default geometry; "
-            f"got {shown}\n{_diagnostic(result)}"
+            f"expected all seven roster entries to render at default geometry; " f"got {shown}\n{_diagnostic(result)}"
         )
         assert _marker_count(result.stdout) is None, (
-            f"no overflow marker expected when the whole roster fits\n"
-            f"{_diagnostic(result)}"
+            f"no overflow marker expected when the whole roster fits\n" f"{_diagnostic(result)}"
         )
 
-    def test_status_band_shows_one_row_per_roster_agent(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_status_band_shows_one_row_per_roster_agent(self, tmp_path: pathlib.Path) -> None:
         kanban_root = tmp_path / "kanroot"
         (kanban_root / "logs").mkdir(parents=True)
         _install_crontab(_FULL_ROSTER_CRONTAB)
@@ -282,8 +259,7 @@ class TestDefaultGeometryShowsFullRosterInBothBands:
         )
         for token in _ROSTER_ORDER:
             assert any(row.startswith(token) for row in data_rows), (
-                f"expected a status row starting with {token!r}; "
-                f"rows={data_rows}\n{_diagnostic(result)}"
+                f"expected a status row starting with {token!r}; " f"rows={data_rows}\n{_diagnostic(result)}"
             )
 
 
@@ -301,24 +277,19 @@ class TestEventBandFiltersIdleCycleKeepsDispatchCycle:
         logs_dir = kanban_root / "logs"
 
         idle_lines = [
-            f"[{_today_iso(8, 0, 0)}] wake(writer): "
-            "re-checking WAITING tasks for satisfied prerequisites...",
-            f"[{_today_iso(8, 0, 1)}] wake(writer): no WAITING tasks to re-check",
-            f"[{_today_iso(8, 0, 2)}] wake(writer): "
-            "discovery_run_pipeline: no work pending, idle exit",
-            f"[{_today_iso(8, 0, 3)}] wake(writer): "
-            "sleeping 21s before work (--sleep stagger)",
-            f"[{_today_iso(8, 0, 4)}] wake(writer): "
+            f"[{today_local_iso(8, 0, 0)}] wake(writer): " "re-checking WAITING tasks for satisfied prerequisites...",
+            f"[{today_local_iso(8, 0, 1)}] wake(writer): no WAITING tasks to re-check",
+            f"[{today_local_iso(8, 0, 2)}] wake(writer): " "discovery_run_pipeline: no work pending, idle exit",
+            f"[{today_local_iso(8, 0, 3)}] wake(writer): " "sleeping 21s before work (--sleep stagger)",
+            f"[{today_local_iso(8, 0, 4)}] wake(writer): "
             "timing: work_begin=1785107882 work_end=1785107882 work_delta=0s",
-            f"[{_today_iso(8, 0, 5)}] wake(writer): project demo: "
-            'done: completed=0 project_elapsed=3s batch_elapsed=3s '
+            f"[{today_local_iso(8, 0, 5)}] wake(writer): project demo: "
+            "done: completed=0 project_elapsed=3s batch_elapsed=3s "
             'reason="no more BACKLOG tasks in writer queue"',
         ]
         dispatch_lines = [
-            f"[{_today_iso(9, 30, 0)}] wake(tester): task TESTER-example: "
-            "transitioned to WORKING [A]",
-            f"[{_today_iso(9, 31, 0)}] wake(tester): "
-            "finished task TESTER-example with state DONE",
+            f"[{today_local_iso(9, 30, 0)}] wake(tester): task TESTER-example: " "transitioned to WORKING [A]",
+            f"[{today_local_iso(9, 31, 0)}] wake(tester): " "finished task TESTER-example with state DONE",
         ]
         _write_log(logs_dir / "cron-writer.log", idle_lines)
         _write_log(logs_dir / "cron-tester.log", dispatch_lines)
@@ -328,13 +299,10 @@ class TestEventBandFiltersIdleCycleKeepsDispatchCycle:
 
         lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
         assert len(lines) == 2, (
-            f"expected only the two dispatch-cycle lines to render, got: "
-            f"{lines!r}\n{_diagnostic(result)}"
+            f"expected only the two dispatch-cycle lines to render, got: " f"{lines!r}\n{_diagnostic(result)}"
         )
         assert "transitioned to WORKING" in lines[0], _diagnostic(result)
-        assert "finished task TESTER-example with state DONE" in lines[1], _diagnostic(
-            result
-        )
+        assert "finished task TESTER-example with state DONE" in lines[1], _diagnostic(result)
 
         for marker in ("re-checking", "idle exit", "sleeping", "timing:"):
             assert marker not in result.stdout, (
@@ -350,9 +318,7 @@ class TestEventBandFiltersIdleCycleKeepsDispatchCycle:
 
 
 class TestEventBandEmptyStateNarratesExplicitly:
-    def test_no_wake_events_today_prints_literal_message(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_no_wake_events_today_prints_literal_message(self, tmp_path: pathlib.Path) -> None:
         kanban_root = tmp_path / "kanroot"
         (kanban_root / "logs").mkdir(parents=True)
 
@@ -382,17 +348,14 @@ class TestNarrowGeometryRosterBandFallsBackWithAccurateOverflowMarker:
         kanban_root = tmp_path / "kanroot"
         (kanban_root / "logs").mkdir(parents=True)
         _install_crontab(_FULL_ROSTER_CRONTAB)
-        _install_narrow_pane(
-            tmp_path, monkeypatch, width=_NARROW_PANE_WIDTH, height=_NARROW_PANE_HEIGHT
-        )
+        _install_narrow_pane(tmp_path, monkeypatch, width=_NARROW_PANE_WIDTH, height=_NARROW_PANE_HEIGHT)
 
         result = _run_roster_band(kanban_root)
         assert result.returncode == 0, _diagnostic(result)
         stdout = result.stdout
 
         assert _entry_present(stdout, "PM"), (
-            f"the first roster entry (pm) must still print in the vertical "
-            f"fallback\n{_diagnostic(result)}"
+            f"the first roster entry (pm) must still print in the vertical " f"fallback\n{_diagnostic(result)}"
         )
         shown = [tok for tok in _ROSTER_ORDER if _entry_present(stdout, tok)]
         assert shown == ["PM"], (

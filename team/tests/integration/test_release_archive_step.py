@@ -47,7 +47,7 @@ from __future__ import annotations
 import pathlib
 import subprocess
 from contextlib import contextmanager
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 from pgai_agent_kanban.archive import read_rows
@@ -97,7 +97,10 @@ def _require_git() -> None:
 def _git(repo: pathlib.Path, *args: str) -> str:
     """Run git with -C *repo* and return stripped stdout; raise on failure."""
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -107,7 +110,7 @@ def _section(text: str, heading: str) -> str:
     lines = text.splitlines()
     for index, line in enumerate(lines):
         if line.strip() == f"## {heading}":
-            for value in lines[index + 1:]:
+            for value in lines[index + 1 :]:
                 if value.strip():
                     return value.strip()
     return ""
@@ -154,9 +157,7 @@ class _Fixture:
         self.sibling.add_task(ArchiveSandbox.task_id("CODER", 3), "DONE", release_version=_PREVIOUS)
         # The finalizer's own helpers resolve through the kanban root.
         (self.root / "scripts").symlink_to(_SCRIPTS_DIR, target_is_directory=True)
-        (self.root / "pgai_agent_kanban").symlink_to(
-            _TEAM_DIR / "pgai_agent_kanban", target_is_directory=True
-        )
+        (self.root / "pgai_agent_kanban").symlink_to(_TEAM_DIR / "pgai_agent_kanban", target_is_directory=True)
         self.release_state = self.demo.project_root / "release-state.md"
         self.probe = tmp_path / "archive-call-probe.txt"
         self.probe_state = tmp_path / "archive-call-release-state.md"
@@ -165,7 +166,9 @@ class _Fixture:
     def _build_repo(repo: pathlib.Path) -> pathlib.Path:
         """main one release commit (VERSION written) ahead of the RC branch."""
         subprocess.run(
-            ["git", "init", f"--initial-branch={_MAIN}", str(repo)], capture_output=True, check=True,
+            ["git", "init", f"--initial-branch={_MAIN}", str(repo)],
+            capture_output=True,
+            check=True,
         )
         _git(repo, "config", "--local", "user.email", "test@pgai.local")
         _git(repo, "config", "--local", "user.name", "PGAI Test")
@@ -239,10 +242,7 @@ _CLEAN_RELEASE_VERSION={_VERSION.lstrip('v')}
 
     def archive_step_only(self) -> subprocess.CompletedProcess:
         """Run Step 16c's helper alone, against the fixture as it stands."""
-        script = self._preamble() + (
-            "\n_cm_release_archive_finished_items\n"
-            'echo "outcome=${_CM_ARCHIVE_OUTCOME}"\n'
-        )
+        script = self._preamble() + ("\n_cm_release_archive_finished_items\n" 'echo "outcome=${_CM_ARCHIVE_OUTCOME}"\n')
         return run_bash(self.tmp_path, script, cwd=self.tmp_path, timeout=120)
 
     def tag_sha(self) -> str:
@@ -278,7 +278,10 @@ pgai_lock_release {lock_file} "$holder_fd"
 """
     holder = subprocess.Popen(
         ["bash", "-c", script],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
         cwd=lock_file.parent.parent,
     )
     try:
@@ -316,8 +319,7 @@ class TestArchiveStepInFinalize:
 
     def test_archive_runs_after_rc_close_for_released_project_only(self, fixture: _Fixture) -> None:
         sibling_before = {
-            path: data for path, data in fixture.sibling.snapshot().items()
-            if path.startswith(f"projects/{_SIBLING}/")
+            path: data for path, data in fixture.sibling.snapshot().items() if path.startswith(f"projects/{_SIBLING}/")
         }
 
         result = fixture.finalize()
@@ -353,8 +355,7 @@ class TestArchiveStepInFinalize:
         # No other project is touched.
         assert not (fixture.root / "archive" / _SIBLING).exists()
         sibling_after = {
-            path: data for path, data in fixture.sibling.snapshot().items()
-            if path.startswith(f"projects/{_SIBLING}/")
+            path: data for path, data in fixture.sibling.snapshot().items() if path.startswith(f"projects/{_SIBLING}/")
         }
         assert sibling_after == sibling_before
 
@@ -367,7 +368,10 @@ class TestArchiveStepInFinalize:
         _assert_release_finished_normally(fixture, result)
 
         assert "archive.repo_lock_busy" in output, output
-        assert "[Step 16c] WARNING: archive skipped for demo: the project's repo lock is held by a process outside" in result.stderr, output
+        assert (
+            "[Step 16c] WARNING: archive skipped for demo: the project's repo lock is held by a process outside"
+            in result.stderr
+        ), output
         # The step left release-state.md as it found it, and moved nothing.
         assert fixture.release_state.read_bytes() == fixture.probe_state.read_bytes()
         assert sorted(p.name for p in (fixture.demo.project_root / "bugs").iterdir()) == bugs_before
@@ -460,8 +464,7 @@ class TestArchiveStepUnderWakeChainLock:
     def test_archive_runs_under_the_release_chains_own_repo_lock(self, fixture: _Fixture) -> None:
         _close_rc(fixture)
         sibling_before = {
-            path: data for path, data in fixture.sibling.snapshot().items()
-            if path.startswith(f"projects/{_SIBLING}/")
+            path: data for path, data in fixture.sibling.snapshot().items() if path.startswith(f"projects/{_SIBLING}/")
         }
 
         result = _archive_step_in_child_of_chain(fixture)
@@ -487,8 +490,7 @@ class TestArchiveStepUnderWakeChainLock:
         # Ledger rows and moves for the released project only.
         assert not (fixture.root / "archive" / _SIBLING).exists(), output
         sibling_after = {
-            path: data for path, data in fixture.sibling.snapshot().items()
-            if path.startswith(f"projects/{_SIBLING}/")
+            path: data for path, data in fixture.sibling.snapshot().items() if path.startswith(f"projects/{_SIBLING}/")
         }
         assert sibling_after == sibling_before
 
@@ -547,9 +549,7 @@ def _write_done_bugs(project_root: pathlib.Path) -> None:
 
 def _tree(path: pathlib.Path) -> dict[str, bytes]:
     """Every file under *path*, relative, mapped to its bytes."""
-    return {
-        p.relative_to(path).as_posix(): p.read_bytes() for p in sorted(path.rglob("*")) if p.is_file()
-    }
+    return {p.relative_to(path).as_posix(): p.read_bytes() for p in sorted(path.rglob("*")) if p.is_file()}
 
 
 def _open_rc_with_work(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
@@ -566,7 +566,11 @@ def _open_rc_with_work(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Pa
     opened = _run_cm_script(_OPEN_RC_SCRIPT, [_ENTRY_VERSION], root, _ENTRY_PROJECT, repo_root=repo)
     assert opened.returncode == 0, opened.stdout + opened.stderr
     _commit_on_branch(
-        repo, f"rc/{_ENTRY_VERSION}", "feature.txt", "feature\n", "feat: add feature",
+        repo,
+        f"rc/{_ENTRY_VERSION}",
+        "feature.txt",
+        "feature\n",
+        "feat: add feature",
         return_branch="main",
     )
     return root, repo
@@ -595,7 +599,11 @@ class TestArchiveThroughReleaseEntryPoints:
         project_before = _tree(root / "projects" / _ENTRY_PROJECT / "bugs")
 
         result = _run_cm_script(
-            _CANCEL_RC_SCRIPT, ["--key", _ENTRY_VERSION, "--yes"], root, _ENTRY_PROJECT, repo_root=repo,
+            _CANCEL_RC_SCRIPT,
+            ["--key", _ENTRY_VERSION, "--yes"],
+            root,
+            _ENTRY_PROJECT,
+            repo_root=repo,
         )
         output = result.stdout + result.stderr
         assert result.returncode == 0, output

@@ -118,13 +118,11 @@ def test_thinking_disabled_when_cfg_false(tmp_path: pathlib.Path) -> None:
     result = run_bash(tmp_path, harness, extra_env={"FIXTURE_CFG": str(cfg)})
 
     assert result.returncode == 0, (
-        f"Harness exited non-zero for cfg=false:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"Harness exited non-zero for cfg=false:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     # The harness echoes "--thinking disabled" as two adjacent tokens on one line.
     assert "--thinking disabled" in result.stdout, (
-        f"Expected '--thinking disabled' in stdout for cfg=false.\n"
-        f"Got: {result.stdout!r}"
+        f"Expected '--thinking disabled' in stdout for cfg=false.\n" f"Got: {result.stdout!r}"
     )
 
 
@@ -141,16 +139,13 @@ def test_thinking_not_appended_when_cfg_true(tmp_path: pathlib.Path) -> None:
     result = run_bash(tmp_path, harness, extra_env={"FIXTURE_CFG": str(cfg)})
 
     assert result.returncode == 0, (
-        f"Harness exited non-zero for cfg=true:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"Harness exited non-zero for cfg=true:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "--thinking" not in result.stdout, (
-        f"Unexpected '--thinking' in stdout for cfg=true.\n"
-        f"Got: {result.stdout!r}"
+        f"Unexpected '--thinking' in stdout for cfg=true.\n" f"Got: {result.stdout!r}"
     )
     assert "(no-thinking-flag)" in result.stdout, (
-        f"Expected '(no-thinking-flag)' marker in stdout for cfg=true.\n"
-        f"Got: {result.stdout!r}"
+        f"Expected '(no-thinking-flag)' marker in stdout for cfg=true.\n" f"Got: {result.stdout!r}"
     )
 
 
@@ -167,16 +162,13 @@ def test_thinking_not_appended_when_key_absent(tmp_path: pathlib.Path) -> None:
     result = run_bash(tmp_path, harness, extra_env={"FIXTURE_CFG": str(cfg)})
 
     assert result.returncode == 0, (
-        f"Harness exited non-zero for absent key:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"Harness exited non-zero for absent key:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "--thinking" not in result.stdout, (
-        f"Unexpected '--thinking' in stdout for absent key (expected default-true).\n"
-        f"Got: {result.stdout!r}"
+        f"Unexpected '--thinking' in stdout for absent key (expected default-true).\n" f"Got: {result.stdout!r}"
     )
     assert "(no-thinking-flag)" in result.stdout, (
-        f"Expected '(no-thinking-flag)' marker in stdout for absent key.\n"
-        f"Got: {result.stdout!r}"
+        f"Expected '(no-thinking-flag)' marker in stdout for absent key.\n" f"Got: {result.stdout!r}"
     )
 
 
@@ -198,8 +190,7 @@ def test_invalid_thinking_value_fails_loud(tmp_path: pathlib.Path, bad_value: st
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "llm_thinking_enabled" in result.stderr, (
-        f"Expected 'llm_thinking_enabled' in stderr for invalid value {bad_value!r}.\n"
-        f"Got stderr: {result.stderr!r}"
+        f"Expected 'llm_thinking_enabled' in stderr for invalid value {bad_value!r}.\n" f"Got stderr: {result.stderr!r}"
     )
 
 
@@ -221,12 +212,10 @@ def test_wake_claude_provider_contains_thinking_disabled_wiring() -> None:
     content = provider.read_text(encoding="utf-8")
 
     assert "--thinking disabled" in content, (
-        f"{provider} does not contain '--thinking disabled'. "
-        "The llm_thinking_enabled wiring may be missing."
+        f"{provider} does not contain '--thinking disabled'. " "The llm_thinking_enabled wiring may be missing."
     )
     assert "llm_thinking_enabled" in content, (
-        f"{provider} does not reference 'llm_thinking_enabled'. "
-        "The config key read may be missing."
+        f"{provider} does not reference 'llm_thinking_enabled'. " "The config key read may be missing."
     )
     assert "config_get providers llm_thinking_enabled" in content, (
         f"{provider} does not call 'config_get providers llm_thinking_enabled'. "

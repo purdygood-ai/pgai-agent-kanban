@@ -64,7 +64,7 @@ from __future__ import annotations
 
 import sys
 from types import MappingProxyType
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 # ---------------------------------------------------------------------------
 # Canonical intake vocabulary (normalized, lowercase)

@@ -62,11 +62,7 @@ _RUNNERS = {
 _PYTEST_ARGS_ARRAY_RE = re.compile(r"PYTEST_ARGS=\(\s*((?:\"[^\"]*\"\s*)*)\)")
 _QUOTED_ARG_RE = re.compile(r'"([^"]*)"')
 
-_FAKE_ENGINE_STUB = (
-    "#!/usr/bin/env bash\n"
-    '{ echo "invoked: $0 $*"; } >> "%(marker)s"\n'
-    "exit 1\n"
-)
+_FAKE_ENGINE_STUB = "#!/usr/bin/env bash\n" '{ echo "invoked: $0 $*"; } >> "%(marker)s"\n' "exit 1\n"
 
 
 def _extract_pytest_args_from_text(script_text: str) -> list:
@@ -176,12 +172,11 @@ def test_runner_collection_invokes_no_container_engine_and_collects_no_cold_test
         f"engine: {marker.read_text(encoding='utf-8') if marker.exists() else ''}"
     )
     assert "tests/cold" not in result.stdout, (
-        f"{runner_name} runner's collected scope includes a tests/cold test.\n"
-        f"stdout: {result.stdout}"
+        f"{runner_name} runner's collected scope includes a tests/cold test.\n" f"stdout: {result.stdout}"
     )
-    assert "tests" in result.stdout and "collected" in result.stdout, (
-        f"expected a non-trivial collected-test summary; got:\n{result.stdout}"
-    )
+    assert (
+        "tests" in result.stdout and "collected" in result.stdout
+    ), f"expected a non-trivial collected-test summary; got:\n{result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -190,13 +185,7 @@ def test_runner_collection_invokes_no_container_engine_and_collects_no_cold_test
 
 
 def test_detection_logic_flags_the_cold_module_if_it_is_ever_added_back() -> None:
-    synthetic_script = (
-        "#!/usr/bin/env bash\n"
-        "PYTEST_ARGS=(\n"
-        '  "tests/unit/"\n'
-        '  "tests/cold/"\n'
-        ")\n"
-    )
+    synthetic_script = "#!/usr/bin/env bash\n" "PYTEST_ARGS=(\n" '  "tests/unit/"\n' '  "tests/cold/"\n' ")\n"
     args = _extract_pytest_args_from_text(synthetic_script)
     assert args == ["tests/unit/", "tests/cold/"]
     assert "cold" in " ".join(args).lower(), (

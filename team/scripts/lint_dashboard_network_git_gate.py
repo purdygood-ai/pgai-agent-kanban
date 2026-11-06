@@ -114,6 +114,8 @@ from pgai_agent_kanban.lint.findings import (  # noqa: E402
     write_findings_file,
 )
 
+from pgai_agent_kanban.lint.source_text import mask_comment_lines as _mask_comment_lines  # noqa: E402
+
 _LINT_NAME = "dashboard_network_git_gate"
 
 # ---------------------------------------------------------------------------
@@ -128,9 +130,7 @@ _NETWORK_VERBS: tuple[str, ...] = ("ls-remote", "fetch", "pull", "push", "clone"
 # tokens (covers flags such as "-C <path>" or "--no-pager"), by one of the
 # network-capable verbs.  Loose on purpose: dashboard call sites vary in how
 # many flags/args sit between "git" and the subcommand.
-_GIT_VERB_RE = re.compile(
-    r"\bgit\b(?:\s+\S+){0,6}?\s+(" + "|".join(_NETWORK_VERBS) + r")\b"
-)
+_GIT_VERB_RE = re.compile(r"\bgit\b(?:\s+\S+){0,6}?\s+(" + "|".join(_NETWORK_VERBS) + r")\b")
 
 # Pattern 2: a bare "ls-remote" token, unambiguous as a git subcommand name
 # regardless of what (if anything) immediately precedes it.
@@ -157,22 +157,6 @@ class Violation(NamedTuple):
 # Comment masking (reused technique from lint_env_bootstrap.py's approach:
 # exclude documentation prose from the scan while preserving line numbers)
 # ---------------------------------------------------------------------------
-
-
-def _mask_comment_lines(text: str) -> str:
-    """Return *text* with every comment-only line blanked out (same length).
-
-    A line is a "comment line" when its first non-whitespace character is
-    ``#``.  Blanking (rather than deleting) preserves line numbers for
-    subsequent regex matches and their derived line-number reporting.
-    """
-    masked_lines = []
-    for line in text.splitlines(keepends=False):
-        if line.lstrip().startswith("#"):
-            masked_lines.append("")
-        else:
-            masked_lines.append(line)
-    return "\n".join(masked_lines)
 
 
 def _line_number_for_offset(text: str, offset: int) -> int:
@@ -202,9 +186,7 @@ def scan_file_for_network_git(path: Path) -> list[Violation]:
             continue
         seen_lines.add(lineno)
         raw_line = text.splitlines()[lineno - 1].strip()
-        violations.append(
-            Violation(path=path, line=lineno, snippet=raw_line, verb=m.group(1))
-        )
+        violations.append(Violation(path=path, line=lineno, snippet=raw_line, verb=m.group(1)))
 
     for m in _BARE_LS_REMOTE_RE.finditer(masked):
         lineno = _line_number_for_offset(masked, m.start())
@@ -212,9 +194,7 @@ def scan_file_for_network_git(path: Path) -> list[Violation]:
             continue
         seen_lines.add(lineno)
         raw_line = text.splitlines()[lineno - 1].strip()
-        violations.append(
-            Violation(path=path, line=lineno, snippet=raw_line, verb="ls-remote")
-        )
+        violations.append(Violation(path=path, line=lineno, snippet=raw_line, verb="ls-remote"))
 
     violations.sort(key=lambda v: v.line)
     return violations
@@ -247,15 +227,10 @@ def scan_dashboard_dir(dashboard_dir: Path, *, verbose: bool = False) -> list[Vi
 
 def _build_causes(violations: list[Violation]) -> list[str]:
     """Return one cause bullet per violation, naming path:line, verb, and snippet."""
-    return [
-        f"{v.path}:{v.line}: network-capable git verb '{v.verb}' found — {v.snippet!r}"
-        for v in violations
-    ]
+    return [f"{v.path}:{v.line}: network-capable git verb '{v.verb}' found — {v.snippet!r}" for v in violations]
 
 
-def _build_fix_commands(
-    violations: list[Violation], *, team_dir: Path, lint_script: Path
-) -> list[str]:
+def _build_fix_commands(violations: list[Violation], *, team_dir: Path, lint_script: Path) -> list[str]:
     """Return the numbered, verbatim-runnable fix commands for *violations*.
 
     Each violation gets one single-line ``sed`` command that comments out
@@ -277,9 +252,7 @@ def _build_fix_commands(
     return commands
 
 
-def _format_remedy_block(
-    violations: list[Violation], *, team_dir: Path, lint_script: Path
-) -> str:
+def _format_remedy_block(violations: list[Violation], *, team_dir: Path, lint_script: Path) -> str:
     """Assemble the full three-part remedy block required by
     docs/coding-standards.md ("Gates prescribe, not just diagnose"): cause(s)
     with concrete location, a numbered fix block of verbatim-runnable
@@ -422,8 +395,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if violations:
         print(
-            "\n"
-            + _format_remedy_block(violations, team_dir=team_dir, lint_script=lint_script),
+            "\n" + _format_remedy_block(violations, team_dir=team_dir, lint_script=lint_script),
             flush=True,
         )
         # CENSUS-ANCHOR: dashboard-network-git-gate-01

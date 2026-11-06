@@ -111,6 +111,25 @@ require_docker_daemon() never invents a rival availability contract: it
 calls require_binary() for the absent-binary case (identical narration to
 every other guarded binary) and only adds its own narration for the
 distinct present-binary-unreachable-daemon case.
+
+THE OPERATOR-ONLY CONTAINER TIER
+--------------------------------
+A reachable daemon does not make a build the caller's to run. Building
+images and starting containers is the container tier, which only the
+operator invokes (team/scripts/lib/container_tier.sh). A fixture that
+builds an image calls require_container_tier() BEFORE require_docker_daemon()
+-- before any engine call at all, `docker info` included -- so a run
+without the operator's authorization narrate-skips however pytest was
+asked to collect the module:
+
+    from tests.fixtures.binary_guard import require_container_tier, require_docker_daemon
+
+    def some_image_fixture():
+        require_container_tier(
+            label="docker-build-fixture",
+            operator_command="PGAI_CONTAINER_TIER=1 bash team/scripts/run-gated-tests.sh",
+        )
+        guard = require_docker_daemon(label="docker-build-fixture")
 """
 
 from __future__ import annotations
@@ -120,7 +139,8 @@ import shutil
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Callable, NoReturn, Optional
+from typing import NoReturn
+from collections.abc import Callable
 
 import pytest
 
@@ -162,7 +182,7 @@ class BinaryGuard:
     """
 
     name: str
-    path: Optional[str]
+    path: str | None
 
     @property
     def resolved(self) -> bool:
@@ -274,12 +294,68 @@ def require_docker_daemon(engine: str = "docker", label: str = "docker") -> Bina
     return guard
 
 
+CONTAINER_TIER_AUTH_VAR = "PGAI_CONTAINER_TIER"
+AGENT_WAKE_ACTIVE_VAR = "PGAI_AGENT_WAKE_ACTIVE"
+CONTAINER_TIER_SKIP_KEY = "container_tier.operator_only"
+
+
+def container_tier_authorized(env: Mapping[str, str] | None = None) -> bool:
+    """Return whether *env* (default: this process's environment) authorizes
+    the container tier.
+
+    The same rule as container_tier_authorized in
+    team/scripts/lib/container_tier.sh: PGAI_CONTAINER_TIER is exactly "1"
+    and PGAI_AGENT_WAKE_ACTIVE is not "1". Any other value of either is
+    "not authorized". (The harnesses' --operator-approved flag has no pytest
+    equivalent; a harness that accepts it exports PGAI_CONTAINER_TIER=1 to
+    the pytest it starts.)
+    """
+    env = os.environ if env is None else env
+    if env.get(AGENT_WAKE_ACTIVE_VAR, "0") == "1":
+        return False
+    return env.get(CONTAINER_TIER_AUTH_VAR, "") == "1"
+
+
+def require_container_tier(label: str, operator_command: str) -> None:
+    """Return when the container tier is authorized; otherwise narrate-skip.
+
+    Call before any engine command -- `docker info` included. The skip
+    reason carries the machine key container_tier.operator_only, why the
+    run is not authorized, and *operator_command* (the exact command an
+    operator runs to exercise the caller), in the shape the harnesses'
+    SKIPPED line uses. Produces:
+
+        [<label>] SKIP — container tier is operator-only
+        (key=container_tier.operator_only): <why>; nothing was built or
+        started; operator_command="<operator_command>"
+
+    Never returns when unauthorized -- pytest.skip() always raises.
+    """
+    if container_tier_authorized():
+        return
+    if os.environ.get(AGENT_WAKE_ACTIVE_VAR, "0") == "1":
+        why = "this run is inside an agent wake, and agents never run the container tier"
+    else:
+        why = f"{CONTAINER_TIER_AUTH_VAR}=1 is not set"
+    # CONVERT (quality class, SOP-core "Blocking Severity"): an unauthorized
+    # run is a narrated skip, never a failure -- an agent that collects an
+    # image-building module never fails its task over it, and nothing is
+    # built, pulled or started.
+    reason = (
+        f"container tier is operator-only (key={CONTAINER_TIER_SKIP_KEY}): {why}; "
+        f'nothing was built or started; operator_command="{operator_command}"'
+    )
+    print(f"\n[{label}] SKIP — {reason}", flush=True)
+    pytest.skip(reason)
+    raise AssertionError("unreachable: pytest.skip() always raises")  # pragma: no cover
+
+
 def teardown_private_tmux(
     guard: BinaryGuard,
     socket_name: str,
     *,
-    env: Optional[Mapping[str, str]] = None,
-    kill: Optional[Callable[[str], object]] = None,
+    env: Mapping[str, str] | None = None,
+    kill: Callable[[str], object] | None = None,
 ) -> None:
     """Stop a private tmux server (``tmux -L <socket_name>``) and remove its
     socket file -- the one teardown every private-tmux fixture shares.

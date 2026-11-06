@@ -36,9 +36,7 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 
@@ -104,9 +102,7 @@ def _coder_task(source_branch: str = "") -> dict:
 
 def _field(readme: str, heading: str) -> str:
     """Return the body of ``## <heading>`` up to the next ``## `` heading."""
-    match = re.search(
-        rf"^##\s+{re.escape(heading)}\s*\n+(.*?)(?=^##\s|\Z)", readme, re.M | re.S
-    )
+    match = re.search(rf"^##\s+{re.escape(heading)}\s*\n+(.*?)(?=^##\s|\Z)", readme, re.M | re.S)
     assert match, f"'## {heading}' not found in README:\n{readme}"
     return match.group(1).strip()
 
@@ -169,9 +165,7 @@ def test_release_work_ticket_still_gets_the_prefixed_rc_branch(
     _write_project_cfg(tmp_path, prefix)
     task = _coder_task("main")
     task["role"] = task["assigned_agent"] = role
-    result = pm.determine_source_branch(
-        task, str(tmp_path), workflow_type="release", target_version="v9.9.9"
-    )
+    result = pm.determine_source_branch(task, str(tmp_path), workflow_type="release", target_version="v9.9.9")
     assert result == rc
 
 
@@ -182,9 +176,7 @@ def test_non_release_active_rc_wins_over_the_mainline(
     """With an active RC, a feature task with no source_branch targets that RC, not the mainline."""
     _write_project_cfg(tmp_path, prefix)
     _write_release_state(tmp_path, active_rc="v9.9.9")
-    result = pm.determine_source_branch(
-        _coder_task(""), str(tmp_path), workflow_type="feature", target_version=None
-    )
+    result = pm.determine_source_branch(_coder_task(""), str(tmp_path), workflow_type="feature", target_version=None)
     assert result == rc
 
 
@@ -215,9 +207,7 @@ def _build_kanban_root(tmp_path: pathlib.Path, branch_prefix: str) -> tuple:
         (queues / f"{agent}_backlog.md").write_text(f"# {agent} backlog\n", encoding="utf-8")
     src = _REAL_WORKFLOWS_DIR / "release" / "workflow.cfg"
     (root / "workflows" / "release").mkdir(parents=True)
-    (root / "workflows" / "release" / "workflow.cfg").write_text(
-        src.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    (root / "workflows" / "release" / "workflow.cfg").write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
     return root, project_root
 
 
@@ -266,7 +256,8 @@ def test_materialized_release_plan_writes_real_branch_names(
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root))
     monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
     monkeypatch.setattr(
-        sys, "argv",
+        sys,
+        "argv",
         ["pm_materialize.py", str(plan_file), "--team-root", str(project_root), "--owner", "CLAUDE"],
     )
     try:
@@ -276,7 +267,8 @@ def test_materialized_release_plan_writes_real_branch_names(
 
     sources = {
         d.name: _field((d / "README.md").read_text(encoding="utf-8"), "Source Branch")
-        for d in (project_root / "tasks").iterdir() if (d / "README.md").is_file()
+        for d in (project_root / "tasks").iterdir()
+        if (d / "README.md").is_file()
     }
     open_rc = {name: sb for name, sb in sources.items() if "open-rc" in name}
     work = {name: sb for name, sb in sources.items() if name.startswith(("CODER-", "TESTER-"))}

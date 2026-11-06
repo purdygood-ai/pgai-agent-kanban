@@ -48,7 +48,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 # Run by file path (``python3 .../legend.py``) or loaded from a file outside
 # its package, this module has no parent package and the interpreter puts
@@ -96,7 +96,12 @@ DEFAULT_TEMPLATE = "PROJECT: {PROJECTS_BLOCK}   |   STATUS: {STATUS_BLOCK}"
 
 #: The keywords used when the caller passes none.
 DEFAULT_STATUS_KEYWORDS: tuple[str, ...] = (
-    "open", "running", "done", "blocked", NEEDS_OPERATOR_STATUS, CARRIED_STATUS,
+    "open",
+    "running",
+    "done",
+    "blocked",
+    NEEDS_OPERATOR_STATUS,
+    CARRIED_STATUS,
 )
 
 #: The project tag in colour: a filled square.
@@ -190,9 +195,7 @@ def legend_line(
             status_parts.append(entry)
     status_block = "  ".join(status_parts)
 
-    return legend_template.replace("{PROJECTS_BLOCK}", projects_block).replace(
-        "{STATUS_BLOCK}", status_block
-    )
+    return legend_template.replace("{PROJECTS_BLOCK}", projects_block).replace("{STATUS_BLOCK}", status_block)
 
 
 def _nonblank_lines(text: str) -> list[str]:
@@ -200,7 +203,7 @@ def _nonblank_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if line]
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Print the legend line built from the command-line options (see the
     module docstring); exit 0."""
     parser = argparse.ArgumentParser(
@@ -209,23 +212,28 @@ def main(argv: Optional[list[str]] = None) -> int:
         allow_abbrev=False,
     )
     parser.add_argument(
-        "--use-color", default="false",
+        "--use-color",
+        default="false",
         help='"true" (any case) draws the legend in colour (default: false)',
     )
     parser.add_argument(
-        "--template", default="",
+        "--template",
+        default="",
         help="legend template with {PROJECTS_BLOCK} and {STATUS_BLOCK} (default: the canonical one)",
     )
     parser.add_argument(
-        "--status-keywords", default="",
+        "--status-keywords",
+        default="",
         help="space-separated status keywords (default: open running done blocked needs-operator carried)",
     )
     parser.add_argument(
-        "--names", default="",
+        "--names",
+        default="",
         help="newline-separated project names, in legend order (default: none)",
     )
     parser.add_argument(
-        "--colors", default="",
+        "--colors",
+        default="",
         help="newline-separated #RRGGBB colours, one per name (default: none)",
     )
     args = parser.parse_args(argv)

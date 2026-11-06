@@ -58,8 +58,11 @@ _VERIFIER_INPUTS = (
     "lib/temp.sh",
     "lib/ini_parser.sh",
     "lib/task_ids.sh",
+    "lib/script_common.sh",
+    "lib/verify_harness.sh",
     "lib/pp_run_ops.sh",
     "lib/wake_driver.sh",
+    "lib/wake_entry.sh",
     "wake/claude.sh",
     "wake/codex.sh",
 )
@@ -68,9 +71,7 @@ _GUARD_HEADER = "# --- Blocked-task project guard ---"
 _STORM_MODULE_REL = pathlib.Path("pgai_agent_kanban") / "overwatch" / "block_storm.py"
 # The Needs Human half of the decision's human-gated predicate, and an
 # always-true body that disables it.
-_NEEDS_HUMAN_PREDICATE = (
-    'return task_status.section_value(status_text, "Needs Human").strip().lower() == "yes"'
-)
+_NEEDS_HUMAN_PREDICATE = 'return task_status.section_value(status_text, "Needs Human").strip().lower() == "yes"'
 _NEEDS_HUMAN_DISABLED = "return True"
 # The State half: the queue scan's rule, and a rule that accepts any state.
 _STATE_PREDICATE = 'parse_scan_rule("B=BLOCKED")'
@@ -78,7 +79,7 @@ _STATE_DISABLED = 'parse_scan_rule("B=*")'
 # The driver's overwatch chain return above the guard, and the always-false
 # test that removes it.
 _OVERWATCH_BRANCH = 'if [[ "$AGENT" == "overwatch" ]]; then'
-_OVERWATCH_REMOVED = 'if false; then'
+_OVERWATCH_REMOVED = "if false; then"
 # The driver's re-checks after the held block's closing fi.
 _GATE_CLOSE = '  fi  # end: if [[ "$_dispatch_gated" == "false" ]]\n'
 _RECHECKS = "  recheck_waiting_tasks\n  recheck_blocked_tasks\n"
@@ -141,9 +142,7 @@ def _strip_guard_block(driver_text: str) -> str:
     the driver still parses and reads _dispatch_gated as false."""
     lines = driver_text.splitlines(keepends=True)
     start = next(i for i, line in enumerate(lines) if line.strip() == _GUARD_HEADER.strip())
-    set_gated = next(
-        i for i in range(start, len(lines)) if lines[i].strip() == "_dispatch_gated=true"
-    )
+    set_gated = next(i for i in range(start, len(lines)) if lines[i].strip() == "_dispatch_gated=true")
     end = next(i for i in range(set_gated, len(lines)) if lines[i].strip() == "fi")
     kept = [line for line in lines[start : end + 1] if line.lstrip().startswith("local ")]
     return "".join(lines[:start] + kept + lines[end + 1 :])
@@ -152,9 +151,9 @@ def _strip_guard_block(driver_text: str) -> str:
 def _assert_verifier_fails(tmp_path: pathlib.Path, scripts: pathlib.Path, *expected: str) -> str:
     """Run the copied verifier; assert it exits 1 naming every *expected* FAIL."""
     result, _ = _run_verifier_in_sandbox(tmp_path, scripts / "verify-blocked-task-guard.sh")
-    assert result.returncode == 1, (
-        f"verifier exited {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 1
+    ), f"verifier exited {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     _, failed = _results(result.stdout)
     assert failed > 0
     for check in expected:

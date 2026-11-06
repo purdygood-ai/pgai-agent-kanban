@@ -33,6 +33,9 @@ The behaviours locked in here:
      digits (``v0.0.30`` against candidate ``v0.0.3``) does not take it.
   5. No plans directory, and an empty plans directory, leave the first
      candidate free.
+  6. A project whose git dev tree holds no tag matching its branch prefix
+     starts from release-state.md's ``## Last Released`` (v3.5.0 -> v3.5.1),
+     not from the v0.0.0 sentinel.
 
 A calibration test proves the many-marker fixture really defeats a
 pipe-listing check, so behaviour 2 cannot pass for the wrong reason.
@@ -52,7 +55,10 @@ stopping repository discovery at ``tmp_path``. ``PGAI_GIT_LOCAL_ONLY=1``
 keeps any tag lookup on the host. The starting version comes from the
 project's ``release-state.md`` ``## Last Released`` (the resolver's
 no-config fallback); without that file it is the ``v0.0.0`` sentinel, so
-the first candidate is ``v0.0.1``.
+the first candidate is ``v0.0.1``. Behaviour 6 instead gives the project a
+``project.cfg`` naming a throwaway git tree under ``tmp_path`` with no
+``ai_v*`` tag, so the resolver's no-matching-tag fallback is what supplies the
+starting version.
 
 The subprocess environment is built from an explicit set
 (``build_scrubbed_env``) with every kanban root name pointed into the
@@ -67,8 +73,8 @@ from __future__ import annotations
 import math
 import os
 import pathlib
+import subprocess
 import textwrap
-from typing import Optional
 
 import pytest
 
@@ -95,8 +101,7 @@ _MANY_MARKERS_FLOOR = 300
 # The listing-pipe shape of the marker condition, used only by the
 # calibration test to prove the many-marker fixture defeats it.
 _PIPED_LISTING_CHECK = (
-    'grep -rlE "(^|[^.0-9])${candidate//./\\\\.}([^0-9]|$)" '
-    '"${plans_dir}"/.materialized.* 2>/dev/null | grep -q .'
+    'grep -rlE "(^|[^.0-9])${candidate//./\\\\.}([^0-9]|$)" ' '"${plans_dir}"/.materialized.* 2>/dev/null | grep -q .'
 )
 
 
@@ -107,7 +112,7 @@ def _diagnostic(result: BashResult) -> str:
 class _Sandbox:
     """A throwaway kanban root holding one project and its plans directory."""
 
-    def __init__(self, tmp_path: pathlib.Path, last_released: Optional[str] = None):
+    def __init__(self, tmp_path: pathlib.Path, last_released: str | None = None):
         self.tmp_path = tmp_path
         self.root = tmp_path / "kanban-root"
         self.project_root = self.root / "projects" / _PROJECT
@@ -127,6 +132,19 @@ class _Sandbox:
                 encoding="utf-8",
             )
 
+    def add_untagged_dev_tree(self) -> pathlib.Path:
+        """Point the project at a throwaway ``ai_``-prefixed git tree holding no ``ai_v*`` tag."""
+        tree = self.tmp_path / "dev-tree"
+        tree.mkdir()
+        identity = ["-c", "user.email=test@example.com", "-c", "user.name=Test", "-c", "commit.gpgsign=false"]
+        for args in (["init", "-q", "-b", "ai_main"], ["commit", "-q", "--allow-empty", "-m", "initial"]):
+            subprocess.run(["git", *identity, "-C", str(tree), *args], capture_output=True, check=True)
+        (self.project_root / "project.cfg").write_text(
+            f"[project]\nproject_name = {_PROJECT}\nbranch_prefix = ai_\ndev_tree_path = {tree}\n",
+            encoding="utf-8",
+        )
+        return tree
+
     def make_plans_dir(self) -> pathlib.Path:
         self.plans_dir.mkdir(parents=True, exist_ok=True)
         return self.plans_dir
@@ -139,9 +157,7 @@ class _Sandbox:
         """
         plans_dir = self.make_plans_dir()
         marker = plans_dir / f".materialized.{index:0{_HEX_DIGITS}x}"
-        marker.write_text(
-            f"plan: bundle-{index}\nversion: {version}\n", encoding="utf-8"
-        )
+        marker.write_text(f"plan: bundle-{index}\nversion: {version}\n", encoding="utf-8")
         return marker
 
     def many_marker_count(self) -> int:
@@ -170,9 +186,7 @@ class _Sandbox:
             source '{_LIB_DIR}/project_paths.sh'
             source '{_LIB_DIR}/discovery.sh'
             """) + body
-        return run_bash(
-            self.tmp_path, script, base_env=self.env(), cwd=self.workdir
-        )
+        return run_bash(self.tmp_path, script, base_env=self.env(), cwd=self.workdir)
 
     def compute_next_patch(self) -> BashResult:
         return self.run(f"discovery_compute_next_patch '{_PROJECT}'\n")
@@ -180,10 +194,9 @@ class _Sandbox:
 
 def _assert_slot(result: BashResult, expected: str, why: str) -> None:
     assert result.returncode == 0, _diagnostic(result)
-    assert result.stdout.strip() == expected, (
-        f"expected discovery_compute_next_patch to return {expected}: {why}\n"
-        + _diagnostic(result)
-    )
+    assert (
+        result.stdout.strip() == expected
+    ), f"expected discovery_compute_next_patch to return {expected}: {why}\n" + _diagnostic(result)
 
 
 class TestMarkerNamingTheCandidateTakesTheSlot:
@@ -211,12 +224,8 @@ class TestMarkerNamingTheCandidateTakesTheSlot:
             "markers matched (a listing pipe under pipefail takes SIGPIPE)",
         )
 
-    @pytest.mark.skipif(
-        os.geteuid() == 0, reason="root can read a mode-000 file, so no marker is unreadable"
-    )
-    def test_matching_marker_beside_an_unreadable_marker_skips_the_candidate(
-        self, tmp_path
-    ):
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root can read a mode-000 file, so no marker is unreadable")
+    def test_matching_marker_beside_an_unreadable_marker_skips_the_candidate(self, tmp_path):
         sandbox = _Sandbox(tmp_path)
         sandbox.add_marker(0, "v0.0.1")
         unreadable = sandbox.add_marker(1, "v0.0.9")
@@ -235,9 +244,7 @@ class TestMarkerNamingTheCandidateTakesTheSlot:
 
 
 class TestCandidateNotNamedByAnyMarkerIsFree:
-    def test_marker_naming_a_longer_version_with_the_same_digits_leaves_the_candidate_free(
-        self, tmp_path
-    ):
+    def test_marker_naming_a_longer_version_with_the_same_digits_leaves_the_candidate_free(self, tmp_path):
         sandbox = _Sandbox(tmp_path, last_released="v0.0.2")
         sandbox.add_marker(0, "v0.0.30")
 
@@ -292,4 +299,18 @@ class TestManyMarkerFixtureDefeatsAPipedListingCheck:
             "the many-marker fixture no longer makes a piped listing check "
             "lose its match under pipefail, so it cannot prove the marker "
             "condition is pipe-safe\n" + _diagnostic(result)
+        )
+
+
+class TestStartingVersionFromReleaseState:
+    def test_git_tree_without_a_matching_tag_starts_after_last_released(self, tmp_path):
+        sandbox = _Sandbox(tmp_path, last_released="v3.5.0")
+        sandbox.add_untagged_dev_tree()
+
+        _assert_slot(
+            sandbox.compute_next_patch(),
+            "v3.5.1",
+            "the dev tree holds no ai_v* tag, so the last released version is "
+            "release-state.md's v3.5.0 and the next patch is v3.5.1 -- v0.0.1 "
+            "means the resolver ignored the state file",
         )

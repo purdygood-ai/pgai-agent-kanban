@@ -44,7 +44,7 @@ if [[ ! -d "$KANBAN_ROOT" ]]; then
     exit 3
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/projects.sh
 source "${SCRIPT_DIR}/../lib/projects.sh"
 # shellcheck source=../lib/header_help.sh

@@ -132,20 +132,16 @@ import re
 import shlex
 import subprocess
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pgai_agent_kanban.api.validation import ComponentRefused, require_component
 from pgai_agent_kanban.cm import write_rc_state
 from pgai_agent_kanban.cm.read_state_field import read_state_field
+from pgai_agent_kanban.lib.dev_tree import project_dev_tree
 from pgai_agent_kanban.lib import branch_prefix as _branch_prefix
 from pgai_agent_kanban.lib import git_remote as _git_remote
-from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib import push_decision as _push_decision
 from pgai_agent_kanban.lib.error_contract import format_error_contract
-from pgai_agent_kanban.lib.project_cfg import (
-    project_cfg_file as _project_cfg_file,
-    read_cfg_key as _read_cfg_key,
-)
 from pgai_agent_kanban.lib.stdio import write_stderr as _write_stderr
 from pgai_agent_kanban.lib.stdio import write_stdout as _write_stdout
 from pgai_agent_kanban.ops.context import OpsContext
@@ -180,7 +176,7 @@ _FINISHED_STATES = ("DONE", "WONT-DO")
 _YES_ANSWERS = ("y", "yes")
 
 Writer = Callable[[str], None]
-Prompt = Callable[[str], Optional[str]]
+Prompt = Callable[[str], str | None]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -306,10 +302,9 @@ def _dev_tree_path(ctx: OpsContext, project: str) -> str:
     project_root = ctx.project_root(project)
     new_cfg = project_root / "project.cfg"
     old_cfg = project_root / "PROJECT.cfg"
-    if new_cfg.is_file():
-        value = ini.read_line_value(new_cfg, "project", "dev_tree_path") or ""
-    elif old_cfg.is_file():
-        value = _read_cfg_key(old_cfg, "project", "dev_tree_path")
+    if new_cfg.is_file() or old_cfg.is_file():
+        # The project's own tree only: an RC branch lives in no other.
+        value = project_dev_tree(project_root)
     else:
         # BLOCK-WORTHY (docs/blocking-site-census.md): with no project
         # configuration there is no repository to cancel the RC in.
@@ -352,7 +347,10 @@ def _run_git(repo: str, args: list[str]) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
             ["git", "-C", repo, *args],
-            capture_output=True, text=True, errors="replace", check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=False,
             stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError:
@@ -392,9 +390,7 @@ class _Git:
 # ---------------------------------------------------------------------------
 
 
-def pending_tasks(
-    ctx: OpsContext, project: str, version: str, err: Optional[Writer] = None
-) -> list[str]:
+def pending_tasks(ctx: OpsContext, project: str, version: str, err: Writer | None = None) -> list[str]:
     """``"<task id> (<state>)"`` for each task naming *version* that is not finished.
 
     A task is a candidate when its folder holds both ``status.md`` and a
@@ -447,10 +443,10 @@ def cancel_rc(
     *,
     yes: bool = False,
     force: bool = False,
-    prompt: Optional[Prompt] = None,
-    repo_root: Optional[str] = None,
-    out: Optional[Writer] = None,
-    err: Optional[Writer] = None,
+    prompt: Prompt | None = None,
+    repo_root: str | None = None,
+    out: Writer | None = None,
+    err: Writer | None = None,
 ) -> CancelOutcome:
     """Cancel *project*'s active RC *version* (see the module docstring).
 
@@ -514,7 +510,8 @@ def cancel_rc(
                 f"cancel-rc would delete the RC branch for {version} in project {project} and "
                 "reset its release-state.md, and the call carried no confirmation.",
                 installed_script_command(ctx.kanban_root, _SCRIPT, "--project", project, "--key", version),
-            ) + "\n",
+            )
+            + "\n",
         )
 
     # Decided before the repository is resolved, so an unresolved project's
@@ -586,9 +583,7 @@ def cancel_rc(
 
     local_exists = git.quiet("rev-parse", "--verify", f"refs/heads/{rc_branch}").returncode == 0
     # Only a project that pushes asks its remote; one that does not contacts none.
-    remote_exists = push and (
-        git.quiet("ls-remote", "--exit-code", "--heads", remote, rc_branch).returncode == 0
-    )
+    remote_exists = push and (git.quiet("ls-remote", "--exit-code", "--heads", remote, rc_branch).returncode == 0)
 
     if active == "none" and not local_exists and not remote_exists:
         warn_raw("INFO: RC cancellation already complete (idempotent run).\n")
@@ -737,7 +732,7 @@ def cancel_rc(
     return CancelOutcome(rc_branch, "cancelled", tuple(pending), reset_release_state)
 
 
-def _last_released(release_state: pathlib.Path) -> Optional[str]:
+def _last_released(release_state: pathlib.Path) -> str | None:
     """Return release-state.md's ``## Last Released`` value, keeping absent and empty apart.
 
     The section is read by :func:`read_section` with the release-state
@@ -747,13 +742,11 @@ def _last_released(release_state: pathlib.Path) -> Optional[str]:
     ``""`` when it holds no value, otherwise the value (which may be the
     literal ``none``).
     """
-    body = read_section(
-        release_state.read_text(encoding="utf-8"), "Last Released", exact_heading=True, comments=True
-    )
+    body = read_section(release_state.read_text(encoding="utf-8"), "Last Released", exact_heading=True, comments=True)
     return None if body is None else first_value_line(body)
 
 
-def _reset_release_state(release_state: pathlib.Path, last_released: Optional[str]) -> None:
+def _reset_release_state(release_state: pathlib.Path, last_released: str | None) -> None:
     """Reset the three RC fields to none, writing Last Released back unchanged.
 
     *last_released* is the field as ``_last_released`` read it: a value
@@ -773,9 +766,7 @@ def _reset_release_state(release_state: pathlib.Path, last_released: Optional[st
             "cancel_rc.write_failed", f"write_rc_state.py release-state: error: {exc}\n", exit_code=2
         ) from exc
     except OSError as exc:
-        raise CancelRcError(
-            "cancel_rc.write_failed", f"ERROR: could not rewrite {release_state}: {exc}\n"
-        ) from exc
+        raise CancelRcError("cancel_rc.write_failed", f"ERROR: could not rewrite {release_state}: {exc}\n") from exc
 
 
 def _rc_record_path(ctx: OpsContext, project: str, version: str) -> pathlib.Path:
@@ -790,7 +781,7 @@ def _archive_rc_record(ctx: OpsContext, project: str, version: str, say: Callabl
     """
     state_dir = ctx.project_root(project) / "release-state"
     record = str(_rc_record_path(ctx, project, version))
-    closed_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    closed_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -810,7 +801,7 @@ def _archive_rc_record(ctx: OpsContext, project: str, version: str, say: Callabl
 # ---------------------------------------------------------------------------
 
 
-def _stdin_prompt(question: str) -> Optional[str]:
+def _stdin_prompt(question: str) -> str | None:
     """Ask on stdin as bash ``read -r -p`` does; None when no full line arrives.
 
     The question is shown (on stderr) only when stdin is a terminal. An
@@ -861,7 +852,7 @@ def _cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run ``cancel_rc`` from the command line (see the module docstring).
 
     Prints the narration to stdout; a refusal's remaining text goes to
@@ -875,8 +866,12 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
     ctx = OpsContext(kanban_root=pathlib.Path(opts.kanban_root))
     try:
         cancel_rc(
-            ctx, opts.project, opts.key,
-            yes=opts.yes, force=opts.force, prompt=_stdin_prompt,
+            ctx,
+            opts.project,
+            opts.key,
+            yes=opts.yes,
+            force=opts.force,
+            prompt=_stdin_prompt,
             repo_root=opts.repo_root or None,
         )
     except CancelRcError as exc:

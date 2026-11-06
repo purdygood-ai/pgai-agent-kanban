@@ -450,8 +450,8 @@ wake_common_run() {
     # names the operator's stop, not an incidental budget reading.
     if wake_stop_file_present; then
       log "retry pass: stop file present at ${STOP_FILE} -- performing no retry for ${#_CONTENDED_PROJECTS[@]} contended project(s): ${_CONTENDED_PROJECTS[*]}"
-    elif (( _RETRY_ELAPSED >= MAX_RUNTIME_SECONDS )); then
-      log "retry pass: batch runtime budget already exhausted (elapsed=${_RETRY_ELAPSED}s, cap=${MAX_RUNTIME_SECONDS}s) -- performing no retry for ${#_CONTENDED_PROJECTS[@]} contended project(s): ${_CONTENDED_PROJECTS[*]}"
+    elif wd_batch_budget_reached "$_RETRY_ELAPSED"; then
+      log "retry pass: batch runtime budget already exhausted (elapsed=${_RETRY_ELAPSED}s, cap=$(wd_configured_max_runtime_seconds)s) -- performing no retry for ${#_CONTENDED_PROJECTS[@]} contended project(s): ${_CONTENDED_PROJECTS[*]}"
       _LOCK_DEFERRED_PROJECTS=("${_CONTENDED_PROJECTS[@]}")
     else
       log "retry pass: ${#_CONTENDED_PROJECTS[@]} project(s) were contended on the first pass, retrying: ${_CONTENDED_PROJECTS[*]}"
@@ -463,8 +463,8 @@ wake_common_run() {
           break
         fi
         _RETRY_ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))
-        if (( _RETRY_ELAPSED >= MAX_RUNTIME_SECONDS )); then
-          log "retry pass: batch runtime budget reached mid-retry (elapsed=${_RETRY_ELAPSED}s, cap=${MAX_RUNTIME_SECONDS}s) -- skipping remaining retries"
+        if wd_batch_budget_reached "$_RETRY_ELAPSED"; then
+          log "retry pass: batch runtime budget reached mid-retry (elapsed=${_RETRY_ELAPSED}s, cap=$(wd_configured_max_runtime_seconds)s) -- skipping remaining retries"
           _LOCK_DEFERRED_PROJECTS+=("${_CONTENDED_PROJECTS[@]:$_retry_index}")
           break
         fi

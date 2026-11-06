@@ -219,28 +219,37 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import pathlib
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, NamedTuple
 
 # The pgai_agent_kanban package sits one level up from pm-agent/ in the same
-# tree (the pm_status.py idiom), dev tree and live install alike; the
-# archive lookup there lists the archived task folders the scan reads, and
-# the section reader there reads every markdown field.
+# tree (the pm_status.py idiom), dev tree and live install alike; the task
+# readers there (task_tokens) walk the live and archived task folders and
+# read every markdown field, and env resolves the kanban root.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from pgai_agent_kanban.archive.lookup import task_dirs_with_archived  # noqa: E402
+from pgai_agent_kanban.env import resolve_kanban_root  # noqa: E402
 from pgai_agent_kanban.lib import token_pricing  # noqa: E402
-from pgai_agent_kanban.task_status import section_value  # noqa: E402
+from pgai_agent_kanban.metrics.task_tokens import (  # noqa: E402
+    README_MD,
+    all_days,
+    all_rc_versions,
+    is_captured,
+    is_new_schema,
+    load_tokens_json,
+    normalise_version,
+    read_agent,
+    read_field_from_markdown,
+    read_rc_version,
+    record_timestamp,
+    scan_tasks,
+    ts_in_day,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-TOKENS_JSON = "artifacts/tokens.json"
-README_MD = "README.md"
-STATUS_MD = "status.md"
-
 # The pricing table ships beside this module: <tree>/scripts/lib/ next to
 # <tree>/pm-agent/. In the live install <tree> is the kanban root; in a
 # source checkout it is the repository's team/ directory. The layout rule is
@@ -248,31 +257,6 @@ STATUS_MD = "status.md"
 # project's own repository is never consulted.
 PRICING_REL_PATH = token_pricing.PRICING_REL_PATH
 _OWN_TREE_ROOT = pathlib.Path(__file__).resolve().parent.parent
-
-# ---------------------------------------------------------------------------
-# Helpers: kanban root resolution
-# ---------------------------------------------------------------------------
-
-
-def resolve_kanban_root(override: str | None) -> pathlib.Path:
-    """Return the kanban root directory as an absolute Path.
-
-    Precedence: explicit override > PGAI_AGENT_KANBAN_ROOT_PATH (canonical) >
-    ~/pgai_agent_kanban.
-    """
-    if override:
-        p = pathlib.Path(override).expanduser().resolve()
-    else:
-        env = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "")
-        if env:
-            p = pathlib.Path(env).expanduser().resolve()
-        else:
-            p = pathlib.Path.home() / "pgai_agent_kanban"
-    if not p.is_dir():
-        print(f"ERROR: kanban root not found: {p}", file=sys.stderr)
-        sys.exit(1)
-    return p
-
 
 # ---------------------------------------------------------------------------
 # Helpers: pricing
@@ -283,6 +267,7 @@ _PRICING_WARNED = False
 
 # Track which model IDs have already triggered a "not found" warning (one per run).
 _MODEL_WARNED: set[str] = set()
+
 
 def _emit_legacy_fallback_warning(count: int) -> None:
     """
@@ -327,8 +312,7 @@ def load_pricing(install_root: pathlib.Path | None = None) -> dict[str, Any]:
         except (json.JSONDecodeError, OSError) as exc:
             if not _PRICING_WARNED:
                 print(
-                    f"WARNING: token_pricing.json is malformed ({path}): {exc}; "
-                    "cost_usd will be 0 for all tasks.",
+                    f"WARNING: token_pricing.json is malformed ({path}): {exc}; " "cost_usd will be 0 for all tasks.",
                     file=sys.stderr,
                 )
                 _PRICING_WARNED = True
@@ -336,9 +320,7 @@ def load_pricing(install_root: pathlib.Path | None = None) -> dict[str, Any]:
 
     if not _PRICING_WARNED:
         print(
-            "WARNING: token_pricing.json not found; "
-            "cost_usd will be 0 for all tasks. "
-            f"Expected at: {path}",
+            "WARNING: token_pricing.json not found; " "cost_usd will be 0 for all tasks. " f"Expected at: {path}",
             file=sys.stderr,
         )
         _PRICING_WARNED = True
@@ -347,6 +329,7 @@ def load_pricing(install_root: pathlib.Path | None = None) -> dict[str, Any]:
 
 class CategoryCosts(NamedTuple):
     """Per-category cost breakdown for a single token record."""
+
     input_cost_usd: float
     cache_creation_cost_usd: float
     cache_read_cost_usd: float
@@ -359,38 +342,6 @@ class CategoryCosts(NamedTuple):
 
 
 _ZERO_COSTS = CategoryCosts(0.0, 0.0, 0.0, 0.0)
-
-
-def is_new_schema(tok: dict[str, Any]) -> bool:
-    """
-    Return True when tok has the new-schema fields: total_cost_usd (float or int)
-    and model_usage (non-empty dict).
-
-    New schema has total_cost_usd and model_usage (non-empty dict).
-    Legacy schema has top-level model/input_tokens/output_tokens/cache_* fields
-    and no total_cost_usd or model_usage.
-    """
-    total_cost = tok.get("total_cost_usd")
-    model_usage = tok.get("model_usage")
-    return (
-        isinstance(total_cost, (int, float))
-        and isinstance(model_usage, dict)
-        and len(model_usage) > 0
-    )
-
-
-def is_captured(tok: dict[str, Any]) -> bool:
-    """
-    Return True when the tokens.json record represents a successful capture.
-
-    Returns False only when tok has an explicit ``captured: false`` field,
-    which is written by token_capture.sh when the agent exited without emitting
-    usage JSON (e.g. was killed mid-run).  Records that pre-date this field
-    (no ``captured`` key) are assumed to be successful captures.
-    """
-    val = tok.get("captured", True)
-    # Explicit False (not falsy-zero, not absent) means capture failed.
-    return val is not False
 
 
 def compute_cost(pricing: dict[str, Any], tok: dict[str, Any]) -> CategoryCosts:
@@ -446,15 +397,15 @@ def compute_cost(pricing: dict[str, Any], tok: dict[str, Any]) -> CategoryCosts:
             _MODEL_WARNED.add(model_key)
         return _ZERO_COSTS
 
-    input_tok     = int(tok.get("input_tokens", 0) or 0)
-    output_tok    = int(tok.get("output_tokens", 0) or 0)
-    cache_create  = int(tok.get("cache_creation_input_tokens", 0) or 0)
-    cache_read    = int(tok.get("cache_read_input_tokens", 0) or 0)
+    input_tok = int(tok.get("input_tokens", 0) or 0)
+    output_tok = int(tok.get("output_tokens", 0) or 0)
+    cache_create = int(tok.get("cache_creation_input_tokens", 0) or 0)
+    cache_read = int(tok.get("cache_read_input_tokens", 0) or 0)
 
-    input_cost         = input_tok    * float(model_rates.get("input_per_1m",            0)) / 1_000_000
-    cache_create_cost  = cache_create * float(model_rates.get("cache_creation_per_1m",   0)) / 1_000_000
-    cache_read_cost    = cache_read   * float(model_rates.get("cache_read_per_1m",        0)) / 1_000_000
-    output_cost        = output_tok   * float(model_rates.get("output_per_1m",            0)) / 1_000_000
+    input_cost = input_tok * float(model_rates.get("input_per_1m", 0)) / 1_000_000
+    cache_create_cost = cache_create * float(model_rates.get("cache_creation_per_1m", 0)) / 1_000_000
+    cache_read_cost = cache_read * float(model_rates.get("cache_read_per_1m", 0)) / 1_000_000
+    output_cost = output_tok * float(model_rates.get("output_per_1m", 0)) / 1_000_000
 
     return CategoryCosts(
         input_cost_usd=round(input_cost, 6),
@@ -462,160 +413,6 @@ def compute_cost(pricing: dict[str, Any], tok: dict[str, Any]) -> CategoryCosts:
         cache_read_cost_usd=round(cache_read_cost, 6),
         output_cost_usd=round(output_cost, 6),
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers: task discovery and reading
-# ---------------------------------------------------------------------------
-
-
-def read_field_from_markdown(text: str, heading: str) -> str | None:
-    """Return the value of the '## <heading>' section, or None.
-
-    The value is read by task_status.section_value -- the first non-blank
-    line of the section, HTML comments dropped and a bold wrapper removed.
-    An empty section reads as None rather than as the next section's text,
-    and a '## ' line inside a fenced code block is not a heading.
-
-    Returns None if the heading or a value line is not found.
-    """
-    return section_value(text, heading, fences=True) or None
-
-
-def load_tokens_json(task_dir: pathlib.Path) -> dict[str, Any] | None:
-    """
-    Load artifacts/tokens.json for a task directory.
-
-    Returns the parsed dict, or None if the file is absent (silent) or
-    malformed (with a stderr warning).
-    """
-    path = task_dir / TOKENS_JSON
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("top-level value is not a JSON object")
-        return data
-    except (json.JSONDecodeError, ValueError, OSError) as exc:
-        print(
-            f"WARNING: skipping malformed tokens.json for task {task_dir.name}: {exc}",
-            file=sys.stderr,
-        )
-        return None
-
-
-def read_rc_version(task_dir: pathlib.Path) -> str | None:
-    """
-    Read '## Release Version' from the task README.md.
-    Returns the raw string value (e.g. "v0.23.22") or None.
-    """
-    readme = task_dir / README_MD
-    if not readme.is_file():
-        return None
-    try:
-        text = readme.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    return read_field_from_markdown(text, "Release Version")
-
-
-def read_agent(task_dir: pathlib.Path) -> str:
-    """
-    Read the agent type for a task.
-
-    Priority:
-      1. status.md '## Agent' field (e.g. "coder (claude-sonnet-4-6)" -> "coder")
-      2. README.md '## Role' field (lowercased)
-      3. Task ID prefix: ROLE-YYYYMMDD-NNN-slug -> <role>
-    """
-    # 1. status.md Agent field
-    status = task_dir / STATUS_MD
-    if status.is_file():
-        try:
-            text = status.read_text(encoding="utf-8")
-            val = read_field_from_markdown(text, "Agent")
-            if val:
-                # Strip model suffix: "coder (claude-sonnet-4-6)" -> "coder"
-                return val.split("(")[0].strip().lower()
-        except OSError:
-            pass
-
-    # 2. README.md Role field
-    readme = task_dir / README_MD
-    if readme.is_file():
-        try:
-            text = readme.read_text(encoding="utf-8")
-            val = read_field_from_markdown(text, "Role")
-            if val:
-                return val.lower()
-        except OSError:
-            pass
-
-    # 3. Derive from task folder name: ROLE-YYYYMMDD-NNN-slug
-    parts = task_dir.name.split("-")
-    if len(parts) >= 1:
-        return parts[0].lower()
-    return "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Task scan
-# ---------------------------------------------------------------------------
-
-
-def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
-    """
-    Walk the tasks/ directory and collect metadata for every task that has
-    a tokens.json file. The project's archived task folders
-    (archive/<project>/tasks/<ID>/, for IDs with no live folder) are walked
-    too, merged with the live ones in task-ID order, so a roll-up rebuilt
-    after an archive run is the roll-up built before it.
-
-    Returns a list of records:
-      {
-        "task_id":    str,
-        "task_dir":   Path,
-        "rc_version": str | None,
-        "tokens":     dict,
-        "agent":      str,
-        "new_schema": bool,   -- True when total_cost_usd + model_usage present
-      }
-    """
-    records: list[dict[str, Any]] = []
-
-    for entry in task_dirs_with_archived(tasks_dir):
-        tokens = load_tokens_json(entry)
-        if tokens is None:
-            continue  # No tokens.json or malformed (warning already emitted)
-
-        rc_version = read_rc_version(entry)
-        agent = read_agent(entry)
-
-        records.append({
-            "task_id":    entry.name,
-            "task_dir":   entry,
-            "rc_version": rc_version,
-            "tokens":     tokens,
-            "agent":      agent,
-            "new_schema": is_new_schema(tokens),
-            "captured":   is_captured(tokens),
-        })
-
-    return records
-
-
-# ---------------------------------------------------------------------------
-# Version normalisation
-# ---------------------------------------------------------------------------
-
-
-def normalise_version(version: str) -> str:
-    """Ensure the version string starts with 'v'."""
-    version = version.strip()
-    if version and not version.startswith("v"):
-        return f"v{version}"
-    return version
 
 
 # ---------------------------------------------------------------------------
@@ -651,10 +448,7 @@ def build_rc_rollup(
     """
     rc_version = normalise_version(rc_version)
 
-    matching = [
-        r for r in records
-        if normalise_version(r.get("rc_version") or "") == rc_version
-    ]
+    matching = [r for r in records if normalise_version(r.get("rc_version") or "") == rc_version]
 
     tasks_array: list[dict[str, Any]] = []
     total_input = 0
@@ -678,23 +472,25 @@ def build_rc_rollup(
         # cost totals — their zeroed counts would silently under-report the gap.
         if not r.get("captured", True):
             total_uncaptured += 1
-            tasks_array.append({
-                "task_id":                  r["task_id"],
-                "agent":                    r["agent"],
-                "model":                    "unknown",
-                "input":                    0,
-                "output":                   0,
-                "cache_creation_tokens":    0,
-                "cache_read_tokens":        0,
-                "cost_usd":                 0.0,
-                "input_cost_usd":           0.0,
-                "cache_creation_cost_usd":  0.0,
-                "cache_read_cost_usd":      0.0,
-                "output_cost_usd":          0.0,
-                "invocations":              invocations,
-                "captured":                 False,
-                "reason":                   tok.get("reason", "no usage emitted"),
-            })
+            tasks_array.append(
+                {
+                    "task_id": r["task_id"],
+                    "agent": r["agent"],
+                    "model": "unknown",
+                    "input": 0,
+                    "output": 0,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cost_usd": 0.0,
+                    "input_cost_usd": 0.0,
+                    "cache_creation_cost_usd": 0.0,
+                    "cache_read_cost_usd": 0.0,
+                    "output_cost_usd": 0.0,
+                    "invocations": invocations,
+                    "captured": False,
+                    "reason": tok.get("reason", "no usage emitted"),
+                }
+            )
             continue
 
         if new_schema:
@@ -739,40 +535,42 @@ def build_rc_rollup(
         total_cost_accumulator += file_cost
         total_invocations += invocations
 
-        tasks_array.append({
-            "task_id":                  r["task_id"],
-            "agent":                    r["agent"],
-            "model":                    model,
-            "input":                    input_tok,
-            "output":                   output_tok,
-            "cache_creation_tokens":    cache_create,
-            "cache_read_tokens":        cache_read,
-            "cost_usd":                 round(file_cost, 6),
-            "input_cost_usd":           0.0 if new_schema else round(input_cost_usd, 6),
-            "cache_creation_cost_usd":  0.0 if new_schema else round(cache_creation_cost_usd, 6),
-            "cache_read_cost_usd":      0.0 if new_schema else round(cache_read_cost_usd, 6),
-            "output_cost_usd":          0.0 if new_schema else round(output_cost_usd, 6),
-            "invocations":              invocations,
-        })
+        tasks_array.append(
+            {
+                "task_id": r["task_id"],
+                "agent": r["agent"],
+                "model": model,
+                "input": input_tok,
+                "output": output_tok,
+                "cache_creation_tokens": cache_create,
+                "cache_read_tokens": cache_read,
+                "cost_usd": round(file_cost, 6),
+                "input_cost_usd": 0.0 if new_schema else round(input_cost_usd, 6),
+                "cache_creation_cost_usd": 0.0 if new_schema else round(cache_creation_cost_usd, 6),
+                "cache_read_cost_usd": 0.0 if new_schema else round(cache_read_cost_usd, 6),
+                "output_cost_usd": 0.0 if new_schema else round(output_cost_usd, 6),
+                "invocations": invocations,
+            }
+        )
 
-    shipped_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    shipped_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     payload: dict[str, Any] = {
-        "version":    rc_version,
+        "version": rc_version,
         "shipped_at": shipped_at,
-        "tasks":      tasks_array,
+        "tasks": tasks_array,
         "totals": {
-            "input_tokens":              total_input,
-            "output_tokens":             total_output,
-            "cache_creation_tokens":     total_cache_create,
-            "cache_read_tokens":         total_cache_read,
-            "cost_usd":                  round(total_cost_accumulator, 6),
-            "input_cost_usd":            round(total_input_cost, 6),
-            "cache_creation_cost_usd":   round(total_cache_create_cost, 6),
-            "cache_read_cost_usd":       round(total_cache_read_cost, 6),
-            "output_cost_usd":           round(total_output_cost, 6),
-            "invocations":               total_invocations,
-            "uncaptured_tasks":          total_uncaptured,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cache_creation_tokens": total_cache_create,
+            "cache_read_tokens": total_cache_read,
+            "cost_usd": round(total_cost_accumulator, 6),
+            "input_cost_usd": round(total_input_cost, 6),
+            "cache_creation_cost_usd": round(total_cache_create_cost, 6),
+            "cache_read_cost_usd": round(total_cache_read_cost, 6),
+            "output_cost_usd": round(total_output_cost, 6),
+            "invocations": total_invocations,
+            "uncaptured_tasks": total_uncaptured,
         },
     }
 
@@ -791,16 +589,16 @@ def build_rc_rollup(
 def _zero_agent_entry() -> dict[str, Any]:
     """Return an empty per-agent/per-model accumulator dict."""
     return {
-        "input":                    0,
-        "output":                   0,
-        "cache_creation_tokens":    0,
-        "cache_read_tokens":        0,
-        "cost_usd":                 0.0,
-        "input_cost_usd":           0.0,
-        "cache_creation_cost_usd":  0.0,
-        "cache_read_cost_usd":      0.0,
-        "output_cost_usd":          0.0,
-        "invocations":              0,
+        "input": 0,
+        "output": 0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.0,
+        "input_cost_usd": 0.0,
+        "cache_creation_cost_usd": 0.0,
+        "cache_read_cost_usd": 0.0,
+        "output_cost_usd": 0.0,
+        "invocations": 0,
     }
 
 
@@ -838,32 +636,19 @@ def build_day_rollup(
         print(f"ERROR: invalid day format '{day}' (expected YYYY-MM-DD)", file=sys.stderr)
         sys.exit(1)
 
-    def ts_in_day(ts_str: str | None) -> bool:
-        if not ts_str:
-            return False
-        try:
-            # Accept trailing Z or +HH:MM offset
-            clean = ts_str.rstrip("Z")
-            if "+" in clean:
-                clean = clean.split("+")[0]
-            dt = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
-            return dt.date() == day_obj
-        except ValueError:
-            return False
+    matching = [r for r in records if ts_in_day(record_timestamp(r), day_obj)]
 
-    matching = [r for r in records if ts_in_day(r["tokens"].get("timestamp"))]
-
-    total_input          = 0
-    total_output         = 0
-    total_cache_create   = 0
-    total_cache_read     = 0
-    total_input_cost     = 0.0
+    total_input = 0
+    total_output = 0
+    total_cache_create = 0
+    total_cache_read = 0
+    total_input_cost = 0.0
     total_cache_create_cost = 0.0
-    total_cache_read_cost   = 0.0
-    total_output_cost    = 0.0
-    total_invocations    = 0
+    total_cache_read_cost = 0.0
+    total_output_cost = 0.0
+    total_invocations = 0
     total_cost_accumulator = 0.0
-    total_uncaptured     = 0
+    total_uncaptured = 0
 
     # by_agent: { agent_name: accumulator_dict }
     by_agent: dict[str, dict[str, Any]] = {}
@@ -875,10 +660,10 @@ def build_day_rollup(
     rcs_seen: set[str] = set()
 
     for r in matching:
-        tok         = r["tokens"]
+        tok = r["tokens"]
         invocations = int(tok.get("invocations", 1) or 1)
-        agent       = r["agent"]
-        new_schema  = r["new_schema"]
+        agent = r["agent"]
+        new_schema = r["new_schema"]
 
         rc_ver = r.get("rc_version")
         if rc_ver:
@@ -903,9 +688,7 @@ def build_day_rollup(
             # -- Accumulate by_agent --
             if agent not in by_agent:
                 by_agent[agent] = _zero_agent_entry()
-            by_agent[agent]["cost_usd"] = round(
-                by_agent[agent]["cost_usd"] + file_cost, 6
-            )
+            by_agent[agent]["cost_usd"] = round(by_agent[agent]["cost_usd"] + file_cost, 6)
             by_agent[agent]["invocations"] += invocations
 
             # -- Accumulate by_model (one entry per model in model_usage) --
@@ -920,99 +703,85 @@ def build_day_rollup(
 
                 if model_name not in by_model:
                     by_model[model_name] = _zero_agent_entry()
-                by_model[model_name]["input"]                 += mu_input
-                by_model[model_name]["output"]                += mu_output
+                by_model[model_name]["input"] += mu_input
+                by_model[model_name]["output"] += mu_output
                 by_model[model_name]["cache_creation_tokens"] += mu_cache_create
-                by_model[model_name]["cache_read_tokens"]     += mu_cache_read
-                by_model[model_name]["cost_usd"] = round(
-                    by_model[model_name]["cost_usd"] + model_cost, 6
-                )
+                by_model[model_name]["cache_read_tokens"] += mu_cache_read
+                by_model[model_name]["cost_usd"] = round(by_model[model_name]["cost_usd"] + model_cost, 6)
                 by_model[model_name]["invocations"] += invocations
 
         else:
             # ---- LEGACY SCHEMA ----
-            input_tok    = int(tok.get("input_tokens", 0) or 0)
-            output_tok   = int(tok.get("output_tokens", 0) or 0)
+            input_tok = int(tok.get("input_tokens", 0) or 0)
+            output_tok = int(tok.get("output_tokens", 0) or 0)
             cache_create = int(tok.get("cache_creation_input_tokens", 0) or 0)
-            cache_read   = int(tok.get("cache_read_input_tokens", 0) or 0)
-            costs        = compute_cost(pricing, tok)
-            model        = str(tok.get("model", "unknown"))
+            cache_read = int(tok.get("cache_read_input_tokens", 0) or 0)
+            costs = compute_cost(pricing, tok)
+            model = str(tok.get("model", "unknown"))
 
-            total_input          += input_tok
-            total_output         += output_tok
-            total_cache_create   += cache_create
-            total_cache_read     += cache_read
-            total_input_cost     += costs.input_cost_usd
+            total_input += input_tok
+            total_output += output_tok
+            total_cache_create += cache_create
+            total_cache_read += cache_read
+            total_input_cost += costs.input_cost_usd
             total_cache_create_cost += costs.cache_creation_cost_usd
-            total_cache_read_cost   += costs.cache_read_cost_usd
-            total_output_cost    += costs.output_cost_usd
+            total_cache_read_cost += costs.cache_read_cost_usd
+            total_output_cost += costs.output_cost_usd
             total_cost_accumulator += costs.total_cost_usd
-            total_invocations    += invocations
+            total_invocations += invocations
 
             # -- Accumulate by_agent --
             if agent not in by_agent:
                 by_agent[agent] = _zero_agent_entry()
-            by_agent[agent]["input"]                   += input_tok
-            by_agent[agent]["output"]                  += output_tok
-            by_agent[agent]["cache_creation_tokens"]   += cache_create
-            by_agent[agent]["cache_read_tokens"]       += cache_read
-            by_agent[agent]["cost_usd"]                 = round(
-                by_agent[agent]["cost_usd"] + costs.total_cost_usd, 6
-            )
-            by_agent[agent]["input_cost_usd"]           = round(
-                by_agent[agent]["input_cost_usd"] + costs.input_cost_usd, 6
-            )
-            by_agent[agent]["cache_creation_cost_usd"]  = round(
+            by_agent[agent]["input"] += input_tok
+            by_agent[agent]["output"] += output_tok
+            by_agent[agent]["cache_creation_tokens"] += cache_create
+            by_agent[agent]["cache_read_tokens"] += cache_read
+            by_agent[agent]["cost_usd"] = round(by_agent[agent]["cost_usd"] + costs.total_cost_usd, 6)
+            by_agent[agent]["input_cost_usd"] = round(by_agent[agent]["input_cost_usd"] + costs.input_cost_usd, 6)
+            by_agent[agent]["cache_creation_cost_usd"] = round(
                 by_agent[agent]["cache_creation_cost_usd"] + costs.cache_creation_cost_usd, 6
             )
-            by_agent[agent]["cache_read_cost_usd"]      = round(
+            by_agent[agent]["cache_read_cost_usd"] = round(
                 by_agent[agent]["cache_read_cost_usd"] + costs.cache_read_cost_usd, 6
             )
-            by_agent[agent]["output_cost_usd"]          = round(
-                by_agent[agent]["output_cost_usd"] + costs.output_cost_usd, 6
-            )
-            by_agent[agent]["invocations"]             += invocations
+            by_agent[agent]["output_cost_usd"] = round(by_agent[agent]["output_cost_usd"] + costs.output_cost_usd, 6)
+            by_agent[agent]["invocations"] += invocations
 
             # -- Accumulate by_model --
             if model not in by_model:
                 by_model[model] = _zero_agent_entry()
-            by_model[model]["input"]                   += input_tok
-            by_model[model]["output"]                  += output_tok
-            by_model[model]["cache_creation_tokens"]   += cache_create
-            by_model[model]["cache_read_tokens"]       += cache_read
-            by_model[model]["cost_usd"]                 = round(
-                by_model[model]["cost_usd"] + costs.total_cost_usd, 6
-            )
-            by_model[model]["input_cost_usd"]           = round(
-                by_model[model]["input_cost_usd"] + costs.input_cost_usd, 6
-            )
-            by_model[model]["cache_creation_cost_usd"]  = round(
+            by_model[model]["input"] += input_tok
+            by_model[model]["output"] += output_tok
+            by_model[model]["cache_creation_tokens"] += cache_create
+            by_model[model]["cache_read_tokens"] += cache_read
+            by_model[model]["cost_usd"] = round(by_model[model]["cost_usd"] + costs.total_cost_usd, 6)
+            by_model[model]["input_cost_usd"] = round(by_model[model]["input_cost_usd"] + costs.input_cost_usd, 6)
+            by_model[model]["cache_creation_cost_usd"] = round(
                 by_model[model]["cache_creation_cost_usd"] + costs.cache_creation_cost_usd, 6
             )
-            by_model[model]["cache_read_cost_usd"]      = round(
+            by_model[model]["cache_read_cost_usd"] = round(
                 by_model[model]["cache_read_cost_usd"] + costs.cache_read_cost_usd, 6
             )
-            by_model[model]["output_cost_usd"]          = round(
-                by_model[model]["output_cost_usd"] + costs.output_cost_usd, 6
-            )
-            by_model[model]["invocations"]             += invocations
+            by_model[model]["output_cost_usd"] = round(by_model[model]["output_cost_usd"] + costs.output_cost_usd, 6)
+            by_model[model]["invocations"] += invocations
 
     payload: dict[str, Any] = {
-        "date":         day,
-        "project":      project,
-        "rcs_shipped":  sorted(rcs_seen),
+        "date": day,
+        "project": project,
+        "rcs_shipped": sorted(rcs_seen),
         "totals": {
-            "input_tokens":              total_input,
-            "output_tokens":             total_output,
-            "cache_creation_tokens":     total_cache_create,
-            "cache_read_tokens":         total_cache_read,
-            "cost_usd":                  round(total_cost_accumulator, 6),
-            "input_cost_usd":            round(total_input_cost, 6),
-            "cache_creation_cost_usd":   round(total_cache_create_cost, 6),
-            "cache_read_cost_usd":       round(total_cache_read_cost, 6),
-            "output_cost_usd":           round(total_output_cost, 6),
-            "invocations":               total_invocations,
-            "uncaptured_tasks":          total_uncaptured,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "cache_creation_tokens": total_cache_create,
+            "cache_read_tokens": total_cache_read,
+            "cost_usd": round(total_cost_accumulator, 6),
+            "input_cost_usd": round(total_input_cost, 6),
+            "cache_creation_cost_usd": round(total_cache_create_cost, 6),
+            "cache_read_cost_usd": round(total_cache_read_cost, 6),
+            "output_cost_usd": round(total_output_cost, 6),
+            "invocations": total_invocations,
+            "uncaptured_tasks": total_uncaptured,
         },
         "by_agent": by_agent,
         "by_model": by_model,
@@ -1023,38 +792,6 @@ def build_day_rollup(
     out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"[aggregate_tokens] Daily roll-up written: {out_path}", file=sys.stderr)
     return out_path
-
-
-# ---------------------------------------------------------------------------
-# --all mode helpers
-# ---------------------------------------------------------------------------
-
-
-def all_rc_versions(records: list[dict[str, Any]]) -> list[str]:
-    """Return a sorted list of distinct RC versions seen in the records."""
-    versions: set[str] = set()
-    for r in records:
-        rv = r.get("rc_version")
-        if rv:
-            versions.add(normalise_version(rv))
-    return sorted(versions)
-
-
-def all_days(records: list[dict[str, Any]]) -> list[str]:
-    """Return a sorted list of distinct UTC days seen in the records."""
-    days: set[str] = set()
-    for r in records:
-        ts_str = r["tokens"].get("timestamp")
-        if ts_str:
-            try:
-                clean = ts_str.rstrip("Z")
-                if "+" in clean:
-                    clean = clean.split("+")[0]
-                dt = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
-                days.add(dt.strftime("%Y-%m-%d"))
-            except ValueError:
-                pass
-    return sorted(days)
 
 
 # ---------------------------------------------------------------------------
@@ -1072,9 +809,7 @@ def main() -> None:
     including none of --rc/--day/--all).
     """
     parser = argparse.ArgumentParser(
-        description=(
-            "Aggregate per-task token usage into per-RC and per-day roll-ups."
-        ),
+        description=("Aggregate per-task token usage into per-RC and per-day roll-ups."),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -1110,7 +845,7 @@ def main() -> None:
     if not args.rc and not args.day and not args.all_rollups:
         parser.error("at least one of --rc, --day, or --all is required")
 
-    kanban_root = resolve_kanban_root(args.kanban_root)
+    kanban_root = resolve_kanban_root(args.kanban_root, home_default=True)
     project = args.project
 
     project_dir = kanban_root / "projects" / project
@@ -1140,8 +875,7 @@ def main() -> None:
         versions = all_rc_versions(records)
         days = all_days(records)
         print(
-            f"[aggregate_tokens] --all: building {len(versions)} RC roll-up(s)"
-            f" and {len(days)} daily roll-up(s).",
+            f"[aggregate_tokens] --all: building {len(versions)} RC roll-up(s)" f" and {len(days)} daily roll-up(s).",
             file=sys.stderr,
         )
         for ver in versions:

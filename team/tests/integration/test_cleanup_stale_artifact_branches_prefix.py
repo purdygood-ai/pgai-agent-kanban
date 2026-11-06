@@ -55,6 +55,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="cleanup-stale-artifact-branches-prefix")
 
+
 # ---------------------------------------------------------------------------
 # Path helpers -- resolve from this file's own location.
 # ---------------------------------------------------------------------------
@@ -65,9 +66,7 @@ _CLEANUP_SCRIPT = _TEAM_DIR / "scripts" / "cleanup-stale-artifact-only-branches.
 def _init_local_repo(repo_path: pathlib.Path) -> None:
     repo_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True
-    )
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True)
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo_path, check=True)
     (repo_path / "README.md").write_text("fixture\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=repo_path, check=True)
@@ -109,9 +108,12 @@ def _run_cleanup(
     base_env.pop("PGAI_PROJECT_ROOT", None)
     return subprocess.run(
         [
-            "bash", str(_CLEANUP_SCRIPT),
-            "--kanban-root", str(kanban_root),
-            "--project-root", str(project_root),
+            "bash",
+            str(_CLEANUP_SCRIPT),
+            "--kanban-root",
+            str(kanban_root),
+            "--project-root",
+            str(project_root),
         ],
         capture_output=True,
         text=True,
@@ -127,10 +129,7 @@ def test_auto_detects_rc_branch_for_ai_prefix(tmp_path: pathlib.Path) -> None:
     repo = tmp_path / "repo"
     _init_local_repo(repo)
     _create_branch(repo, "ai_rc/v1.2.3")
-    project_root = (
-        _build_kanban_root(tmp_path, "cleanup-test-ai", repo, "ai_")
-        / "projects" / "cleanup-test-ai"
-    )
+    project_root = _build_kanban_root(tmp_path, "cleanup-test-ai", repo, "ai_") / "projects" / "cleanup-test-ai"
 
     result = _run_cleanup(project_root.parent.parent, project_root, repo)
 
@@ -145,10 +144,7 @@ def test_auto_detects_rc_branch_for_a_non_ai_prefix(tmp_path: pathlib.Path) -> N
     repo = tmp_path / "repo"
     _init_local_repo(repo)
     _create_branch(repo, "test_rc/v4.5.6")
-    project_root = (
-        _build_kanban_root(tmp_path, "cleanup-test-other", repo, "test_")
-        / "projects" / "cleanup-test-other"
-    )
+    project_root = _build_kanban_root(tmp_path, "cleanup-test-other", repo, "test_") / "projects" / "cleanup-test-other"
 
     result = _run_cleanup(project_root.parent.parent, project_root, repo)
 
@@ -165,8 +161,7 @@ def test_auto_detects_bare_rc_branch_for_unprefixed_project(
     _init_local_repo(repo)
     _create_branch(repo, "rc/v7.8.9")
     project_root = (
-        _build_kanban_root(tmp_path, "cleanup-test-unprefixed", repo)
-        / "projects" / "cleanup-test-unprefixed"
+        _build_kanban_root(tmp_path, "cleanup-test-unprefixed", repo) / "projects" / "cleanup-test-unprefixed"
     )
 
     result = _run_cleanup(project_root.parent.parent, project_root, repo)
@@ -182,10 +177,7 @@ def test_exits_3_with_existing_remedy_when_nothing_resolves(
     existing 'Could not determine RC branch' remedy, unchanged."""
     repo = tmp_path / "repo"
     _init_local_repo(repo)
-    project_root = (
-        _build_kanban_root(tmp_path, "cleanup-test-none", repo, "ai_")
-        / "projects" / "cleanup-test-none"
-    )
+    project_root = _build_kanban_root(tmp_path, "cleanup-test-none", repo, "ai_") / "projects" / "cleanup-test-none"
 
     result = _run_cleanup(project_root.parent.parent, project_root, repo)
 
@@ -212,10 +204,14 @@ def test_explicit_rc_override_short_circuits_auto_detection(
     base_env.pop("PGAI_PROJECT_ROOT", None)
     result = subprocess.run(
         [
-            "bash", str(_CLEANUP_SCRIPT),
-            "--kanban-root", str(kanban_root),
-            "--project-root", str(project_root),
-            "--rc", "custom/override-branch",
+            "bash",
+            str(_CLEANUP_SCRIPT),
+            "--kanban-root",
+            str(kanban_root),
+            "--project-root",
+            str(project_root),
+            "--rc",
+            "custom/override-branch",
         ],
         capture_output=True,
         text=True,
@@ -224,6 +220,4 @@ def test_explicit_rc_override_short_circuits_auto_detection(
         timeout=30,
     )
 
-    assert "RC branch: custom/override-branch" in result.stdout, (
-        result.stdout + result.stderr
-    )
+    assert "RC branch: custom/override-branch" in result.stdout, result.stdout + result.stderr

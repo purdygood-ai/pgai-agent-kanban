@@ -38,9 +38,7 @@ _FIXTURES_DIR = _TEAM_DIR / "tests" / "fixtures"
 
 
 def _import_lint_module():
-    spec = importlib.util.spec_from_file_location(
-        "lint_test_anti_patterns", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_test_anti_patterns", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -74,12 +72,8 @@ def test_golden_comparison_with_inherited_env_is_flagged_once() -> None:
 
     # The finding must name the exact line the inherited-environment
     # construct sits on, not merely somewhere in the file.
-    env_lineno = next(
-        idx + 1 for idx, line in enumerate(lines) if "dict(os.environ)" in line
-    )
-    assert f"{path}:{env_lineno}:" in finding, (
-        f"expected finding to cite line {env_lineno}: {finding}"
-    )
+    env_lineno = next(idx + 1 for idx, line in enumerate(lines) if "dict(os.environ)" in line)
+    assert f"{path}:{env_lineno}:" in finding, f"expected finding to cite line {env_lineno}: {finding}"
 
 
 # ---------------------------------------------------------------------------
@@ -88,9 +82,7 @@ def test_golden_comparison_with_inherited_env_is_flagged_once() -> None:
 
 
 def test_inherited_env_without_golden_comparison_is_silent() -> None:
-    path, lines = _read_fixture_lines(
-        "fixture_inherited_env_without_golden_comparison.py"
-    )
+    path, lines = _read_fixture_lines("fixture_inherited_env_without_golden_comparison.py")
     findings = _lint._check_ap7(path, lines)
     assert findings == [], findings
 
@@ -125,12 +117,7 @@ def test_real_tree_has_zero_ap7_findings() -> None:
     for path in sorted(_TEAM_DIR.rglob("test_*.py")):
         if "__pycache__" in path.parts or "fixtures" in path.parts:
             continue
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines(
-            keepends=True
-        )
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
         all_findings.extend(_lint._check_ap7(path, lines))
 
-    assert all_findings == [], (
-        "Unexpected AP7 findings in the shipped test tree:\n"
-        + "\n".join(all_findings)
-    )
+    assert all_findings == [], "Unexpected AP7 findings in the shipped test tree:\n" + "\n".join(all_findings)

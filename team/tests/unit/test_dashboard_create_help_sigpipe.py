@@ -172,19 +172,16 @@ def test_help_output_names_every_accepted_flag() -> None:
     of the same shape."""
     result = subprocess.run(
         ["bash", str(_CREATE_SH), "--help"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         env=_run_env(),
         timeout=20,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"create.sh --help exited {result.returncode}; stderr:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"create.sh --help exited {result.returncode}; stderr:\n{result.stderr}"
     output = result.stdout
-    assert any(re.search(r"(?<![\w-])create\.sh", line) for line in output.splitlines()), (
-        "expected the usage text to name the script by its current name (create.sh)"
-    )
+    assert any(
+        re.search(r"(?<![\w-])create\.sh", line) for line in output.splitlines()
+    ), "expected the usage text to name the script by its current name (create.sh)"
     for flag in ("--no-tmux", "--print-schedule-floors", "--kanban-root", "--session"):
         assert flag in output, (
             f"create.sh --help does not name {flag!r} -- every flag the "
@@ -193,8 +190,4 @@ def test_help_output_names_every_accepted_flag() -> None:
 
 
 if __name__ == "__main__":  # pragma: no cover - manual debug entry point
-    sys.exit(
-        subprocess.call(
-            [sys.executable, "-m", "pytest", "-v", str(_THIS_FILE)]
-        )
-    )
+    sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-v", str(_THIS_FILE)]))

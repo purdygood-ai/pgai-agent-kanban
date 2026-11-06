@@ -126,9 +126,13 @@ def test_classifier_has_one_home() -> None:
     [
         (
             "pgai_agent_kanban.api.routers.board",
-            ["COLUMN_ORDER", "COLUMN_KINDS",
-             "get_active_rc_for_project", "get_target_version_for_item",
-             "intake_carried_names"],
+            [
+                "COLUMN_ORDER",
+                "COLUMN_KINDS",
+                "get_active_rc_for_project",
+                "get_target_version_for_item",
+                "intake_carried_names",
+            ],
         ),
         (
             "pgai_agent_kanban.api.routers.projects",
@@ -230,7 +234,8 @@ def _running_bug(project_dir: pathlib.Path) -> pathlib.Path:
 
 @pytest.mark.parametrize("closed_status", ["done", "wont-do", "duplicate"])
 def test_running_bug_listed_only_by_a_closed_bundle_is_carried(
-    tmp_path: pathlib.Path, closed_status: str,
+    tmp_path: pathlib.Path,
+    closed_status: str,
 ) -> None:
     bug = _running_bug(tmp_path)
     _bundle(tmp_path / "requirements", "v9.1.0-bugfix-bundle-20260101", closed_status, bug)
@@ -291,7 +296,6 @@ def _display_id(task_id: str) -> str:
     """The ``YYYYMMDD-NNN`` id column-render.sh draws for *task_id*."""
     date, seq = re.match(r"^[A-Z]+-(\d{8})-(\d+)-", task_id).groups()
     return f"{date}-{int(seq):03d}"
-
 
 
 def test_board_response_matches_golden(golden_root: pathlib.Path) -> None:
@@ -377,8 +381,17 @@ def _column_render_cli(env: dict[str, str], scratch: pathlib.Path, pane: str, co
     scratch.mkdir()
     root = pathlib.Path(env["PGAI_AGENT_KANBAN_ROOT_PATH"])
     return run_dashboard_script(
-        ["bash", str(root / "scripts" / "dashboard" / "column-render.sh"),
-         pane, "none", "--kanban-root", str(root), "--all-projects", "--column-type", column],
+        [
+            "bash",
+            str(root / "scripts" / "dashboard" / "column-render.sh"),
+            pane,
+            "none",
+            "--kanban-root",
+            str(root),
+            "--all-projects",
+            "--column-type",
+            column,
+        ],
         env={**env, "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch)},
         timeout=60,
     )
@@ -516,9 +529,21 @@ def test_renderer_draws_wont_do_and_done_rows_alike(tmp_path: pathlib.Path) -> N
     (tmp_path / "scratch").mkdir()
 
     result = run_dashboard_script(
-        ["bash", str(root / "scripts" / "dashboard" / "column-render.sh"),
-         "queue", "none", "10", "60", "--label", "CODER",
-         "--kanban-root", str(root), "--all-projects", "--column-type", "coder"],
+        [
+            "bash",
+            str(root / "scripts" / "dashboard" / "column-render.sh"),
+            "queue",
+            "none",
+            "10",
+            "60",
+            "--label",
+            "CODER",
+            "--kanban-root",
+            str(root),
+            "--all-projects",
+            "--column-type",
+            "coder",
+        ],
         env=env,
         timeout=60,
     )

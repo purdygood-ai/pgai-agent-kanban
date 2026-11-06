@@ -106,7 +106,6 @@ from pgai_agent_kanban.ops.context import OpsContext  # noqa: E402
 from pgai_agent_kanban.ops.errors import Ambiguous, NotFound, OpsError  # noqa: E402
 from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Public result type
 # ---------------------------------------------------------------------------
@@ -201,9 +200,7 @@ def resolve_item(
     _require_plain_key(key, project_root)
 
     if not project_root.is_dir():
-        raise OpsError(
-            f"resolve_item: project root does not exist or is not a directory: {project_root}"
-        )
+        raise OpsError(f"resolve_item: project root does not exist or is not a directory: {project_root}")
 
     live = _search_tree(project_root, key)
     if live is not None:
@@ -223,7 +220,7 @@ def resolve_item(
     )
 
 
-def _search_tree(root: pathlib.Path, key: str, *, archived: bool = False) -> "ResolveResult | None":
+def _search_tree(root: pathlib.Path, key: str, *, archived: bool = False) -> ResolveResult | None:
     """Resolve KEY in one project tree (live or archived); ``None`` when nothing matches.
 
     Runs the four resolution steps of :func:`resolve_item` over *root*.
@@ -243,9 +240,7 @@ def _search_tree(root: pathlib.Path, key: str, *, archived: bool = False) -> "Re
         task_dir = task_matches[0]
         status_file = task_dir / "status.md"
         if not status_file.is_file():
-            raise OpsError(
-                f"resolve_item: task directory found but status.md is missing: {status_file}"
-            )
+            raise OpsError(f"resolve_item: task directory found but status.md is missing: {status_file}")
         require_task_document_inside(status_file, task_dir)
         state = _read_task_state(status_file)
         result = ResolveResult(item_type="task", path=task_dir, state=state, archived=archived)
@@ -286,7 +281,7 @@ def _search_tree(root: pathlib.Path, key: str, *, archived: bool = False) -> "Re
     return None
 
 
-def _archive_tree(ctx: OpsContext, project: str, key: str) -> "pathlib.Path | None":
+def _archive_tree(ctx: OpsContext, project: str, key: str) -> pathlib.Path | None:
     """The project's archive tree to search for KEY, or ``None`` when there is none to search.
 
     ``None`` when the archive directory does not exist, when *project* is
@@ -353,9 +348,7 @@ def resolve_project_name(ctx: OpsContext, name: str) -> str:
     try:
         entries = ini.projects_registry(ctx.kanban_root)
     except ini.IniError as exc:
-        raise OpsError(
-            f"resolve_project_name: cannot read the project registry {cfg}: {exc}"
-        ) from exc
+        raise OpsError(f"resolve_project_name: cannot read the project registry {cfg}: {exc}") from exc
     names = [entry.name for entry in sorted(entries, key=lambda entry: entry.section_index)]
 
     if name in names:
@@ -378,11 +371,13 @@ def resolve_project_name(ctx: OpsContext, name: str) -> str:
         # rather than concatenated into a path, exactly as the bash resolver
         # refuses.
         # CENSUS-ANCHOR: ops-resolve-project-not-found-01
-        raise NotFound(format_error_contract(
-            "project_resolve.not_found",
-            f"pp_resolve_project_name: no project matches '{name}' in {cfg}.",
-            remedy,
-        ))
+        raise NotFound(
+            format_error_contract(
+                "project_resolve.not_found",
+                f"pp_resolve_project_name: no project matches '{name}' in {cfg}.",
+                remedy,
+            )
+        )
 
     # BLOCK-WORTHY (docs/blocking-site-census.md): picking one of several
     # prefix matches would risk operating on the wrong project's data, so
@@ -391,8 +386,7 @@ def resolve_project_name(ctx: OpsContext, name: str) -> str:
     raise Ambiguous(
         format_error_contract(
             "project_resolve.ambiguous",
-            f"pp_resolve_project_name: '{name}' matches multiple registered projects: "
-            f"{', '.join(matches)}.",
+            f"pp_resolve_project_name: '{name}' matches multiple registered projects: " f"{', '.join(matches)}.",
             f"Re-run with a longer, unambiguous prefix or the full name, e.g. --project {matches[0]}.",
         ),
         candidates=matches,
@@ -463,13 +457,15 @@ def _require_inside(path: pathlib.Path, tree: pathlib.Path) -> None:
     # remove, so one that lies outside the project tree is never handed to
     # them, nor read for show.
     # CENSUS-ANCHOR: ops-resolve-path-outside-tree-01
-    raise OpsError(format_error_contract(
-        "resolve_item.path_outside_tree",
-        f"resolve_item: {path} resolves to {real}, outside the tree it was found in "
-        f"({real_tree}); an item is only read, written or deleted inside its own "
-        "project tree. Nothing was read, written or run.",
-        f"ls -ld {shlex.quote(str(path))}",
-    ))
+    raise OpsError(
+        format_error_contract(
+            "resolve_item.path_outside_tree",
+            f"resolve_item: {path} resolves to {real}, outside the tree it was found in "
+            f"({real_tree}); an item is only read, written or deleted inside its own "
+            "project tree. Nothing was read, written or run.",
+            f"ls -ld {shlex.quote(str(path))}",
+        )
+    )
 
 
 def require_task_document_inside(document: pathlib.Path, task_dir: pathlib.Path) -> None:
@@ -494,7 +490,7 @@ def _collect_prefix_matches(
     suffix: str,
     is_dir: bool,
     *,
-    tree: "pathlib.Path | None" = None,
+    tree: pathlib.Path | None = None,
 ) -> list[pathlib.Path]:
     """Collect sorted matching paths for KEY under BASE_DIR.
 
@@ -750,8 +746,7 @@ def _cli_search_direct(project_root: pathlib.Path, key: str) -> int:
         state = _read_task_state(status_file)
         if len(task_matches) > 1:
             print(
-                f"resolve_item: ambiguous key {key!r} — {len(task_matches)} task directories "
-                f"match in tasks/:",
+                f"resolve_item: ambiguous key {key!r} — {len(task_matches)} task directories " f"match in tasks/:",
                 file=sys.stderr,
             )
             for m in task_matches:

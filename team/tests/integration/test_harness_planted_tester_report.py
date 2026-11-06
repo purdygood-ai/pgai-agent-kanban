@@ -100,10 +100,7 @@ def _build_wake_harness_root(parent: pathlib.Path) -> tuple[pathlib.Path, pathli
         encoding="utf-8",
     )
     (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\n"
-        "priority=1\n"
-        "description=planted report fixture project\n"
-        "enabled=true\n",
+        f"[project:{_PROJECT}]\n" "priority=1\n" "description=planted report fixture project\n" "enabled=true\n",
         encoding="utf-8",
     )
     (proj / "project.cfg").write_text(
@@ -117,19 +114,12 @@ def _build_wake_harness_root(parent: pathlib.Path) -> tuple[pathlib.Path, pathli
         encoding="utf-8",
     )
     (proj / "release-state.md").write_text(
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n" "## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
     for agent in ("coder", "pm", "writer", "cm", "bug", "priority"):
-        (queues / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n", encoding="utf-8"
-        )
-    (queues / "tester_backlog.md").write_text(
-        f"# TESTER Backlog\n\n- [ ] {_TASK_ID}\n", encoding="utf-8"
-    )
+        (queues / f"{agent}_backlog.md").write_text(f"# {agent.upper()} Backlog\n", encoding="utf-8")
+    (queues / "tester_backlog.md").write_text(f"# TESTER Backlog\n\n- [ ] {_TASK_ID}\n", encoding="utf-8")
 
     (task_dir / "README.md").write_text(
         f"# Task: verify the planted report\n\n"
@@ -189,8 +179,7 @@ def test_wake_harness_plants_a_report_the_parser_reads_as_ship(tmp_path: pathlib
 
     report_path = proj / "tasks" / _TASK_ID / "artifacts" / "report.md"
     assert report_path.is_file(), (
-        f"wake/harness.sh planted no report at {report_path}; the task may not "
-        f"have been dispatched.\n{log}"
+        f"wake/harness.sh planted no report at {report_path}; the task may not " f"have been dispatched.\n{log}"
     )
 
     report = parse_report(report_path)
@@ -217,9 +206,7 @@ def _require_git() -> None:
     require_binary("git", label="harness-planted-tester-report")
 
 
-def test_helloworld_flow_plants_a_report_the_parser_reads_as_ship(
-    tmp_path: pathlib.Path, _require_git: None
-) -> None:
+def test_helloworld_flow_plants_a_report_the_parser_reads_as_ship(tmp_path: pathlib.Path, _require_git: None) -> None:
     """helloworld-flow-check.sh's verify stage plants a report whose
     recommendation parses as SHIP, with its own summary after the head."""
     temp_root = tmp_path / "pgai_kanban_tmp"
@@ -244,8 +231,7 @@ def test_helloworld_flow_plants_a_report_the_parser_reads_as_ship(
 
     reports = sorted(temp_root.rglob("TESTER-*/artifacts/report.md"))
     assert len(reports) == 1, (
-        f"Expected exactly one planted TESTER report under {temp_root}; "
-        f"found {[str(p) for p in reports]}.\n{log}"
+        f"Expected exactly one planted TESTER report under {temp_root}; " f"found {[str(p) for p in reports]}.\n{log}"
     )
     report_path = reports[0]
 

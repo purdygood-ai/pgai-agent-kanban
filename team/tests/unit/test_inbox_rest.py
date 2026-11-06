@@ -52,9 +52,7 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     """A sandbox kanban root with one registered project directory."""
     sandbox = tmp_path / "root"
     (sandbox / "projects" / _PROJECT).mkdir(parents=True)
-    (sandbox / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8"
-    )
+    (sandbox / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8")
     return sandbox
 
 
@@ -229,7 +227,12 @@ def test_post_answer_is_what_the_cli_prints_for_the_same_entry(root, client, tmp
 @pytest.mark.parametrize(
     ("body_extra", "cli_args", "error", "status"),
     [
-        ({"id": "INBOX-0099", "answer": "keep"}, ("--id", "INBOX-0099", "--answer", "keep"), "inbox.unknown_entry", 404),
+        (
+            {"id": "INBOX-0099", "answer": "keep"},
+            ("--id", "INBOX-0099", "--answer", "keep"),
+            "inbox.unknown_entry",
+            404,
+        ),
         ({"id": "zz", "answer": "keep"}, ("--id", "zz", "--answer", "keep"), "inbox.bad_entry_id", 409),
         ({"id": "INBOX-0001", "answer": "  "}, ("--id", "INBOX-0001", "--answer", "  "), "inbox.empty_answer", 409),
         ({"id": "INBOX-0001"}, ("--id", "INBOX-0001"), "inbox.empty_answer", 409),

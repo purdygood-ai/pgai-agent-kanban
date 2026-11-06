@@ -160,8 +160,10 @@ _GUARD_SCRIPTS = [
 
 # Each guard's summary row name, in the same order.
 _GUARD_ROWS = [
-    "guard: env-bootstrap", "guard: operator-verb-docs",
-    "guard: dashboard-window-docs", "guard: docs-citations",
+    "guard: env-bootstrap",
+    "guard: operator-verb-docs",
+    "guard: dashboard-window-docs",
+    "guard: docs-citations",
 ]
 
 # A guard stand-in that finds something: logs its run, prints one finding
@@ -267,11 +269,14 @@ def _build_tree(tmp_path: pathlib.Path, *, real_engine: bool) -> pathlib.Path:
             (team / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(_TEAM_DIR / relative, team / relative)
     else:
-        _write(team, {
-            "pgai_agent_kanban/__init__.py": "",
-            "pgai_agent_kanban/testing/__init__.py": "",
-            "pgai_agent_kanban/testing/pre_merge.py": _STUB_ENGINE,
-        })
+        _write(
+            team,
+            {
+                "pgai_agent_kanban/__init__.py": "",
+                "pgai_agent_kanban/testing/__init__.py": "",
+                "pgai_agent_kanban/testing/pre_merge.py": _STUB_ENGINE,
+            },
+        )
     for config in _RUNNER_CONFIG.values():
         (team / config["test_dir"]).mkdir(parents=True, exist_ok=True)
     return repo
@@ -281,15 +286,20 @@ def _git(repo: pathlib.Path, home: pathlib.Path, *args: str) -> None:
     env = build_scrubbed_env(
         home_dir=home,
         extra_env={
-            "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
-            "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+            "GIT_AUTHOR_NAME": "fixture",
+            "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+            "GIT_COMMITTER_NAME": "fixture",
+            "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
         },
     )
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True, env=env, timeout=60)
 
 
 def _build_git_fixture(
-    tmp_path: pathlib.Path, home: pathlib.Path, *, greet_change: str,
+    tmp_path: pathlib.Path,
+    home: pathlib.Path,
+    *,
+    greet_change: str,
     stale_operator_verb_docs: bool = False,
 ) -> pathlib.Path:
     """The real-engine tree as a git repository: the base on the RC branch,
@@ -311,17 +321,19 @@ def _build_git_fixture(
         "    assert 'hello' in pathlib.Path('scripts/greet.sh').read_text(encoding='utf-8')\n"
     )
     never_collected = (
-        "def test_not_affected():\n"
-        "    assert False, 'collected a test file the change does not affect'\n"
+        "def test_not_affected():\n" "    assert False, 'collected a test file the change does not affect'\n"
     )
-    _write(team, {
-        "scripts/greet.sh": _GREET_BASE,
-        "tests/unit/test_package_modules_run_by_path.py": _BY_PATH_STUB,
-        "tests/unit/test_greet.py": asserts_hello,
-        "tests/unit/test_untouched.py": never_collected,
-        "tests/integration/test_greet_flow.py": asserts_hello,
-        "tests/integration/test_untouched_flow.py": never_collected,
-    })
+    _write(
+        team,
+        {
+            "scripts/greet.sh": _GREET_BASE,
+            "tests/unit/test_package_modules_run_by_path.py": _BY_PATH_STUB,
+            "tests/unit/test_greet.py": asserts_hello,
+            "tests/unit/test_untouched.py": never_collected,
+            "tests/integration/test_greet_flow.py": asserts_hello,
+            "tests/integration/test_untouched_flow.py": never_collected,
+        },
+    )
     _write(repo, {".gitignore": "__pycache__/\n.pytest_cache/\n"})
     _git(repo, home, "init", "-q", "-b", _RC_BRANCH)
     _git(repo, home, "add", "-A")
@@ -354,7 +366,11 @@ class _Sandbox:
         (self.kanban_root / "kanban.cfg").write_text(f"[testing]\n{testing_cfg}", encoding="utf-8")
 
     def run(
-        self, repo: pathlib.Path, runner_name: str, *args: str, engine_exit: int = 0,
+        self,
+        repo: pathlib.Path,
+        runner_name: str,
+        *args: str,
+        engine_exit: int = 0,
     ) -> subprocess.CompletedProcess:
         env = build_scrubbed_env(
             home_dir=self.home,
@@ -404,8 +420,14 @@ def _describe(result: subprocess.CompletedProcess) -> str:
 
 def _expected_argv(repo: pathlib.Path, runner_name: str, *, cap: str, workers: str) -> list[str]:
     return [
-        "--repo", os.path.realpath(repo), "--suite", _RUNNER_CONFIG[runner_name]["suite"],
-        "--cap", cap, "--workers", workers,
+        "--repo",
+        os.path.realpath(repo),
+        "--suite",
+        _RUNNER_CONFIG[runner_name]["suite"],
+        "--cap",
+        cap,
+        "--workers",
+        workers,
     ]
 
 
@@ -446,13 +468,13 @@ def test_unit_help_names_every_always_run_guard_under_pre_merge(tmp_path: pathli
     result = sandbox.run(repo, "run-unit-tests.sh", "--help")
 
     assert result.returncode == 0, _describe(result)
-    section = result.stdout[result.stdout.index("  --pre-merge "):result.stdout.index("  --base REF ")]
+    section = result.stdout[result.stdout.index("  --pre-merge ") : result.stdout.index("  --base REF ")]
     flowed = " ".join(section.split())
     for guard in pre_merge.WHOLE_TREE_GUARDS:
         assert guard.name in flowed, f"--pre-merge help does not name the {guard.name} guard\n{section}"
-        assert pathlib.PurePath(guard.script).relative_to("scripts").as_posix() in flowed, (
-            f"--pre-merge help does not name {guard.script}\n{section}"
-        )
+        assert (
+            pathlib.PurePath(guard.script).relative_to("scripts").as_posix() in flowed
+        ), f"--pre-merge help does not name {guard.script}\n{section}"
     assert f"{pre_merge.GUARD_BUDGET_SECONDS:.1f}s budget" in flowed, section
 
 
@@ -501,7 +523,11 @@ def test_pre_merge_passes_base_through(runner_name: str, tmp_path: pathlib.Path)
     ],
 )
 def test_pre_merge_cap_and_workers_come_from_testing_config(
-    testing_cfg: str, extra_args: list[str], cap: str, workers: str, tmp_path: pathlib.Path,
+    testing_cfg: str,
+    extra_args: list[str],
+    cap: str,
+    workers: str,
+    tmp_path: pathlib.Path,
 ) -> None:
     repo = _build_tree(tmp_path, real_engine=False)
     sandbox = _Sandbox(tmp_path, testing_cfg=testing_cfg)
@@ -521,7 +547,9 @@ def test_pre_merge_cap_and_workers_come_from_testing_config(
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
 @pytest.mark.parametrize("engine_exit", [0, 1, 2])
 def test_pre_merge_exit_code_is_the_engines_and_lands_in_its_own_exit_file(
-    runner_name: str, engine_exit: int, tmp_path: pathlib.Path,
+    runner_name: str,
+    engine_exit: int,
+    tmp_path: pathlib.Path,
 ) -> None:
     repo = _build_tree(tmp_path, real_engine=False)
     sandbox = _Sandbox(tmp_path)
@@ -531,14 +559,15 @@ def test_pre_merge_exit_code_is_the_engines_and_lands_in_its_own_exit_file(
     assert result.returncode == engine_exit, _describe(result)
     assert sandbox.exit_file(runner_name).read_text(encoding="utf-8") == f"{engine_exit}\n"
     other = "run-integration-tests.sh" if runner_name == "run-unit-tests.sh" else "run-unit-tests.sh"
-    assert not sandbox.exit_file(other).exists(), (
-        f"{runner_name} wrote the other runner's {_RUNNER_CONFIG[other]['exit_file']}"
-    )
+    assert not sandbox.exit_file(
+        other
+    ).exists(), f"{runner_name} wrote the other runner's {_RUNNER_CONFIG[other]['exit_file']}"
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
 def test_pre_merge_runs_no_gate_and_creates_no_certification_or_targeted_file(
-    runner_name: str, tmp_path: pathlib.Path,
+    runner_name: str,
+    tmp_path: pathlib.Path,
 ) -> None:
     repo = _build_tree(tmp_path, real_engine=False)
     sandbox = _Sandbox(tmp_path)
@@ -556,7 +585,8 @@ def test_pre_merge_runs_no_gate_and_creates_no_certification_or_targeted_file(
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
 def test_pre_merge_leaves_existing_certification_and_targeted_files_untouched(
-    runner_name: str, tmp_path: pathlib.Path,
+    runner_name: str,
+    tmp_path: pathlib.Path,
 ) -> None:
     repo = _build_tree(tmp_path, real_engine=False)
     sandbox = _Sandbox(tmp_path)
@@ -583,8 +613,12 @@ def test_pre_merge_leaves_existing_certification_and_targeted_files_untouched(
 _REFUSAL_CASES = [
     pytest.param(["--pre-merge", "--files", "{named}"], "pre-merge-incompatible-flags", "--files", id="with-files"),
     pytest.param(["--coverage", "--pre-merge"], "pre-merge-incompatible-flags", "--coverage", id="with-coverage"),
-    pytest.param(["--pre-merge", "--quarantined"], "pre-merge-incompatible-flags", "--quarantined", id="with-quarantined"),
-    pytest.param(["--pre-merge", "--reuse-if-green"], "pre-merge-incompatible-flags", "--reuse-if-green", id="with-reuse"),
+    pytest.param(
+        ["--pre-merge", "--quarantined"], "pre-merge-incompatible-flags", "--quarantined", id="with-quarantined"
+    ),
+    pytest.param(
+        ["--pre-merge", "--reuse-if-green"], "pre-merge-incompatible-flags", "--reuse-if-green", id="with-reuse"
+    ),
     pytest.param(["--pre-merge", "--base"], "pre-merge-base-missing", "--base needs a git ref", id="base-no-ref"),
     pytest.param(["--pre-merge", "--base", "--verbose"], "pre-merge-base-missing", "'--verbose'", id="base-dash-value"),
     pytest.param(["--base", "ai_main"], "base-without-pre-merge", "without --pre-merge", id="base-alone"),
@@ -594,7 +628,11 @@ _REFUSAL_CASES = [
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
 @pytest.mark.parametrize(("argv", "key_suffix", "message_names"), _REFUSAL_CASES)
 def test_pre_merge_refusals_speak_the_dual_channel_contract(
-    runner_name: str, argv: list[str], key_suffix: str, message_names: str, tmp_path: pathlib.Path,
+    runner_name: str,
+    argv: list[str],
+    key_suffix: str,
+    message_names: str,
+    tmp_path: pathlib.Path,
 ) -> None:
     repo = _build_tree(tmp_path, real_engine=False)
     named = f"{_RUNNER_CONFIG[runner_name]['test_dir']}/test_named.py"
@@ -609,16 +647,16 @@ def test_pre_merge_refusals_speak_the_dual_channel_contract(
     message = [ln for ln in lines if ln.startswith("message: ")]
     remedy = [ln for ln in lines if ln.startswith("remedy:  ")]
     assert message and message_names in message[0], _describe(result)
-    assert remedy and f'{runner_name}" --pre-merge' in remedy[0], (
-        "the remedy must be a corrected pre-merge run of this runner\n" + _describe(result)
-    )
+    assert (
+        remedy and f'{runner_name}" --pre-merge' in remedy[0]
+    ), "the remedy must be a corrected pre-merge run of this runner\n" + _describe(result)
     assert "<" not in remedy[0], "a remedy must carry no angle-bracket placeholder"
     assert sandbox.engine_calls() == [], "a refused run must not start the engine"
     assert sandbox.gates_run() == [], "a refused run must refuse before any gate runs"
     if "--pre-merge" in argv:
-        assert sandbox.exit_file(runner_name).read_text(encoding="utf-8") == "1\n", (
-            "a refused pre-merge run records its exit code in its own exit file"
-        )
+        assert (
+            sandbox.exit_file(runner_name).read_text(encoding="utf-8") == "1\n"
+        ), "a refused pre-merge run records its exit code in its own exit file"
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
@@ -629,8 +667,8 @@ def test_pre_merge_refuses_a_malformed_cap(runner_name: str, tmp_path: pathlib.P
     result = sandbox.run(repo, runner_name, "--pre-merge")
 
     assert result.returncode == 1, _describe(result)
-    assert "error:   config_loader.testing.invalid_pre_merge_affected_cap" in result.stderr.splitlines(), (
-        _describe(result)
+    assert "error:   config_loader.testing.invalid_pre_merge_affected_cap" in result.stderr.splitlines(), _describe(
+        result
     )
     assert sandbox.engine_calls() == [], "a malformed cap must stop the run before the engine starts"
     assert sandbox.exit_file(runner_name).read_text(encoding="utf-8") == "1\n"
@@ -652,14 +690,21 @@ def test_unit_pre_merge_runs_by_path_ratchet_lints_guards_and_affected_tests(tmp
     assert "pre-merge summary" in out, _describe(result)
     rows = [m.group("name", "verdict") for m in map(_SUMMARY_ROW_RE.match, out.splitlines()) if m]
     assert rows == [
-        ("by-path", "PASS"), ("lint: inline-python", "PASS"), ("lint: python-duplicates", "PASS"),
-        ("lint: engine-size", "PASS"), ("lint: api-route-impl", "PASS"),
-        ("lint: echo-pipe-grep-q", "PASS"), ("lint: section-parsers", "PASS"),
+        ("by-path", "PASS"),
+        ("lint: inline-python", "PASS"),
+        ("lint: python-duplicates", "PASS"),
+        ("lint: engine-size", "PASS"),
+        ("lint: api-route-impl", "PASS"),
+        ("lint: echo-pipe-grep-q", "PASS"),
+        ("lint: section-parsers", "PASS"),
         ("lint: tracked-ignored", "PASS"),
-        *((row, "PASS") for row in _GUARD_ROWS), ("affected tests", "PASS"),
+        *((row, "PASS") for row in _GUARD_ROWS),
+        ("affected tests", "PASS"),
     ], "the summary block must list each unit pre-merge check, passing\n" + _describe(result)
     assert re.search(
-        r"^guards:  4 always-run guard\(s\) added \d+\.\ds of the 5\.0s budget$", out, re.M,
+        r"^guards:  4 always-run guard\(s\) added \d+\.\ds of the 5\.0s budget$",
+        out,
+        re.M,
     ), "the summary must report the guards' added time against the budget\n" + _describe(result)
     assert "pre-merge: PASS -- all 13 check(s) passed" in out, _describe(result)
     assert f"base:    {_RC_BRANCH}" in out, "the summary must name the default base\n" + _describe(result)
@@ -691,7 +736,9 @@ def test_unit_pre_merge_fails_when_an_always_run_guard_finds_something(tmp_path:
     # because it always runs, and its finding alone fails the run.
     sandbox = _Sandbox(tmp_path)
     repo = _build_git_fixture(
-        tmp_path, sandbox.home, greet_change="#!/usr/bin/env bash\necho hello there\n",
+        tmp_path,
+        sandbox.home,
+        greet_change="#!/usr/bin/env bash\necho hello there\n",
         stale_operator_verb_docs=True,
     )
 
@@ -699,15 +746,15 @@ def test_unit_pre_merge_fails_when_an_always_run_guard_finds_something(tmp_path:
 
     assert result.returncode == 1, _describe(result)
     rows = dict(m.group("name", "verdict") for m in map(_SUMMARY_ROW_RE.match, result.stdout.splitlines()) if m)
-    assert [name for name, verdict in rows.items() if verdict == "FAIL"] == ["guard: operator-verb-docs"], (
-        _describe(result)
+    assert [name for name, verdict in rows.items() if verdict == "FAIL"] == ["guard: operator-verb-docs"], _describe(
+        result
     )
     assert "    DRIFT -- verb='halt' block in docs/operator-commands.md" in result.stdout, _describe(result)
-    assert "    fix: regenerate, then commit docs/operator-commands.md and docs/operator-api.md: " \
-        "python3 team/scripts/generate_operator_verb_docs.py" in result.stdout, _describe(result)
-    assert "pre-merge: FAIL -- 1 of 13 check(s) failed (guard: operator-verb-docs)" in result.stdout, (
-        _describe(result)
-    )
+    assert (
+        "    fix: regenerate, then commit docs/operator-commands.md and docs/operator-api.md: "
+        "python3 team/scripts/generate_operator_verb_docs.py" in result.stdout
+    ), _describe(result)
+    assert "pre-merge: FAIL -- 1 of 13 check(s) failed (guard: operator-verb-docs)" in result.stdout, _describe(result)
     assert "error:   pre_merge.checks_failed" in result.stderr.splitlines(), _describe(result)
     # Every check still ran after the guard failed.
     assert sandbox.gates_run() == ["by-path", *_RATCHET_LINTS, *_GUARD_SCRIPTS], sandbox.gates_run()
@@ -724,10 +771,9 @@ def test_integration_pre_merge_runs_only_the_affected_integration_tests(tmp_path
 
     assert result.returncode == 0, _describe(result)
     rows = [m.group("name", "verdict") for m in map(_SUMMARY_ROW_RE.match, result.stdout.splitlines()) if m]
-    assert rows == [("affected integration tests", "PASS")], (
-        "the integration pre-merge summary has exactly one check, the affected integration tests\n"
-        + _describe(result)
-    )
+    assert rows == [
+        ("affected integration tests", "PASS")
+    ], "the integration pre-merge summary has exactly one check, the affected integration tests\n" + _describe(result)
     assert "  tests/integration/test_greet_flow.py" in result.stdout, _describe(result)
     assert sandbox.gates_run() == [], f"an integration pre-merge run ran {sandbox.gates_run()}"
     assert sandbox.exit_file("run-integration-tests.sh").read_text(encoding="utf-8") == "0\n"

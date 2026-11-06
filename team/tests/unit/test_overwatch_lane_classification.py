@@ -39,7 +39,6 @@ from __future__ import annotations
 import json
 import pathlib
 
-import pytest
 
 from pgai_agent_kanban.overwatch.resolution_matrix import (
     LANE_A,
@@ -241,10 +240,10 @@ def _build_fixture(
     tmp_path: pathlib.Path,
     project_name: str,
     *,
-    overwatch_resolve: "str | None" = None,
+    overwatch_resolve: str | None = None,
     tester_report_body: str = "# TESTER Report\n\nNone.\n",
-    cargo_bugs: "list | None" = None,
-    intent_entries: "list | None" = None,
+    cargo_bugs: list | None = None,
+    intent_entries: list | None = None,
 ) -> dict:
     """Build a minimal kanban root/project laid out just enough to drive
     run_resolution_stage() to the three-lane classifier without needing a
@@ -255,9 +254,7 @@ def _build_fixture(
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
 
-    (root / "kanban.cfg").write_text(
-        "[release]\nmax_rc_retries = 3\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text("[release]\nmax_rc_retries = 3\n", encoding="utf-8")
 
     project_cfg_lines = [
         "[project]\n",
@@ -310,9 +307,7 @@ def _build_fixture(
 
 
 def _decision_blocks(release_state_text: str) -> list:
-    return [
-        block for block in release_state_text.split("## OVERWATCH Decision")[1:]
-    ]
+    return [block for block in release_state_text.split("## OVERWATCH Decision")[1:]]
 
 
 # ---------------------------------------------------------------------------
@@ -425,9 +420,7 @@ class TestLaneWiringWithFlagOn:
         assert "### INBOX-0001" in inbox_text and "OVERWATCH read" in inbox_text
         assert fx["halt_path"].is_file()
 
-    def test_second_firing_appends_a_second_event_without_altering_the_first(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_second_firing_appends_a_second_event_without_altering_the_first(self, tmp_path: pathlib.Path) -> None:
         fx = _build_fixture(tmp_path, "proj_lane_c_twice", overwatch_resolve="true")
 
         run_resolution_stage("proj_lane_c_twice", str(fx["kanban_root"]))

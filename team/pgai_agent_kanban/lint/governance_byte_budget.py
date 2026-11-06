@@ -40,7 +40,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Iterable, Optional, TextIO
+from typing import TextIO
+from collections.abc import Iterable
 
 __all__ = [
     "LINT_NAME",
@@ -64,8 +65,7 @@ def finding(role: str, assembled_bytes: int, budget_bytes: int) -> dict:
         "assembled_bytes": assembled_bytes,
         "budget_bytes": budget_bytes,
         "summary": (
-            f"{role} over governance byte budget: "
-            f"assembled={assembled_bytes} bytes budget={budget_bytes} bytes"
+            f"{role} over governance byte budget: " f"assembled={assembled_bytes} bytes budget={budget_bytes} bytes"
         ),
     }
 
@@ -102,7 +102,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
 
-def main(argv: Optional[list] = None, stdin: Optional[TextIO] = None) -> int:
+def main(argv: list | None = None, stdin: TextIO | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     _build_parser().parse_args(argv)
     source = sys.stdin if stdin is None else stdin
@@ -110,8 +110,7 @@ def main(argv: Optional[list] = None, stdin: Optional[TextIO] = None) -> int:
         text = render_findings(source)
     except ValueError as exc:
         print(
-            "governance_byte_budget: expected '<role>\\t<assembled_bytes>\\t<budget_bytes>' "
-            f"lines on stdin: {exc}",
+            "governance_byte_budget: expected '<role>\\t<assembled_bytes>\\t<budget_bytes>' " f"lines on stdin: {exc}",
             file=sys.stderr,
         )
         return 1

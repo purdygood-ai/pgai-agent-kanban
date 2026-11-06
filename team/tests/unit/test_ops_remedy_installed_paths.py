@@ -193,9 +193,13 @@ def test_show_queues_no_project_on_empty_registry_names_installed_create_and_sho
     _assert_refused(result, "show_queues.no_project")
     words = shlex.split(_remedy_after(result.stderr, "then name it: "))
     assert words == [
-        _installed(spaced_root, "create-project.sh"), "--project", _EXAMPLE_PROJECT,
+        _installed(spaced_root, "create-project.sh"),
+        "--project",
+        _EXAMPLE_PROJECT,
         "&&",
-        _installed(spaced_root, "dashboard/show-queues.sh"), "--project", _EXAMPLE_PROJECT,
+        _installed(spaced_root, "dashboard/show-queues.sh"),
+        "--project",
+        _EXAMPLE_PROJECT,
     ], words
 
 
@@ -234,11 +238,14 @@ def test_restamp_fixed_in_malformed_version_names_installed_restamp_script(space
     _assert_refused(result, "fixed_in_restamp.version_malformed")
     words = shlex.split(_remedy_after(result.stderr, "remedy:"))
     assert words == [
-        _installed(spaced_root, "restamp-fixed-in.sh"), "--project", "demo",
-        "--version", "v1.4.0", "BUG-0101", "BUG-0102",
+        _installed(spaced_root, "restamp-fixed-in.sh"),
+        "--project",
+        "demo",
+        "--version",
+        "v1.4.0",
+        "BUG-0101",
+        "BUG-0102",
     ], words
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -261,47 +268,97 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 #: checkout, not an installed kanban's operator. (path under team/, fragment
 #: of the literal or remedy, why). A fragment of None exempts the whole file.
 _SOURCE_TREE_TEXT = (
-    ("pgai_agent_kanban/testing/pre_merge.py", None,
-     "the pre-merge runner runs only in a repository checkout and names the files to commit there"),
-    ("pgai_agent_kanban/testing/affected.py", None,
-     "the affected-test selector reads a repository diff; its help names source paths"),
-    ("pgai_agent_kanban/api/generate_icd.py", "team/scripts/generate-icd.sh",
-     "the ICD generator regenerates docs/api/ in a repository checkout, run from the repository root"),
-    ("pgai_agent_kanban/api/reads.py", "team/scripts/dashboard/agent-metrics.sh",
-     "OpenAPI description naming the source script a route mirrors"),
-    ("pgai_agent_kanban/api/reads.py", "team/scripts/why.sh",
-     "OpenAPI description naming the source script a route mirrors"),
-    ("pgai_agent_kanban/cm/release_notes_generator.py", "team/scripts/lib/cm in a repository checkout",
-     "an example labelled as the repository checkout's value"),
-    ("pgai_agent_kanban/cm/ship_policy_bug_filer.py", "team/scripts/lib/cm/",
-     "a filed bug's Files Involved: the source files its fixer edits"),
-    ("pgai_agent_kanban/deep_verify/bug_filer.py", "team/scripts/deep-verify.sh",
-     "a filed bug's reproduction, read by its fixer in a repository checkout"),
-    ("pgai_agent_kanban/lint/bug_filer.py", "team/scripts/lint_hygiene.py",
-     "a filed bug's reproduction: the lint scans a repository checkout"),
-    ("scripts/upgrade.sh", "checkout HEAD -- team/scripts/lib/version_stamp.sh",
-     "a git pathspec inside the dev tree upgrade.sh installs from"),
-    ("scripts/lib/wake_driver_invoke.sh", "(team/scripts/lib/wake_driver_invoke.sh)",
-     "names the source file whose text a developer rewords"),
-    ("pgai_agent_kanban/lib/palette.py", "team/config/default_palette.txt",
-     "a missing palette key is fixed in the repository's palette file; install.sh replaces the installed copy"),
-    ("scripts/lib/dashboard_palette.sh", "team/config/default_palette.txt (dev tree) or config/default_palette.txt",
-     "names the repository and the installed palette file side by side"),
-    ("scripts/lib/dashboard_palette.sh", "%${key} entry to team/config/default_palette.txt",
-     "a missing palette key is fixed in the repository's palette file; install.sh replaces the installed copy"),
-    ("scripts/run-unit-tests.sh", "relocate each named file to team/tests/cold/",
-     "relocating a test module is an edit to the repository checkout the gated runner tests"),
-    ("scripts/run-integration-tests.sh", "relocate each named file to team/tests/cold/",
-     "relocating a test module is an edit to the repository checkout the gated runner tests"),
-    ("scripts/run-unit-tests.sh", "team/config/operator_verb_census_exempt.txt",
-     "the API-parity census exemption list is edited in the repository checkout the gated runner tests"),
+    (
+        "pgai_agent_kanban/testing/pre_merge.py",
+        None,
+        "the pre-merge runner runs only in a repository checkout and names the files to commit there",
+    ),
+    (
+        "pgai_agent_kanban/testing/affected.py",
+        None,
+        "the affected-test selector reads a repository diff; its help names source paths",
+    ),
+    (
+        "pgai_agent_kanban/api/generate_icd.py",
+        "team/scripts/generate-icd.sh",
+        "the ICD generator regenerates docs/api/ in a repository checkout, run from the repository root",
+    ),
+    (
+        "pgai_agent_kanban/api/reads.py",
+        "team/scripts/dashboard/agent-metrics.sh",
+        "OpenAPI description naming the source script a route mirrors",
+    ),
+    (
+        "pgai_agent_kanban/api/reads.py",
+        "team/scripts/why.sh",
+        "OpenAPI description naming the source script a route mirrors",
+    ),
+    (
+        "pgai_agent_kanban/cm/release_notes_generator.py",
+        "team/scripts/lib/cm in a repository checkout",
+        "an example labelled as the repository checkout's value",
+    ),
+    (
+        "pgai_agent_kanban/cm/ship_policy_bug_filer.py",
+        "team/scripts/lib/cm/",
+        "a filed bug's Files Involved: the source files its fixer edits",
+    ),
+    (
+        "pgai_agent_kanban/deep_verify/bug_filer.py",
+        "team/scripts/deep-verify.sh",
+        "a filed bug's reproduction, read by its fixer in a repository checkout",
+    ),
+    (
+        "pgai_agent_kanban/lint/bug_filer.py",
+        "team/scripts/lint_hygiene.py",
+        "a filed bug's reproduction: the lint scans a repository checkout",
+    ),
+    (
+        "scripts/upgrade.sh",
+        "checkout HEAD -- team/scripts/lib/version_stamp.sh",
+        "a git pathspec inside the dev tree upgrade.sh installs from",
+    ),
+    (
+        "scripts/lib/wake_driver_invoke.sh",
+        "(team/scripts/lib/wake_driver_invoke.sh)",
+        "names the source file whose text a developer rewords",
+    ),
+    (
+        "pgai_agent_kanban/lib/palette.py",
+        "team/config/default_palette.txt",
+        "a missing palette key is fixed in the repository's palette file; install.sh replaces the installed copy",
+    ),
+    (
+        "scripts/lib/dashboard_palette.sh",
+        "team/config/default_palette.txt (dev tree) or config/default_palette.txt",
+        "names the repository and the installed palette file side by side",
+    ),
+    (
+        "scripts/lib/dashboard_palette.sh",
+        "%${key} entry to team/config/default_palette.txt",
+        "a missing palette key is fixed in the repository's palette file; install.sh replaces the installed copy",
+    ),
+    (
+        "scripts/run-unit-tests.sh",
+        "relocate each named file to team/tests/cold/",
+        "relocating a test module is an edit to the repository checkout the gated runner tests",
+    ),
+    (
+        "scripts/run-integration-tests.sh",
+        "relocate each named file to team/tests/cold/",
+        "relocating a test module is an edit to the repository checkout the gated runner tests",
+    ),
+    (
+        "scripts/run-unit-tests.sh",
+        "team/config/operator_verb_census_exempt.txt",
+        "the API-parity census exemption list is edited in the repository checkout the gated runner tests",
+    ),
 )
 
 
 def _exempt(rel_path: str, text: str) -> bool:
     return any(
-        path == rel_path and (fragment is None or fragment in text)
-        for path, fragment, _why in _SOURCE_TREE_TEXT
+        path == rel_path and (fragment is None or fragment in text) for path, fragment, _why in _SOURCE_TREE_TEXT
     )
 
 
@@ -317,7 +374,11 @@ def _repo_path_literals(source: str) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             first = node.body[0] if node.body else None
-            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
                 docstrings.add(id(first.value))
     return sorted(
         (node.lineno, node.value)
@@ -330,10 +391,7 @@ def _repo_path_literals(source: str) -> list[tuple[int, str]]:
 
 
 def _package_modules() -> list[pathlib.Path]:
-    return sorted(
-        path for path in _PACKAGE_DIR.rglob("*.py")
-        if "tests" not in path.relative_to(_PACKAGE_DIR).parts
-    )
+    return sorted(path for path in _PACKAGE_DIR.rglob("*.py") if "tests" not in path.relative_to(_PACKAGE_DIR).parts)
 
 
 #: The Python error-contract emitters; their third positional argument is the remedy.
@@ -374,7 +432,8 @@ def _remedy_expressions(tree: ast.AST):
                     break
         elif isinstance(node, ast.Dict):
             yield from (
-                value for key, value in zip(node.keys, node.values)
+                value
+                for key, value in zip(node.keys, node.values)
                 if isinstance(key, ast.Constant) and key.value == "remedy"
             )
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -391,12 +450,14 @@ def _python_repo_path_remedies(source: str) -> list[tuple[int, str]]:
     f-string parts are read one by one; an interpolated root in front of
     ``team/`` (an absolute dev-tree path) is not matched.
     """
-    return sorted({
-        (node.lineno, node.value)
-        for expression in _remedy_expressions(ast.parse(source))
-        for node in ast.walk(expression)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and _REPO_PATH_RE.search(node.value)
-    })
+    return sorted(
+        {
+            (node.lineno, node.value)
+            for expression in _remedy_expressions(ast.parse(source))
+            for node in ast.walk(expression)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and _REPO_PATH_RE.search(node.value)
+        }
+    )
 
 
 def _load_emitter_scanner() -> types.ModuleType:
@@ -423,7 +484,7 @@ def _emitted_remedies(text: str) -> list[tuple[int, str]]:
     for match in _EMITTERS._BASH_FUNC_RE.finditer(text):
         start = text.rfind("\n", 0, match.start()) + 1
         end = text.find("\n", match.start())
-        line = _EMITTERS._strip_bash_comment(text[start:end if end != -1 else len(text)])
+        line = _EMITTERS._strip_bash_comment(text[start : end if end != -1 else len(text)])
         column = match.start() - start
         if column >= len(line) or _EMITTERS._is_availability_probe_operand(line[:column]):
             continue
@@ -436,7 +497,9 @@ def _emitted_remedies(text: str) -> list[tuple[int, str]]:
         variable = _BARE_VARIABLE_RE.match(remedy)
         if variable:
             assignment = re.compile(rf"^\s*(?:local\s+)?{re.escape(variable.group(1))}=(.*)$", re.MULTILINE)
-            remedies.extend((line_no, _EMITTERS._strip_bash_comment(value).strip()) for value in assignment.findall(text))
+            remedies.extend(
+                (line_no, _EMITTERS._strip_bash_comment(value).strip()) for value in assignment.findall(text)
+            )
     return remedies
 
 
@@ -507,9 +570,9 @@ def test_every_source_tree_exemption_still_matches_a_site() -> None:
             hits = [*_repo_path_literals(text), *_python_repo_path_remedies(text)]
         else:
             hits = _repo_path_remedies(text)
-        assert any(fragment is None or fragment in hit for _line, hit in hits), (
-            f"exemption {rel} {fragment!r} ({why}) matches nothing; drop its entry"
-        )
+        assert any(
+            fragment is None or fragment in hit for _line, hit in hits
+        ), f"exemption {rel} {fragment!r} ({why}) matches nothing; drop its entry"
 
 
 def test_repository_path_sweep_reports_a_seeded_literal_and_skips_docstrings_and_comments() -> None:
@@ -559,8 +622,15 @@ def test_python_remedy_sweep_reports_each_seeded_remedy_shape_and_skips_messages
         "def _status_remedy():\n"
         '    return "copy team/templates/n.md"\n'
     )
-    assert [re.search(r"team/templates/(\w+\.md)", text).group(1) for _line, text in _python_repo_path_remedies(seeded)] == [
-        "d.md", "f.md", "h.md", "j.md", "k.md", "n.md",
+    assert [
+        re.search(r"team/templates/(\w+\.md)", text).group(1) for _line, text in _python_repo_path_remedies(seeded)
+    ] == [
+        "d.md",
+        "f.md",
+        "h.md",
+        "j.md",
+        "k.md",
+        "n.md",
     ]
 
 
@@ -578,7 +648,11 @@ def test_restamp_fixed_in_without_a_project_names_installed_restamp_script(space
     words = shlex.split(_remedy_after(result.stderr, "remedy:"))
     assert words == [
         str(spaced_root["root"] / "scripts" / "restamp-fixed-in.sh"),
-        "--project", _EXAMPLE_PROJECT, "--version", "v1.4.0", "BUG-0101",
+        "--project",
+        _EXAMPLE_PROJECT,
+        "--version",
+        "v1.4.0",
+        "BUG-0101",
     ], words
 
 
@@ -598,11 +672,14 @@ def test_discovery_active_rc_guard_names_installed_unwind_rc(spaced_root, tmp_pa
         "_disc_active_rc_blocks bugs demo\n"
         'echo "RC=$?"\n'
     )
-    env = build_scrubbed_env(home_dir=spaced_root["home"], extra_env={
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "KANBAN_ROOT": str(root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(spaced_root["temp_dir"]),
-    })
+    env = build_scrubbed_env(
+        home_dir=spaced_root["home"],
+        extra_env={
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(spaced_root["temp_dir"]),
+        },
+    )
 
     result = run_bash(tmp_path, script, base_env=env)
 
@@ -610,7 +687,11 @@ def test_discovery_active_rc_guard_names_installed_unwind_rc(spaced_root, tmp_pa
     _assert_refused(types.SimpleNamespace(returncode=1, stderr=result.stderr), "discovery.active-rc-in-flight")
     command = _remedy_after(result.stderr, "must be cleared, run: ")
     assert shlex.split(command) == [
-        str(root / "scripts" / "unwind-rc.sh"), "--project", "demo", "--key", "v9.4.0",
+        str(root / "scripts" / "unwind-rc.sh"),
+        "--project",
+        "demo",
+        "--key",
+        "v9.4.0",
     ], command
 
 
@@ -625,8 +706,12 @@ def test_task_status_missing_target_names_installed_task_status(spaced_root) -> 
     _assert_refused(result, "task-status.missing-target")
     words = shlex.split(_remedy_after(result.stderr, "remedy:"))
     assert words == [
-        _installed(spaced_root, "task-status.sh"), "read",
-        "--project", _EXAMPLE_PROJECT, "--key", "CODER-20260101-001-example-task",
+        _installed(spaced_root, "task-status.sh"),
+        "read",
+        "--project",
+        _EXAMPLE_PROJECT,
+        "--key",
+        "CODER-20260101-001-example-task",
     ], words
 
 
@@ -640,15 +725,24 @@ def test_lane_a_rewrite_missing_names_installed_attach_script(tmp_path) -> None:
 
     root = tmp_path / "kanban root"
     text = resolution_stage._format_lane_a_rewrite_missing(
-        types.SimpleNamespace(regression_bug_id="BUG-9101"), None, str(root / "projects" / "demo" / "bugs"),
-        "v9.4.0", str(root), "demo",
+        types.SimpleNamespace(regression_bug_id="BUG-9101"),
+        None,
+        str(root / "projects" / "demo" / "bugs"),
+        "v9.4.0",
+        str(root),
+        "demo",
     )
 
     assert "team/scripts/" not in text
     command = _remedy_after(text, "attach the rewrite first: ").split(", adding", 1)[0]
     assert shlex.split(command) == [
         str(root / "scripts" / "overwatch-attach-fix-rewrite.sh"),
-        "--project", "demo", "--kanban-root", str(root), "--bug-id", "BUG-9101",
+        "--project",
+        "demo",
+        "--kanban-root",
+        str(root),
+        "--bug-id",
+        "BUG-9101",
     ], command
 
 
@@ -677,7 +771,9 @@ def test_task_status_missing_section_names_the_installed_template(spaced_root) -
     (task / "status.md").write_text("# Status\n\n## State\nWORKING\n", encoding="utf-8")
 
     result = _run(
-        "task-status.sh", ["--project", "demo", "--key", "X-1", "--state", "DONE", "--summary", "done"], spaced_root,
+        "task-status.sh",
+        ["--project", "demo", "--key", "X-1", "--state", "DONE", "--summary", "done"],
+        spaced_root,
     )
 
     _assert_refused(result, "task-status.missing-section")

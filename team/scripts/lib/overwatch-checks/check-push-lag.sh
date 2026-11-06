@@ -19,8 +19,10 @@
 #
 # Push lag is defined as:
 #   - The local <prefix>main is ahead of origin/<prefix>main by at least one
-#     commit, OR
-#   - One or more local <prefix>vX.Y.Z release tags do not exist on origin.
+#     commit (two local refs: the remote-tracking ref is whatever the last
+#     fetch left, so no remote is contacted), OR
+#   - One or more local <prefix>vX.Y.Z release tags do not exist on origin
+#     (read with ls-remote, and only when the check may push -- see below).
 #
 # Before any git call the check asks the shared push-decision resolver
 # (pp_push_decision, team/scripts/lib/push_decision.sh) about the project.
@@ -31,18 +33,33 @@
 #                dev_tree_path. The check prints one line with the status
 #                'skipped-unresolved-project' naming the missing piece, runs
 #                no git command at all (no ls-remote, no push), and exits 0.
-#   no-push    — push_to_remote = false: when lag is found, local-ahead state
-#                is by design, the action log receives a 'staged-by-design'
-#                entry, and no push is attempted.
+#   no-push    — push_to_remote = false: the check makes no git network call
+#                (no ls-remote, fetch or push). It prints one line naming the
+#                setting and stating that tag lag against the remote is not
+#                measured because the project does not push. Local
+#                <prefix>main is still compared with its remote-tracking ref;
+#                when it is ahead, local-ahead state is by design, the action
+#                log receives a 'staged-by-design' entry naming the setting
+#                and main's lag, and no push is attempted.
 #   push       — the resolver's answer when push_to_remote is true or absent.
 #                This check pushes only on an explicit push_to_remote = true
 #                in the project's config: an absent (or any other) value is
-#                treated like false -- 'staged-by-design' is logged naming the
-#                setting, and nothing is pushed. With push_to_remote = true,
-#                when lag is found and no CM agent flock is contended,
-#                OVERWATCH pushes via overwatch_halt_first_fix to keep origin
-#                in sync, each ref by its explicit name
-#                (refs/heads/<prefix>main, refs/tags/<tag>).
+#                treated exactly like false above -- no remote is contacted
+#                and nothing is pushed. With push_to_remote = true, the
+#                remote's tags are read with ls-remote, and when lag is found
+#                and no CM agent flock is contended, OVERWATCH pushes via
+#                overwatch_halt_first_fix to keep origin in sync, each ref by
+#                its explicit name (refs/heads/<prefix>main, refs/tags/<tag>).
+#
+# Remote unreachable: when that ls-remote exits non-zero (the remote cannot
+# be resolved, reached or read), the remote's tag set is unknown, not empty.
+# The check writes exactly one action-log row with the action key
+# 'remote-unreachable', whose target is the remote name and whose detail
+# carries the remote, git's exit status and its error text; it then compares
+# no tags, pushes nothing (neither main nor any tag) and returns 0. The
+# --dry-run branch writes the same row instead of an unpushed-tag count. Only
+# a successful listing feeds the unpushed-tag count. With no local release
+# tags the remote is not read, so this outcome cannot arise.
 #
 # The per-repo flock ($KANBAN_ROOT/locks/repo-wake-<project-repo-id>.lock,
 # resolved via pp_repo_lock_path in project_paths.sh) is the proxy for "a CM
@@ -76,11 +93,18 @@
 #   bash check-push-lag.sh [--dry-run]
 #
 # Exit codes:
-#   0 — completed successfully (no lag, lag corrected without error, or the
-#       project did not resolve: skipped-unresolved-project)
+#   0 — completed successfully (no lag, lag corrected without error, the
+#       remote could not be read: remote-unreachable, or the project did
+#       not resolve: skipped-unresolved-project)
 #   1 — internal error (missing dependencies, unreadable state dir, etc.)
 #
 # --dry-run: scans and logs findings but does NOT push to origin.
+
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CPL_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CPL_SELF_DIR=""
+_CPL_LIB_DIR="${_CPL_SELF_DIR%/*}"
 
 # overwatch_registered_projects: the shared projects.cfg reader.
 # shellcheck source=../overwatch_config.sh
@@ -103,41 +127,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # declines), 1 on failure.
 # ---------------------------------------------------------------------------
 _cpl_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-push-lag: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        # Resolve from projects.cfg — never silently fall back to first project.
-        # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
-        # path is only safe for single-project installs.
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-push-lag: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-push-lag: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-push-lag || return 1
 
     # Ask the shared resolver. It reads the project's registration and its
     # own config only; an inherited PGAI_DEV_TREE_PATH plays no part.
     if ! declare -F pp_push_decision >/dev/null 2>&1; then
         local _cpl_lib_dir
-        _cpl_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || {
+        _cpl_lib_dir="${_CPL_LIB_DIR}"
+        [[ -n "${_cpl_lib_dir}" ]] || {
             echo "check-push-lag: cannot resolve lib dir" >&2
             return 1
         }
@@ -150,7 +147,8 @@ _cpl_resolve_env() {
     fi
     if ! declare -F release_refs_local_release_tags >/dev/null 2>&1; then
         local _cpl_refs_dir
-        _cpl_refs_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || return 1
+        _cpl_refs_dir="${_CPL_LIB_DIR}"
+        [[ -n "${_cpl_refs_dir}" ]] || return 1
         if [[ ! -f "${_cpl_refs_dir}/release_refs.sh" ]]; then
             echo "check-push-lag: release_refs.sh not found in ${_cpl_refs_dir}" >&2
             return 1
@@ -223,12 +221,22 @@ _cpl_main_commits_ahead() {
 
 # ---------------------------------------------------------------------------
 # _cpl_unpushed_tags <dev_tree> <tag_prefix> <remote>
-# Echo one tag name per line for each of the project's local release tags
-# (<tag_prefix>vX.Y.Z, release_refs_local_release_tags) that does not exist
-# on <remote>. Echoes nothing if all of them exist there.
+# Find the project's local release tags (<tag_prefix>vX.Y.Z,
+# release_refs_local_release_tags) that do not exist on <remote>. Reads the
+# remote (ls-remote), so it is called only when the check may push. Runs in
+# the caller's shell (not a command substitution) so it can set:
+#   _CPL_TAGS_ABSENT_ON_REMOTE  one tag name per line; empty when every
+#                               local release tag exists on <remote>
+#   _CPL_REMOTE_READ_ERROR      one line: the ls-remote command, its exit
+#                               status and git's error text; empty on success
+# Returns 0 when the remote's tags were read (or there are no local release
+# tags, so the remote is not contacted), 2 when ls-remote exited non-zero:
+# the remote's tag set is then unknown and no tag is reported absent.
 # ---------------------------------------------------------------------------
 _cpl_unpushed_tags() {
     local dev_tree="$1" tag_prefix="$2" remote="$3"
+    _CPL_TAGS_ABSENT_ON_REMOTE=""
+    _CPL_REMOTE_READ_ERROR=""
 
     # The project's own local release tags only
     local local_tags
@@ -238,21 +246,33 @@ _cpl_unpushed_tags() {
         return 0
     fi
 
-    # Get all remote tags (refs/tags/*)
-    local remote_tags
-    remote_tags="$(git -C "${dev_tree}" ls-remote --tags "${remote}" 2>/dev/null \
-        | awk '{print $2}' \
-        | grep -v '\^{}' \
-        | sed 's|refs/tags/||')" || remote_tags=""
+    # stdout and stderr together: on success only "<sha> refs/tags/<name>"
+    # lines are tags (anything else is a git diagnostic); on failure the
+    # whole text is git's error.
+    local listing ls_rc=0
+    listing="$(git -C "${dev_tree}" ls-remote --tags "${remote}" 2>&1)" || ls_rc=$?
+    if (( ls_rc != 0 )); then
+        local git_error
+        git_error="$(printf '%s' "${listing}" | tr '\t\r\n' '   ' | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//')"
+        _CPL_REMOTE_READ_ERROR="git ls-remote --tags ${remote} exited ${ls_rc}: ${git_error:-no error output}"
+        return 2
+    fi
 
-    # Emit local tags not present on the remote
-    local tag
+    # Remote tag names (refs/tags/*), peeled ^{} entries dropped
+    local remote_tags
+    remote_tags="$(awk '$1 ~ /^[0-9a-fA-F]+$/ && $2 ~ /^refs\/tags\// && $2 !~ /\^\{\}$/ {
+        sub(/^refs\/tags\//, "", $2); print $2 }' <<< "${listing}")"
+
+    # Collect local tags not present on the remote
+    local tag absent=""
     while IFS= read -r tag; do
         [[ -z "${tag}" ]] && continue
         if ! grep -qxF "${tag}" <<< "${remote_tags}" 2>/dev/null; then
-            echo "${tag}"
+            absent+="${tag}"$'\n'
         fi
     done <<< "${local_tags}"
+    _CPL_TAGS_ABSENT_ON_REMOTE="${absent%$'\n'}"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -376,7 +396,8 @@ overwatch_check_push_lag() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CPL_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-push-lag: cannot resolve lib dir" >&2
             return 1
         }
@@ -416,31 +437,58 @@ overwatch_check_push_lag() {
         return 0
     fi
 
-    # Detect main branch lag
+    # Detect main branch lag. Both refs are local -- the remote-tracking ref
+    # is whatever the last fetch left -- so this never contacts the remote.
     local ahead
     ahead="$(_cpl_main_commits_ahead "${dev_tree}" "${main_branch}" "${remote}")"
 
     echo "check-push-lag: local ${main_branch} is ${ahead} commit(s) ahead of ${remote}/${main_branch}" >&2
 
-    # Detect unpushed release tags (ls-remote reads the remote; nothing is fetched)
+    # Detect unpushed release tags. Only under push is the remote read
+    # (ls-remote; nothing is fetched). Under no-push the project does not
+    # push, so the remote is not contacted at all: tag lag against it is not
+    # measured, and only main's local lag can record a row.
     local unpushed_tags=""
     local tag_count=0
-    if (( dry_run == 0 )); then
-        unpushed_tags="$(_cpl_unpushed_tags "${dev_tree}" "${tag_prefix}" "${remote}")"
+    local tag_summary
+    if [[ "${_CPL_DECISION}" != "push" ]]; then
+        tag_summary="tag lag against ${remote} not measured"
+        echo "check-push-lag: push_to_remote=${_CPL_PUSH_SETTING:-false} (not true); tag lag against ${remote} is not measured because the project does not push; ${remote} is not contacted" >&2
     else
-        unpushed_tags="$(_cpl_unpushed_tags "${dev_tree}" "${tag_prefix}" "${remote}")" 2>/dev/null || unpushed_tags=""
-    fi
+        local read_rc=0
+        _cpl_unpushed_tags "${dev_tree}" "${tag_prefix}" "${remote}" || read_rc=$?
 
-    if [[ -n "${unpushed_tags}" ]]; then
-        tag_count="$(printf '%s\n' "${unpushed_tags}" | grep -c '.' 2>/dev/null)" || tag_count=0
-        echo "check-push-lag: ${tag_count} unpushed local tag(s) detected" >&2
-        local tag
-        while IFS= read -r tag; do
-            [[ -z "${tag}" ]] && continue
-            echo "check-push-lag:   unpushed tag: ${tag}" >&2
-        done <<< "${unpushed_tags}"
-    else
-        echo "check-push-lag: no unpushed tags detected" >&2
+        # The remote could not be read: its tag set is unknown, not empty.
+        # One narrated row, no tag comparison and no push this run; exit 0.
+        if (( read_rc != 0 )); then
+            local mode_note=""
+            if (( dry_run == 1 )); then
+                mode_note="; dry-run"
+            fi
+            echo "check-push-lag: ${remote} could not be read (${_CPL_REMOTE_READ_ERROR}); tag lag not measured, nothing pushed this run" >&2
+            overwatch_log_action \
+                "check-push-lag" \
+                "${remote}" \
+                "remote-unreachable" \
+                "none" \
+                "Could not list release tags on remote ${remote} for project ${project_name}: ${_CPL_REMOTE_READ_ERROR}; tag lag not measured, no push attempted (${main_branch} ahead=${ahead})${mode_note}" \
+            2>/dev/null || true
+            return 0
+        fi
+        unpushed_tags="${_CPL_TAGS_ABSENT_ON_REMOTE}"
+
+        if [[ -n "${unpushed_tags}" ]]; then
+            tag_count="$(printf '%s\n' "${unpushed_tags}" | grep -c '.' 2>/dev/null)" || tag_count=0
+            echo "check-push-lag: ${tag_count} unpushed local tag(s) detected" >&2
+            local tag
+            while IFS= read -r tag; do
+                [[ -z "${tag}" ]] && continue
+                echo "check-push-lag:   unpushed tag: ${tag}" >&2
+            done <<< "${unpushed_tags}"
+        else
+            echo "check-push-lag: no unpushed tags detected" >&2
+        fi
+        tag_summary="unpushed tags=${tag_count}"
     fi
 
     # Nothing to do?
@@ -450,17 +498,22 @@ overwatch_check_push_lag() {
     fi
 
     if (( push_main == 0 && tag_count == 0 )); then
-        echo "check-push-lag: local matches ${remote}; no push needed" >&2
+        if [[ "${_CPL_DECISION}" != "push" ]]; then
+            echo "check-push-lag: local ${main_branch} is not ahead of ${remote}/${main_branch}; nothing staged" >&2
+        else
+            echo "check-push-lag: local matches ${remote}; no push needed" >&2
+        fi
         return 0
     fi
 
-    echo "check-push-lag: push lag detected (${main_branch} ahead=${ahead}, unpushed tags=${tag_count})" >&2
+    echo "check-push-lag: push lag detected (${main_branch} ahead=${ahead}, ${tag_summary})" >&2
 
-    # The resolver's no-push answer is push_to_remote = false: the
-    # local-ahead state is by design (local-only mode), so log
-    # 'staged-by-design' and exit without pushing.  This is the gate that
-    # prevents OVERWATCH from pushing deliberately staged local work to the
-    # remote repository on installs configured for operator-controlled pushes.
+    # The no-push decision (push_to_remote = false, or anything but an
+    # explicit true): the local-ahead state is by design (local-only mode),
+    # so log 'staged-by-design' and exit without pushing. This is the gate
+    # that prevents OVERWATCH from pushing deliberately staged local work to
+    # the remote repository on installs configured for operator-controlled
+    # pushes. The row names main's local lag only; tag lag was not measured.
     if [[ "${_CPL_DECISION}" != "push" ]]; then
         echo "check-push-lag: push_to_remote=${_CPL_PUSH_SETTING:-false} (not true); local-ahead state is by design; skipping push" >&2
         overwatch_log_action \
@@ -468,7 +521,7 @@ overwatch_check_push_lag() {
             "${dev_tree}" \
             "staged-by-design" \
             "none" \
-            "push_to_remote=${_CPL_PUSH_SETTING:-false} for project ${project_name}; OVERWATCH pushes only on push_to_remote = true, so the local-ahead state is by design (${main_branch} ahead=${ahead}, unpushed_tags=${tag_count}); no push attempted" \
+            "push_to_remote=${_CPL_PUSH_SETTING:-false} for project ${project_name}; OVERWATCH pushes only on push_to_remote = true, so the local-ahead state is by design (${main_branch} ahead=${ahead}, ${tag_summary}); no push attempted" \
         2>/dev/null || true
         return 0
     fi

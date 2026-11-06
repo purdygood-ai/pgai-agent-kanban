@@ -299,7 +299,7 @@ done
 # reference to PGAI_AGENT_KANBAN_ROOT_PATH, which is the Lane B admission
 # check further down (_cm_release_lane_b_intent_verified's first argument).
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Operator force-override refusals ---
 # Both refusals below must run before ANY project/repo state is touched
@@ -313,7 +313,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
 # its own, so it is safe to source this early, ahead of the rest of this
 # script's lib sourcing below.
 # shellcheck source=../lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/error_contract.sh"
 
 # pp_run_ops.sh is also safe to source this early: it is self-locating
 # (BASH_SOURCE[0]-only, no env/project dependency) and sourcing it twice is
@@ -322,7 +322,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/error_contract.sh"
 # verification helper immediately below can compose a correct PYTHONPATH
 # before project/config resolution has run.
 # shellcheck source=../lib/pp_run_ops.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/pp_run_ops.sh"
 
 # Helper: independently verify that *reason* is the verbatim declaration
 # text of a LIVE entry in <kanban_root>/projects/<project>/INTENT.md, read
@@ -463,68 +463,80 @@ TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$TEAM_ROOT"
 
 # shellcheck source=lib/project_paths.sh
 # NOTE: project_paths.sh loads ini_parser.sh (read_ini), used just below.
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/project_paths.sh"
 
 # --- Read INI config (kanban.cfg); falls back to legacy config.cfg if absent. ---
 _CM_KANBAN_CFG="${TEAM_ROOT}/kanban.cfg"
+# shellcheck source=../lib/dev_tree.sh
+declare -F resolve_global_dev_tree >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/dev_tree.sh"
 if [[ -f "$_CM_KANBAN_CFG" ]]; then
-    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$_CM_KANBAN_CFG" paths dev_tree_path "")}"
+    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree "$_CM_KANBAN_CFG")}"
+fi
+# [release] hook_timeout_seconds: the limit _run_release_hook puts on each
+# lifecycle hook. Absent or blank -> the default
+# (config_release_hook_timeout_seconds_default); not a positive whole number
+# -> the default with a warning, so a hook is never unbounded.
+CM_HOOK_TIMEOUT_SECONDS="$(read_ini "$_CM_KANBAN_CFG" release hook_timeout_seconds "")"
+if [[ ! "$CM_HOOK_TIMEOUT_SECONDS" =~ ^0*[1-9][0-9]*$ ]]; then
+    _cm_hook_timeout_default="$(config_release_hook_timeout_seconds_default)"
+    [[ -z "$CM_HOOK_TIMEOUT_SECONDS" ]] || echo "[cm-release] WARNING: [release] hook_timeout_seconds = '${CM_HOOK_TIMEOUT_SECONDS}' in ${_CM_KANBAN_CFG} is not a positive whole number of seconds; using the default, ${_cm_hook_timeout_default}s." >&2
+    CM_HOOK_TIMEOUT_SECONDS="$_cm_hook_timeout_default"
 fi
 
 # shellcheck source=lib/projects.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/projects.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/projects.sh"
 
 # cm_resolve_and_enforce_hook — the single hook-resolution call site shared
 # by release.sh and the ship-rc verb (cm/ship.py) (one-implementation rule).
 # shellcheck source=lib/cm_release_hooks.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm_release_hooks.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm_release_hooks.sh"
 
 # shellcheck source=lib/pp_run_ops.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/pp_run_ops.sh"
 
 # HALT-AFTER scope-root resolution + `python3 -m halt_after` invocation --
 # shared with the wake loop (team/scripts/lib/wake_project.sh) so CM's
 # ship-time spend of a version-pinned sentinel (release_finalize.sh, Step
 # 12c) uses the exact same evaluator, not a second implementation.
 # shellcheck source=lib/halt_after_invoke.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/halt_after_invoke.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/halt_after_invoke.sh"
 
 # Dual-channel error-contract emitter — every fail-loud site in this script
 # and its sourced lib stages speaks through this one primitive.
 # shellcheck source=lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/error_contract.sh"
 
 # CM release preflight, ship-policy, squash, notes, and finalize lib stages
 # (see each file's own header for its public API and step-by-step doc).
 # shellcheck source=lib/cm/release_preflight.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_preflight.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_preflight.sh"
 # shellcheck source=lib/cm/release_known_issue.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_known_issue.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_known_issue.sh"
 # shellcheck source=lib/cm/release_operator_override.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_operator_override.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_operator_override.sh"
 # shellcheck source=lib/cm/release_ship_posture.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_ship_posture.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_ship_posture.sh"
 # shellcheck source=lib/cm/release_ship_policy.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_ship_policy.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_ship_policy.sh"
 # shellcheck source=lib/cm/release_squash.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_squash.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_squash.sh"
 # shellcheck source=lib/cm/release_notes.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_notes.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_notes.sh"
 # shellcheck source=lib/cm/release_campaign_spend.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_campaign_spend.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_campaign_spend.sh"
 # shellcheck source=lib/cm/release_halt_after_spend.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_halt_after_spend.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_halt_after_spend.sh"
 # shellcheck source=lib/cm/release_origin_summary.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_origin_summary.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_origin_summary.sh"
 # shellcheck source=lib/cm/release_finalize.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_finalize.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_finalize.sh"
 # shellcheck source=lib/cm/release_decide_only.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/release_decide_only.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/release_decide_only.sh"
 
 # --- Enable strict mode for our own code ---
 set -euo pipefail
@@ -586,6 +598,12 @@ _cm_run_pre_squash_hook_step() {
   }
   _pre_squash_rc=0
   if [[ -n "$CM_RESOLVED_HOOK_PATH" ]]; then
+    # BLOCK-WORTHY (trigger 4): a hook runner that cannot start the hook
+    # stops here, naming the runner (release_hook_runner.sh), not the hook.
+    if ! cm_release_hook_runner_check "cm-release-pre-squash"; then
+      [[ "${CM_RESOLVED_HOOK_IS_TEMP:-0}" == "1" ]] && rm -f "$CM_RESOLVED_HOOK_PATH"
+      cm_halt "cm-release.trigger-4.pre-squash-hook-runner-failed" "Trigger 4: ${_CM_HOOK_RUNNER_FAULT_MESSAGE}" "$_CM_HOOK_RUNNER_FAULT_REMEDY" --inbox
+    fi
     ( _run_release_hook "cm-release-pre-squash" "$CM_RESOLVED_HOOK_PATH" ) || _pre_squash_rc=$?
   fi
   # Clean up the materialized RC-branch hook file (only set when the resolver

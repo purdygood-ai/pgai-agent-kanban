@@ -63,7 +63,7 @@ from pgai_agent_kanban.overwatch.halt_provenance import (
     provenance_lines,
 )
 
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _PAST_ISO = "2026-01-01T11:00:00+00:00"
 _PROJECT = "example-project"
 _TASK = "CODER-20260101-001-example-task"
@@ -71,7 +71,11 @@ _ROOT = "/srv/kanban-example"
 
 _BRANCH_EVIDENCE = "worktree=gone; branch=ai_feature/example; ahead=2; merged=no"
 _RESTAMP_EVIDENCE = "verb=restamp-fixed-in; project=example-project; version=v2.28.0; bugs=BUG-0412,BUG-0413"
-_WORKTREE_FACTS = {"worktree_residue_in_base": True, "residue_holds_no_unique_commits": True, "source_branch_exists": True}
+_WORKTREE_FACTS = {
+    "worktree_residue_in_base": True,
+    "residue_holds_no_unique_commits": True,
+    "source_branch_exists": True,
+}
 
 # A representative first block per code: (owner_role, evidence, cooldown_until, facts).
 # A row that waits one window first has already waited it out.
@@ -256,7 +260,9 @@ def test_allowlisted_verb_is_named_with_its_typed_arguments(table):
     outcome = _first("agent_operator_data_action", table)
     assert _shape(outcome) == (dc.OUTCOME_VERB, "restamp-fixed-in")
     assert {k: outcome.args[k] for k in ("project", "version", "bugs")} == {
-        "project": "example-project", "version": "v2.28.0", "bugs": "BUG-0412,BUG-0413",
+        "project": "example-project",
+        "version": "v2.28.0",
+        "bugs": "BUG-0412,BUG-0413",
     }
 
 
@@ -349,8 +355,14 @@ def test_a_tester_timeout_keeps_its_own_requeue_row(table):
 
 def _halt(origin="chain", writer=WRITER_CM_RELEASE, *, fleet=False, path=f"{_ROOT}/projects/{_PROJECT}/HALT"):
     return HaltProvenance(
-        path=path, origin=origin, writer=writer, reason="cm-release.trigger-5.squash-conflict",
-        trigger="5", source="body", detail="example", fleet_scope=fleet,
+        path=path,
+        origin=origin,
+        writer=writer,
+        reason="cm-release.trigger-5.squash-conflict",
+        trigger="5",
+        source="body",
+        detail="example",
+        fleet_scope=fleet,
     )
 
 
@@ -369,8 +381,9 @@ def _trip() -> runaway.Trip:
 )
 def test_operator_halt_decides_none_even_with_a_runaway_trip(halt, operator_halts):
     for trips in ((), (_trip(),)):
-        outcome = dc.decide(_inputs(subject=dc.SUBJECT_HALT, halt=halt, operator_halts=operator_halts,
-                                    runaway_trips=trips))
+        outcome = dc.decide(
+            _inputs(subject=dc.SUBJECT_HALT, halt=halt, operator_halts=operator_halts, runaway_trips=trips)
+        )
         assert outcome.kind == dc.OUTCOME_NONE and outcome.why == dc.WHY_OPERATOR_HALT
 
 
@@ -523,6 +536,7 @@ def _trap_side_effects(monkeypatch) -> list:
         def _refused(*args, **kwargs):
             attempts.append(name)
             raise AssertionError(f"decide started a process through {name}")
+
         return _refused
 
     monkeypatch.setattr(builtins, "open", guarded_open)
@@ -546,20 +560,29 @@ def test_decide_changes_no_file_and_starts_no_process(sandbox, monkeypatch):
         encoding="utf-8",
     )
     (task_dir / "status.md").write_text(
-        "# Status\n\n## Task\n" + _TASK + "\n\n## State\nBLOCKED\n\n## Needs Human\nyes\n\n## Block Record\n"
-        + _record("zero_progress", attempts=1).to_body() + "\n",
+        "# Status\n\n## Task\n"
+        + _TASK
+        + "\n\n## State\nBLOCKED\n\n## Needs Human\nyes\n\n## Block Record\n"
+        + _record("zero_progress", attempts=1).to_body()
+        + "\n",
         encoding="utf-8",
     )
     halt = project_dir / "HALT"
     halt.write_text(
         "# HALT created by CM at 2026-01-01T10:00:00Z\n"
-        + "\n".join(provenance_lines(WRITER_CM_RELEASE, "cm-release.trigger-5.squash-conflict", "5")) + "\n",
+        + "\n".join(provenance_lines(WRITER_CM_RELEASE, "cm-release.trigger-5.squash-conflict", "5"))
+        + "\n",
         encoding="utf-8",
     )
     ctx = OpsContext(kanban_root=str(sandbox))
     for minute in range(4):
         runaway.record_event(
-            ctx, _PROJECT, runaway.COUNTER_REASON_REPEATS, key="", subject=_TASK, detail="zero_progress",
+            ctx,
+            _PROJECT,
+            runaway.COUNTER_REASON_REPEATS,
+            key="",
+            subject=_TASK,
+            detail="zero_progress",
             at=f"2026-01-01T11:0{minute}:00+00:00",
         )
 

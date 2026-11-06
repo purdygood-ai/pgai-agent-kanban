@@ -87,9 +87,7 @@ def _load_config(cfg_file: pathlib.Path, *, export_var: str | None = None) -> su
 
 
 @pytest.mark.parametrize("bad_value", ["on", "off", "maybe"], ids=["on", "off", "maybe"])
-def test_deferred_bugs_rejects_unaccepted_value_naming_true_and_false(
-    tmp_path: pathlib.Path, bad_value: str
-) -> None:
+def test_deferred_bugs_rejects_unaccepted_value_naming_true_and_false(tmp_path: pathlib.Path, bad_value: str) -> None:
     cfg_file = _write_cfg(tmp_path / "kanban.cfg", ["[release]", f"deferred_bugs = {bad_value}"])
 
     result = _load_config(cfg_file)
@@ -114,9 +112,7 @@ def test_deferred_bugs_accepts_true_and_false(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize("bad_value", ["on", "off", "sometimes"], ids=["on", "off", "sometimes"])
-def test_defer_piggyback_rejects_unaccepted_value_naming_true_and_false(
-    tmp_path: pathlib.Path, bad_value: str
-) -> None:
+def test_defer_piggyback_rejects_unaccepted_value_naming_true_and_false(tmp_path: pathlib.Path, bad_value: str) -> None:
     cfg_file = _write_cfg(tmp_path / "kanban.cfg", ["[release]", f"defer_piggyback = {bad_value}"])
 
     result = _load_config(cfg_file)
@@ -200,9 +196,9 @@ def test_deep_verify_accepts_all_four_documented_spellings_without_exporting_a_c
     result = _load_config_without_inherited_deep_verify(cfg_file)
 
     assert result.returncode == 0, f"deep_verify={value} should load: {result.stderr!r}"
-    assert "PGAI_DEEP_VERIFY=[unset]" in result.stdout, (
-        f"load_config must not export PGAI_DEEP_VERIFY (no reader); stdout: {result.stdout!r}"
-    )
+    assert (
+        "PGAI_DEEP_VERIFY=[unset]" in result.stdout
+    ), f"load_config must not export PGAI_DEEP_VERIFY (no reader); stdout: {result.stdout!r}"
 
 
 def test_deep_verify_rejects_an_unrecognised_value_naming_the_file_and_key(
@@ -226,9 +222,9 @@ def test_deep_verify_legacy_boolean_spellings_remain_accepted_after_the_word_spe
     for value in ("true", "false"):
         cfg_file = _write_cfg(tmp_path / f"kanban-{value}.cfg", ["[release]", f"deep_verify = {value}"])
         result = _load_config_without_inherited_deep_verify(cfg_file)
-        assert result.returncode == 0, (
-            f"deep_verify={value} (legacy boolean spelling) must keep resolving: {result.stderr!r}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"deep_verify={value} (legacy boolean spelling) must keep resolving: {result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +250,7 @@ def test_defer_piggyback_outside_release_section_loads_without_refusing(
     result = _load_config(cfg_file, export_var="PGAI_DEFER_PIGGYBACK")
 
     assert result.returncode == 0, (
-        f"a stray defer_piggyback outside [release] must not cause load_config to "
-        f"refuse: {result.stderr!r}"
+        f"a stray defer_piggyback outside [release] must not cause load_config to " f"refuse: {result.stderr!r}"
     )
     # [release] never carried the key, so the built-in default (true) applies --
     # the [training]-scoped "any" value is invisible to this registry by design.
@@ -276,8 +271,7 @@ def test_deferred_bug_level_outside_release_section_does_not_trigger_the_release
     result = _load_config(cfg_file, export_var="PGAI_DEFERRED_BUG_LEVEL")
 
     assert result.returncode == 0, (
-        f"a stray deferred_bug_level outside [release] must not cause load_config to "
-        f"refuse: {result.stderr!r}"
+        f"a stray deferred_bug_level outside [release] must not cause load_config to " f"refuse: {result.stderr!r}"
     )
     assert "PGAI_DEFERRED_BUG_LEVEL=[low]" in result.stdout
 
@@ -291,9 +285,7 @@ def test_deferred_bug_level_outside_release_section_does_not_trigger_the_release
 
 
 def _resolver_refusal_stderr(tmp_path: pathlib.Path, key: str, bad_value: str) -> str:
-    project_cfg = _write_cfg(
-        tmp_path / "projects" / "demo" / "project.cfg", ["[release]", f"{key} = {bad_value}"]
-    )
+    project_cfg = _write_cfg(tmp_path / "projects" / "demo" / "project.cfg", ["[release]", f"{key} = {bad_value}"])
     (tmp_path / "kanban.cfg").write_text("", encoding="utf-8")
     env = _base_env()
     env.pop("PGAI_PROJECT_NAME", None)
@@ -319,11 +311,10 @@ def test_resolver_refusal_names_the_same_accepted_set_as_the_loader(
     loader_result = _load_config(loader_cfg)
     assert loader_result.returncode != 0, f"expected loader to refuse {key}={bad_value!r}"
     assert accepted_set_substring in loader_result.stderr, (
-        f"loader refusal for {key} did not name {accepted_set_substring!r}: "
-        f"{loader_result.stderr!r}"
+        f"loader refusal for {key} did not name {accepted_set_substring!r}: " f"{loader_result.stderr!r}"
     )
 
     resolver_stderr = _resolver_refusal_stderr(tmp_path / "resolver_side", key, bad_value)
-    assert accepted_set_substring in resolver_stderr, (
-        f"resolver refusal for {key} did not name {accepted_set_substring!r}: {resolver_stderr!r}"
-    )
+    assert (
+        accepted_set_substring in resolver_stderr
+    ), f"resolver refusal for {key} did not name {accepted_set_substring!r}: {resolver_stderr!r}"

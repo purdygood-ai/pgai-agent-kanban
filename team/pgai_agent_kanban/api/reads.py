@@ -160,7 +160,7 @@ import os
 import pathlib
 import shlex
 import time
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -248,8 +248,7 @@ _VALID_PANES = _COLUMN_PANES | frozenset(_PANE_SCRIPTS)
 #: column names of that kind, lower-cased into the dashboard's
 #: ``--column-type`` vocabulary, in board order (``COLUMN_ORDER``).
 _PANE_COLUMN_TYPES: dict[str, tuple[str, ...]] = {
-    pane: tuple(name.lower() for name in COLUMN_ORDER if COLUMN_KINDS[name] == pane)
-    for pane in sorted(_COLUMN_PANES)
+    pane: tuple(name.lower() for name in COLUMN_ORDER if COLUMN_KINDS[name] == pane) for pane in sorted(_COLUMN_PANES)
 }
 
 #: The machine key of the refusal a column pane returns when the request
@@ -325,10 +324,9 @@ def _read_http_status(result: ShellResult) -> int:
     return status
 
 
-def _read_output_result(output: "ops_read.ReadOutput") -> ShellResult:
+def _read_output_result(output: ops_read.ReadOutput) -> ShellResult:
     """The envelope fields of a script-shaped ``ops.read`` render result."""
     return ShellResult(exit_code=output.exit_code, stdout=output.stdout, stderr=output.stderr)
-
 
 
 def _projects_cfg_list(kanban_root: pathlib.Path) -> list[str]:
@@ -367,7 +365,7 @@ def _projects_cfg_list(kanban_root: pathlib.Path) -> list[str]:
 def get_status(
     request: Request,
     project: str,
-    no_color: Optional[bool] = None,
+    no_color: bool | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the status summary ``kanban-status.sh --project <name>`` prints.
@@ -407,9 +405,7 @@ def get_status(
     try:
         validate_required({"project": project}, required_keys=["project"])
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
-        ) from exc
+        raise HTTPException(status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail) from exc
 
     refused = _component_refusal(request, "status", {"project": project}, None, warnings)
     if refused is not None:
@@ -418,9 +414,7 @@ def get_status(
     ctx = OpsContext(kanban_root=request.app.state.api_cfg.kanban_root)
     read = ops_read.read_status(ctx, project, no_color=bool(no_color))
     ship_posture = read.snapshot.ship_posture if read.snapshot is not None else None
-    return _make_envelope(
-        _read_output_result(read.output), warnings, extra={"ship_posture": ship_posture}
-    )
+    return _make_envelope(_read_output_result(read.output), warnings, extra={"ship_posture": ship_posture})
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +434,7 @@ def get_show(
     request: Request,
     project: str,
     key: str,
-    file: Optional[str] = None,
+    file: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return a task's or intake item's document, as ``show.sh`` prints it.
@@ -478,9 +472,7 @@ def get_show(
     try:
         validate_required({"project": project, "key": key}, required_keys=["project", "key"])
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
-        ) from exc
+        raise HTTPException(status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail) from exc
 
     refused = _component_refusal(request, "show", {"project": project, "key": key}, None, warnings)
     if refused is not None:
@@ -552,9 +544,7 @@ def get_test_report(
     try:
         validate_required({"project": project, "key": key}, required_keys=["project", "key"])
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
-        ) from exc
+        raise HTTPException(status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail) from exc
 
     refused = _component_refusal(request, "test-report", {"project": project, "key": key}, None, warnings)
     if refused is not None:
@@ -583,10 +573,10 @@ def get_test_report(
 )
 def get_metrics(
     request: Request,
-    project: Optional[str] = None,
-    last: Optional[int] = None,
-    per_agent: Optional[bool] = None,
-    format: Optional[str] = None,
+    project: str | None = None,
+    last: int | None = None,
+    per_agent: bool | None = None,
+    format: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return historical RC metrics for the requested project(s).
@@ -672,11 +662,11 @@ def get_metrics(
 )
 def get_costs(
     request: Request,
-    project: Optional[str] = None,
-    month: Optional[str] = None,
-    day: Optional[str] = None,
-    rc: Optional[str] = None,
-    format: Optional[str] = None,
+    project: str | None = None,
+    month: str | None = None,
+    day: str | None = None,
+    rc: str | None = None,
+    format: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return cost report data for the requested project and scope.
@@ -781,9 +771,9 @@ _AGENT_METRICS_DEFAULT_WINDOW = 10
 def _agent_metrics_span(
     request: Request,
     window: int,
-    last: Optional[int],
+    last: int | None,
     all_shipped: bool,
-    since: Optional[str],
+    since: str | None,
 ) -> RcSpan:
     """Build the RcSpan the /agent-metrics span parameters name.
 
@@ -808,8 +798,7 @@ def _agent_metrics_span(
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
             detail=(
-                "window, last, all and since are mutually exclusive; give at most one "
-                f"(got: {', '.join(given)})."
+                "window, last, all and since are mutually exclusive; give at most one " f"(got: {', '.join(given)})."
             ),
         )
 
@@ -853,9 +842,9 @@ def get_agent_metrics(
     request: Request,
     project: str,
     window: int = _AGENT_METRICS_DEFAULT_WINDOW,
-    last: Optional[int] = None,
+    last: int | None = None,
     all: bool = False,  # noqa: A002 -- the query parameter mirrors the CLI's --all flag
-    since: Optional[str] = None,
+    since: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return per-agent average wall time, tokens and tasks, and total tokens
@@ -945,9 +934,7 @@ def get_agent_metrics(
     try:
         validate_required({"project": project}, required_keys=["project"])
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
-        ) from exc
+        raise HTTPException(status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail) from exc
 
     refused = _component_refusal(request, "agent-metrics", {"project": project}, None, warnings)
     if refused is not None:
@@ -1005,7 +992,7 @@ def get_agent_metrics(
 )
 def get_rejected(
     request: Request,
-    project: Optional[str] = None,
+    project: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the quarantine inventory ``list-rejected.sh [--project <name>]`` prints.
@@ -1073,7 +1060,7 @@ def get_projects(
 def _dashboard_column_refusal(
     request: Request,
     pane: str,
-    column_type: Optional[str],
+    column_type: str | None,
     accepted: tuple[str, ...],
     warnings: list[str],
 ) -> dict:
@@ -1155,13 +1142,13 @@ def _render_column_pane(request: Request, pane: str, column: str) -> ShellResult
                 DASHBOARD_GATHER_UNAVAILABLE_ERROR_KEY,
                 f"GET /dashboard/{pane} rendered nothing for column_type {column}: {cause}.",
                 remedy,
-            ) + "\n",
+            )
+            + "\n",
         )
     # The script prints its renderer's output through $(...) and printf
     # '%s\n': trailing newlines collapse to one.
     stdout = "".join(f"{line}\n" for line in lines).rstrip("\n") + "\n"
     return ShellResult(exit_code=0, stdout=stdout, stderr="")
-
 
 
 @router.get(
@@ -1179,8 +1166,8 @@ def _render_column_pane(request: Request, pane: str, column: str) -> ShellResult
 def get_dashboard_pane(
     pane: str,
     request: Request,
-    project: Optional[str] = None,
-    column_type: Optional[str] = None,
+    project: str | None = None,
+    column_type: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the rendered output for a named dashboard pane.
@@ -1283,7 +1270,8 @@ def get_dashboard_pane(
         flags["project"] = project
 
     result = shell_out(
-        _script_path(request, script_rel), flags,
+        _script_path(request, script_rel),
+        flags,
         timeout_seconds=request.app.state.api_cfg.shell_out_timeout_seconds,
     )
     return _make_envelope(result, warnings)
@@ -1319,7 +1307,7 @@ def _is_registered_project(kanban_root: pathlib.Path, project_name: str) -> bool
 )
 def get_approvals(
     request: Request,
-    project: Optional[str] = None,
+    project: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return pending HUMAN-APPROVE gate tasks as a structured JSON array.
@@ -1391,7 +1379,7 @@ def get_approvals(
 )
 def get_auto_resolutions(
     request: Request,
-    project: Optional[str] = None,
+    project: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return OVERWATCH auto-resolution ledger entries as a structured JSON array.
@@ -1481,8 +1469,8 @@ def get_auto_resolutions(
 )
 def get_verdicts(
     request: Request,
-    project: Optional[str] = None,
-    details: Optional[bool] = None,
+    project: str | None = None,
+    details: bool | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return every registered project's lane verdict as JSON.
@@ -1607,10 +1595,7 @@ def get_verdicts(
         # report is always per-project.
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                "?details=true requires ?project=<name> -- the diagnostic "
-                "pane is always per-project."
-            ),
+            detail=("?details=true requires ?project=<name> -- the diagnostic " "pane is always per-project."),
         )
 
     live_root = route_kanban_root(request)
@@ -1627,9 +1612,7 @@ def get_verdicts(
         # not an error. Mirrors get_projects()'s "always 200, even empty".
         return JSONResponse(content={"verdicts": [], "warnings": warnings}, status_code=200)
 
-    report = ops_verdict.resolve_verdicts(
-        live_root, [project] if project else registered, details=bool(details)
-    )
+    report = ops_verdict.resolve_verdicts(live_root, [project] if project else registered, details=bool(details))
     if report.details is not None and report.details.posture_error is not None:
         raise HTTPException(
             status_code=HTTP_INTERNAL_SERVER_ERROR,
@@ -1765,8 +1748,8 @@ def get_task_readme(
 )
 def get_show_queues(
     request: Request,
-    project: Optional[str] = None,
-    details: Optional[bool] = None,
+    project: str | None = None,
+    details: bool | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return show-queues.sh's queue-state pane, compact or per-agent detail.
@@ -1869,9 +1852,7 @@ def get_show_queues(
         all_details: dict = {}
         for name in _projects_cfg_list(kanban_root):
             all_details[name] = (
-                ops_read.get_queues(ctx, name)["details"]
-                if ctx.project_root(name).is_dir()
-                else empty_queue_details()
+                ops_read.get_queues(ctx, name)["details"] if ctx.project_root(name).is_dir() else empty_queue_details()
             )
         return JSONResponse(
             content={"project": None, "details": all_details, "warnings": warnings},
@@ -1911,7 +1892,7 @@ def get_show_queues(
 def get_verify_rc_state(
     request: Request,
     project: str,
-    verbose: Optional[bool] = None,
+    verbose: bool | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the RC-state consistency report ``verify-rc-state.sh`` prints.
@@ -1952,9 +1933,7 @@ def get_verify_rc_state(
     try:
         validate_required({"project": project}, required_keys=["project"])
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail
-        ) from exc
+        raise HTTPException(status_code=HTTP_UNPROCESSABLE_ENTITY, detail=exc.detail) from exc
 
     refused = _component_refusal(request, "verify-rc-state", {"project": project}, None, warnings)
     if refused is not None:
@@ -1980,8 +1959,8 @@ def get_verify_rc_state(
 )
 def get_release_locks(
     request: Request,
-    release: Optional[str] = None,
-    force: Optional[bool] = None,
+    release: str | None = None,
+    force: bool | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the lock listing ``release-locks.sh`` prints with no flags (list mode).
@@ -2023,7 +2002,7 @@ def get_release_locks(
             detail=(
                 "GET /release-locks is the read-only listing mode; it never "
                 "releases a lock. To release one, POST /operations/release-locks "
-                "with a JSON body {\"release\": NAME} (add \"force\": true to "
+                'with a JSON body {"release": NAME} (add "force": true to '
                 "override a live holder), or run the CLI verb directly: "
                 f"{installed_script_command(ctx.kanban_root, 'release-locks.sh')} --release NAME [--force]."
             ),
@@ -2045,6 +2024,7 @@ def get_release_locks(
 # generic wrap when it is not, so the JSON body always carries real
 # error/message/remedy strings rather than an empty field.
 # ---------------------------------------------------------------------------
+
 
 def _refused_to_dual_channel(exc: Refused, fallback_error_key: str, fallback_remedy: str) -> dict:
     """Convert a ``Refused`` exception into ``{"error", "message", "remedy"}``.
@@ -2149,7 +2129,7 @@ def get_release_state_route(
         body["warnings"] = warnings
         return JSONResponse(content=body, status_code=HTTP_UNPROCESSABLE_ENTITY)
 
-    def _none_to_null(value: str) -> "str | None":
+    def _none_to_null(value: str) -> str | None:
         return None if value.strip().lower() == "none" else value
 
     return JSONResponse(

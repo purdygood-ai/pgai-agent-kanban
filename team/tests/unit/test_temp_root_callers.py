@@ -47,8 +47,11 @@ def sandboxed_env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> py
     """Clear every live-install variable and the worktree inputs; point the
     kanban root at an empty sandbox so no kanban.cfg outside tmp_path is read."""
     for name in (
-        "PGAI_AGENT_KANBAN_TEMP_DIR", "PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT",
-        "PGAI_WORKTREE_BASE", "PP_project_name",
+        "PGAI_AGENT_KANBAN_TEMP_DIR",
+        "PGAI_TASKS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_WORKTREE_BASE",
+        "PP_project_name",
     ):
         monkeypatch.delenv(name, raising=False)
     empty_root = tmp_path / "empty-kanban-root"
@@ -60,9 +63,7 @@ def sandboxed_env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> py
 
 def _write_paths(root: pathlib.Path, tmp_root: pathlib.Path, tmp_subdir: str) -> None:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "kanban.cfg").write_text(
-        f"[paths]\ntmp_root = {tmp_root}\ntmp_subdir = {tmp_subdir}\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text(f"[paths]\ntmp_root = {tmp_root}\ntmp_subdir = {tmp_subdir}\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +204,20 @@ def test_a_pre_merge_run_makes_and_removes_its_scratch_dir_under_the_temp_dir(
     repo.mkdir()
     for args in (("init", "-q", "-b", "main"), ("commit", "-q", "--allow-empty", "-m", "root")):
         subprocess.run(
-            ["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-             "-c", "commit.gpgsign=false", *args],
-            check=True, capture_output=True,
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
         )
     sandbox = tmp_path / "override-sandbox"
     sandboxed_env.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(sandbox))
@@ -229,9 +241,7 @@ def test_a_pre_merge_run_makes_and_removes_its_scratch_dir_under_the_temp_dir(
 # 4. green_ledger.sh: green_ledger_path
 # ---------------------------------------------------------------------------
 
-_PRINT_LEDGER_AND_TEMP_ROOT = (
-    'source "$1"; printf "%s\\n" "$(green_ledger_path)"; pgai_temp_dir'
-)
+_PRINT_LEDGER_AND_TEMP_ROOT = 'source "$1"; printf "%s\\n" "$(green_ledger_path)"; pgai_temp_dir'
 
 
 def test_green_ledger_path_with_a_whitespace_only_override_is_under_pgai_temp_dir(
@@ -251,9 +261,13 @@ def test_green_ledger_path_with_a_whitespace_only_override_is_under_pgai_temp_di
         },
     )
     result = subprocess.run(
-        ["bash", "-c", _PRINT_LEDGER_AND_TEMP_ROOT, "bash",
-         str(_TEAM_DIR / "scripts" / "lib" / "green_ledger.sh")],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        ["bash", "-c", _PRINT_LEDGER_AND_TEMP_ROOT, "bash", str(_TEAM_DIR / "scripts" / "lib" / "green_ledger.sh")],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr

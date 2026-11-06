@@ -20,9 +20,10 @@ Additional tests verify the helper functions independently.
 
 from __future__ import annotations
 
+import copy
+
 import pathlib
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -33,9 +34,7 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 
@@ -44,9 +43,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def _tester_task(source_branch: str = "none",
-                 git_repo: str = "git@github.com:org/repo.git",
-                 task_id: str = "TESTER-20260101-001-verify") -> dict:
+def _tester_task(
+    source_branch: str = "none",
+    git_repo: str = "git@github.com:org/repo.git",
+    task_id: str = "TESTER-20260101-001-verify",
+) -> dict:
     """Return a minimal TESTER task dict for tests."""
     return {
         "task_id": task_id,
@@ -60,9 +61,9 @@ def _tester_task(source_branch: str = "none",
     }
 
 
-def _coder_task(source_branch: str = "main",
-                git_repo: str = "git@github.com:org/repo.git",
-                task_id: str = "CODER-20260101-001-impl") -> dict:
+def _coder_task(
+    source_branch: str = "main", git_repo: str = "git@github.com:org/repo.git", task_id: str = "CODER-20260101-001-impl"
+) -> dict:
     """Return a minimal CODER task dict for tests."""
     return {
         "task_id": task_id,
@@ -198,8 +199,8 @@ def test_propagate_mixed_tasks() -> None:
     """Fills tasks without explicit source_branch; leaves those with explicit value alone."""
     tasks = [
         {"task_id": "A", "source_branch": "explicit-branch"},  # must NOT change
-        {"task_id": "B", "source_branch": "none"},             # must be filled
-        {"task_id": "C"},                                       # must be filled
+        {"task_id": "B", "source_branch": "none"},  # must be filled
+        {"task_id": "C"},  # must be filled
     ]
     count = pm._propagate_plan_source_branch(tasks, "rc/v2.0.0")
     assert count == 2
@@ -224,13 +225,18 @@ def test_propagate_returns_zero_for_empty_task_list() -> None:
 # ---------------------------------------------------------------------------
 # _validate_source_ref_for_worktree_roles
 # ---------------------------------------------------------------------------
+def _assert_guard_passes(tasks: list, caps: dict, workflow_type: str, capsys) -> None:
+    """The guard returns None, prints nothing to stderr, and leaves *tasks* unchanged."""
+    before = copy.deepcopy(tasks)
+    assert pm._validate_source_ref_for_worktree_roles(tasks, caps, workflow_type) is None
+    assert capsys.readouterr().err == ""
+    assert tasks == before
 
 
-def test_validate_passes_when_tester_has_source_branch() -> None:
+def test_validate_passes_when_tester_has_source_branch(capsys) -> None:
     """No error when TESTER task carries a valid source_branch."""
     tasks = [_tester_task(source_branch="rc/v2.5.0")]
-    # Must not raise SystemExit
-    pm._validate_source_ref_for_worktree_roles(tasks, _TESTING_ONLY_CAPS, "testing-only")
+    _assert_guard_passes(tasks, _TESTING_ONLY_CAPS, "testing-only", capsys)
 
 
 def test_validate_exits_when_tester_has_no_source_branch() -> None:
@@ -259,35 +265,34 @@ def test_validate_exits_when_tester_has_empty_source_branch() -> None:
         pm._validate_source_ref_for_worktree_roles(tasks, _TESTING_ONLY_CAPS, "testing-only")
 
 
-def test_validate_skips_release_workflow() -> None:
+def test_validate_skips_release_workflow(capsys) -> None:
     """Guard is bypassed entirely for release workflows (determine_source_branch handles it)."""
     tasks = [_tester_task(source_branch="none")]
-    # Must not raise, even though TESTER has no source_branch
-    pm._validate_source_ref_for_worktree_roles(tasks, _TESTING_ONLY_CAPS, "release")
+    _assert_guard_passes(tasks, _TESTING_ONLY_CAPS, "release", capsys)
 
 
-def test_validate_skips_when_git_mode_is_none() -> None:
+def test_validate_skips_when_git_mode_is_none(capsys) -> None:
     """Guard is bypassed when the workflow's git_mode is 'none' (no worktree needed)."""
     tasks = [_tester_task(source_branch="none")]
-    pm._validate_source_ref_for_worktree_roles(tasks, _NO_GIT_CAPS, "testing-only")
+    _assert_guard_passes(tasks, _NO_GIT_CAPS, "testing-only", capsys)
 
 
-def test_validate_skips_when_caps_empty() -> None:
+def test_validate_skips_when_caps_empty(capsys) -> None:
     """Guard is bypassed when workflow caps are empty (pre-manifest plugin)."""
     tasks = [_tester_task(source_branch="none")]
-    pm._validate_source_ref_for_worktree_roles(tasks, {}, "testing-only")
+    _assert_guard_passes(tasks, {}, "testing-only", capsys)
 
 
-def test_validate_skips_non_tester_roles() -> None:
+def test_validate_skips_non_tester_roles(capsys) -> None:
     """Guard does not fire for CODER tasks, even with source_branch='none'."""
     tasks = [_coder_task(source_branch="none")]
-    pm._validate_source_ref_for_worktree_roles(tasks, _TESTING_ONLY_CAPS, "testing-only")
+    _assert_guard_passes(tasks, _TESTING_ONLY_CAPS, "testing-only", capsys)
 
 
-def test_validate_skips_tester_with_no_git_repo() -> None:
+def test_validate_skips_tester_with_no_git_repo(capsys) -> None:
     """Guard does not fire for TESTER tasks whose git_repo is 'none' (no worktree needed)."""
     tasks = [_tester_task(source_branch="none", git_repo="none")]
-    pm._validate_source_ref_for_worktree_roles(tasks, _TESTING_ONLY_CAPS, "testing-only")
+    _assert_guard_passes(tasks, _TESTING_ONLY_CAPS, "testing-only", capsys)
 
 
 def test_validate_multiple_tester_tasks_all_named_on_error(capsys) -> None:
@@ -310,7 +315,7 @@ def test_validate_multiple_tester_tasks_all_named_on_error(capsys) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_propagate_then_validate_succeeds_when_plan_has_source_branch() -> None:
+def test_propagate_then_validate_succeeds_when_plan_has_source_branch(capsys) -> None:
     """AC-3 + AC-2 combined: propagation supplies the source ref; guard passes."""
     tasks = [
         _coder_task(source_branch="none"),
@@ -321,8 +326,7 @@ def test_propagate_then_validate_succeeds_when_plan_has_source_branch() -> None:
     # After propagation both tasks have source_branch set
     for t in tasks:
         assert t["source_branch"] == plan_sb
-    # Guard must pass (no SystemExit)
-    pm._validate_source_ref_for_worktree_roles(tasks, _TESTING_ONLY_CAPS, "testing-only")
+    _assert_guard_passes(tasks, _TESTING_ONLY_CAPS, "testing-only", capsys)
 
 
 def test_propagate_then_validate_fails_when_no_source_branch_anywhere() -> None:
@@ -377,15 +381,11 @@ def test_guard_fires_on_post_assembly_injected_tester_with_no_source_branch(
     # Simulate post-assembly injection: rogue injector appends a ticket
     # AFTER the guard would normally have been satisfied.
     rogue_id = "TESTER-20260714-002-post-assembly-injection"
-    assembled_tasks.append(
-        _tester_task(source_branch="none", task_id=rogue_id)
-    )
+    assembled_tasks.append(_tester_task(source_branch="none", task_id=rogue_id))
 
     # Guard must refuse with sys.exit(1) (non-zero).
     with pytest.raises(SystemExit) as exc_info:
-        pm._validate_source_ref_for_worktree_roles(
-            assembled_tasks, _TESTING_ONLY_CAPS, "testing-only"
-        )
+        pm._validate_source_ref_for_worktree_roles(assembled_tasks, _TESTING_ONLY_CAPS, "testing-only")
     assert exc_info.value.code != 0, (
         "Expected sys.exit with non-zero code for post-assembly injected "
         f"TESTER with source_branch='none'; got code {exc_info.value.code!r}."
@@ -394,16 +394,14 @@ def test_guard_fires_on_post_assembly_injected_tester_with_no_source_branch(
     # Diagnostic must name the offending task.
     captured = capsys.readouterr()
     assert rogue_id in captured.err, (
-        f"Expected the offending task ID {rogue_id!r} in stderr diagnostic.\n"
-        f"stderr: {captured.err}"
+        f"Expected the offending task ID {rogue_id!r} in stderr diagnostic.\n" f"stderr: {captured.err}"
     )
     assert "Source Branch" in captured.err or "source_branch" in captured.err.lower(), (
-        f"Expected 'Source Branch' or 'source_branch' mentioned in stderr diagnostic.\n"
-        f"stderr: {captured.err}"
+        f"Expected 'Source Branch' or 'source_branch' mentioned in stderr diagnostic.\n" f"stderr: {captured.err}"
     )
 
 
-def test_guard_passes_when_all_assembled_tasks_have_source_branch() -> None:
+def test_guard_passes_when_all_assembled_tasks_have_source_branch(capsys) -> None:
     """Guard passes when every TESTER in the assembled list has a valid source ref.
 
     Confirms that normal assembly (where propagation has filled all source refs)
@@ -413,10 +411,7 @@ def test_guard_passes_when_all_assembled_tasks_have_source_branch() -> None:
         _tester_task(source_branch="rc/v1.22.5", task_id="TESTER-20260714-001-verify"),
         _tester_task(source_branch="rc/v1.22.5", task_id="TESTER-20260714-002-verify-and-report"),
     ]
-    # Must not raise SystemExit — all tasks have a valid source ref.
-    pm._validate_source_ref_for_worktree_roles(
-        assembled_tasks, _TESTING_ONLY_CAPS, "testing-only"
-    )
+    _assert_guard_passes(assembled_tasks, _TESTING_ONLY_CAPS, "testing-only", capsys)
 
 
 def test_guard_names_all_injected_tickets_lacking_source_branch(capsys) -> None:
@@ -434,14 +429,8 @@ def test_guard_names_all_injected_tickets_lacking_source_branch(capsys) -> None:
     ]
 
     with pytest.raises(SystemExit):
-        pm._validate_source_ref_for_worktree_roles(
-            assembled_tasks, _TESTING_ONLY_CAPS, "testing-only"
-        )
+        pm._validate_source_ref_for_worktree_roles(assembled_tasks, _TESTING_ONLY_CAPS, "testing-only")
 
     captured = capsys.readouterr()
-    assert rogue_id_1 in captured.err, (
-        f"Expected {rogue_id_1!r} named in stderr diagnostic.\nstderr: {captured.err}"
-    )
-    assert rogue_id_2 in captured.err, (
-        f"Expected {rogue_id_2!r} named in stderr diagnostic.\nstderr: {captured.err}"
-    )
+    assert rogue_id_1 in captured.err, f"Expected {rogue_id_1!r} named in stderr diagnostic.\nstderr: {captured.err}"
+    assert rogue_id_2 in captured.err, f"Expected {rogue_id_2!r} named in stderr diagnostic.\nstderr: {captured.err}"

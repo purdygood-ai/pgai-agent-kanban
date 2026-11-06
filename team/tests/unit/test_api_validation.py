@@ -117,9 +117,7 @@ def test_require_component_refuses_each_class(value: str, reason: str) -> None:
     with pytest.raises(ComponentRefused) as caught:
         require_component(value, "key")
     assert caught.value.field == "key"
-    assert reason in caught.value.reason, (
-        f"refusal of {value!r} should say {reason!r}; said {caught.value.reason!r}"
-    )
+    assert reason in caught.value.reason, f"refusal of {value!r} should say {reason!r}; said {caught.value.reason!r}"
 
 
 @pytest.mark.parametrize(
@@ -192,8 +190,16 @@ def test_component_refusal_block_is_the_emitters_three_line_block() -> None:
 
 @pytest.mark.parametrize(
     "value, code",
-    [("a\nb", "U+000A"), ("a\rb", "U+000D"), ("a\tb", "U+0009"), ("\x00", "U+0000"),
-     ("a\x7fb", "U+007F"), ("a\x85b", "U+0085"), ("a\u2028b", "U+2028"), ("a\u2029b", "U+2029")],
+    [
+        ("a\nb", "U+000A"),
+        ("a\rb", "U+000D"),
+        ("a\tb", "U+0009"),
+        ("\x00", "U+0000"),
+        ("a\x7fb", "U+007F"),
+        ("a\x85b", "U+0085"),
+        ("a\u2028b", "U+2028"),
+        ("a\u2029b", "U+2029"),
+    ],
 )
 def test_control_character_fault_names_the_first_control_character(value: str, code: str) -> None:
     fault = control_character_fault(value)

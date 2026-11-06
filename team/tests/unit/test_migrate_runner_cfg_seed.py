@@ -63,8 +63,8 @@ verbose_mode = false
 
 _OTHER_CFG = """\
 [project]
-project_name = video-generator
-dev_tree_path = /srv/develop/video-generator
+project_name = my-app
+dev_tree_path = /srv/develop/my-app
 
 [training]
 reasoning_trace = false
@@ -111,7 +111,11 @@ def _cfg(root: pathlib.Path, name: str) -> pathlib.Path:
 
 
 def _run(
-    root: pathlib.Path, tmp_path: pathlib.Path, *args: str, env_extra=None, script: pathlib.Path = _MIGRATION,
+    root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    *args: str,
+    env_extra=None,
+    script: pathlib.Path = _MIGRATION,
 ) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -128,7 +132,11 @@ def _run(
     )
     return subprocess.run(
         ["bash", str(script), *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
     )
 
 
@@ -138,8 +146,8 @@ def _ok(result: subprocess.CompletedProcess) -> str:
 
 
 def test_seeds_the_kanban_project_and_leaves_the_other_project_byte_identical(tmp_path) -> None:
-    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "video-generator": _OTHER_CFG})
-    other_before = _cfg(root, "video-generator").read_bytes()
+    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "my-app": _OTHER_CFG})
+    other_before = _cfg(root, "my-app").read_bytes()
 
     out = _ok(_run(root, tmp_path))
 
@@ -150,14 +158,14 @@ def test_seeds_the_kanban_project_and_leaves_the_other_project_byte_identical(tm
         + f"targeted_test_command = {KANBAN_TARGETED}\n"
         + f"pre_merge_command = {KANBAN_PRE_MERGE}\n"
     )
-    assert _cfg(root, "video-generator").read_bytes() == other_before
+    assert _cfg(root, "my-app").read_bytes() == other_before
     assert "[seeded]  pgai-agent-kanban: added [testing] targeted_test_command" in out
 
 
 def test_second_run_changes_nothing(tmp_path) -> None:
-    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "video-generator": _OTHER_CFG})
+    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "my-app": _OTHER_CFG})
     _ok(_run(root, tmp_path))
-    first = {name: _cfg(root, name).read_bytes() for name in (_KANBAN_PROJECT, "video-generator")}
+    first = {name: _cfg(root, name).read_bytes() for name in (_KANBAN_PROJECT, "my-app")}
 
     out = _ok(_run(root, tmp_path))
 
@@ -176,9 +184,7 @@ def test_seeded_values_give_the_kanban_tickets_todays_criteria(tmp_path) -> None
         "adds or changes>` (and the integration runner the same way, if integration "
         "tests were touched) exits 0."
     )
-    assert config.pre_merge_criterion() == (
-        "`bash team/scripts/run-unit-tests.sh --pre-merge` exits 0 before merging."
-    )
+    assert config.pre_merge_criterion() == ("`bash team/scripts/run-unit-tests.sh --pre-merge` exits 0 before merging.")
 
 
 def test_adds_keys_to_an_existing_testing_section_after_its_last_key(tmp_path) -> None:
@@ -205,13 +211,17 @@ def test_a_key_already_present_is_kept_even_when_blank(tmp_path) -> None:
     )
 
 
-@pytest.mark.parametrize("projects", [
-    {"video-generator": _OTHER_CFG},
-    {_KANBAN_PROJECT: None, "video-generator": _OTHER_CFG},
-], ids=["kanban-not-registered", "kanban-without-project-cfg"])
+@pytest.mark.parametrize(
+    "projects",
+    [
+        {"my-app": _OTHER_CFG},
+        {_KANBAN_PROJECT: None, "my-app": _OTHER_CFG},
+    ],
+    ids=["kanban-not-registered", "kanban-without-project-cfg"],
+)
 def test_writes_nothing_when_the_kanban_project_cannot_be_seeded(tmp_path, projects) -> None:
     root = _build_root(tmp_path, projects)
-    other_before = _cfg(root, "video-generator").read_bytes()
+    other_before = _cfg(root, "my-app").read_bytes()
     # An unregistered directory of the same name is not a target either.
     stray = root / "projects" / _KANBAN_PROJECT
     stray.mkdir(parents=True, exist_ok=True)
@@ -219,23 +229,23 @@ def test_writes_nothing_when_the_kanban_project_cannot_be_seeded(tmp_path, proje
     out = _ok(_run(root, tmp_path))
 
     assert "[skip]" in out
-    assert _cfg(root, "video-generator").read_bytes() == other_before
+    assert _cfg(root, "my-app").read_bytes() == other_before
     assert not _cfg(root, _KANBAN_PROJECT).exists()
 
 
 def test_project_flag_naming_another_project_writes_nothing(tmp_path) -> None:
-    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "video-generator": _OTHER_CFG})
-    out = _ok(_run(root, tmp_path, "--project", "video-generator"))
+    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "my-app": _OTHER_CFG})
+    out = _ok(_run(root, tmp_path, "--project", "my-app"))
     assert _cfg(root, _KANBAN_PROJECT).read_text(encoding="utf-8") == _KANBAN_CFG
-    assert _cfg(root, "video-generator").read_text(encoding="utf-8") == _OTHER_CFG
-    assert "[skip]  video-generator: dev tree /srv/develop/video-generator is not the kanban's source tree" in out
+    assert _cfg(root, "my-app").read_text(encoding="utf-8") == _OTHER_CFG
+    assert "[skip]  my-app: dev tree /srv/develop/my-app is not the kanban's source tree" in out
 
 
 def test_an_exported_project_name_does_not_narrow_the_run(tmp_path) -> None:
-    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "video-generator": _OTHER_CFG})
-    _ok(_run(root, tmp_path, env_extra={"PGAI_PROJECT_NAME": "video-generator"}))
+    root = _build_root(tmp_path, {_KANBAN_PROJECT: _KANBAN_CFG, "my-app": _OTHER_CFG})
+    _ok(_run(root, tmp_path, env_extra={"PGAI_PROJECT_NAME": "my-app"}))
     assert "targeted_test_command = " in _cfg(root, _KANBAN_PROJECT).read_text(encoding="utf-8")
-    assert _cfg(root, "video-generator").read_text(encoding="utf-8") == _OTHER_CFG
+    assert _cfg(root, "my-app").read_text(encoding="utf-8") == _OTHER_CFG
 
 
 def test_dry_run_previews_and_writes_nothing(tmp_path) -> None:
@@ -272,7 +282,9 @@ def test_seed_module_refuses_a_missing_file(tmp_path, capsys) -> None:
 def test_seeds_the_source_tree_registered_under_any_name(tmp_path) -> None:
     self_cfg = _own_tree_cfg("kanban-self", _SOURCE_TREE)
     root = _build_root(
-        tmp_path, {"kanban-self": self_cfg, "video-generator": _OTHER_CFG}, configured_dev_tree=None,
+        tmp_path,
+        {"kanban-self": self_cfg, "my-app": _OTHER_CFG},
+        configured_dev_tree=None,
     )
 
     out = _ok(_run(root, tmp_path))
@@ -283,17 +295,20 @@ def test_seeds_the_source_tree_registered_under_any_name(tmp_path) -> None:
         + f"targeted_test_command = {KANBAN_TARGETED}\n"
         + f"pre_merge_command = {KANBAN_PRE_MERGE}\n"
     )
-    assert _cfg(root, "video-generator").read_text(encoding="utf-8") == _OTHER_CFG
+    assert _cfg(root, "my-app").read_text(encoding="utf-8") == _OTHER_CFG
     assert "[seeded]  kanban-self: added [testing] targeted_test_command" in out
     assert "[seeded]  kanban-self: added [testing] pre_merge_command" in out
 
 
 def test_a_project_on_another_git_tree_is_left_byte_identical(tmp_path) -> None:
     other_tree = _git_repo(tmp_path / "other-app")
-    root = _build_root(tmp_path, {
-        "kanban-self": _own_tree_cfg("kanban-self", _SOURCE_TREE),
-        "other-app": _own_tree_cfg("other-app", other_tree),
-    })
+    root = _build_root(
+        tmp_path,
+        {
+            "kanban-self": _own_tree_cfg("kanban-self", _SOURCE_TREE),
+            "other-app": _own_tree_cfg("other-app", other_tree),
+        },
+    )
     other_before = _cfg(root, "other-app").read_bytes()
 
     out = _ok(_run(root, tmp_path))
@@ -306,7 +321,9 @@ def test_a_project_on_another_git_tree_is_left_byte_identical(tmp_path) -> None:
 def test_only_another_git_tree_registered_writes_nothing(tmp_path) -> None:
     other_tree = _git_repo(tmp_path / "other-app")
     root = _build_root(
-        tmp_path, {"other-app": _own_tree_cfg("other-app", other_tree)}, configured_dev_tree=None,
+        tmp_path,
+        {"other-app": _own_tree_cfg("other-app", other_tree)},
+        configured_dev_tree=None,
     )
     before = _cfg(root, "other-app").read_bytes()
 
@@ -336,7 +353,9 @@ def test_another_checkout_of_the_same_repository_is_the_same_tree(tmp_path) -> N
     git = require_binary("git", label="migration-dev-tree-match").path
     subprocess.run(
         [git, "-C", str(repo), "worktree", "add", "-q", "--detach", str(worktree)],
-        check=True, capture_output=True, timeout=60,
+        check=True,
+        capture_output=True,
+        timeout=60,
     )
     # The worktree carries the script and links to the libraries and the
     # package it calls, laid out as the source tree lays them out.
@@ -347,10 +366,14 @@ def test_another_checkout_of_the_same_repository_is_the_same_tree(tmp_path) -> N
     (worktree / "team" / "scripts" / "lib").symlink_to(_TEAM_DIR / "scripts" / "lib", target_is_directory=True)
     (worktree / "team" / "pgai_agent_kanban").symlink_to(_TEAM_DIR / "pgai_agent_kanban", target_is_directory=True)
     unrelated = _git_repo(tmp_path / "unrelated")
-    root = _build_root(tmp_path, {
-        "kanban-self": _own_tree_cfg("kanban-self", repo),
-        "unrelated": _own_tree_cfg("unrelated", unrelated),
-    }, configured_dev_tree=None)
+    root = _build_root(
+        tmp_path,
+        {
+            "kanban-self": _own_tree_cfg("kanban-self", repo),
+            "unrelated": _own_tree_cfg("unrelated", unrelated),
+        },
+        configured_dev_tree=None,
+    )
     unrelated_before = _cfg(root, "unrelated").read_bytes()
 
     out = _ok(_run(root, tmp_path, script=script))

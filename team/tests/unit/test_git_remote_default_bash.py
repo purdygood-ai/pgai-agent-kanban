@@ -71,7 +71,11 @@ def _bash(tmp_path: pathlib.Path, body: str, *, cwd: pathlib.Path) -> subprocess
     )
     return subprocess.run(
         ["bash", "-c", f"set -euo pipefail\n{body}\n"],
-        capture_output=True, text=True, env=env, cwd=cwd, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
+        timeout=60,
     )
 
 
@@ -83,7 +87,10 @@ def _repo_with_two_remotes(tmp_path: pathlib.Path) -> pathlib.Path:
 
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            check=True,
             env=build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"GIT_CONFIG_NOSYSTEM": "1"}),
         ).stdout.strip()
 

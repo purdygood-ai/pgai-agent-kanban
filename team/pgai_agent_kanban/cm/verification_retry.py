@@ -77,7 +77,6 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -206,7 +205,10 @@ def _record_version(version: str) -> str:
     # main() narrates the refusal and release_verification_retry.sh
     # carries on.
     return checked_release_version(
-        version, VerificationRetryError, _BAD_VERSION_KEY, _HELP_COMMAND,
+        version,
+        VerificationRetryError,
+        _BAD_VERSION_KEY,
+        _HELP_COMMAND,
         consequence="it cannot name a verification-retry record",
     )
 
@@ -240,12 +242,12 @@ def _checked_case(case: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def record_path(project_root: "Path | str", version: str) -> Path:
+def record_path(project_root: Path | str, version: str) -> Path:
     """Where *version*'s retry record lives under *project_root*."""
     return Path(project_root) / _RECORD_DIR / f"{_RECORD_PREFIX}{_record_version(version)}"
 
 
-def read_record(project_root: "Path | str", version: str) -> Optional[RetryRecord]:
+def read_record(project_root: Path | str, version: str) -> RetryRecord | None:
     """*version*'s retry record, or None when its requeue is not spent.
 
     Read liberally: unknown keys are ignored and a missing key reads as
@@ -269,8 +271,13 @@ def read_record(project_root: "Path | str", version: str) -> Optional[RetryRecor
 
 
 def _new_record(
-    version: str, task_id: str, *, case: str, cause: str, requeued_by: str,
-    now: "datetime.datetime | str | None" = None,
+    version: str,
+    task_id: str,
+    *,
+    case: str,
+    cause: str,
+    requeued_by: str,
+    now: datetime.datetime | str | None = None,
 ) -> RetryRecord:
     """The record a requeue writes, validated; nothing is written."""
     return RetryRecord(
@@ -283,22 +290,22 @@ def _new_record(
     )
 
 
-def _write_record(project_root: "Path | str", record: RetryRecord) -> None:
+def _write_record(project_root: Path | str, record: RetryRecord) -> None:
     path = record_path(project_root, record.version)
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, "\n".join(record.as_lines()) + "\n")
 
 
 def record_requeue(
-    project_root: "Path | str",
+    project_root: Path | str,
     version: str,
     task_id: str,
     *,
     case: str,
     cause: str,
     requeued_by: str,
-    now: "datetime.datetime | str | None" = None,
-) -> Optional[RetryRecord]:
+    now: datetime.datetime | str | None = None,
+) -> RetryRecord | None:
     """Write *version*'s retry record; None (nothing written) when it already exists."""
     record = _new_record(version, task_id, case=case, cause=cause, requeued_by=requeued_by, now=now)
     if record_path(project_root, record.version).exists():
@@ -312,7 +319,7 @@ def record_requeue(
 # ---------------------------------------------------------------------------
 
 
-def block_cause(task_dir: "Path | str", case: str = CASE_TESTER_BLOCKED) -> str:
+def block_cause(task_dir: Path | str, case: str = CASE_TESTER_BLOCKED) -> str:
     """The TESTER task's block cause, one line.
 
     For a BLOCKED task: its status.md ``## Blockers``, else its Block
@@ -335,12 +342,12 @@ def block_cause(task_dir: "Path | str", case: str = CASE_TESTER_BLOCKED) -> str:
     return f"no block cause recorded in {task_dir / 'status.md'}"
 
 
-def verifies_version(task_dir: "Path | str", version: str) -> bool:
+def verifies_version(task_dir: Path | str, version: str) -> bool:
     """True when the task README's ``## Release Version`` names *version*."""
     return bool(version) and task_release_version(Path(task_dir) / "README.md") == version
 
 
-def verification_facts(task_dir: "Path | str", active_rc: str) -> dict:
+def verification_facts(task_dir: Path | str, active_rc: str) -> dict:
     """The decision wake's facts about a blocked TESTER task's verification.
 
     ``{}`` unless the task's README names a release that is the open RC
@@ -371,7 +378,7 @@ def triage_note(version: str, case: str, cause: str) -> str:
     )
 
 
-def inbox_question(version: str, task_id: str, record: Optional[RetryRecord], case: str, cause: str) -> str:
+def inbox_question(version: str, task_id: str, record: RetryRecord | None, case: str, cause: str) -> str:
     """The operator inbox question for an unverified ship."""
     first = ""
     if record is not None:
@@ -414,9 +421,8 @@ def _ensure_return_sections(status: Path) -> None:
         atomic_write(status, text, preserve_mode=True)
 
 
-
 def requeue_task(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     version: str,
     task_id: str,
@@ -424,9 +430,9 @@ def requeue_task(
     case: str,
     cause: str,
     requeued_by: str = BY_CM_RELEASE,
-    now: "datetime.datetime | str | None" = None,
-    project_root: "Path | str | None" = None,
-) -> Optional[RetryRecord]:
+    now: datetime.datetime | str | None = None,
+    project_root: Path | str | None = None,
+) -> RetryRecord | None:
     """Spend *version*'s one requeue on *task_id*: record it, append the
     Triage Note, and return the task to BACKLOG.
 
@@ -457,7 +463,10 @@ def requeue_task(
     state = ts.section_value(status.read_text(encoding="utf-8"), "State").strip().upper() or "unknown"
     _ensure_return_sections(status)
     return_to_backlog(
-        status, find_queue_file(project_root, task_id), project=project, task_id=task_id,
+        status,
+        find_queue_file(project_root, task_id),
+        project=project,
+        task_id=task_id,
         summary=(
             f"Returned from {state} to BACKLOG by {record.requeued_by}: verification of {record.version} "
             f"{_CASE_PHRASES[record.case]} (cause: {record.cause}). This is the RC's one requeue; "
@@ -470,14 +479,14 @@ def requeue_task(
 
 
 def write_inbox_entry(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     version: str,
     task_id: str,
     *,
     case: str,
     cause: str,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> str:
     """Write the operator inbox entry for an unverified ship; its entry ID.
 
@@ -489,7 +498,8 @@ def write_inbox_entry(
     record = read_record(ctx.project_root(project), version)
     root = shlex.quote(str(ctx.kanban_root))
     entry = operator_inbox.write_entry(
-        ctx, project,
+        ctx,
+        project,
         source=task_id,
         question=inbox_question(version, task_id, record, _checked_case(case), cause),
         meanwhile=(
@@ -531,10 +541,13 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--version", required=True, help=RELEASE_VERSION_HELP)
     cause = sub.add_parser("cause", help="print the TESTER task's block cause, one line")
     cause.add_argument("--task-dir", required=True, help="the TESTER task folder")
-    cause.add_argument("--case", default=CASE_TESTER_BLOCKED, choices=CASES,
-                       help=f"{_CASE_HELP}; default: {CASE_TESTER_BLOCKED}")
-    for name, helptext in (("requeue", "spend the RC's one requeue on the TESTER task"),
-                           ("inbox", "write the operator inbox entry for an unverified ship")):
+    cause.add_argument(
+        "--case", default=CASE_TESTER_BLOCKED, choices=CASES, help=f"{_CASE_HELP}; default: {CASE_TESTER_BLOCKED}"
+    )
+    for name, helptext in (
+        ("requeue", "spend the RC's one requeue on the TESTER task"),
+        ("inbox", "write the operator inbox entry for an unverified ship"),
+    ):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("--kanban-root", required=True, help="the kanban root")
         p.add_argument("--project", required=True, help="the project, e.g. pgai-agent-kanban")
@@ -544,17 +557,22 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--cause", default="", help="the block cause, one line")
         if name == "requeue":
             p.add_argument(
-                "--by", default=BY_CM_RELEASE, choices=_REQUEUERS,
+                "--by",
+                default=BY_CM_RELEASE,
+                choices=_REQUEUERS,
                 help=f"who spends the requeue, recorded as requeued_by (default: {BY_CM_RELEASE})",
             )
-            p.add_argument("--project-root", default="", help="the project's root (default: <kanban root>/projects/<project>)")
+            p.add_argument(
+                "--project-root", default="", help="the project's root (default: <kanban root>/projects/<project>)"
+            )
     notes = sub.add_parser("notes-block", help="print the ## Known Issues body of an unverified ship")
-    notes.add_argument("--case", default=CASE_TESTER_BLOCKED, choices=CASES,
-                       help=f"{_CASE_HELP}; default: {CASE_TESTER_BLOCKED}")
+    notes.add_argument(
+        "--case", default=CASE_TESTER_BLOCKED, choices=CASES, help=f"{_CASE_HELP}; default: {CASE_TESTER_BLOCKED}"
+    )
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run one subcommand and print its output (``key=value`` lines, or
     the notes block for ``notes-block``).
 
@@ -573,15 +591,26 @@ def main(argv: Optional[list] = None) -> int:
             print(f"cause={block_cause(args.task_dir, args.case)}")
         elif args.command == "requeue":
             record = requeue_task(
-                args.kanban_root, args.project, args.version, args.task, case=args.case, cause=args.cause,
-                requeued_by=args.by, project_root=args.project_root or None,
+                args.kanban_root,
+                args.project,
+                args.version,
+                args.task,
+                case=args.case,
+                cause=args.cause,
+                requeued_by=args.by,
+                project_root=args.project_root or None,
             )
             print(f"outcome={'requeued' if record is not None else 'spent'}")
             for line in record.as_lines() if record is not None else []:
                 print(line)
         elif args.command == "inbox":
             entry_id = write_inbox_entry(
-                args.kanban_root, args.project, args.version, args.task, case=args.case, cause=args.cause,
+                args.kanban_root,
+                args.project,
+                args.version,
+                args.task,
+                case=args.case,
+                cause=args.cause,
             )
             print(f"entry_id={entry_id}")
         else:

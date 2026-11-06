@@ -22,7 +22,6 @@ from pgai_agent_kanban.lib.error_contract import (
     format_error_contract,
 )
 
-
 # ---------------------------------------------------------------------------
 # format_error_contract: house shape
 # ---------------------------------------------------------------------------
@@ -62,10 +61,7 @@ def test_fields_are_colon_aligned_to_the_same_value_column() -> None:
     # first letters of "error"/"message"/"remedy" and give a false match).
     result = format_error_contract("AAA_ERR", "BBB_MSG", "CCC_REM")
     lines = result.split("\n")
-    starts = [
-        line.index(value)
-        for line, value in zip(lines, ("AAA_ERR", "BBB_MSG", "CCC_REM"))
-    ]
+    starts = [line.index(value) for line, value in zip(lines, ("AAA_ERR", "BBB_MSG", "CCC_REM"))]
     assert starts[0] == starts[1] == starts[2]
 
 
@@ -154,9 +150,7 @@ def test_emit_propagates_validation_error() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_emit_with_project_records_a_refusal_ledger_entry(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_emit_with_project_records_a_refusal_ledger_entry(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A refusal emitted with project= in scope leaves a record naming the
     machine key, message, remedy, timestamp, and raising surface, readable
     through the library's one reader."""
@@ -168,23 +162,17 @@ def test_emit_with_project_records_a_refusal_ledger_entry(
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
     buf = io.StringIO()
 
-    emit_error_contract(
-        "gate.ledger", "ledger message", "ledger remedy", file=buf, project="demo-project"
-    )
+    emit_error_contract("gate.ledger", "ledger message", "ledger remedy", file=buf, project="demo-project")
 
     record = read_latest(ledger_path_for_project(str(tmp_path), "demo-project"))
     assert record is not None
     assert record["error"] == "gate.ledger"
     assert record["message"] == "ledger message"
     assert record["remedy"] == "ledger remedy"
-    assert record["surface"].endswith(
-        "test_error_contract.py:test_emit_with_project_records_a_refusal_ledger_entry"
-    )
+    assert record["surface"].endswith("test_error_contract.py:test_emit_with_project_records_a_refusal_ledger_entry")
 
 
-def test_second_emit_replaces_first_ledger_entry(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_second_emit_replaces_first_ledger_entry(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A second refusal for the same project REPLACES the first: the
     record still holds exactly one entry and it is the newer one."""
     from pgai_agent_kanban.lib.refusal_ledger import (
@@ -195,12 +183,18 @@ def test_second_emit_replaces_first_ledger_entry(
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
 
     emit_error_contract(
-        "gate.first", "first message", "first remedy",
-        file=io.StringIO(), project="demo-project",
+        "gate.first",
+        "first message",
+        "first remedy",
+        file=io.StringIO(),
+        project="demo-project",
     )
     emit_error_contract(
-        "gate.second", "second message", "second remedy",
-        file=io.StringIO(), project="demo-project",
+        "gate.second",
+        "second message",
+        "second remedy",
+        file=io.StringIO(),
+        project="demo-project",
     )
 
     ledger_path = ledger_path_for_project(str(tmp_path), "demo-project")
@@ -212,9 +206,7 @@ def test_second_emit_replaces_first_ledger_entry(
     assert record["error"] == "gate.second"
 
 
-def test_emit_without_project_scope_records_nothing(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_emit_without_project_scope_records_nothing(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """No explicit project= and no ambient PGAI_PROJECT_NAME: recording is
     skipped entirely -- no project directory is even created."""
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
@@ -225,9 +217,7 @@ def test_emit_without_project_scope_records_nothing(
     assert not (tmp_path / "projects").exists()
 
 
-def test_emit_with_unwritable_ledger_path_preserves_output(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_emit_with_unwritable_ledger_path_preserves_output(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With the ledger path made unwritable, a refusal still prints its
     original stdout/stderr text unchanged and raises nothing -- the
     diagnostic never becomes a gate."""
@@ -238,8 +228,11 @@ def test_emit_with_unwritable_ledger_path_preserves_output(
     try:
         buf = io.StringIO()
         emit_error_contract(
-            "gate.unwritable", "unwritable message", "unwritable remedy",
-            file=buf, project="locked-project",
+            "gate.unwritable",
+            "unwritable message",
+            "unwritable remedy",
+            file=buf,
+            project="locked-project",
         )
     finally:
         projects_dir.chmod(0o755)
@@ -273,9 +266,7 @@ def test_dual_channel_from_text_returns_the_parsed_triple_when_the_house_shape_i
 def test_dual_channel_from_text_falls_back_to_the_shared_key_and_remedy_for_plain_text() -> None:
     from pgai_agent_kanban.lib.error_contract import dual_channel_from_text
 
-    triple = dual_channel_from_text(
-        "the HALT file is present", "ops.halted", "remove the HALT file, then retry"
-    )
+    triple = dual_channel_from_text("the HALT file is present", "ops.halted", "remove the HALT file, then retry")
     assert triple == {
         "error": "ops.halted",
         "message": "the HALT file is present",

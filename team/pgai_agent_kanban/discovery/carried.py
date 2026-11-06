@@ -53,7 +53,7 @@ import dataclasses
 import pathlib
 import re
 import sys
-from typing import Optional, TextIO
+from typing import TextIO
 
 # Run by file path (``python3 .../carried.py``) or loaded from a file outside
 # its package, this module has no parent package and the interpreter puts
@@ -184,8 +184,8 @@ def _reason_for(tasks_dir: pathlib.Path, pm_task: str, item_name: str) -> str:
 
 def carried_items(
     dir_path: pathlib.Path,
-    requirements_dir: Optional[pathlib.Path] = None,
-    tasks_dir: Optional[pathlib.Path] = None,
+    requirements_dir: pathlib.Path | None = None,
+    tasks_dir: pathlib.Path | None = None,
 ) -> list[CarriedItem]:
     """The carried items in *dir_path*, in file-name order. Reads only.
 
@@ -242,8 +242,8 @@ def carried_question(item: CarriedItem) -> str:
 
 def convert_carried(
     dir_path: pathlib.Path,
-    requirements_dir: Optional[pathlib.Path] = None,
-    tasks_dir: Optional[pathlib.Path] = None,
+    requirements_dir: pathlib.Path | None = None,
+    tasks_dir: pathlib.Path | None = None,
     *,
     err: TextIO = sys.stderr,
 ) -> list[CarriedItem]:
@@ -301,7 +301,7 @@ _USAGE = {
 }
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
@@ -309,8 +309,11 @@ def main(argv: Optional[list] = None) -> int:
         return 0
     command, rest = args[0], args[1:]
     if command not in _USAGE or not 1 <= len(rest) <= 3:
-        print("usage: python3 -m pgai_agent_kanban.discovery.carried "
-              + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} ..."), file=sys.stderr)
+        print(
+            "usage: python3 -m pgai_agent_kanban.discovery.carried "
+            + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} ..."),
+            file=sys.stderr,
+        )
         return 2
     dir_path = pathlib.Path(rest[0])
     requirements_dir = pathlib.Path(rest[1]) if len(rest) > 1 and rest[1] else None

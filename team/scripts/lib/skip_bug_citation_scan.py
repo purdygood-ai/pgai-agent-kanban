@@ -168,9 +168,7 @@ def iter_python_files(tests_dir: Path, exclude_dirs: set[str]):
                 yield Path(dirpath) / name
 
 
-def scan_tree(
-    tests_dir: Path, mode: str, exclude_dirs: set[str]
-) -> list[SkipCitationFinding]:
+def scan_tree(tests_dir: Path, mode: str, exclude_dirs: set[str]) -> list[SkipCitationFinding]:
     """Return the skip-citation findings for every Python file under *tests_dir*.
 
     Files are scanned in sorted order with :func:`scan_source` in *mode*;
@@ -230,10 +228,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--mode",
         required=True,
         choices=sorted(_MODE_PATTERNS),
-        help=(
-            "placeholder: BUG-SKIP or an informal (non-numeric) BUG- suffix. "
-            "citation: a real BUG-NNNN citation."
-        ),
+        help=("placeholder: BUG-SKIP or an informal (non-numeric) BUG- suffix. " "citation: a real BUG-NNNN citation."),
     )
     parser.add_argument(
         "--exclude-dir",

@@ -35,7 +35,7 @@ import pytest
 
 from pgai_agent_kanban.cm.notes_status_section import non_functional_pattern
 from tests.fixtures.binary_guard import require_binary
-from tests.fixtures.ship_policy_sandbox import KEY_T8, VERSION, build_lane, run_ship_policy
+from tests.fixtures.ship_policy_sandbox import KEY_T8, build_lane, run_ship_policy
 from tests.unit.shell_harness import run_bash
 
 _TEMPLATED = (

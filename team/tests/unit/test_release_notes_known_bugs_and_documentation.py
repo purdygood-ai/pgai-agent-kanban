@@ -61,12 +61,10 @@ _VERSION = "v9.9.9"
 _TIMEOUT_SECONDS = 60
 
 _BUGS_SKIPPED_HEADER = (
-    "| Substance (what was wrong) | Public ID (if disclosed) | Severity | "
-    "Rationale for Skipping |"
+    "| Substance (what was wrong) | Public ID (if disclosed) | Severity | " "Rationale for Skipping |"
 )
 _BUGS_SKIPPED_SEPARATOR = (
-    "|------------------------------|---------------------------|----------"
-    "|-------------------------|"
+    "|------------------------------|---------------------------|----------" "|-------------------------|"
 )
 
 _MEDIUM_SYMPTOM = "The queue view drops the last row when the list is full."
@@ -80,8 +78,7 @@ _ID_PLACEHOLDER = "another item"
 _DOCUMENTATION_SHIPPED = "- Further documentation updates shipped in this release."
 _PAIRED_GOAL = "Paired documentation for BUG-0001."
 _BUG_LIST_GOAL = (
-    "Documentation for BUG-0001, BUG-0002, BUG-0003 and BUG-0004, "
-    "written after the matching code tickets merge."
+    "Documentation for BUG-0001, BUG-0002, BUG-0003 and BUG-0004, " "written after the matching code tickets merge."
 )
 
 
@@ -109,7 +106,12 @@ def _bugs_skipped_block(tmp_path: pathlib.Path, *pairs: tuple[pathlib.Path, str]
 
 
 def _write_task(
-    tasks_dir: pathlib.Path, task_id: str, role: str, version: str, state: str, goal: str,
+    tasks_dir: pathlib.Path,
+    task_id: str,
+    role: str,
+    version: str,
+    state: str,
+    goal: str,
     title: str | None = "fixture",
 ) -> pathlib.Path:
     """A task folder whose README opens with '# Task: <title>' (no H1 when *title* is None)."""
@@ -117,39 +119,46 @@ def _write_task(
     task_dir.mkdir(parents=True)
     heading = f"# Task: {title}\n\n" if title is not None else ""
     (task_dir / "README.md").write_text(
-        f"{heading}## Task ID\n{task_id}\n\n## Role\n{role}\n\n"
-        f"## Goal\n{goal}\n\n## Release Version\n{version}\n",
+        f"{heading}## Task ID\n{task_id}\n\n## Role\n{role}\n\n" f"## Goal\n{goal}\n\n## Release Version\n{version}\n",
         encoding="utf-8",
     )
-    (task_dir / "status.md").write_text(
-        f"# Status\n\n## Task\n{task_id}\n\n## State\n{state}\n", encoding="utf-8"
-    )
+    (task_dir / "status.md").write_text(f"# Status\n\n## Task\n{task_id}\n\n## State\n{state}\n", encoding="utf-8")
     return task_dir
 
 
 def _shipped_writer_tasks(tasks_dir: pathlib.Path) -> None:
     """One DONE WRITER ticket for the release, plus three that must not be listed."""
     _write_task(
-        tasks_dir, "WRITER-20990101-004-ops-cleanup-docs", "WRITER", _VERSION, "DONE",
+        tasks_dir,
+        "WRITER-20990101-004-ops-cleanup-docs",
+        "WRITER",
+        _VERSION,
+        "DONE",
         f"{_WRITER_GOAL_LEAD} It names BUG-0900 and /home/someone/notes.md in its detail.",
     )
-    _write_task(tasks_dir, "WRITER-20990101-005-other-release", "WRITER", "v9.9.8", "DONE",
-                "A goal for another release.")
-    _write_task(tasks_dir, "WRITER-20990101-006-not-done", "WRITER", _VERSION, "WAITING",
-                "A goal that did not ship.")
-    _write_task(tasks_dir, "CODER-20990101-007-code", "CODER", _VERSION, "DONE",
-                "A code change, not documentation.")
+    _write_task(
+        tasks_dir, "WRITER-20990101-005-other-release", "WRITER", "v9.9.8", "DONE", "A goal for another release."
+    )
+    _write_task(tasks_dir, "WRITER-20990101-006-not-done", "WRITER", _VERSION, "WAITING", "A goal that did not ship.")
+    _write_task(tasks_dir, "CODER-20990101-007-code", "CODER", _VERSION, "DONE", "A code change, not documentation.")
 
 
-def _generate(
-    tmp_path: pathlib.Path, status: str, bugs_skipped_block: str = "", tasks_dir: str = "none"
-) -> str:
+def _generate(tmp_path: pathlib.Path, status: str, bugs_skipped_block: str = "", tasks_dir: str = "none") -> str:
     """Run the shipped generator with the argv cm_release_generate_notes passes."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir(exist_ok=True)
     argv = [
-        "none", str(repo_root), _VERSION, status, "2099-01-01", "test-project",
-        "none", "rc/" + _VERSION, "", bugs_skipped_block, tasks_dir,
+        "none",
+        str(repo_root),
+        _VERSION,
+        status,
+        "2099-01-01",
+        "test-project",
+        "none",
+        "rc/" + _VERSION,
+        "",
+        bugs_skipped_block,
+        tasks_dir,
     ]
     assert release_notes_main(argv) == 0
     return (repo_root / "release-notes" / f"{_VERSION}.md").read_text(encoding="utf-8")
@@ -158,7 +167,7 @@ def _generate(
 def _section(text: str, heading: str) -> str:
     match = re.search(rf"^##\s+{re.escape(heading)}\s*$", text, re.MULTILINE)
     assert match, f"'## {heading}' not found in:\n{text}"
-    rest = text[match.end():]
+    rest = text[match.end() :]
     following = re.search(r"^##\s+", rest, re.MULTILINE)
     return (rest[: following.start()] if following else rest).strip()
 
@@ -233,8 +242,14 @@ def test_documentation_lists_the_shipped_writer_ticket_goal_without_ids(tmp_path
 
 def test_documentation_reads_a_prefixed_release_version(tmp_path):
     tasks_dir = tmp_path / "tasks"
-    _write_task(tasks_dir, "WRITER-20990101-008-prefixed", "**WRITER**", f"ai_{_VERSION}", "DONE",
-                "The guide names the installed script paths.")
+    _write_task(
+        tasks_dir,
+        "WRITER-20990101-008-prefixed",
+        "**WRITER**",
+        f"ai_{_VERSION}",
+        "DONE",
+        "The guide names the installed script paths.",
+    )
 
     docs = _section(_generate(tmp_path, "FUNCTIONAL", tasks_dir=str(tasks_dir)), "Documentation")
 
@@ -243,8 +258,14 @@ def test_documentation_reads_a_prefixed_release_version(tmp_path):
 
 def test_documentation_scrubs_a_task_id_and_local_path_in_the_lead_sentence(tmp_path):
     tasks_dir = tmp_path / "tasks"
-    _write_task(tasks_dir, "WRITER-20990101-009-paired", "WRITER", _VERSION, "DONE",
-                "Document what CODER-20990101-003-code changed in `/tmp/scratch/out.md` for operators.")
+    _write_task(
+        tasks_dir,
+        "WRITER-20990101-009-paired",
+        "WRITER",
+        _VERSION,
+        "DONE",
+        "Document what CODER-20990101-003-code changed in `/tmp/scratch/out.md` for operators.",
+    )
 
     docs = _section(_generate(tmp_path, "FUNCTIONAL", tasks_dir=str(tasks_dir)), "Documentation")
 
@@ -261,8 +282,15 @@ def _assert_no_placeholder_or_bug_id(bullets: list[str]) -> None:
 
 def test_documentation_paired_goal_is_listed_by_its_task_title(tmp_path):
     tasks_dir = tmp_path / "tasks"
-    _write_task(tasks_dir, "WRITER-20990101-011-paired", "WRITER", "v1.2.3", "DONE",
-                _PAIRED_GOAL, title="The operations guide names the per-run evidence location")
+    _write_task(
+        tasks_dir,
+        "WRITER-20990101-011-paired",
+        "WRITER",
+        "v1.2.3",
+        "DONE",
+        _PAIRED_GOAL,
+        title="The operations guide names the per-run evidence location",
+    )
 
     bullets = shipped_documentation(str(tasks_dir), "v1.2.3")
 
@@ -272,8 +300,9 @@ def test_documentation_paired_goal_is_listed_by_its_task_title(tmp_path):
 
 def test_documentation_paired_goal_with_an_id_only_title_says_documentation_shipped(tmp_path):
     tasks_dir = tmp_path / "tasks"
-    _write_task(tasks_dir, "WRITER-20990101-012-paired", "WRITER", "v1.2.3", "DONE",
-                _PAIRED_GOAL, title="Docs for BUG-0001")
+    _write_task(
+        tasks_dir, "WRITER-20990101-012-paired", "WRITER", "v1.2.3", "DONE", _PAIRED_GOAL, title="Docs for BUG-0001"
+    )
 
     bullets = shipped_documentation(str(tasks_dir), "v1.2.3")
 
@@ -283,8 +312,7 @@ def test_documentation_paired_goal_with_an_id_only_title_says_documentation_ship
 
 def test_documentation_goal_listing_only_bug_ids_says_documentation_shipped(tmp_path):
     tasks_dir = tmp_path / "tasks"
-    _write_task(tasks_dir, "WRITER-20990101-013-bug-list", "WRITER", "v1.2.3", "DONE",
-                _BUG_LIST_GOAL, title=None)
+    _write_task(tasks_dir, "WRITER-20990101-013-bug-list", "WRITER", "v1.2.3", "DONE", _BUG_LIST_GOAL, title=None)
 
     bullets = shipped_documentation(str(tasks_dir), "v1.2.3")
 
@@ -294,8 +322,15 @@ def test_documentation_goal_listing_only_bug_ids_says_documentation_shipped(tmp_
 
 def test_documentation_goal_listing_only_bug_ids_renders_through_the_cli(tmp_path):
     tasks_dir = tmp_path / "tasks"
-    _write_task(tasks_dir, "WRITER-20990101-014-bug-list", "WRITER", _VERSION, "DONE",
-                _BUG_LIST_GOAL, title="Operator docs: runner keys and the name rule")
+    _write_task(
+        tasks_dir,
+        "WRITER-20990101-014-bug-list",
+        "WRITER",
+        _VERSION,
+        "DONE",
+        _BUG_LIST_GOAL,
+        title="Operator docs: runner keys and the name rule",
+    )
 
     docs = _section(_generate(tmp_path, "FUNCTIONAL", tasks_dir=str(tasks_dir)), "Documentation")
 
@@ -356,8 +391,11 @@ def test_release_stage_hands_the_generator_the_project_tasks(tmp_path):
     require_binary("git", label="release-notes-known-bugs-and-documentation")
     repo = tmp_path / "dev_repo"
     repo.mkdir()
-    for args in (["init", "--initial-branch=main"], ["config", "--local", "user.email", "t@pgai.local"],
-                 ["config", "--local", "user.name", "PGAI Test"]):
+    for args in (
+        ["init", "--initial-branch=main"],
+        ["config", "--local", "user.email", "t@pgai.local"],
+        ["config", "--local", "user.name", "PGAI Test"],
+    ):
         subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=True)
     (repo / "README.md").write_text("See CHANGELOG.md.\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], capture_output=True, check=True)
@@ -393,8 +431,14 @@ def test_release_stage_hands_the_generator_the_project_tasks(tmp_path):
         },
     )
     proc = subprocess.Popen(
-        ["bash", "-c", _HARNESS], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, env=env, cwd=str(cwd), start_new_session=True,
+        ["bash", "-c", _HARNESS],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         out, err = proc.communicate(timeout=_TIMEOUT_SECONDS)

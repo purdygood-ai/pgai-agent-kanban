@@ -38,11 +38,7 @@ from pgai_agent_kanban.cm.changelog_writer import (
     regenerate,
 )
 
-_FIXTURE_DIR = (
-    pathlib.Path(__file__).resolve().parent.parent
-    / "fixtures"
-    / "changelog_public_id_ledger"
-)
+_FIXTURE_DIR = pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "changelog_public_id_ledger"
 _INPUT_DIR = _FIXTURE_DIR / "input"
 _EXPECTED_DIR = _FIXTURE_DIR / "expected"
 

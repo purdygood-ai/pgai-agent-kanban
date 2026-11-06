@@ -140,8 +140,13 @@ def _project_cfg(root: pathlib.Path) -> pathlib.Path:
 
 def _run(tmp_path, root, stub, script, *args) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(script), *args], capture_output=True, text=True,
-        env=_env(tmp_path, root, stub), cwd=str(tmp_path), timeout=60, stdin=subprocess.DEVNULL,
+        ["bash", str(script), *args],
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root, stub),
+        cwd=str(tmp_path),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -205,9 +210,7 @@ def test_switch_provider_route_and_cli_reach_ops_write_switch_provider(tmp_path,
     assert result.response.status_code == 200, result.response.text
     assert result.cli is not None and result.cli.calls
     assert result.cli.completed.returncode == 0, result.cli.completed.stderr
-    assert result.response.json()["stdout"] == result.cli.completed.stdout.replace(
-        str(cli_board), str(rest_board)
-    )
+    assert result.response.json()["stdout"] == result.cli.completed.stdout.replace(str(cli_board), str(rest_board))
     expected = _KANBAN_CFG.replace("\nactive = codex\n", "\nactive = claude\n")
     assert (rest_board / "kanban.cfg").read_text(encoding="utf-8") == expected
     assert (cli_board / "kanban.cfg").read_text(encoding="utf-8") == expected
@@ -238,7 +241,10 @@ def test_switch_provider_route_and_cli_reach_ops_write_switch_provider(tmp_path,
         pytest.param(["--minor", "7"], "", _PROJECT_CFG.replace("max_minor = 13\n", "max_minor=7\n"), id="minor"),
         pytest.param(["--major", "3"], "", _PROJECT_CFG.replace("max_major = 0\n", "max_major=3\n"), id="major"),
         pytest.param(
-            ["--no-minor"], "", _PROJECT_CFG.replace("max_minor = 13\n", "max_minor = none\n"), id="no-minor",
+            ["--no-minor"],
+            "",
+            _PROJECT_CFG.replace("max_minor = 13\n", "max_minor = none\n"),
+            id="no-minor",
         ),
         pytest.param(
             ["--minor", "07", "--major", "3", "--show"],
@@ -314,16 +320,25 @@ def test_cli_no_action_prints_the_refusal_and_usage(tmp_path, stub_bin):
     "script, args, target, expected",
     [
         pytest.param(
-            _CEILING_SH, ["--project", _PROJECT, "--minor", "9"], "project",
-            _PROJECT_CFG.replace("max_minor = 13\n", "max_minor=9\n"), id="set-version-ceiling-set",
+            _CEILING_SH,
+            ["--project", _PROJECT, "--minor", "9"],
+            "project",
+            _PROJECT_CFG.replace("max_minor = 13\n", "max_minor=9\n"),
+            id="set-version-ceiling-set",
         ),
         pytest.param(
-            _CEILING_SH, ["--project", _PROJECT, "--no-major"], "project",
-            _PROJECT_CFG.replace("max_major = 0\n", "max_major = none\n"), id="set-version-ceiling-lift",
+            _CEILING_SH,
+            ["--project", _PROJECT, "--no-major"],
+            "project",
+            _PROJECT_CFG.replace("max_major = 0\n", "max_major = none\n"),
+            id="set-version-ceiling-lift",
         ),
         pytest.param(
-            _SWITCH_SH, ["--provider", "claude"], "kanban",
-            _KANBAN_CFG.replace("\nactive = codex\n", "\nactive = claude\n"), id="switch-provider",
+            _SWITCH_SH,
+            ["--provider", "claude"],
+            "kanban",
+            _KANBAN_CFG.replace("\nactive = codex\n", "\nactive = claude\n"),
+            id="switch-provider",
         ),
     ],
 )
@@ -414,28 +429,46 @@ def test_cli_switch_provider_refuses_a_kanban_cfg_with_no_active_key(tmp_path, s
     "route, body, script, cli_args, error, http_status",
     [
         pytest.param(
-            "/operations/set-version-ceiling", {"project": _PROJECT, "minor": -1},
-            _CEILING_SH, ["--project", _PROJECT, "--minor", "-1"],
-            "set_version_ceiling.invalid_ceiling", 422, id="invalid-ceiling",
+            "/operations/set-version-ceiling",
+            {"project": _PROJECT, "minor": -1},
+            _CEILING_SH,
+            ["--project", _PROJECT, "--minor", "-1"],
+            "set_version_ceiling.invalid_ceiling",
+            422,
+            id="invalid-ceiling",
         ),
         pytest.param(
-            "/operations/set-version-ceiling", {"project": "nocfg", "minor": 5},
-            _CEILING_SH, ["--project", "nocfg", "--minor", "5"],
-            "set_version_ceiling.refused", 404, id="no-project-cfg",
+            "/operations/set-version-ceiling",
+            {"project": "nocfg", "minor": 5},
+            _CEILING_SH,
+            ["--project", "nocfg", "--minor", "5"],
+            "set_version_ceiling.refused",
+            404,
+            id="no-project-cfg",
         ),
         pytest.param(
-            "/operations/set-version-ceiling", {"project": "ghost", "minor": 5},
-            _CEILING_SH, ["--project", "ghost", "--minor", "5"],
-            "project_resolve.not_found", 404, id="unknown-project",
+            "/operations/set-version-ceiling",
+            {"project": "ghost", "minor": 5},
+            _CEILING_SH,
+            ["--project", "ghost", "--minor", "5"],
+            "project_resolve.not_found",
+            404,
+            id="unknown-project",
         ),
         pytest.param(
-            "/operations/switch-provider", {"provider": "nobody"},
-            _SWITCH_SH, ["--provider", "nobody"],
-            "switch_provider.unknown_provider", 409, id="unknown-provider",
+            "/operations/switch-provider",
+            {"provider": "nobody"},
+            _SWITCH_SH,
+            ["--provider", "nobody"],
+            "switch_provider.unknown_provider",
+            409,
+            id="unknown-provider",
         ),
     ],
 )
-def test_route_refusal_matches_the_cli_refusal(tmp_path, stub_bin, monkeypatch, route, body, script, cli_args, error, http_status):
+def test_route_refusal_matches_the_cli_refusal(
+    tmp_path, stub_bin, monkeypatch, route, body, script, cli_args, error, http_status
+):
     monkeypatch.setenv("PATH", f"{stub_bin}{os.pathsep}{os.environ.get('PATH', '')}")
     rest_root = _sandbox(tmp_path / "rest")
     cli_root = _sandbox(tmp_path / "cli")
@@ -465,9 +498,7 @@ def test_a_lifted_ceiling_set_again_is_rewritten_in_place(tmp_path):
     report = ops_write.set_version_ceiling(ctx, _PROJECT, minor=4, show=True)
     assert report.changed is True
     assert report.lines == ("max_minor=4", "max_major=0")
-    assert _project_cfg(root).read_text(encoding="utf-8") == _PROJECT_CFG.replace(
-        "max_minor = 13\n", "max_minor=4\n"
-    )
+    assert _project_cfg(root).read_text(encoding="utf-8") == _PROJECT_CFG.replace("max_minor = 13\n", "max_minor=4\n")
 
 
 def test_no_major_writes_none_and_keeps_every_other_line_byte_identical(tmp_path):
@@ -520,15 +551,24 @@ def test_lifting_a_ceiling_already_none_writes_nothing(tmp_path):
 @pytest.mark.parametrize(
     "versioning, lines",
     [
-        pytest.param("[project]\nproject_name = demo-app\n", ("max_minor=13 (default)", "max_major=0 (default)"),
-                     id="absent-keys-show-the-defaults"),
-        pytest.param("[versioning]\nmax_minor = NONE\nmax_major = \"2\"\n", ("max_minor=none", "max_major=2"),
-                     id="none-any-case-and-quoted-number"),
-        pytest.param("[versioning]\nmax_major = O\n",
-                     ("max_minor=13 (default)",
-                      "max_major=O (invalid: not a non-negative whole number or none; "
-                      "the project is ceiling-blocked)"),
-                     id="malformed-is-marked-invalid"),
+        pytest.param(
+            "[project]\nproject_name = demo-app\n",
+            ("max_minor=13 (default)", "max_major=0 (default)"),
+            id="absent-keys-show-the-defaults",
+        ),
+        pytest.param(
+            '[versioning]\nmax_minor = NONE\nmax_major = "2"\n',
+            ("max_minor=none", "max_major=2"),
+            id="none-any-case-and-quoted-number",
+        ),
+        pytest.param(
+            "[versioning]\nmax_major = O\n",
+            (
+                "max_minor=13 (default)",
+                "max_major=O (invalid: not a non-negative whole number or none; " "the project is ceiling-blocked)",
+            ),
+            id="malformed-is-marked-invalid",
+        ),
     ],
 )
 def test_cli_show_reports_the_ceiling_in_effect(tmp_path, stub_bin, versioning, lines):
@@ -554,9 +594,11 @@ def test_switch_provider_reports_an_empty_previous_value_as_none(tmp_path, stub_
 def test_ops_cli_verbs_check_their_argument_count(tmp_path):
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     argv = [sys.executable, "-m", "pgai_agent_kanban.ops"]
-    ceiling = subprocess.run(argv + ["set_version_ceiling", str(tmp_path)],
-                             capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
-    provider = subprocess.run(argv + ["switch_provider", str(tmp_path)],
-                              capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
+    ceiling = subprocess.run(
+        argv + ["set_version_ceiling", str(tmp_path)], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60
+    )
+    provider = subprocess.run(
+        argv + ["switch_provider", str(tmp_path)], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60
+    )
     assert ceiling.returncode == 1 and "DRY_RUN arguments are required" in ceiling.stderr
     assert provider.returncode == 1 and "KANBAN_ROOT and PROVIDER" in provider.stderr

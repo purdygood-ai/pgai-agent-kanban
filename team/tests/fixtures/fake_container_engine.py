@@ -89,7 +89,7 @@ import shlex
 import stat
 import sys
 import tempfile
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 ENV_SCENARIO = "PGAI_FAKE_ENGINE_SCENARIO"
 ENV_LOG = "PGAI_FAKE_ENGINE_LOG"
@@ -99,15 +99,55 @@ UNSUPPORTED_EXIT = 125
 
 # `run` options that take a value (as a separate argument). Anything else
 # starting with '-' is a flag, or carries its value after '='.
-_RUN_VALUE_OPTIONS = frozenset({
-    "-v", "--volume", "-e", "--env", "--name", "-w", "--workdir", "-u", "--user",
-    "--entrypoint", "-p", "--publish", "--mount", "--network", "--net", "--restart",
-    "-l", "--label", "-h", "--hostname", "--env-file", "--tmpfs", "--cap-add",
-    "--cap-drop", "--security-opt", "--pid", "--ipc", "--userns", "--add-host",
-    "--device", "--log-driver", "--log-opt", "-m", "--memory", "--cpus", "--shm-size",
-    "--stop-timeout", "--stop-signal", "--platform", "--pull", "--cidfile",
-    "--group-add", "--ulimit", "--health-cmd", "--label-file",
-})
+_RUN_VALUE_OPTIONS = frozenset(
+    {
+        "-v",
+        "--volume",
+        "-e",
+        "--env",
+        "--name",
+        "-w",
+        "--workdir",
+        "-u",
+        "--user",
+        "--entrypoint",
+        "-p",
+        "--publish",
+        "--mount",
+        "--network",
+        "--net",
+        "--restart",
+        "-l",
+        "--label",
+        "-h",
+        "--hostname",
+        "--env-file",
+        "--tmpfs",
+        "--cap-add",
+        "--cap-drop",
+        "--security-opt",
+        "--pid",
+        "--ipc",
+        "--userns",
+        "--add-host",
+        "--device",
+        "--log-driver",
+        "--log-opt",
+        "-m",
+        "--memory",
+        "--cpus",
+        "--shm-size",
+        "--stop-timeout",
+        "--stop-signal",
+        "--platform",
+        "--pull",
+        "--cidfile",
+        "--group-add",
+        "--ulimit",
+        "--health-cmd",
+        "--label-file",
+    }
+)
 _EXEC_VALUE_OPTIONS = frozenset({"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file"})
 
 
@@ -158,7 +198,7 @@ def agent_process(
     task_id: str,
     *,
     provider: str = "claude",
-    exits_after_polls: Optional[int] = None,
+    exits_after_polls: int | None = None,
 ) -> dict:
     """An agent CLI process working *task_id*; with *exits_after_polls* it
     is listed by that many ``exec ... ps`` polls and gone after them."""
@@ -177,7 +217,7 @@ def wake_driver_process(
     *,
     script: str = "wake-batch.sh",
     args: str = "--agent=coder --sleep=0",
-    exits_after_polls: Optional[int] = None,
+    exits_after_polls: int | None = None,
 ) -> dict:
     """A wake script (*script* under ``<kanban_root>/scripts``) running as
     its ``#!/usr/bin/env bash`` line starts it; with *exits_after_polls* it
@@ -205,7 +245,7 @@ class FakeEngine:
     invocation). Put :attr:`bin_dir` first on the subprocess PATH.
     """
 
-    def __init__(self, root: os.PathLike | str, *, name: str = "docker", scenario: Optional[dict] = None):
+    def __init__(self, root: os.PathLike | str, *, name: str = "docker", scenario: dict | None = None):
         self.root = pathlib.Path(root)
         self.name = name
         self.bin_dir = self.root / "bin"
@@ -220,7 +260,7 @@ class FakeEngine:
             f"export {ENV_SCENARIO}={shlex.quote(str(self.scenario_path))}\n"
             f"export {ENV_LOG}={shlex.quote(str(self.log_path))}\n"
             f"export {ENV_NAME}={shlex.quote(name)}\n"
-            f"exec {shlex.quote(sys.executable)} {shlex.quote(str(pathlib.Path(__file__).resolve()))} \"$@\"\n",
+            f'exec {shlex.quote(sys.executable)} {shlex.quote(str(pathlib.Path(__file__).resolve()))} "$@"\n',
         )
 
     @property
@@ -249,7 +289,7 @@ class FakeEngine:
         return [record["command"] for record in self.records()]
 
 
-def install_fake_crontab(bin_dir: os.PathLike | str, text: Optional[str]) -> pathlib.Path:
+def install_fake_crontab(bin_dir: os.PathLike | str, text: str | None) -> pathlib.Path:
     """Install a ``crontab`` stub in *bin_dir* whose ``-l`` prints *text*.
 
     *text* ``None`` behaves like a user with no crontab (``no crontab for
@@ -271,11 +311,11 @@ def install_fake_crontab(bin_dir: os.PathLike | str, text: Optional[str]) -> pat
         "#!/usr/bin/env bash\n"
         "# Fake crontab for tests: lists a fixed crontab, changes nothing.\n"
         f"printf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n"
-        "if [[ \"$*\" == \"-l\" ]]; then\n"
+        'if [[ "$*" == "-l" ]]; then\n'
         f"    if [[ -f {shlex.quote(str(body))} ]]; then cat {shlex.quote(str(body))}; exit 0; fi\n"
-        "    echo \"no crontab for ${USER:-user}\" >&2; exit 1\n"
+        '    echo "no crontab for ${USER:-user}" >&2; exit 1\n'
         "fi\n"
-        "echo \"fake crontab: only -l is supported; refused: $*\" >&2\n"
+        'echo "fake crontab: only -l is supported; refused: $*" >&2\n'
         "exit 1\n",
     )
     return path
@@ -298,7 +338,7 @@ def _fake_id(name: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _command_key(argv: list[str]) -> tuple[str, list[str]]:
@@ -319,17 +359,19 @@ def _command_key(argv: list[str]) -> tuple[str, list[str]]:
     return words[0], words[1:]
 
 
-def _flag_value(args: list[str], *names: str) -> Optional[str]:
+def _flag_value(args: list[str], *names: str) -> str | None:
     for i, arg in enumerate(args):
         for name in names:
             if arg == name and i + 1 < len(args):
                 return args[i + 1]
             if arg.startswith(name + "="):
-                return arg[len(name) + 1:]
+                return arg[len(name) + 1 :]
     return None
 
 
-def _positionals(args: list[str], value_options: Iterable[str] = ("-f", "--format", "--filter", "-t", "--time", "--type")) -> list[str]:
+def _positionals(
+    args: list[str], value_options: Iterable[str] = ("-f", "--format", "--filter", "-t", "--time", "--type")
+) -> list[str]:
     values = set(value_options)
     out, skip = [], False
     for arg in args:
@@ -439,7 +481,7 @@ class _Engine:
         name_filter = None
         flt = _flag_value(args, "--filter", "-f")
         if flt and flt.startswith("name="):
-            name_filter = re.compile(flt[len("name="):])
+            name_filter = re.compile(flt[len("name=") :])
         fmt = _flag_value(args, "--format")
         rows = []
         for name, c in self.s["containers"].items():
@@ -447,13 +489,15 @@ class _Engine:
                 continue
             if name_filter and not name_filter.search(name):
                 continue
-            rows.append({
-                "ID": _fake_id(name)[:12],
-                "Names": name,
-                "Image": c.get("image", ""),
-                "State": c.get("status", ""),
-                "Status": "Up" if c.get("status") == "running" else "Exited (0)",
-            })
+            rows.append(
+                {
+                    "ID": _fake_id(name)[:12],
+                    "Names": name,
+                    "Image": c.get("image", ""),
+                    "State": c.get("status", ""),
+                    "Status": "Up" if c.get("status") == "running" else "Exited (0)",
+                }
+            )
         for row in rows:
             if quiet:
                 self.out.append(row["ID"])
@@ -480,15 +524,17 @@ class _Engine:
                 i += 2
                 continue
             if arg.startswith("--name="):
-                name = arg[len("--name="):]
+                name = arg[len("--name=") :]
             elif arg in ("-d", "--detach") or (re.fullmatch(r"-[a-zA-Z]+", arg) and "d" in arg):
                 detached = True
             i += 1
         if i >= len(args):
             raise _Exit(UNSUPPORTED_EXIT, stderr="fake container engine: run needs an image")
-        image, command = args[i], args[i + 1:]
+        image, command = args[i], args[i + 1 :]
         if image not in self.s["images"]:
-            raise _Exit(UNSUPPORTED_EXIT, stderr=f"Unable to find image '{image}' locally (the fake engine never pulls)")
+            raise _Exit(
+                UNSUPPORTED_EXIT, stderr=f"Unable to find image '{image}' locally (the fake engine never pulls)"
+            )
         if name and name in self.s["containers"]:
             raise _Exit(UNSUPPORTED_EXIT, stderr=f'Conflict. The container name "/{name}" is already in use')
         if not detached:
@@ -505,8 +551,9 @@ class _Engine:
         for name in _positionals(args):
             c = self._container(name)
             if c.get("status") != "running":
-                c.update(status="running", started_at=_now_iso(),
-                         processes=[{"pid": 1, "args": "bash -l"}], tmux_sessions=[])
+                c.update(
+                    status="running", started_at=_now_iso(), processes=[{"pid": 1, "args": "bash -l"}], tmux_sessions=[]
+                )
             self.out.append(name)
         return 0
 
@@ -524,7 +571,10 @@ class _Engine:
         for name in _positionals(args):
             c = self._container(name)
             if c.get("status") == "running" and not force:
-                raise _Exit(1, stderr=f"Error response from daemon: cannot remove container \"/{name}\": container is running: stop the container before removing or force remove")
+                raise _Exit(
+                    1,
+                    stderr=f'Error response from daemon: cannot remove container "/{name}": container is running: stop the container before removing or force remove',
+                )
             del self.s["containers"][name]
             self.out.append(name)
         return 0
@@ -548,7 +598,7 @@ class _Engine:
             i += 2 if args[i] in _EXEC_VALUE_OPTIONS else 1
         if i >= len(args):
             raise _Exit(UNSUPPORTED_EXIT, stderr="fake container engine: exec needs a container and a command")
-        name, command = args[i], args[i + 1:]
+        name, command = args[i], args[i + 1 :]
         c = self._container(name)
         if c.get("status") != "running":
             raise _Exit(1, stderr=f"Error response from daemon: container {name} is not running")
@@ -569,7 +619,9 @@ class _Engine:
         if program == "pkill":
             pattern = next((a for a in rest if not a.startswith("-")), "")
             before = len(c["processes"])
-            c["processes"] = [p for p in c["processes"] if p.get("pid") == 1 or not re.search(pattern, p.get("args", ""))]
+            c["processes"] = [
+                p for p in c["processes"] if p.get("pid") == 1 or not re.search(pattern, p.get("args", ""))
+            ]
             self._sync_sessions(c)
             return 0 if len(c["processes"]) < before else 1
         if program == "kill":
@@ -637,13 +689,15 @@ class _Engine:
             return
         path = pathlib.Path(log)
         path.parent.mkdir(parents=True, exist_ok=True)
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         lines = [
             f"pseudocron starting: 5 jobs loaded from {path.parent.parent / 'pseudocron.cfg'}",
             f"pseudocron starting: 3 vars loaded from {path.parent.parent / 'pseudocron.env'}",
         ]
         if sched.get("fires"):
-            lines.append(f"{now.strftime('%Y-%m-%dT%H:%M:%SZ')} fired (minute={now.minute:02d}): scripts/wake-batch.sh --agent=pm --sleep=0")
+            lines.append(
+                f"{now.strftime('%Y-%m-%dT%H:%M:%SZ')} fired (minute={now.minute:02d}): scripts/wake-batch.sh --agent=pm --sleep=0"
+            )
         with open(path, "a", encoding="utf-8") as fh:
             fh.write("\n".join(lines) + "\n")
 
@@ -661,13 +715,26 @@ class _Engine:
             if forced:
                 raise _Exit(int(forced.get("exit", 1)), forced.get("stdout", ""), forced.get("stderr", ""))
         handler = {
-            "inspect": self.inspect, "image inspect": self.image_inspect, "images": self.images,
-            "ps": self.ps, "run": self.run, "start": self.start, "stop": self.stop,
-            "kill": self.kill, "rm": self.rm, "exec": self.exec, "version": self.version,
-            "info": self.info, "build": self.build, "pull": self.pull,
+            "inspect": self.inspect,
+            "image inspect": self.image_inspect,
+            "images": self.images,
+            "ps": self.ps,
+            "run": self.run,
+            "start": self.start,
+            "stop": self.stop,
+            "kill": self.kill,
+            "rm": self.rm,
+            "exec": self.exec,
+            "version": self.version,
+            "info": self.info,
+            "build": self.build,
+            "pull": self.pull,
         }.get(key)
         if handler is None:
-            raise _Exit(UNSUPPORTED_EXIT, stderr=f"fake container engine: '{key}' is not modelled; extend tests/fixtures/fake_container_engine.py")
+            raise _Exit(
+                UNSUPPORTED_EXIT,
+                stderr=f"fake container engine: '{key}' is not modelled; extend tests/fixtures/fake_container_engine.py",
+            )
         return handler(args)
 
     @staticmethod
@@ -675,7 +742,7 @@ class _Engine:
         i = 0
         while i < len(args) and args[i].startswith("-"):
             i += 2 if args[i] in _EXEC_VALUE_OPTIONS else 1
-        command = args[i + 1:]
+        command = args[i + 1 :]
         if not command:
             return ""
         program = command[0].rsplit("/", 1)[-1]
@@ -707,7 +774,10 @@ def engine_main(argv: list[str]) -> int:
     """Answer one engine invocation; returns its exit status."""
     scenario_env, log_env = os.environ.get(ENV_SCENARIO), os.environ.get(ENV_LOG)
     if not scenario_env or not log_env:
-        print(f"fake container engine: {ENV_SCENARIO} and {ENV_LOG} must name the scenario and call-log files", file=sys.stderr)
+        print(
+            f"fake container engine: {ENV_SCENARIO} and {ENV_LOG} must name the scenario and call-log files",
+            file=sys.stderr,
+        )
         return UNSUPPORTED_EXIT
     scenario_path, log_path = pathlib.Path(scenario_env), pathlib.Path(log_env)
     key, args = _command_key(argv)

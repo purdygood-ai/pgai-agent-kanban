@@ -109,7 +109,8 @@ import pathlib
 import subprocess
 import sys
 from types import ModuleType
-from typing import Any, Callable, Iterator, Optional, Sequence, Union
+from typing import Any
+from collections.abc import Callable, Iterator, Sequence
 
 # team/ is three levels up from this file (fixtures/ -> tests/ -> team/),
 # the same self-location golden_board.py and action_parity_cases.py use.
@@ -159,14 +160,14 @@ class ParityTarget:
     function: str
     method: str
     route: str
-    script: Optional[str]
+    script: str | None
 
     @property
     def dotted(self) -> str:
         return f"{self.module}.{self.function}"
 
 
-def parity_target(row: Union[str, Any]) -> ParityTarget:
+def parity_target(row: str | Any) -> ParityTarget:
     """Read the route, script and function a manifest row declares.
 
     Args:
@@ -210,8 +211,7 @@ def _import_function(target: ParityTarget) -> tuple[ModuleType, Callable]:
     function = getattr(module, target.function, None)
     if not callable(function):
         raise AssertionError(
-            f"verb '{target.verb}': {target.module} has no function {target.function} "
-            f"(impl module:{target.dotted})"
+            f"verb '{target.verb}': {target.module} has no function {target.function} " f"(impl module:{target.dotted})"
         )
     return module, function
 
@@ -230,9 +230,28 @@ _PROCESS_ENTRY_POINTS: tuple[tuple[ModuleType, str], ...] = tuple(
         (
             os,
             (
-                "system", "popen", "posix_spawn", "posix_spawnp", "fork", "forkpty",
-                "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe",
-                "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
+                "system",
+                "popen",
+                "posix_spawn",
+                "posix_spawnp",
+                "fork",
+                "forkpty",
+                "execl",
+                "execle",
+                "execlp",
+                "execlpe",
+                "execv",
+                "execve",
+                "execvp",
+                "execvpe",
+                "spawnl",
+                "spawnle",
+                "spawnlp",
+                "spawnlpe",
+                "spawnv",
+                "spawnve",
+                "spawnvp",
+                "spawnvpe",
             ),
         ),
         (asyncio, ("create_subprocess_exec", "create_subprocess_shell")),
@@ -279,8 +298,8 @@ def forbid_subprocess() -> Iterator[list[str]]:
     try:
         for module, name in _PROCESS_ENTRY_POINTS:
             originals.append((module, name, getattr(module, name)))
-            replacement = _ForbiddenPopen if (module, name) == (subprocess, "Popen") else _forbidden(
-                f"{module.__name__}.{name}"
+            replacement = (
+                _ForbiddenPopen if (module, name) == (subprocess, "Popen") else _forbidden(f"{module.__name__}.{name}")
             )
             setattr(module, name, replacement)
         yield attempts
@@ -339,7 +358,7 @@ def spy_on(dotted: str) -> Iterator[list[tuple[tuple, dict]]]:
 # ---------------------------------------------------------------------------
 
 
-def build_api_client(kanban_root: Union[str, pathlib.Path]) -> Any:
+def build_api_client(kanban_root: str | pathlib.Path) -> Any:
     """Return an in-process ``TestClient`` for the production API on *kanban_root*.
 
     *kanban_root* is the server's root: route data and ``scripts/`` both
@@ -363,10 +382,10 @@ def _excerpt(text: str, limit: int = 400) -> str:
 
 def assert_route_reaches_function(
     client: Any,
-    row: Union[str, Any],
+    row: str | Any,
     *,
     json: Any = None,
-    params: Optional[dict] = None,
+    params: dict | None = None,
 ) -> Any:
     """Assert the row's route calls its function in-process and starts no process.
 
@@ -388,7 +407,7 @@ def assert_route_reaches_function(
     target = parity_target(row)
     where = f"verb '{target.verb}': {target.method} {target.route}"
     response = None
-    raised: Optional[BaseException] = None
+    raised: BaseException | None = None
     with spy_on(target.dotted) as calls, forbid_subprocess() as attempts:
         try:
             response = client.request(target.method, target.route, json=json, params=params)
@@ -404,8 +423,7 @@ def assert_route_reaches_function(
         raise raised
     if not calls:
         raise AssertionError(
-            f"{where} never called {target.dotted} (HTTP {response.status_code}: "
-            f"{_excerpt(response.text)})"
+            f"{where} never called {target.dotted} (HTTP {response.status_code}: " f"{_excerpt(response.text)})"
         )
     return response
 
@@ -418,7 +436,7 @@ def assert_route_reaches_function(
 # function in every loaded module that holds it and appends one line per call
 # to the record file. An interpreter that cannot import the target (a python3
 # started without pp_run_ops' path) runs unmodified.
-_SITECUSTOMIZE = '''\
+_SITECUSTOMIZE = f'''\
 """Route/CLI parity spy: records calls to the function named in the environment."""
 import functools
 import importlib
@@ -427,8 +445,8 @@ import sys
 
 
 def _install():
-    dotted = os.environ.get("{target_env}", "")
-    record = os.environ.get("{record_env}", "")
+    dotted = os.environ.get("{SPY_TARGET_ENV}", "")
+    record = os.environ.get("{SPY_RECORD_ENV}", "")
     module_name, _, function_name = dotted.rpartition(".")
     if not (module_name and function_name and record):
         return
@@ -457,7 +475,7 @@ def _install():
 
 
 _install()
-'''.format(target_env=SPY_TARGET_ENV, record_env=SPY_RECORD_ENV)
+'''
 
 
 @dataclasses.dataclass(frozen=True)
@@ -484,12 +502,12 @@ def _script_path(target: ParityTarget, team_dir: pathlib.Path) -> pathlib.Path:
 
 
 def run_cli_with_spy(
-    row: Union[str, Any],
+    row: str | Any,
     cli_args: Sequence[str],
     *,
     env: dict,
-    scratch_dir: Union[str, pathlib.Path],
-    team_dir: Union[str, pathlib.Path, None] = None,
+    scratch_dir: str | pathlib.Path,
+    team_dir: str | pathlib.Path | None = None,
     timeout: int = 120,
 ) -> CliRun:
     """Run the row's script with the call-recording sitecustomize in place.
@@ -535,13 +553,13 @@ def run_cli_with_spy(
 
 
 def assert_cli_reaches_function(
-    row: Union[str, Any],
+    row: str | Any,
     *,
-    cli_args: Optional[Sequence[str]] = None,
-    env: Optional[dict] = None,
-    scratch_dir: Union[str, pathlib.Path, None] = None,
-    team_dir: Union[str, pathlib.Path, None] = None,
-) -> Optional[CliRun]:
+    cli_args: Sequence[str] | None = None,
+    env: dict | None = None,
+    scratch_dir: str | pathlib.Path | None = None,
+    team_dir: str | pathlib.Path | None = None,
+) -> CliRun | None:
     """Assert the row's script reaches its function through pp_run_ops.
 
     The source check always runs. With *cli_args*, the script also runs (see
@@ -568,7 +586,7 @@ def assert_cli_reaches_function(
             f"{script} has no 'pp_run_ops {target.module} {target.function}' call (or a module "
             f"above it) and no pp_pythonpath import of {target.function}"
         )
-    run: Optional[CliRun] = None
+    run: CliRun | None = None
     if cli_args is not None:
         if env is None or scratch_dir is None:
             raise AssertionError("running the script needs env= and scratch_dir= (a throwaway board and scratch dir)")
@@ -596,24 +614,22 @@ class ParityResult:
 
     target: ParityTarget
     response: Any
-    cli: Optional[CliRun]
+    cli: CliRun | None
 
 
 def assert_route_cli_parity(
-    row: Union[str, Any],
+    row: str | Any,
     client: Any,
     *,
     json: Any = None,
-    params: Optional[dict] = None,
-    cli_args: Optional[Sequence[str]] = None,
-    env: Optional[dict] = None,
-    scratch_dir: Union[str, pathlib.Path, None] = None,
-    team_dir: Union[str, pathlib.Path, None] = None,
+    params: dict | None = None,
+    cli_args: Sequence[str] | None = None,
+    env: dict | None = None,
+    scratch_dir: str | pathlib.Path | None = None,
+    team_dir: str | pathlib.Path | None = None,
 ) -> ParityResult:
     """Assert both halves for one ``module:`` row; see the module docstring."""
     target = parity_target(row)
     response = assert_route_reaches_function(client, row, json=json, params=params)
-    cli = assert_cli_reaches_function(
-        row, cli_args=cli_args, env=env, scratch_dir=scratch_dir, team_dir=team_dir
-    )
+    cli = assert_cli_reaches_function(row, cli_args=cli_args, env=env, scratch_dir=scratch_dir, team_dir=team_dir)
     return ParityResult(target, response, cli)

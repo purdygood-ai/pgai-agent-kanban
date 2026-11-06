@@ -224,7 +224,7 @@ This is the single most important safety property. It exists because the cost of
 
 Even when a task folder is old, the script refuses to touch it if the project has an active RC and the task is referenced by that RC's open requirement bundle. This prevents purging the working set during a stalled release cycle.
 
-In practice: if `rc/v0.24.8` is still open and its requirements bundle still mentions `CLAUDE-CODER-20260315-002`, that task folder will be skipped even if it is 90 days old. The script logs the skip so you can see it happened.
+In practice: if `rc/v0.24.8` is still open and its requirements bundle still mentions `CODER-20260315-002-add-login-endpoint`, that task folder will be skipped even if it is 90 days old. The script logs the skip so you can see it happened.
 
 You do not configure this guard. It is always on.
 

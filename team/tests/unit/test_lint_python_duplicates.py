@@ -55,8 +55,7 @@ _PKG = "team/pgai_agent_kanban"
 # ---------------------------------------------------------------------------
 
 # A body comfortably above the default size floor.
-COPY_A = textwrap.dedent(
-    '''\
+COPY_A = textwrap.dedent('''\
     def load_rows(path: str, limit: int = 10) -> list:
         """Read rows."""
         rows = []
@@ -67,13 +66,11 @@ COPY_A = textwrap.dedent(
                 if len(rows) >= limit:
                     break
         return rows
-    '''
-)
+    ''')
 
 # Same body: different function name, parameter names, annotations,
 # docstring, spacing and comments.
-COPY_B = textwrap.dedent(
-    """\
+COPY_B = textwrap.dedent("""\
     import os
 
 
@@ -87,11 +84,9 @@ COPY_B = textwrap.dedent(
                 if len(rows) >= maximum:
                     break
         return rows
-    """
-)
+    """)
 
-ATOMIC_WRITE = textwrap.dedent(
-    """\
+ATOMIC_WRITE = textwrap.dedent("""\
     import os
 
 
@@ -102,8 +97,7 @@ ATOMIC_WRITE = textwrap.dedent(
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, target)
-    """
-)
+    """)
 
 
 def _make_tree(tmp_path: Path, files: dict[str, str], allowlist: str = "") -> Path:
@@ -177,8 +171,7 @@ def test_methods_are_named_by_qualified_name(tmp_path):
     method = "class Loader:\n" + textwrap.indent(COPY_A, "    ")
     root = _make_tree(tmp_path, {f"{_PKG}/a.py": method, "team/pm-agent/b.py": COPY_B})
     assert _emit(root) == (
-        f"duplicate-body\t{_PKG}/a.py\tLoader.load_rows\t1\n"
-        "duplicate-body\tteam/pm-agent/b.py\tread_csv_lines\t1\n"
+        f"duplicate-body\t{_PKG}/a.py\tLoader.load_rows\t1\n" "duplicate-body\tteam/pm-agent/b.py\tread_csv_lines\t1\n"
     )
 
 
@@ -233,8 +226,7 @@ def test_deny_listed_name_matches_with_or_without_leading_underscores(tmp_path):
     )
     root = _make_tree(tmp_path, {f"{_PKG}/w.py": body})
     assert _emit(root) == (
-        f"atomic-write\t{_PKG}/w.py\tW.__atomic_write\t1\n"
-        f"atomic-write\t{_PKG}/w.py\tatomic_write\t1\n"
+        f"atomic-write\t{_PKG}/w.py\tW.__atomic_write\t1\n" f"atomic-write\t{_PKG}/w.py\tatomic_write\t1\n"
     )
 
 
@@ -254,8 +246,7 @@ def test_deny_listed_copy_is_not_also_reported_as_a_duplicate_body(tmp_path):
 
 
 def test_configparser_instantiation_outside_lib_ini_is_reported_under_any_alias(tmp_path):
-    body = textwrap.dedent(
-        """\
+    body = textwrap.dedent("""\
         import configparser
         import configparser as _cp
         from configparser import RawConfigParser as RCP
@@ -272,8 +263,7 @@ def test_configparser_instantiation_outside_lib_ini_is_reported_under_any_alias(
 
 
         p = configparser.ConfigParser(interpolation=None)
-        """
-    )
+        """)
     root = _make_tree(
         tmp_path,
         {"team/pm-agent/cfg.py": body, f"{_PKG}/lib/ini.py": body},
@@ -286,8 +276,7 @@ def test_configparser_instantiation_outside_lib_ini_is_reported_under_any_alias(
 
 
 def test_state_regex_outside_task_status_is_reported(tmp_path):
-    body = textwrap.dedent(
-        '''\
+    body = textwrap.dedent("""\
         import re
 
         _STATE_RE = re.compile(r"^##\\s+State\\s*$", re.MULTILINE)
@@ -300,8 +289,7 @@ def test_state_regex_outside_task_status_is_reported(tmp_path):
 
         def write(state):
             return re.sub("## State", state, "x")
-        '''
-    )
+        """)
     root = _make_tree(
         tmp_path,
         {f"{_PKG}/reader.py": body, f"{_PKG}/task_status.py": body},
@@ -314,8 +302,7 @@ def test_state_regex_outside_task_status_is_reported(tmp_path):
 
 
 def test_state_text_that_is_not_a_regex_is_not_reported(tmp_path):
-    body = textwrap.dedent(
-        '''\
+    body = textwrap.dedent('''\
         """Reads the ## State field; the pattern is r"^##\\s+State"."""
 
         TEMPLATE = """
@@ -333,8 +320,7 @@ def test_state_text_that_is_not_a_regex_is_not_reported(tmp_path):
 
         def is_heading(line):
             return line.strip() == "## State"
-        '''
-    )
+        ''')
     root = _make_tree(tmp_path, {f"{_PKG}/render.py": body})
     _rc, _out, findings = _run(root, tmp_path)
     assert findings == []
@@ -346,7 +332,11 @@ def test_state_text_that_is_not_a_regex_is_not_reported(tmp_path):
 
 
 def test_tree_matching_its_allowlist_is_clean(tmp_path):
-    files = {f"{_PKG}/a.py": COPY_A, "team/scripts/b.py": COPY_B, "team/scripts/c.py": "def _parse_iso(v):\n    return v\n"}
+    files = {
+        f"{_PKG}/a.py": COPY_A,
+        "team/scripts/b.py": COPY_B,
+        "team/scripts/c.py": "def _parse_iso(v):\n    return v\n",
+    }
     root = _make_tree(tmp_path, files)
     (root / "team/config/python-duplicates-allowlist.txt").write_text("# header\n\n" + _emit(root), encoding="utf-8")
     rc, out, findings = _run(root, tmp_path)
@@ -503,6 +493,4 @@ def test_runner_wiring_records_a_seeded_finding_and_returns_zero(tmp_path, runne
     assert "block-exit=0" in proc.stdout
     data = json.loads(out_file.read_text(encoding="utf-8"))
     ours = [f for f in data["findings"] if f.get("lint") == "python_duplicates"]
-    assert [(f["kind"], f["family"], f["file"]) for f in ours] == [
-        ("unlisted", "traversal", f"{_PKG}/seeded.py")
-    ]
+    assert [(f["kind"], f["family"], f["file"]) for f in ours] == [("unlisted", "traversal", f"{_PKG}/seeded.py")]

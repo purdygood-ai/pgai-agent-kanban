@@ -54,13 +54,10 @@ def _extract_function(source_path: pathlib.Path, function_name: str) -> str:
     header = f"{function_name}() {{"
     start = next((i for i, line in enumerate(lines) if line == header), None)
     assert start is not None, (
-        f"Could not find '{header}' in {source_path}. "
-        "The function may have been renamed or reformatted."
+        f"Could not find '{header}' in {source_path}. " "The function may have been renamed or reformatted."
     )
     end = next((i for i in range(start + 1, len(lines)) if lines[i] == "}"), None)
-    assert end is not None, (
-        f"Could not find the closing brace for {function_name}() in {source_path}."
-    )
+    assert end is not None, f"Could not find the closing brace for {function_name}() in {source_path}."
     return "\n".join(lines[start : end + 1])
 
 
@@ -72,7 +69,7 @@ def _extract_remedy_text(source_path: pathlib.Path, error_key: str) -> str:
     """
     text = source_path.read_text(encoding="utf-8")
     pattern = re.compile(
-        r'pgai_emit_error_contract\s*\\\s*\n'
+        r"pgai_emit_error_contract\s*\\\s*\n"
         r'\s*"' + re.escape(error_key) + r'"\s*\\\s*\n'
         r'\s*"((?:[^"\\]|\\.)*)"\s*\\\s*\n'
         r'\s*"((?:[^"\\]|\\.)*)"',
@@ -90,9 +87,7 @@ def _extract_remedy_text(source_path: pathlib.Path, error_key: str) -> str:
 def _write_intent_md(kanban_root: pathlib.Path, project: str, declaration: str) -> None:
     proj_dir = kanban_root / "projects" / project
     proj_dir.mkdir(parents=True, exist_ok=True)
-    (proj_dir / "INTENT.md").write_text(
-        f"# INTENT\n\n## Entries\n- 2026-09-10: {declaration}\n", encoding="utf-8"
-    )
+    (proj_dir / "INTENT.md").write_text(f"# INTENT\n\n## Entries\n- 2026-09-10: {declaration}\n", encoding="utf-8")
 
 
 def _run_check(tmp_path: pathlib.Path, declaration: str, reason: str):

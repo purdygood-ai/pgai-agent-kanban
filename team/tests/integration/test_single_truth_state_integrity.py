@@ -168,10 +168,7 @@ def _write_release_project(projects_root: pathlib.Path, name: str) -> pathlib.Pa
     )
 
     (proj / "release-state.md").write_text(
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n" "## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
 
@@ -307,9 +304,7 @@ class TestStaleMarkerLetsDiscoveryProceed:
     reports idle (exit 0) — the assertion below is the discriminator.
     """
 
-    def test_stale_marker_over_done_status_is_judged_idle(
-        self, shared_tree: pathlib.Path
-    ) -> None:
+    def test_stale_marker_over_done_status_is_judged_idle(self, shared_tree: pathlib.Path) -> None:
         tree = shared_tree
         task_id = "CODER-20260601-901-single-truth-fixture-one"
         task_dir = tree / "projects" / PRIMARY_PROJECT / "tasks" / task_id
@@ -318,9 +313,7 @@ class TestStaleMarkerLetsDiscoveryProceed:
             "## State\nDONE\n\n## Summary\nfixture task, already done\n",
             encoding="utf-8",
         )
-        backlog_file = (
-            tree / "projects" / PRIMARY_PROJECT / "tasks" / "queues" / "coder_backlog.md"
-        )
+        backlog_file = tree / "projects" / PRIMARY_PROJECT / "tasks" / "queues" / "coder_backlog.md"
         backlog_file.write_text(
             f"# CODER Backlog\n\n- [ ] {task_id} -- stale marker, task actually done\n",
             encoding="utf-8",
@@ -388,17 +381,12 @@ class TestReleaseStateNoneRefusesLoud:
     note describes.
     """
 
-    def test_active_rc_none_uppercase_is_refused_naming_accepted_forms(
-        self, shared_tree: pathlib.Path
-    ) -> None:
+    def test_active_rc_none_uppercase_is_refused_naming_accepted_forms(self, shared_tree: pathlib.Path) -> None:
         tree = shared_tree
         release_state = tree / "scratch" / "single-truth-fixture-two-release-state.md"
         release_state.parent.mkdir(parents=True, exist_ok=True)
         release_state.write_text(
-            "# Release State\n\n"
-            "## Active RC\nNONE\n\n"
-            "## RC Opened At\nnone\n\n"
-            "## RC Opened By Task\nnone\n",
+            "# Release State\n\n" "## Active RC\nNONE\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
             encoding="utf-8",
         )
 
@@ -406,8 +394,7 @@ class TestReleaseStateNoneRefusesLoud:
         env = scrub_wake_tunable_env(dict(os.environ))
         env["KANBAN_ROOT"] = str(tree)
         result = subprocess.run(
-            ["bash", str(pp_run_ops), "pgai_agent_kanban.cm.read_state_field",
-             "--validate", str(release_state)],
+            ["bash", str(pp_run_ops), "pgai_agent_kanban.cm.read_state_field", "--validate", str(release_state)],
             capture_output=True,
             text=True,
             env=env,
@@ -418,21 +405,16 @@ class TestReleaseStateNoneRefusesLoud:
             f"Expected --validate to refuse (exit 1) on Active RC='NONE'.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        active_rc_lines = [
-            line for line in result.stdout.splitlines() if line.startswith("Active RC\t")
-        ]
+        active_rc_lines = [line for line in result.stdout.splitlines() if line.startswith("Active RC\t")]
         assert active_rc_lines, f"Expected an 'Active RC' result line.\nstdout: {result.stdout}"
         active_rc_line = active_rc_lines[0]
         assert "\tERROR\t" in active_rc_line, (
-            f"Expected Active RC to be reported as ERROR, not silently accepted.\n"
-            f"line: {active_rc_line}"
+            f"Expected Active RC to be reported as ERROR, not silently accepted.\n" f"line: {active_rc_line}"
         )
-        assert "'none' or vX.Y.Z" in active_rc_line, (
-            f"Expected the refusal to name the accepted forms.\nline: {active_rc_line}"
-        )
-        assert "remedy:" in active_rc_line, (
-            f"Expected the refusal to carry a remedy.\nline: {active_rc_line}"
-        )
+        assert (
+            "'none' or vX.Y.Z" in active_rc_line
+        ), f"Expected the refusal to name the accepted forms.\nline: {active_rc_line}"
+        assert "remedy:" in active_rc_line, f"Expected the refusal to carry a remedy.\nline: {active_rc_line}"
 
         # release-state.md itself must be untouched by a read-only validator.
         assert "NONE" in release_state.read_text(encoding="utf-8")
@@ -455,9 +437,7 @@ class TestUnprovenancedLockIsRefused:
     discriminator.
     """
 
-    def test_acquire_with_blank_pid_is_refused_and_takes_no_lock(
-        self, shared_tree: pathlib.Path
-    ) -> None:
+    def test_acquire_with_blank_pid_is_refused_and_takes_no_lock(self, shared_tree: pathlib.Path) -> None:
         tree = shared_tree
         lib = _scripts_lib(tree)
         lock_file = tree / "locks" / "single-truth-provenance-fixture.lock"
@@ -478,13 +458,11 @@ class TestUnprovenancedLockIsRefused:
             timeout=30,
         )
         assert "RC=2" in result.stdout, (
-            f"Expected refusal (rc=2) with pid blank.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected refusal (rc=2) with pid blank.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "FD_EMPTY=yes" in result.stdout, "No fd should be left open on refusal."
         assert "pid" in result.stderr, (
-            f"Expected the refusal message to name the missing field 'pid'.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the refusal message to name the missing field 'pid'.\n" f"stderr: {result.stderr}"
         )
         assert (
             "error:" in result.stderr and "message:" in result.stderr and "remedy:" in result.stderr
@@ -675,9 +653,7 @@ class TestZeroProgressCapEscalates:
             # state (this task's own dispatch already exited); rewritten
             # each cycle (idempotent -- same task_id, same dead pid).
             script = header + f'task_liveness_record "{task_id}" claude 99999999 dispatch\n' + "reconcile_stale_active"
-            result = subprocess.run(
-                ["bash", "-c", script], capture_output=True, text=True, timeout=30
-            )
+            result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
             assert result.returncode == 0, (
                 f"cycle {cycle}: reconcile_stale_active should not error\n"
                 f"stdout={result.stdout}\nstderr={result.stderr}"
@@ -690,7 +666,9 @@ class TestZeroProgressCapEscalates:
                 assert state == "BACKLOG", f"cycle {cycle}: expected BACKLOG (below cap)\n{status_text}"
                 # Simulate the task being picked up and orphaned again.
                 status_file.write_text(
-                    re.sub(r"(^## State\s*\n)BACKLOG", r"\1WORKING", status_file.read_text(encoding="utf-8"), flags=re.M),
+                    re.sub(
+                        r"(^## State\s*\n)BACKLOG", r"\1WORKING", status_file.read_text(encoding="utf-8"), flags=re.M
+                    ),
                     encoding="utf-8",
                 )
                 backlog_file.write_text(f"# CODER Backlog\n\n- [A] {task_id}\n", encoding="utf-8")
@@ -698,9 +676,9 @@ class TestZeroProgressCapEscalates:
         assert observed_states == ["BACKLOG", "BACKLOG", "BLOCKED"], observed_states
 
         final_text = status_file.read_text(encoding="utf-8")
-        assert _field(final_text, "Needs Human").lower() == "yes", (
-            f"cycle 3 (at cap) must escalate to Needs Human=yes\n{final_text}"
-        )
+        assert (
+            _field(final_text, "Needs Human").lower() == "yes"
+        ), f"cycle 3 (at cap) must escalate to Needs Human=yes\n{final_text}"
         blockers = _field(final_text, "Blockers")
         assert "3" in blockers, f"Blockers should name the count/ceiling (3)\n{blockers}"
 
@@ -802,9 +780,7 @@ class TestContendedProjectRetriedSameIteration:
     below are the discriminator.
     """
 
-    def test_contended_project_worked_via_retry_pass_in_same_firing(
-        self, shared_tree: pathlib.Path
-    ) -> None:
+    def test_contended_project_worked_via_retry_pass_in_same_firing(self, shared_tree: pathlib.Path) -> None:
         kanban_root = shared_tree
         target = RETRY_TARGET_PROJECT
 
@@ -837,16 +813,15 @@ class TestContendedProjectRetriedSameIteration:
         )
         assert returncode == 0, f"wake firing exited {returncode}, expected 0.\noutput:\n{output}"
 
-        assert f"project {target}: repo lock held by holder={_RETRY_AGENT}" in output, (
-            f"Expected the first-pass deferral log line to name the holder.\noutput:\n{output}"
-        )
-        assert f"project {target}: retry pass: retrying after end-of-iteration deferral" in output, (
-            f"Expected the retry pass to fire for {target!r}.\noutput:\n{output}"
-        )
+        assert (
+            f"project {target}: repo lock held by holder={_RETRY_AGENT}" in output
+        ), f"Expected the first-pass deferral log line to name the holder.\noutput:\n{output}"
+        assert (
+            f"project {target}: retry pass: retrying after end-of-iteration deferral" in output
+        ), f"Expected the retry pass to fire for {target!r}.\noutput:\n{output}"
         assert f"project {target}: retry pass: chain completed" in output, (
-            f"Expected the retry to complete (lock now free), not remain contended.\n"
-            f"output:\n{output}"
+            f"Expected the retry to complete (lock now free), not remain contended.\n" f"output:\n{output}"
         )
-        assert f"project {target}: retry pass: still contended" not in output, (
-            f"Retry should have succeeded once the lock was free.\noutput:\n{output}"
-        )
+        assert (
+            f"project {target}: retry pass: still contended" not in output
+        ), f"Retry should have succeeded once the lock was free.\noutput:\n{output}"

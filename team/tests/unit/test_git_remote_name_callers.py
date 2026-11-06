@@ -35,7 +35,6 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -78,23 +77,31 @@ def _env(tmp_path: pathlib.Path, root: pathlib.Path) -> dict:
     )
 
 
-def _bash(tmp_path: pathlib.Path, root: pathlib.Path, body: str, *, project_paths: bool = True) -> subprocess.CompletedProcess:
+def _bash(
+    tmp_path: pathlib.Path, root: pathlib.Path, body: str, *, project_paths: bool = True
+) -> subprocess.CompletedProcess:
     prelude = f'source "{_LIB / "ini_parser.sh"}"\nsource "{_LIB / "project_paths.sh"}"\n' if project_paths else ""
     return subprocess.run(
         ["bash", "-c", f"{prelude}{body}\n"],
-        capture_output=True, text=True, env=_env(tmp_path, root), timeout=60,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root),
+        timeout=60,
     )
 
 
 def _git(tmp_path: pathlib.Path, repo: pathlib.Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True, env=_env(tmp_path, tmp_path / "kanban"),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_env(tmp_path, tmp_path / "kanban"),
     )
     return result.stdout.strip()
 
 
-def _repo(tmp_path: pathlib.Path, name: str, tag: Optional[str] = None) -> pathlib.Path:
+def _repo(tmp_path: pathlib.Path, name: str, tag: str | None = None) -> pathlib.Path:
     """A local repository with one commit, tagged *tag* when given."""
     repo = tmp_path / name
     repo.mkdir()
@@ -109,13 +116,16 @@ def _repo(tmp_path: pathlib.Path, name: str, tag: Optional[str] = None) -> pathl
     return repo
 
 
-def _bare_remote(tmp_path: pathlib.Path, name: str, tag: Optional[str]) -> pathlib.Path:
+def _bare_remote(tmp_path: pathlib.Path, name: str, tag: str | None) -> pathlib.Path:
     """A local bare repository holding *tag* (or no tag), cloned from a local source."""
     source = _repo(tmp_path, f"{name}-src", tag)
     bare = tmp_path / f"{name}.git"
     subprocess.run(
         ["git", "clone", "--bare", "--quiet", str(source), str(bare)],
-        capture_output=True, text=True, check=True, env=_env(tmp_path, tmp_path / "kanban"),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_env(tmp_path, tmp_path / "kanban"),
     )
     return bare
 
@@ -160,7 +170,9 @@ def _tag_fixture(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     return root, dev
 
 
-def _tag_exists(tmp_path: pathlib.Path, root: pathlib.Path, call: str, *, cwd: Optional[pathlib.Path] = None) -> subprocess.CompletedProcess:
+def _tag_exists(
+    tmp_path: pathlib.Path, root: pathlib.Path, call: str, *, cwd: pathlib.Path | None = None
+) -> subprocess.CompletedProcess:
     body = f'source "{_LIB / "discovery.sh"}"\n'
     if cwd is not None:
         body += f'cd "{cwd}"\n'
@@ -171,9 +183,9 @@ def _tag_exists(tmp_path: pathlib.Path, root: pathlib.Path, call: str, *, cwd: O
 @pytest.mark.parametrize(
     ("cfg_line", "expected_rc"),
     [
-        (None, "RC=1"),                            # origin, which lacks the tag
+        (None, "RC=1"),  # origin, which lacks the tag
         ("git_remote_name = origin", "RC=1"),
-        ("git_remote_name = upstream", "RC=0"),    # the configured remote holds it
+        ("git_remote_name = upstream", "RC=0"),  # the configured remote holds it
         ('git_remote_name = "upstream"', "RC=0"),
     ],
 )

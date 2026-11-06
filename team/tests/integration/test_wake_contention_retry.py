@@ -27,9 +27,11 @@ Coverage (requirements/v2.11.0-single-truth-state-integrity.md, CODER task
   - A project contended on both passes is deferred with a log line naming
     the project and the lock holder, and the firing still exits cleanly
     (test_project_contended_on_both_passes...).
-  - A firing whose runtime budget is already exhausted when the first pass
-    ends performs no retry and says so in the log
-    (test_retry_pass_skipped_when_runtime_budget_exhausted).
+  - A firing with max_runtime_seconds = 0 (no batch bound) still performs
+    its retry, and never narrates an exhausted budget
+    (test_retry_pass_runs_with_no_batch_bound). A positive budget already
+    spent when the first pass ends performs no retry; that stop is driven
+    on a fake clock in tests/unit/test_wake_task_timeout_budget.py.
   - A project that acquired a HALT sentinel between the two passes is not
     retried (test_project_halted_between_passes_is_not_retried).
   - A LOCK_WAIT_SECONDS / LOCK_STARVATION_FIRINGS exported in the process
@@ -142,9 +144,7 @@ def _build_kanban_root(tmp_path: pathlib.Path, project_names: list[str]) -> path
         proj = root / "projects" / name
         proj.mkdir(parents=True, exist_ok=True)
         (proj / "project.cfg").write_text(
-            "[project]\n"
-            f"project_name = {name}\n"
-            "workflow_type = document\n",
+            "[project]\n" f"project_name = {name}\n" "workflow_type = document\n",
             encoding="utf-8",
         )
         queues_dir = proj / "tasks" / "queues"
@@ -191,9 +191,7 @@ def _wake_env(kanban_root: pathlib.Path, extra_env: dict | None = None) -> dict:
     return env
 
 
-def _start_external_holder(
-    kanban_root: pathlib.Path, project_name: str
-) -> tuple[subprocess.Popen, pathlib.Path]:
+def _start_external_holder(kanban_root: pathlib.Path, project_name: str) -> tuple[subprocess.Popen, pathlib.Path]:
     """Start a background bash process that holds the real repo-wake lock
     for *project_name* -- exactly the flock pgai_lock_acquire itself takes
     -- until the returned "done" marker file appears. Blocks until the
@@ -339,19 +337,17 @@ def test_contended_project_worked_via_retry_pass_in_same_firing(
     assert returncode == 0, f"wake firing exited {returncode}, expected 0.\noutput:\n{output}"
 
     assert f"project {target}: repo lock held by holder={_AGENT}" in output, (
-        f"Expected the first-pass deferral log line to name the holder ({_AGENT}).\n"
-        f"output:\n{output}"
+        f"Expected the first-pass deferral log line to name the holder ({_AGENT}).\n" f"output:\n{output}"
     )
-    assert f"project {target}: retry pass: retrying after end-of-iteration deferral" in output, (
-        f"Expected the retry pass to fire for {target!r}.\noutput:\n{output}"
-    )
+    assert (
+        f"project {target}: retry pass: retrying after end-of-iteration deferral" in output
+    ), f"Expected the retry pass to fire for {target!r}.\noutput:\n{output}"
     assert f"project {target}: retry pass: chain completed" in output, (
-        f"Expected the retry to complete (lock now free), not remain contended.\n"
-        f"output:\n{output}"
+        f"Expected the retry to complete (lock now free), not remain contended.\n" f"output:\n{output}"
     )
-    assert f"project {target}: retry pass: still contended" not in output, (
-        f"Retry should have succeeded once the lock was free.\noutput:\n{output}"
-    )
+    assert (
+        f"project {target}: retry pass: still contended" not in output
+    ), f"Retry should have succeeded once the lock was free.\noutput:\n{output}"
 
 
 # ---------------------------------------------------------------------------
@@ -390,18 +386,18 @@ def test_project_contended_on_both_passes_is_deferred_and_firing_exits_cleanly(
         f"got {output.count(first_pass_line)}.\noutput:\n{output}"
     )
     assert f"project {target}: retry pass: retrying after end-of-iteration deferral" in output
-    assert f"project {target}: retry pass: still contended after retry" in output, (
-        f"Expected the retry pass to name the still-contended outcome.\noutput:\n{output}"
-    )
+    assert (
+        f"project {target}: retry pass: still contended after retry" in output
+    ), f"Expected the retry pass to name the still-contended outcome.\noutput:\n{output}"
 
 
 # ---------------------------------------------------------------------------
-# Fixture 3: batch runtime budget already exhausted when the first pass
-# ends -- no retry is performed, and the log says so.
+# Fixture 3: max_runtime_seconds = 0 is no batch bound -- the retry pass
+# still retries the contended project.
 # ---------------------------------------------------------------------------
 
 
-def test_retry_pass_skipped_when_runtime_budget_exhausted(tmp_path: pathlib.Path) -> None:
+def test_retry_pass_runs_with_no_batch_bound(tmp_path: pathlib.Path) -> None:
     target = "budget-target"
     kanban_root = _build_kanban_root(tmp_path, [target])
 
@@ -410,12 +406,8 @@ def test_retry_pass_skipped_when_runtime_budget_exhausted(tmp_path: pathlib.Path
         result = subprocess.run(
             ["bash", str(kanban_root / _WAKE_CLAUDE_REL), f"--agent={_AGENT}"],
             cwd=str(kanban_root),
-            # A batch budget of 0 seconds is already exhausted the instant
-            # the first pass's elapsed-time check runs -- deterministic
-            # regardless of real wall-clock timing (mirrors the existing,
-            # un-guarded `ELAPSED >= MAX_RUNTIME_SECONDS` convention already
-            # used by run_project_chain's own per-task loop, which likewise
-            # does not special-case 0 as "unlimited").
+            # A batch budget of 0 is no batch bound, so no elapsed time
+            # skips the retry pass.
             env=_wake_env(kanban_root, {"MAX_RUNTIME_SECONDS": "0"}),
             capture_output=True,
             text=True,
@@ -427,17 +419,15 @@ def test_retry_pass_skipped_when_runtime_budget_exhausted(tmp_path: pathlib.Path
     output = result.stdout + result.stderr
     assert result.returncode == 0, f"wake firing exited {result.returncode}.\noutput:\n{output}"
 
-    assert "retry pass: batch runtime budget already exhausted" in output, (
-        f"Expected the budget-exhausted retry skip to be narrated.\noutput:\n{output}"
-    )
-    budget_lines = [line for line in output.splitlines() if "performing no retry for" in line]
-    assert budget_lines and target in budget_lines[0], (
-        f"Expected the budget-exhausted skip line to name {target!r}.\noutput:\n{output}"
-    )
-    assert f"project {target}: retry pass: retrying after end-of-iteration deferral" not in output, (
-        f"No retry should have been attempted once the batch budget was exhausted.\n"
-        f"output:\n{output}"
-    )
+    assert (
+        "batch runtime budget" not in output
+    ), f"max_runtime_seconds = 0 is no batch bound; no budget stop may be narrated.\noutput:\n{output}"
+    assert (
+        f"project {target}: retry pass: retrying after end-of-iteration deferral" in output
+    ), f"Expected the contended project to be retried with no batch bound.\noutput:\n{output}"
+    assert (
+        f"project {target}: retry pass: still contended after retry" in output
+    ), f"Expected the retry to run and find the lock still held.\noutput:\n{output}"
 
 
 # ---------------------------------------------------------------------------
@@ -489,15 +479,15 @@ def test_project_halted_between_passes_is_not_retried(tmp_path: pathlib.Path) ->
     )
     assert returncode == 0, f"wake firing exited {returncode}, expected 0.\noutput:\n{output}"
 
-    assert f"project {target}: repo lock held by holder={_AGENT}" in output, (
-        f"Expected the first-pass deferral log line to name the holder.\noutput:\n{output}"
-    )
-    assert f"project {target}: retry pass: per-project HALT now present, not retried" in output, (
-        f"Expected the retry pass to re-check per-project HALT and decline.\noutput:\n{output}"
-    )
-    assert f"project {target}: retry pass: retrying after end-of-iteration deferral" not in output, (
-        f"A project that halted between the two passes must not be retried.\noutput:\n{output}"
-    )
+    assert (
+        f"project {target}: repo lock held by holder={_AGENT}" in output
+    ), f"Expected the first-pass deferral log line to name the holder.\noutput:\n{output}"
+    assert (
+        f"project {target}: retry pass: per-project HALT now present, not retried" in output
+    ), f"Expected the retry pass to re-check per-project HALT and decline.\noutput:\n{output}"
+    assert (
+        f"project {target}: retry pass: retrying after end-of-iteration deferral" not in output
+    ), f"A project that halted between the two passes must not be retried.\noutput:\n{output}"
 
 
 # ---------------------------------------------------------------------------
@@ -528,8 +518,7 @@ def _run_contended_wake(kanban_root: pathlib.Path, target: str, extra_env: dict 
         )
     except subprocess.TimeoutExpired as exc:
         partial = "".join(
-            s.decode("utf-8", "replace") if isinstance(s, bytes) else (s or "")
-            for s in (exc.stdout, exc.stderr)
+            s.decode("utf-8", "replace") if isinstance(s, bytes) else (s or "") for s in (exc.stdout, exc.stderr)
         )
         pytest.fail(
             f"the sandboxed wake was still running after {_INHERITED_ENV_TIMEOUT_SECONDS}s -- "
@@ -573,9 +562,9 @@ def test_inherited_lock_wait_seconds_does_not_override_the_sandbox_cfg(
     output = _run_contended_wake(kanban_root, target, extra_env=None)
 
     deferral = f"project {target}: repo lock held by holder={_AGENT}"
-    assert deferral in output and "deferring" in output, (
-        f"Expected the immediate deferral line naming holder={_AGENT!r}.\noutput:\n{output}"
-    )
+    assert (
+        deferral in output and "deferring" in output
+    ), f"Expected the immediate deferral line naming holder={_AGENT!r}.\noutput:\n{output}"
     assert "waiting up to" not in output, (
         "The sandboxed wake waited for the lock: the LOCK_WAIT_SECONDS exported "
         "by this test's own process overrode the sandbox cfg's "
@@ -699,14 +688,16 @@ def test_contended_project_defers_at_once_while_another_project_has_work(
         f"Expected project {locked} to be attempted again in the retry pass, after "
         f"project {ready}'s chain.\noutput:\n{output}"
     )
-    assert _first_index(lines[ready_begins:retry_begins], f"finished task {task_id} with state DONE") >= 0, (
-        f"Expected project {ready}'s ready task to be dispatched before the retry pass.\noutput:\n{output}"
-    )
+    assert (
+        _first_index(lines[ready_begins:retry_begins], f"finished task {task_id} with state DONE") >= 0
+    ), f"Expected project {ready}'s ready task to be dispatched before the retry pass.\noutput:\n{output}"
     # The retry pass spends the budget the first pass left whole. Its lines
     # all carry lock_wait_seconds=<N>, whichever of them the host's speed
     # produces (see _lines_reporting_lock_wait_seconds).
     retry_waits = _lines_reporting_lock_wait_seconds(
-        "\n".join(lines[retry_begins:]), locked, _DEFER_LOCK_WAIT_SECONDS,
+        "\n".join(lines[retry_begins:]),
+        locked,
+        _DEFER_LOCK_WAIT_SECONDS,
     )
     assert retry_waits, (
         f"Expected the retry pass to wait for project {locked}'s lock within "

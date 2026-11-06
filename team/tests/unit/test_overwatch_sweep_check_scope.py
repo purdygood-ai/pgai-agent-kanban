@@ -92,7 +92,7 @@ class _Fleet:
         (root / "kanban.cfg").write_text("[wake]\n", encoding="utf-8")
         (root / "VERSION").write_text(installed_version + "\n", encoding="utf-8")
 
-    def add(self, name: str, dev_tree: "pathlib.Path | None", *, branch_prefix: str = "") -> pathlib.Path:
+    def add(self, name: str, dev_tree: pathlib.Path | None, *, branch_prefix: str = "") -> pathlib.Path:
         proj = self.root / "projects" / name
         (proj / "overwatch" / "backups").mkdir(parents=True)
         (proj / "overwatch" / "actions.log").write_text("", encoding="utf-8")
@@ -137,8 +137,9 @@ def _sweep(fleet: _Fleet, tmp_path: pathlib.Path, args: str):
 
 
 def _not_applicable(rows: list, slug: str) -> list:
-    return [r for r in rows if r[0] == "overwatch-sweep" and r[2] == "check-not-applicable"
-            and r[4].startswith(f"{slug}:")]
+    return [
+        r for r in rows if r[0] == "overwatch-sweep" and r[2] == "check-not-applicable" and r[4].startswith(f"{slug}:")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +162,13 @@ def test_changelog_drift_is_not_applicable_to_a_project_without_team_dir(tmp_pat
     skipped = _not_applicable(rows, "changelog-drift")
     assert len(skipped) == 1, rows
     assert str(dev) in skipped[0][4], "the not-applicable row should name the dev tree it judged"
-    assert ("overwatch-sweep", "video-proj", "sweep-end", "none",
-            "0 check(s) ok, 0 check(s) error, 1 check(s) not applicable") in rows, rows
+    assert (
+        "overwatch-sweep",
+        "video-proj",
+        "sweep-end",
+        "none",
+        "0 check(s) ok, 0 check(s) error, 1 check(s) not applicable",
+    ) in rows, rows
     assert "\tcheck-not-applicable\tnone\tchangelog-drift" in fleet.sweep_log("video-proj")
     assert "\tcheck-error\t" not in fleet.sweep_log("video-proj")
     assert "1 project(s) swept, 0 error(s)" in result.stderr, result.stderr
@@ -201,7 +207,9 @@ def test_version_divergence_records_only_for_the_kanban_project(tmp_path):
     assert kanban_records[0][2] == "report:version-divergence", kanban_records
     assert "installed=v2.49.2" in kanban_records[0][4] and "ai_v2.50.0" in kanban_records[0][4]
     assert len(_not_applicable(fleet.rows("video-proj"), "version-divergence")) == 1, fleet.rows("video-proj")
-    assert "v0.33.2" not in "".join(r[4] for r in fleet.rows("video-proj")), "the kanban VERSION was compared with the project's tag"
+    assert "v0.33.2" not in "".join(
+        r[4] for r in fleet.rows("video-proj")
+    ), "the kanban VERSION was compared with the project's tag"
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +244,9 @@ def test_kanban_project_changelog_drift_still_regenerates_and_commits(tmp_path):
     assert "running changelog-drift" in result.stderr, result.stderr
     rows = fleet.rows("kanban-proj")
     assert _not_applicable(rows, "changelog-drift") == [], rows
-    assert [r for r in rows if r[0] == "check-changelog-drift" and r[2] == "changelog-drift-fixed"], (
-        f"the kanban project's drift was not regenerated and committed:\n{rows}\n{result.stderr}"
-    )
+    assert [
+        r for r in rows if r[0] == "check-changelog-drift" and r[2] == "changelog-drift-fixed"
+    ], f"the kanban project's drift was not regenerated and committed:\n{rows}\n{result.stderr}"
     assert _git("-C", str(dev), "rev-parse", "HEAD") != head_before
     assert (dev / "CHANGELOG.md").read_text(encoding="utf-8") != "# STALE\n"
 

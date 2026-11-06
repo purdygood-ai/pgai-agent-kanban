@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -130,9 +130,7 @@ def test_create_project_refuses_the_value_at_422_naming_the_field(
 ) -> None:
     before = _snapshot(outer)
 
-    response = client.post(
-        "/operations/create-project", json={"project": "alpha", field: value, "dry_run": dry_run}
-    )
+    response = client.post("/operations/create-project", json={"project": "alpha", field: value, "dry_run": dry_run})
 
     body = _assert_value_refusal(response, "create_project", field)
     assert reason in body["message"]
@@ -166,9 +164,9 @@ def test_a_valid_create_and_add_still_succeed(client, board) -> None:
     added = client.post("/operations/add-project", json={"project": "loose"})
 
     assert created.status_code == 200, created.text
-    assert "dev_tree_path = /srv/develop/alpha\n" in (
-        board / "projects" / "alpha" / "project.cfg"
-    ).read_text(encoding="utf-8")
+    assert "dev_tree_path = /srv/develop/alpha\n" in (board / "projects" / "alpha" / "project.cfg").read_text(
+        encoding="utf-8"
+    )
     assert added.status_code == 200, added.text
     registry = (board / "projects.cfg").read_text(encoding="utf-8")
     assert "[project:alpha]" in registry and "[project:loose]" in registry

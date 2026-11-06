@@ -93,10 +93,11 @@ snapshot_ttl_seconds = 5
 # Default: 20000
 event_band_read_bound_lines = 20000
 
-# tmux session name the dashboard scripts create, attach to and kill
-# (scripts/dashboard/create.sh, kill.sh). Change it to run a second
-# dashboard beside the first. Overridable per invocation with
-# PGAI_DASHBOARD_SESSION_NAME.
+# tmux session name the dashboard scripts create, attach to, detach and
+# kill (scripts/dashboard/create.sh, attach.sh, detach.sh, kill.sh). Change
+# it to run a second dashboard beside the first. Overridable per invocation
+# with PGAI_DASHBOARD_SESSION_NAME, and the scripts' --session flag
+# outranks both.
 # Default: pgai-kanban-dashboard
 session_name = pgai-kanban-dashboard
 
@@ -113,6 +114,42 @@ refresh_seconds = 5
 # with DASHBOARD_ROWS_PER_COLUMN.
 # Default: 21
 rows_per_column = 21
+
+# Width of the operator window's workbench — an interactive shell column on
+# the far right, beside the board and the command line — as a whole-number
+# percent of the window width, 0-99. 0 disables the pane: the operator
+# window keeps the board and command line at the full width. A width that
+# would leave a board column under 15 columns shows no workbench (see
+# operator_workbench_min_cols). Anything else falls back to the default
+# with a warning. Read when the dashboard is created
+# (scripts/dashboard/create.sh).
+# Default: 40
+operator_workbench_pct = 40
+
+# Narrow-window guard for the workbench: when the operator window is
+# narrower than this many columns, no workbench pane is shown and the board
+# keeps the full width. Checked when the dashboard is created (create.sh
+# then prints one line naming the window width and this threshold) and
+# again whenever the window changes size: a client attaching from a
+# narrower terminal, or a terminal resized narrower, moves the workbench to
+# a window of its own named "workbench" until the window is wide enough
+# again. Whatever this value, the workbench is also left out wherever a
+# board column would get fewer than 15 columns beside it. A whole number
+# 0-10000 (0 turns the guard off); anything else falls back to the default
+# with a warning.
+# Default: 160
+operator_workbench_min_cols = 160
+
+# The operator window's board columns. merged shows BUGS, PRIORITIES,
+# REQUIREMENTS and one AGENTS column listing every task of the five role
+# backlogs (PM, CODER, WRITER, TESTER, CM), newest first per project; split
+# shows the five role columns instead, as the visibility window does. The
+# visibility window ignores this key. Anything else falls back to the
+# default with a warning. Read when the dashboard is created
+# (scripts/dashboard/create.sh).
+# Values: merged | split
+# Default: merged
+operator_board_agents = merged
 
 # Pane colours, by colour name (black, red, green, yellow, blue, magenta,
 # cyan, white); a name outside that list renders the text uncoloured.
@@ -136,6 +173,38 @@ color_header = cyan
 color_halt = red
 # OK indicator in the multi-project view. Default: green
 color_ok = green
+
+# Width budget, in characters, of the two status lines (status-bottom.sh and
+# status-right.sh). A line longer than this drops its informational segments,
+# rightmost first; HALT, APPROVAL and DEFER segments are never dropped.
+# PGAI_DASHBOARD_STATUS_MAX_WIDTH, when set, wins over this value.
+# Default: 320
+status_max_width = 320
+
+# Seconds create.sh waits, with no further pane reporting armed, before it
+# refuses and leaves the session up for inspection. A value that is not a
+# positive whole number falls back to the default.
+# PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS, when set, wins over this value.
+# Default: 20
+arm_timeout_seconds = 20
+
+
+# ---------------------------------------------------------------------------
+# [discovery] — intake discovery (priority/ and bugs/ files)
+# ---------------------------------------------------------------------------
+[discovery]
+
+# Seconds an intake file must sit unchanged before discovery reads it, so a
+# file still being written is left for the next tick. 0 disables the wait.
+# PGAI_DISCOVERY_SETTLE_SECONDS, when set, wins over this value.
+# Default: 60
+settle_seconds = 60
+
+# Rejections of the same intake file before discovery moves it to the
+# project's rejected/ directory; the attention pane warns below this count.
+# PGAI_DISCOVERY_REJECT_THRESHOLD, when set, wins over this value.
+# Default: 3
+reject_threshold = 3
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +417,10 @@ max_tasks_per_wake = 5
 # task < project <= batch (max_task_seconds < max_project_seconds <= this).
 # A task dispatched late in the batch is capped at the remaining batch
 # budget, so the batch ends within this value plus kill_grace_seconds.
+#
+# Set to 0 for no batch bound: the dispatch loop, the contended-project
+# retry pass and the repo-lock wait apply no batch limit, and only
+# max_project_seconds and max_task_seconds still cap the run.
 # Default: 14400 (4 hours)
 max_runtime_seconds = 14400
 
@@ -695,10 +768,11 @@ po =
 # ---------------------------------------------------------------------------
 [cleanup]
 
-# cleanup.sh reads the three keys below on every run. An environment
+# cleanup.sh reads the four keys below on every run. An environment
 # variable set in the calling shell wins over the value here:
-# PGAI_CLEANUP_RETENTION_DAYS, PGAI_CLEANUP_TRIVIAL_LOG_BYTES and
-# PGAI_CLEANUP_TRIVIAL_LOG_HOURS respectively.
+# PGAI_CLEANUP_RETENTION_DAYS, PGAI_CLEANUP_TRIVIAL_LOG_BYTES,
+# PGAI_CLEANUP_TRIVIAL_LOG_HOURS and PGAI_CLEANUP_TASK_RETENTION_DAYS
+# respectively.
 
 # Days to keep wake log files before cleanup.sh deletes them (Step 1), and
 # briefs before it moves them to the briefs archive (Step 5). Task folders
@@ -724,6 +798,12 @@ trivial_log_bytes = 1700
 # this are always preserved, even if below the byte threshold.
 # Default: 6
 trivial_log_hours = 6
+
+# Age in days past which cleanup.sh's Step 2 counts a terminal (DONE or
+# WONT-DO) task folder in its report. No task folder is deleted at any age.
+# PGAI_CLEANUP_TASK_RETENTION_DAYS, when set, wins over this value.
+# Default: 7
+task_retention_days = 7
 
 
 # ---------------------------------------------------------------------------
@@ -771,7 +851,7 @@ trivial_log_hours = 6
 # headroom policy above).
 # Shipped value: 77824. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_coder = 77824
+budget_bytes_coder = 81920
 
 # TESTER budget: 124KB — re-baselined against an assembled total of
 # 120131 bytes, measured after the SOP-core.md growth; the stack sat 1347
@@ -783,13 +863,13 @@ budget_bytes_coder = 77824
 # unbudgeted; the lint never fails).
 budget_bytes_tester = 126976
 
-# PO budget: 72KB — re-baselined against an assembled total of 67631
-# bytes (previous 65536-byte budget was 2095 bytes over after SOP-core.md
-# and OVERVIEW.md grew; see headroom policy above). PO's role file is
-# still the leanest in the catalog (brief expansion only).
-# Shipped value: 73728. No in-code default (absent = role reported
+# PO budget: 80KB — re-baselined against an assembled total of 74342
+# bytes (previous 73728-byte budget was 614 bytes over after SOP-core.md
+# grew; see headroom policy above). PO's role file is still the leanest
+# in the catalog (brief expansion only).
+# Shipped value: 81920. No in-code default (absent = role reported
 # unbudgeted; the lint never fails).
-budget_bytes_po = 73728
+budget_bytes_po = 81920
 
 # PM budget: 96KB — re-baselined against an assembled total of 90780
 # bytes (previous 90112-byte budget was 668 bytes over; see headroom
@@ -922,6 +1002,14 @@ deep_verify = weekly
 # value, and the next source applies. Never a refusal.
 # Accepted: HH:MM-HH:MM (UTC). Default: 03:00-03:59
 # deep_verify_offhours_window = 03:00-03:59
+
+# deep_verify_freshness_window_days: days a built DEEP-VERIFY record stays
+# fresh for the pre-release check (scripts/deep-verify-freshness-check.sh)
+# and the TESTER report's freshness line. Read from this file only, not from
+# a project's project.cfg. PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS, when set,
+# wins over this value.
+# Default: 7
+deep_verify_freshness_window_days = 7
 
 # --- Deferral bounds and bundle mixing ---------------------------------------
 # Four keys capping how long deferred bugs wait and whether they may ride in
@@ -1065,6 +1153,20 @@ ship_posture = always
 # Example: container_images = all
 # Default: empty (no default selection)
 container_images =
+
+# hook_timeout_seconds: the most seconds a release lifecycle hook (pre-squash,
+# pre-tag, post-tag) may run, and the limit on resolving which hook a phase
+# runs. The hook starts in its own process group; past the limit the whole
+# group -- any daemon the hook forked with it -- is stopped (SIGTERM, then
+# SIGKILL after 5s) and the hook counts as failed with rc=124, so its phase
+# takes the path any failing hook takes: pre-squash and pre-tag stop the
+# release, post-tag is a warning. Read by cm/release.sh and ship-rc.sh from
+# kanban.cfg only (not project.cfg). Absent or blank resolves to the
+# default; a value that is not a positive whole number (0, a unit, a word)
+# is warned about and the default is used -- a hook is never unbounded.
+# The default is defined once, in team/pgai_agent_kanban/lib/hook_timeout.py.
+# Accepted: a positive whole number of seconds. Default: 900
+hook_timeout_seconds = 900
 
 
 # ---------------------------------------------------------------------------
@@ -1276,6 +1378,22 @@ runaway_inbox_entries_per_day = 20
 # (a typo, 'yes', 'on') refuses loud.
 # Accepted: true|false. Default: false
 halt_after_auto_resume = false
+
+# verb_timeout_seconds: the most seconds one operator verb script run by
+# OVERWATCH's resolution stage may take -- cancel-rc.sh and unwind-rc.sh in
+# the cancel drills, cm/release.sh for a declared-intent ship. The script
+# starts in its own process group; past the limit the whole group is
+# stopped (SIGTERM, then SIGKILL after 5s) and the verb is recorded as
+# failed with the reason code overwatch.verb-timeout: the drill takes its
+# ordinary failure path (nothing after the failed step runs, the
+# ship-policy HALT stays) and the decision wake continues. Keep it above
+# what a release takes, hooks included ([release] hook_timeout_seconds,
+# up to three hooks). Read by team/pgai_agent_kanban/overwatch/
+# resolution_stage.py from kanban.cfg only (not project.cfg). Absent or
+# blank resolves to the default; a value that is not a positive whole
+# number is warned about and the default is used.
+# Accepted: a positive whole number of seconds. Default: 3600
+verb_timeout_seconds = 3600
 
 
 # ---------------------------------------------------------------------------

@@ -63,7 +63,7 @@ import dataclasses
 import pathlib
 import sys
 from pathlib import Path
-from typing import Callable, Mapping
+from collections.abc import Callable, Mapping
 
 # Run by file path (``python3 .../allowlisted_verbs.py``) or loaded from a
 # file outside its package, this module has no parent package and the
@@ -270,12 +270,12 @@ def validated_args(record: BlockRecord) -> dict[str, str]:
     return canonical
 
 
-def target_problems(kanban_root: "Path | str", args: Mapping[str, str]) -> list[str]:
+def target_problems(kanban_root: Path | str, args: Mapping[str, str]) -> list[str]:
     """Why the targets of validated *args* do not check out; [] when they do."""
     return VERBS[args[ACTION_VERB_KEY]].target_check(Path(kanban_root), args)
 
 
-def run_allowlisted_verb(kanban_root: "Path | str", args: Mapping[str, str]) -> VerbRun:
+def run_allowlisted_verb(kanban_root: Path | str, args: Mapping[str, str]) -> VerbRun:
     """Re-check *args* and their targets, then run the verb once.
 
     Raises:

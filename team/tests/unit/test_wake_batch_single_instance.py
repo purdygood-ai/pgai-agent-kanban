@@ -31,7 +31,6 @@ provider or project is touched.
 from __future__ import annotations
 
 import datetime
-import os
 import pathlib
 import shutil
 import subprocess
@@ -105,8 +104,12 @@ def _env(install: dict, **extra: str) -> dict:
 def _fire(install: dict, *args: str, **extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(install["script"]), *args],
-        capture_output=True, text=True, env=_env(install, **extra), cwd=str(install["tmp"]),
-        timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=_env(install, **extra),
+        cwd=str(install["tmp"]),
+        timeout=60,
+        check=False,
     )
 
 
@@ -124,9 +127,15 @@ def _boot_id() -> str:
 
 
 def _write_record(
-    install: dict, agent: str, pid: int, *, age_seconds: int, pid_start: str, project: str = "demo",
+    install: dict,
+    agent: str,
+    pid: int,
+    *,
+    age_seconds: int,
+    pid_start: str,
+    project: str = "demo",
 ) -> str:
-    acquired = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=age_seconds))
+    acquired = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=age_seconds)
     text = (
         f"holder=wake-batch\npid={pid}\nop=wake-batch:{agent}:{project}\ntask=none\n"
         f"acquired_at={acquired.strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
@@ -199,8 +208,11 @@ def test_overlapping_firings_of_one_agent_run_one_at_a_time(install) -> None:
     release = install["tmp"] / "release-first"
     first = subprocess.Popen(
         ["bash", str(install["script"]), "--agent=coder"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        env=_env(install, STUB_HOLD_UNTIL=str(release)), cwd=str(install["tmp"]),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_env(install, STUB_HOLD_UNTIL=str(release)),
+        cwd=str(install["tmp"]),
     )
     try:
         ran = install["root"] / "stub-ran"
@@ -289,8 +301,11 @@ def test_a_firing_while_project_1_runs_starts_project_2_only(install) -> None:
     release = install["tmp"] / "release-alpha"
     first = subprocess.Popen(
         ["bash", str(install["script"]), "--agent=coder"],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        env=_env(install, STUB_HOLD_UNTIL=str(release), STUB_HOLD_PROJECT="alpha"), cwd=str(install["tmp"]),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_env(install, STUB_HOLD_UNTIL=str(release), STUB_HOLD_PROJECT="alpha"),
+        cwd=str(install["tmp"]),
     )
     try:
         _wait_for(lambda: sorted(p for _, p in _ran_projects(install)) == ["alpha", "beta"], "both batches to start")

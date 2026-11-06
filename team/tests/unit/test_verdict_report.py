@@ -364,7 +364,7 @@ _CLOCK_SLACK_SECONDS = 30
 
 
 def _iso_ago(seconds: int) -> str:
-    then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=seconds)
+    then = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=seconds)
     return then.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -393,7 +393,8 @@ def test_details_release_lock_reports_held_seconds_from_acquired_at_not_mtime(
     _write_projects_cfg(tmp_path, [("demo", 1, True)])
     _make_project_dir(tmp_path, "demo")
     _seed_fresh_lock(
-        tmp_path, "repo-wake-demo.lock",
+        tmp_path,
+        "repo-wake-demo.lock",
         f"holder=coder\npid={os.getpid()}\nop=wake-chain:demo\ntask=none\n"
         f"acquired_at={_iso_ago(_HELD_THREE_HOURS)}\n",
     )
@@ -404,9 +405,9 @@ def test_details_release_lock_reports_held_seconds_from_acquired_at_not_mtime(
     block = _release_lock_blocks(result.stdout)["repo-wake-demo.lock"]
     held = int(block["held_seconds"])
     assert _HELD_THREE_HOURS <= held <= _HELD_THREE_HOURS + _CLOCK_SLACK_SECONDS, block
-    assert 0 <= int(block["age_seconds"]) <= _CLOCK_SLACK_SECONDS, (
-        f"age_seconds is the refresh age (mtime), which was just touched: {block}"
-    )
+    assert (
+        0 <= int(block["age_seconds"]) <= _CLOCK_SLACK_SECONDS
+    ), f"age_seconds is the refresh age (mtime), which was just touched: {block}"
 
 
 def test_details_release_lock_without_acquired_at_reports_held_none(
@@ -416,7 +417,8 @@ def test_details_release_lock_without_acquired_at_reports_held_none(
     _make_project_dir(tmp_path, "demo")
     for name, extra in (("repo-legacy-demo.lock", ""), ("repo-torn-demo.lock", "acquired_at=2026-10-01T04:2\n")):
         _seed_fresh_lock(
-            tmp_path, name,
+            tmp_path,
+            name,
             f"holder=coder\npid={os.getpid()}\nop=wake-chain:demo\ntask=T-1\n{extra}",
         )
 

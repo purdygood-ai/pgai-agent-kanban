@@ -85,21 +85,18 @@ def test_backup_step_keeps_the_ten_newest_and_writes_nothing_when_unchanged(
     after_first = _backups(sandbox)
     new = [p for p in after_first if p not in fixtures]
     assert len(new) == 1, f"expected one new backup, found {new}\n" + diagnostic(result)
-    assert new[0].read_bytes() == sandbox.crontab_bytes(), (
-        "the new backup must hold the crontab as it was before the step"
-    )
-    expected = fixtures[-(_DEFAULT_KEEP - 1):] + new
-    assert after_first == sorted(expected), (
-        f"expected the {_DEFAULT_KEEP} newest backups, found "
-        f"{[p.name for p in after_first]}\n" + diagnostic(result)
-    )
+    assert (
+        new[0].read_bytes() == sandbox.crontab_bytes()
+    ), "the new backup must hold the crontab as it was before the step"
+    expected = fixtures[-(_DEFAULT_KEEP - 1) :] + new
+    assert after_first == sorted(
+        expected
+    ), f"expected the {_DEFAULT_KEEP} newest backups, found " f"{[p.name for p in after_first]}\n" + diagnostic(result)
 
     second = _install(sandbox)
 
     assert second.returncode == 0, diagnostic(second)
-    assert _backups(sandbox) == after_first, (
-        "an unchanged crontab must not write another backup\n" + diagnostic(second)
-    )
+    assert _backups(sandbox) == after_first, "an unchanged crontab must not write another backup\n" + diagnostic(second)
     assert "no new backup written" in second.stdout, diagnostic(second)
 
 
@@ -144,9 +141,7 @@ def test_invalid_count_is_refused_before_anything_changes(tmp_path: pathlib.Path
 
         remedy = re.search(r"^remedy:\s+(.+)$", result.stderr, re.MULTILINE)
         assert remedy, diagnostic(result)
-        fix = subprocess.run(
-            ["bash", "-c", remedy.group(1)], capture_output=True, text=True, timeout=30
-        )
+        fix = subprocess.run(["bash", "-c", remedy.group(1)], capture_output=True, text=True, timeout=30)
         assert fix.returncode == 0, diagnostic(fix)
         assert "crontab_backups_keep = 10" in cfg.read_text(encoding="utf-8")
         rerun = _install(sandbox)
@@ -162,16 +157,10 @@ def test_empty_crontab_restore_hint_lists_the_surviving_backups(
     survivors = _backups(sandbox)
     sandbox.write_crontab("")
 
-    result = sandbox.run(
-        ["bash", "-c", f'source "{_SAFE_OVERWRITE}"; warn_if_empty_crontab']
-    )
+    result = sandbox.run(["bash", "-c", f'source "{_SAFE_OVERWRITE}"; warn_if_empty_crontab'])
 
     assert result.returncode == 1, diagnostic(result)
-    listing = [
-        line.strip()[len("ls "):]
-        for line in result.stdout.splitlines()
-        if line.strip().startswith("ls ")
-    ]
+    listing = [line.strip()[len("ls ") :] for line in result.stdout.splitlines() if line.strip().startswith("ls ")]
     assert len(listing) == 1, diagnostic(result)
     assert sorted(pathlib.Path(p) for p in glob.glob(listing[0])) == survivors, (
         f"the restore hint's listing must name exactly the surviving backups "

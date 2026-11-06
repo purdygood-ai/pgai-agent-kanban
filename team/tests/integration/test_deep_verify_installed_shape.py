@@ -64,6 +64,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="deep-verify-installed-shape")
 
+
 # ---------------------------------------------------------------------------
 # Path resolution -- anchored to this file's own location.
 # test file:  team/tests/integration/test_deep_verify_installed_shape.py
@@ -139,14 +140,10 @@ def _write_stub_green(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def _register_project(install_root: pathlib.Path, project: str) -> pathlib.Path:
-    (install_root / "projects.cfg").write_text(
-        f"[project:{project}]\npriority = 1\n", encoding="utf-8"
-    )
+    (install_root / "projects.cfg").write_text(f"[project:{project}]\npriority = 1\n", encoding="utf-8")
     project_dir = install_root / "projects" / project
     project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / "project.cfg").write_text(
-        f"[project]\nproject_name = {project}\n", encoding="utf-8"
-    )
+    (project_dir / "project.cfg").write_text(f"[project]\nproject_name = {project}\n", encoding="utf-8")
     return project_dir
 
 
@@ -188,9 +185,7 @@ def test_installed_shape_run_records_the_configured_dev_tree_and_satisfies_fresh
     )
     assert result.returncode == 0, result.stderr
 
-    ledger_text = (install_root / "projects" / project / "deep-verify-ledger.md").read_text(
-        encoding="utf-8"
-    )
+    ledger_text = (install_root / "projects" / project / "deep-verify-ledger.md").read_text(encoding="utf-8")
 
     # The ledger must never record the literal "unknown" sentinel when a
     # resolvable dev tree exists.

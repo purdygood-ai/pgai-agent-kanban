@@ -95,9 +95,7 @@ def _lines(result: BashResult) -> list[str]:
 
 
 @pytest.mark.parametrize("exit_code", _NON_PROMOTE_EXIT_CODES)
-def test_run_under_errexit_returns_evaluator_code_and_keeps_errexit_on(
-    tmp_path: pathlib.Path, exit_code: int
-) -> None:
+def test_run_under_errexit_returns_evaluator_code_and_keeps_errexit_on(tmp_path: pathlib.Path, exit_code: int) -> None:
     """Under set -euo pipefail the call returns the code and the shell runs on.
 
     The call is a statement of its own (not an ``if`` condition) that

@@ -49,7 +49,6 @@ import datetime
 import pathlib
 import re
 import sys
-from typing import Optional
 
 if not __package__:
     _OWN_PACKAGE_ROOT = str(pathlib.Path(__file__).resolve().parents[2])
@@ -108,12 +107,12 @@ def _unanchored(task_id_pattern: str) -> str:
     return pattern
 
 
-def _entry_regex(task_id_pattern: str) -> "re.Pattern[str]":
+def _entry_regex(task_id_pattern: str) -> re.Pattern[str]:
     task_id = _unanchored(task_id_pattern)
     return re.compile(rf"^\s*-\s+\[(?P<bracket>[^\]\n]*)\]\s+(?P<task_id>{task_id})(?=\s|$)(?P<rest>.*)$")
 
 
-def _prereq_regex(task_id_pattern: str) -> "re.Pattern[str]":
+def _prereq_regex(task_id_pattern: str) -> re.Pattern[str]:
     task_id = _unanchored(task_id_pattern)
     return re.compile(rf"^-?\s*(?P<task_id>{task_id})\s*$")
 
@@ -224,7 +223,7 @@ def render_named_queue(
     queue_name: str,
     task_id_pattern: str,
     colors: PaneColors = PaneColors(),
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> str:
     """Render the pane for one queue file.
 
@@ -256,9 +255,13 @@ def render_named_queue(
     pending = total - done - working - waiting - blocked
 
     count_parts = []
-    for count, label, color in ((done, "done", c.done), (working, "working", c.working),
-                                (waiting, "waiting", c.waiting), (blocked, "blocked", c.blocked),
-                                (pending, "pending", c.dim)):
+    for count, label, color in (
+        (done, "done", c.done),
+        (working, "working", c.working),
+        (waiting, "waiting", c.waiting),
+        (blocked, "blocked", c.blocked),
+        (pending, "pending", c.dim),
+    ):
         if count:
             count_parts.append(f"{color}{count} {label}{c.reset}")
     count_str = ", ".join(count_parts) if count_parts else f"{c.dim}empty{c.reset}"
@@ -270,14 +273,20 @@ def render_named_queue(
     for entry in entries:
         task_dir = tasks_root / entry.task_id
         state = _display_state(entry, task_dir)
-        warn = (f"  {c.warn}⚠ task folder missing{c.reset}"
-                if not task_dir.is_dir() and entry.marker not in DONE_MARKERS else "")
+        warn = (
+            f"  {c.warn}⚠ task folder missing{c.reset}"
+            if not task_dir.is_dir() and entry.marker not in DONE_MARKERS
+            else ""
+        )
         short_desc = f"  {c.dim}{entry.description[:50]}{c.reset}" if entry.description else ""
         lines.append(f"  {_badge(state, c)} {c.dim}{entry.task_id}{c.reset}{warn}{short_desc}")
 
         if state == "WAITING" and task_dir.is_dir():
-            unmet = [(pid, ps) for pid, ps in _prereqs_status(tasks_root, entry.task_id, task_id_pattern)
-                     if ps not in ("DONE", "WONT-DO")]
+            unmet = [
+                (pid, ps)
+                for pid, ps in _prereqs_status(tasks_root, entry.task_id, task_id_pattern)
+                if ps not in ("DONE", "WONT-DO")
+            ]
             if unmet:
                 lines.append(f"    {c.waiting}waiting on:{c.reset}")
                 lines.extend(f"      {_badge(ps, c)} {c.dim}{pid}{c.reset}" for pid, ps in unmet)
@@ -287,7 +296,7 @@ def render_named_queue(
     return "\n".join(lines) + "\n"
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI entry point; see the module docstring for the arguments."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.dashboard.named_queue_pane",
@@ -296,17 +305,27 @@ def main(argv: "list[str] | None" = None) -> int:
     parser.add_argument("queue_file", help="the queue file, e.g. <project>/tasks/queues/coder_backlog.md")
     parser.add_argument("tasks_dir", help="the project's tasks/ directory")
     parser.add_argument("queue_name", help="the name shown in the header, e.g. coder")
-    parser.add_argument("--task-id-pattern", required=True,
-                        help="the canonical task-ID regex (kanban_task_id_pattern in task_ids.sh)")
-    parser.add_argument("--colors", nargs=9, default=None,
-                        metavar=("LABEL", "BOLD", "DONE", "WORKING", "BLOCKED", "WAITING", "DIM", "WARN", "RESET"),
-                        help="escape codes, in this order; omit for no colour")
+    parser.add_argument(
+        "--task-id-pattern", required=True, help="the canonical task-ID regex (kanban_task_id_pattern in task_ids.sh)"
+    )
+    parser.add_argument(
+        "--colors",
+        nargs=9,
+        default=None,
+        metavar=("LABEL", "BOLD", "DONE", "WORKING", "BLOCKED", "WAITING", "DIM", "WARN", "RESET"),
+        help="escape codes, in this order; omit for no colour",
+    )
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     colors = PaneColors(*args.colors) if args.colors else PaneColors()
-    sys.stdout.write(render_named_queue(
-        pathlib.Path(args.queue_file), pathlib.Path(args.tasks_dir), args.queue_name,
-        args.task_id_pattern, colors,
-    ))
+    sys.stdout.write(
+        render_named_queue(
+            pathlib.Path(args.queue_file),
+            pathlib.Path(args.tasks_dir),
+            args.queue_name,
+            args.task_id_pattern,
+            colors,
+        )
+    )
     return 0
 
 

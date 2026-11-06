@@ -51,6 +51,8 @@ import textwrap
 
 import pytest
 
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
+
 # ---------------------------------------------------------------------------
 # Paths to the real scripts (dev tree layout, relative to this test file)
 # ---------------------------------------------------------------------------
@@ -69,6 +71,8 @@ _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 _REAL_CONFIG_LOADER_SH = _TEAM_SCRIPTS_DIR / "lib" / "config_loader.sh"
+_REAL_DEV_TREE_SH = _TEAM_SCRIPTS_DIR / "lib" / "dev_tree.sh"
+_REAL_PP_RUN_OPS_SH = _TEAM_SCRIPTS_DIR / "lib" / "pp_run_ops.sh"
 
 _TEAM_TEMPLATES_DIR = pathlib.Path(__file__).parent.parent.parent / "templates"
 _REAL_RETIRED_FILES_TXT = _TEAM_TEMPLATES_DIR / "retired-files.txt"
@@ -141,12 +145,17 @@ def _build_fossil_sandbox(
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
-        _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -170,20 +179,16 @@ def _build_fossil_sandbox(
     else:
         # Fallback: write the known manifest entries inline.
         (installed_templates / "retired-files.txt").write_text(
-            "# retired in v1.3.0 (pipeline-in-plugin)\n"
-            "workflows/release.yaml\n"
-            "workflows/document.yaml\n",
+            "# retired in v1.3.0 (pipeline-in-plugin)\n" "workflows/release.yaml\n" "workflows/document.yaml\n",
             encoding="utf-8",
         )
 
     # --- Kanban root: kanban.cfg pointing at dev tree ---
     (kanban_root / "kanban.cfg").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             [paths]
             dev_tree_path = {dev_tree}
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -196,18 +201,16 @@ def _build_fossil_sandbox(
     for fossil_type in fossils:
         fossil_path = workflows_dir / f"{fossil_type}.yaml"
         fossil_path.write_text(
-            textwrap.dedent(
-                f"""\
+            textwrap.dedent(f"""\
                 # Fossil pipeline file for {fossil_type} (pre-v1.3.0 layout).
                 # This file should not be loaded after the v1.3.0 upgrade.
                 type: {fossil_type}
-                """
-            ),
+                """),
             encoding="utf-8",
         )
 
     # --- Kanban root: optional operator-authored files ---
-    for custom_rel in (custom_files or []):
+    for custom_rel in custom_files or []:
         custom_path = kanban_root / custom_rel
         custom_path.parent.mkdir(parents=True, exist_ok=True)
         custom_path.write_text(f"# operator-authored: {custom_rel}\n", encoding="utf-8")
@@ -215,13 +218,11 @@ def _build_fossil_sandbox(
     # --- Dev tree: install.sh stub ---
     dev_install_sh = dev_tree / "install.sh"
     dev_install_sh.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             # Stub install.sh for sandbox tests.
             exit 0
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     dev_install_sh.chmod(0o755)
@@ -239,15 +240,21 @@ def _build_fossil_sandbox(
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
-        _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_team_lib / lib_src.name)
+    seed_provider_home_rule(dev_tree / "team")
 
     # --- Dev tree: subagents/MANIFEST.txt stub ---
     (dev_tree / "subagents").mkdir()
@@ -258,9 +265,7 @@ def _build_fossil_sandbox(
 
     # --- Dev tree: team content stubs for the deposit loop ---
     for item_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
-        (dev_tree / "team" / item_name).write_text(
-            f"# {item_name} stub\n", encoding="utf-8"
-        )
+        (dev_tree / "team" / item_name).write_text(f"# {item_name} stub\n", encoding="utf-8")
 
     for sub in [
         "roles",
@@ -285,9 +290,7 @@ def _build_fossil_sandbox(
         shutil.copy2(_REAL_RETIRED_FILES_TXT, dev_templates / "retired-files.txt")
     else:
         (dev_templates / "retired-files.txt").write_text(
-            "# retired in v1.3.0 (pipeline-in-plugin)\n"
-            "workflows/release.yaml\n"
-            "workflows/document.yaml\n",
+            "# retired in v1.3.0 (pipeline-in-plugin)\n" "workflows/release.yaml\n" "workflows/document.yaml\n",
             encoding="utf-8",
         )
 
@@ -372,14 +375,11 @@ def test_retirement_moves_both_fossils_when_both_are_present(
     ``retired/<UTC-ts>/workflows/`` and emits one loud per-file line.
     Neither file remains at the live root after the upgrade.
     """
-    sandbox = _build_fossil_sandbox(
-        tmp_path, fossils=["release", "document"]
-    )
+    sandbox = _build_fossil_sandbox(tmp_path, fossils=["release", "document"])
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     kanban_root = sandbox["kanban_root"]
@@ -387,8 +387,12 @@ def test_retirement_moves_both_fossils_when_both_are_present(
 
     # Both per-file retirement lines must appear.
     retire_lines = [
-        line for line in combined_output.splitlines()
-        if _RETIRE_FRAGMENT in line and _GRAVEYARD_FRAGMENT in line and _RETIRE_PER_FILE_MARKER in line and "[upgrade]" in line
+        line
+        for line in combined_output.splitlines()
+        if _RETIRE_FRAGMENT in line
+        and _GRAVEYARD_FRAGMENT in line
+        and _RETIRE_PER_FILE_MARKER in line
+        and "[upgrade]" in line
     ]
     assert len(retire_lines) == 2, (
         f"Expected 2 retirement lines, found {len(retire_lines)}.\n"
@@ -401,26 +405,24 @@ def test_retirement_moves_both_fossils_when_both_are_present(
     assert "document.yaml" in retire_text
 
     # Both fossil files must now be in the graveyard, not the live root.
-    assert not (kanban_root / "workflows" / "release.yaml").exists(), (
-        "workflows/release.yaml was not moved to the graveyard."
-    )
-    assert not (kanban_root / "workflows" / "document.yaml").exists(), (
-        "workflows/document.yaml was not moved to the graveyard."
-    )
+    assert not (
+        kanban_root / "workflows" / "release.yaml"
+    ).exists(), "workflows/release.yaml was not moved to the graveyard."
+    assert not (
+        kanban_root / "workflows" / "document.yaml"
+    ).exists(), "workflows/document.yaml was not moved to the graveyard."
 
     graveyard = _find_graveyard_dir(kanban_root)
     assert graveyard is not None, "No retired/<ts>/ directory was created."
-    assert (graveyard / "workflows" / "release.yaml").exists(), (
-        f"workflows/release.yaml not found in graveyard {graveyard}."
-    )
-    assert (graveyard / "workflows" / "document.yaml").exists(), (
-        f"workflows/document.yaml not found in graveyard {graveyard}."
-    )
+    assert (
+        graveyard / "workflows" / "release.yaml"
+    ).exists(), f"workflows/release.yaml not found in graveyard {graveyard}."
+    assert (
+        graveyard / "workflows" / "document.yaml"
+    ).exists(), f"workflows/document.yaml not found in graveyard {graveyard}."
 
     # Summary line must mention the count.
-    assert "Retired:" in combined_output, (
-        "Summary 'Retired:' line not found in upgrade output."
-    )
+    assert "Retired:" in combined_output, "Summary 'Retired:' line not found in upgrade output."
 
 
 @pytest.mark.skipif(
@@ -439,16 +441,19 @@ def test_retirement_moves_release_fossil_only(
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     kanban_root = sandbox["kanban_root"]
     combined_output = result.stdout + result.stderr
 
     retire_lines = [
-        line for line in combined_output.splitlines()
-        if _RETIRE_FRAGMENT in line and _GRAVEYARD_FRAGMENT in line and _RETIRE_PER_FILE_MARKER in line and "[upgrade]" in line
+        line
+        for line in combined_output.splitlines()
+        if _RETIRE_FRAGMENT in line
+        and _GRAVEYARD_FRAGMENT in line
+        and _RETIRE_PER_FILE_MARKER in line
+        and "[upgrade]" in line
     ]
     assert len(retire_lines) == 1, (
         f"Expected 1 retirement line, found {len(retire_lines)}.\n"
@@ -457,9 +462,9 @@ def test_retirement_moves_release_fossil_only(
     )
     assert "release.yaml" in retire_lines[0]
 
-    assert not (kanban_root / "workflows" / "release.yaml").exists(), (
-        "workflows/release.yaml was not moved to the graveyard."
-    )
+    assert not (
+        kanban_root / "workflows" / "release.yaml"
+    ).exists(), "workflows/release.yaml was not moved to the graveyard."
 
     graveyard = _find_graveyard_dir(kanban_root)
     assert graveyard is not None
@@ -480,16 +485,19 @@ def test_retirement_moves_document_fossil_only(
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     kanban_root = sandbox["kanban_root"]
     combined_output = result.stdout + result.stderr
 
     retire_lines = [
-        line for line in combined_output.splitlines()
-        if _RETIRE_FRAGMENT in line and _GRAVEYARD_FRAGMENT in line and _RETIRE_PER_FILE_MARKER in line and "[upgrade]" in line
+        line
+        for line in combined_output.splitlines()
+        if _RETIRE_FRAGMENT in line
+        and _GRAVEYARD_FRAGMENT in line
+        and _RETIRE_PER_FILE_MARKER in line
+        and "[upgrade]" in line
     ]
     assert len(retire_lines) == 1
     assert "document.yaml" in retire_lines[0]
@@ -526,14 +534,17 @@ def test_retirement_removes_stale_top_level_sop_md(
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     combined_output = result.stdout + result.stderr
     retire_lines = [
-        line for line in combined_output.splitlines()
-        if _RETIRE_FRAGMENT in line and _GRAVEYARD_FRAGMENT in line and _RETIRE_PER_FILE_MARKER in line and "[upgrade]" in line
+        line
+        for line in combined_output.splitlines()
+        if _RETIRE_FRAGMENT in line
+        and _GRAVEYARD_FRAGMENT in line
+        and _RETIRE_PER_FILE_MARKER in line
+        and "[upgrade]" in line
     ]
     assert len(retire_lines) == 1, (
         f"Expected 1 retirement line for the stale SOP.md, found {len(retire_lines)}.\n"
@@ -550,9 +561,7 @@ def test_retirement_removes_stale_top_level_sop_md(
 
     graveyard = _find_graveyard_dir(kanban_root)
     assert graveyard is not None, "No retired/<ts>/ directory was created."
-    assert (graveyard / "SOP.md").exists(), (
-        f"SOP.md not found in graveyard {graveyard}."
-    )
+    assert (graveyard / "SOP.md").exists(), f"SOP.md not found in graveyard {graveyard}."
 
 
 @pytest.mark.skipif(
@@ -571,8 +580,7 @@ def test_retirement_is_silent_no_op_when_no_fossils_present(
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     kanban_root = sandbox["kanban_root"]
@@ -580,23 +588,25 @@ def test_retirement_is_silent_no_op_when_no_fossils_present(
 
     # No per-file retirement lines.
     retire_lines = [
-        line for line in combined_output.splitlines()
-        if _RETIRE_FRAGMENT in line and _GRAVEYARD_FRAGMENT in line and _RETIRE_PER_FILE_MARKER in line and "[upgrade]" in line
+        line
+        for line in combined_output.splitlines()
+        if _RETIRE_FRAGMENT in line
+        and _GRAVEYARD_FRAGMENT in line
+        and _RETIRE_PER_FILE_MARKER in line
+        and "[upgrade]" in line
     ]
-    assert len(retire_lines) == 0, (
-        f"Expected no retirement lines when no fossils are present, "
-        f"found {len(retire_lines)}:\n" + "\n".join(retire_lines)
+    assert (
+        len(retire_lines) == 0
+    ), f"Expected no retirement lines when no fossils are present, " f"found {len(retire_lines)}:\n" + "\n".join(
+        retire_lines
     )
 
     # No graveyard directory created.
-    assert not (kanban_root / "retired").exists(), (
-        "retired/ directory was created even though no fossils were present."
-    )
+    assert not (kanban_root / "retired").exists(), "retired/ directory was created even though no fossils were present."
 
     # Summary must say 'none'.
     assert "Retired:           none" in combined_output or "Retired: none" in combined_output, (
-        f"Summary 'Retired: none' not found.\n"
-        f"Full stdout:\n{result.stdout}"
+        f"Summary 'Retired: none' not found.\n" f"Full stdout:\n{result.stdout}"
     )
 
 
@@ -633,9 +643,7 @@ def test_malformed_manifest_aborts_before_any_file_is_moved(
     )
 
     # No graveyard directory should have been created.
-    assert not (kanban_root / "retired").exists(), (
-        "retired/ directory was created despite manifest lint failure."
-    )
+    assert not (kanban_root / "retired").exists(), "retired/ directory was created despite manifest lint failure."
 
 
 @pytest.mark.skipif(
@@ -664,20 +672,15 @@ def test_operator_authored_files_are_never_touched(
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     # Custom file must still be present and unchanged.
     custom_path = kanban_root / custom_rel
-    assert custom_path.exists(), (
-        f"Operator-authored file was removed or moved: {custom_rel}"
-    )
-    assert custom_path.read_text(encoding="utf-8") == custom_content_before, (
-        f"Operator-authored file content changed after upgrade: {custom_rel}"
-    )
+    assert custom_path.exists(), f"Operator-authored file was removed or moved: {custom_rel}"
+    assert (
+        custom_path.read_text(encoding="utf-8") == custom_content_before
+    ), f"Operator-authored file content changed after upgrade: {custom_rel}"
 
     # The fossil was moved.
-    assert not (kanban_root / "workflows" / "release.yaml").exists(), (
-        "The manifest-listed fossil was not moved."
-    )
+    assert not (kanban_root / "workflows" / "release.yaml").exists(), "The manifest-listed fossil was not moved."

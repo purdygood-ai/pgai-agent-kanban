@@ -14,7 +14,7 @@ import pytest
 
 from pgai_agent_kanban.lib.timeutil import format_iso, parse_iso, try_parse_iso, utc_now_iso
 
-UTC = datetime.timezone.utc
+UTC = datetime.UTC
 
 
 def test_z_suffix_parses_as_utc() -> None:

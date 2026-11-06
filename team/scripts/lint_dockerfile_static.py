@@ -230,8 +230,7 @@ def check_chmod_octal(path: Path, lines: list[str]) -> list[_Finding]:
                         "cold on the other"
                     ),
                     remedy=(
-                        f"Edit {path}:{line_no} -- replace '--chmod={value}' "
-                        "with an octal mode, e.g. '--chmod=755'"
+                        f"Edit {path}:{line_no} -- replace '--chmod={value}' " "with an octal mode, e.g. '--chmod=755'"
                     ),
                 )
             )
@@ -261,8 +260,7 @@ def _print_findings(findings: list[_Finding], lint_script: Path) -> None:
     for i, finding in enumerate(findings, start=1):
         print(f"  {i}. {finding.remedy}", flush=True)
     print(
-        f"  {len(findings) + 1}. python3 \"{lint_script}\"   # re-run this "
-        "lint to confirm",
+        f'  {len(findings) + 1}. python3 "{lint_script}"   # re-run this ' "lint to confirm",
         flush=True,
     )
     print("", flush=True)
@@ -317,13 +315,12 @@ def main(argv: list[str] | None = None) -> int:
         docker_dir = Path(args.docker_dir).resolve()
     else:
         script_dir = Path(__file__).resolve().parent  # team/scripts/
-        repo_root = script_dir.parent.parent           # repo root
+        repo_root = script_dir.parent.parent  # repo root
         docker_dir = repo_root / "docker"
 
     if not docker_dir.is_dir():
         print(
-            f"ERROR: docker directory not found: {docker_dir}\n"
-            "Use --docker-dir to specify an alternative path.",
+            f"ERROR: docker directory not found: {docker_dir}\n" "Use --docker-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
@@ -331,8 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     dockerfiles = find_dockerfiles(docker_dir)
 
     print(
-        f"lint_dockerfile_static: scanning {len(dockerfiles)} Dockerfile(s) "
-        f"under {docker_dir}",
+        f"lint_dockerfile_static: scanning {len(dockerfiles)} Dockerfile(s) " f"under {docker_dir}",
         flush=True,
     )
 
@@ -351,8 +347,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(
-        f"lint_dockerfile_static: OK -- {len(dockerfiles)} Dockerfile(s) "
-        "checked, 0 violations.",
+        f"lint_dockerfile_static: OK -- {len(dockerfiles)} Dockerfile(s) " "checked, 0 violations.",
         flush=True,
     )
     return 0

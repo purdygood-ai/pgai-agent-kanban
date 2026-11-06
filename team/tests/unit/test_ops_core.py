@@ -19,12 +19,11 @@ All tests use tmp_path.  No live filesystem paths, no process-env leakage.
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -58,7 +57,6 @@ from pgai_agent_kanban.ops.write import (
     reset_item,
     _cli_main as _write_cli_main,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers / mini fixture builders
@@ -192,9 +190,7 @@ def test_ops_context_release_state_path(tmp_path: Path) -> None:
 def test_ops_context_queue_path(tmp_path: Path) -> None:
     """OpsContext.queue_path returns the <agent>_backlog.md path."""
     ctx = OpsContext(kanban_root=tmp_path)
-    expected = (
-        tmp_path / "projects" / "alpha" / "tasks" / "queues" / "coder_backlog.md"
-    )
+    expected = tmp_path / "projects" / "alpha" / "tasks" / "queues" / "coder_backlog.md"
     assert ctx.queue_path("alpha", "coder") == expected
 
 
@@ -205,18 +201,14 @@ def test_ops_context_normalizes_kanban_root(tmp_path: Path) -> None:
     assert ctx.kanban_root.is_absolute()
 
 
-def test_ops_context_from_env_reads_kanban_root_env_var(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ops_context_from_env_reads_kanban_root_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """OpsContext.from_env reads KANBAN_ROOT env var when present."""
     monkeypatch.setenv("KANBAN_ROOT", str(tmp_path))
     ctx = OpsContext.from_env()
     assert ctx.kanban_root == tmp_path.resolve()
 
 
-def test_ops_context_from_env_falls_back_to_pgai_root_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ops_context_from_env_falls_back_to_pgai_root_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """OpsContext.from_env falls back to PGAI_AGENT_KANBAN_ROOT_PATH when KANBAN_ROOT is absent."""
     monkeypatch.delenv("KANBAN_ROOT", raising=False)
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
@@ -466,7 +458,10 @@ def test_unhalt_removes_halt_sentinel(tmp_path: Path) -> None:
 def test_unhalt_is_idempotent_when_halt_absent(tmp_path: Path) -> None:
     """unhalt does not raise when PROJECT_ROOT/HALT does not exist."""
     project_root, ctx = _make_project_tree(tmp_path)
+    before = sorted(p.relative_to(project_root) for p in project_root.rglob("*"))
     unhalt(ctx, "my-project")  # no HALT file present — should be silent
+    assert not (project_root / "HALT").exists()
+    assert sorted(p.relative_to(project_root) for p in project_root.rglob("*")) == before
 
 
 def test_unhalt_raises_ops_error_when_project_root_absent(tmp_path: Path) -> None:
@@ -534,6 +529,7 @@ def test_halt_global_is_idempotent(tmp_path: Path) -> None:
     (kanban_root / "HALT").touch()
     ctx = OpsContext(kanban_root=kanban_root)
     halt_global(ctx)  # second call should be silent
+    assert (kanban_root / "HALT").is_file()
 
 
 def test_unhalt_global_removes_kanban_root_halt(tmp_path: Path) -> None:
@@ -552,6 +548,8 @@ def test_unhalt_global_is_idempotent_when_halt_absent(tmp_path: Path) -> None:
     kanban_root.mkdir()
     ctx = OpsContext(kanban_root=kanban_root)
     unhalt_global(ctx)  # no HALT sentinel — must be silent
+    assert not (kanban_root / "HALT").exists()
+    assert list(kanban_root.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -702,9 +700,7 @@ def test_deposit_intake_refuses_target_that_appears_after_precheck(tmp_path: Pat
         with pytest.raises(OpsError, match="no clobber"):
             deposit_intake(ctx, "my-project", src)
 
-    assert target.read_bytes() == winner_bytes, (
-        "placement must not replace a target that appeared after the pre-check"
-    )
+    assert target.read_bytes() == winner_bytes, "placement must not replace a target that appeared after the pre-check"
 
 
 def test_deposit_intake_leaves_no_temp_file_after_placement_refusal(tmp_path: Path) -> None:
@@ -760,14 +756,10 @@ def test_deposit_intake_interleaved_depositors_first_placement_wins(tmp_path: Pa
     exit_codes: list[int] = []
 
     def depositor_b_runs_to_completion() -> None:
-        exit_codes.append(
-            _write_cli_main(["deposit_intake", str(project_root), str(src_b)])
-        )
+        exit_codes.append(_write_cli_main(["deposit_intake", str(project_root), str(src_b)]))
 
     with patch("shutil.copy2", new=_copy2_then(depositor_b_runs_to_completion)):
-        exit_codes.append(
-            _write_cli_main(["deposit_intake", str(project_root), str(src_a)])
-        )
+        exit_codes.append(_write_cli_main(["deposit_intake", str(project_root), str(src_a)]))
 
     assert sorted(exit_codes) == [0, 3], f"expected one success and one no-clobber refusal, got {exit_codes}"
     assert exit_codes == [0, 3], "B (first to place) succeeds; A (held past the pre-check) is refused"
@@ -782,9 +774,7 @@ def test_deposit_intake_interleaved_depositors_first_placement_wins(tmp_path: Pa
 # ---------------------------------------------------------------------------
 
 
-def _setup_task_with_queue(
-    tmp_path: Path, task_id: str, state: str
-) -> tuple[Path, OpsContext]:
+def _setup_task_with_queue(tmp_path: Path, task_id: str, state: str) -> tuple[Path, OpsContext]:
     """Build a project tree with a task and a queue entry, return (project_root, ctx)."""
     project_root, ctx = _make_project_tree(tmp_path)
     agent = task_id.split("-")[0].lower()
@@ -995,9 +985,7 @@ def _write_requirement_file(
     req_dir.mkdir(parents=True, exist_ok=True)
     p = req_dir / f"{stem}.md"
     p.write_text(
-        f"# {stem}\n\n"
-        f"## Status\n{status}\n\n"
-        f"## PM Task\n{pm_task_id}\n",
+        f"# {stem}\n\n" f"## Status\n{status}\n\n" f"## PM Task\n{pm_task_id}\n",
         encoding="utf-8",
     )
     return p
@@ -1034,9 +1022,7 @@ def test_reset_item_requirement_leaves_pm_backlog_untouched(tmp_path: Path) -> N
     """
     project_root, ctx = _make_project_tree(tmp_path)
     pm_task_id = "PM-20260101-001-decompose-v0-5-0"
-    _write_requirement_file(
-        project_root, "v0.5.0-my-feature", status="running", pm_task_id=pm_task_id
-    )
+    _write_requirement_file(project_root, "v0.5.0-my-feature", status="running", pm_task_id=pm_task_id)
     # Pre-populate pm_backlog with the PM task marked done ([x]).
     pm_backlog = project_root / "tasks" / "queues" / "pm_backlog.md"
     original_backlog = f"- [x] {pm_task_id}\n"
@@ -1045,9 +1031,9 @@ def test_reset_item_requirement_leaves_pm_backlog_untouched(tmp_path: Path) -> N
     reset_item(ctx, "my-project", "v0.5.0-my-feature")
 
     # pm_backlog.md must be byte-identical after the reset.
-    assert pm_backlog.read_text(encoding="utf-8") == original_backlog, (
-        "reset_item must not modify pm_backlog.md for requirement resets"
-    )
+    assert (
+        pm_backlog.read_text(encoding="utf-8") == original_backlog
+    ), "reset_item must not modify pm_backlog.md for requirement resets"
 
 
 # ---------------------------------------------------------------------------

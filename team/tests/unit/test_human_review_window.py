@@ -30,7 +30,6 @@ import pathlib
 import sys
 import textwrap
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Ensure the package root is importable regardless of cwd.
@@ -46,10 +45,10 @@ from pgai_agent_kanban.dashboard.scan_human_approvals import (
     _format_age,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture builder helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_task(
     tasks_dir: pathlib.Path,
@@ -179,7 +178,8 @@ def test_single_pending_gate_renders_task_id(
 ) -> None:
     """One WAITING HUMAN-APPROVE task: task ID appears in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review v1.10.0 features.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -193,7 +193,8 @@ def test_single_pending_gate_renders_project_name(
 ) -> None:
     """One pending gate: project name appears in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review v1.10.0 features.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -207,7 +208,8 @@ def test_single_pending_gate_renders_release_version(
 ) -> None:
     """One pending gate: RC/target version from ## Release Version appears in output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review v1.10.0 features.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -221,7 +223,8 @@ def test_single_pending_gate_renders_goal_content(
 ) -> None:
     """One pending gate: show content (Goal section) appears in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review all feature tasks for v1.10.0.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -235,7 +238,8 @@ def test_single_pending_gate_renders_approve_command(
 ) -> None:
     """One pending gate: verbatim approve command appears in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -249,7 +253,8 @@ def test_single_pending_gate_renders_reject_command(
 ) -> None:
     """One pending gate: verbatim reject command appears in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -263,7 +268,8 @@ def test_backlog_state_treated_as_pending(
 ) -> None:
     """BACKLOG state (prerequisites satisfied but not yet started) is also pending."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-100", "BACKLOG", "v1.10.0", "Review.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -283,11 +289,13 @@ def test_two_projects_both_listed(
 ) -> None:
     """Two projects each with one pending gate: both task IDs appear in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review alpha.")],
     )
     _build_single_project_fixture(
-        tmp_path, "proj-beta",
+        tmp_path,
+        "proj-beta",
         [("HUMAN-APPROVE-v2.0.0-001", "WAITING", "v2.0.0", "Review beta.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -302,11 +310,13 @@ def test_two_projects_both_labeled(
 ) -> None:
     """Two projects: both project names appear in the output as labels."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review alpha.")],
     )
     _build_single_project_fixture(
-        tmp_path, "proj-beta",
+        tmp_path,
+        "proj-beta",
         [("HUMAN-APPROVE-v2.0.0-001", "WAITING", "v2.0.0", "Review beta.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -321,11 +331,13 @@ def test_two_projects_commands_reference_correct_project(
 ) -> None:
     """Two projects: each task's commands reference its own project name."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review alpha.")],
     )
     _build_single_project_fixture(
-        tmp_path, "proj-beta",
+        tmp_path,
+        "proj-beta",
         [("HUMAN-APPROVE-v2.0.0-001", "WAITING", "v2.0.0", "Review beta.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -342,11 +354,13 @@ def test_two_projects_no_approvals_pending_absent(
 ) -> None:
     """Two pending gates: the empty-state message 'no approvals pending.' is absent."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review alpha.")],
     )
     _build_single_project_fixture(
-        tmp_path, "proj-beta",
+        tmp_path,
+        "proj-beta",
         [("HUMAN-APPROVE-v2.0.0-001", "WAITING", "v2.0.0", "Review beta.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -365,7 +379,8 @@ def test_done_state_excluded(
 ) -> None:
     """DONE HUMAN-APPROVE tasks do not appear in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "DONE", "v1.10.0", "Already approved.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -380,7 +395,8 @@ def test_wont_do_state_excluded(
 ) -> None:
     """WONT-DO HUMAN-APPROVE tasks do not appear in the output."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WONT-DO", "v1.10.0", "Rejected.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -395,7 +411,8 @@ def test_blocked_state_excluded(
 ) -> None:
     """BLOCKED HUMAN-APPROVE tasks do not appear in the pending listing."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "BLOCKED", "v1.10.0", "Blocked for reason.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -410,7 +427,8 @@ def test_working_state_excluded(
 ) -> None:
     """WORKING HUMAN-APPROVE tasks do not appear (they should not exist, but guard it)."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WORKING", "v1.10.0", "In progress?")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -430,7 +448,8 @@ def test_non_human_approve_task_excluded(
 ) -> None:
     """Tasks whose IDs do not start with HUMAN-APPROVE are ignored."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("CODER-20260708-025-some-task", "WAITING", "v1.10.0", "Some coder task.")],
     )
     scan_pending_approvals(str(tmp_path), use_color=False)
@@ -449,7 +468,8 @@ def test_collect_returns_correct_fields(
 ) -> None:
     """_collect_pending_approvals returns dicts with the expected keys."""
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Review v1.10.0.")],
     )
     results = _collect_pending_approvals(tmp_path)
@@ -468,11 +488,13 @@ def test_collect_sorts_by_project_then_task_id(
 ) -> None:
     """_collect_pending_approvals returns results sorted by project then task_id."""
     _build_single_project_fixture(
-        tmp_path, "proj-beta",
+        tmp_path,
+        "proj-beta",
         [("HUMAN-APPROVE-v2.0.0-001", "WAITING", "v2.0.0", "Beta review.")],
     )
     _build_single_project_fixture(
-        tmp_path, "proj-alpha",
+        tmp_path,
+        "proj-alpha",
         [("HUMAN-APPROVE-v1.10.0-099", "WAITING", "v1.10.0", "Alpha review.")],
     )
     results = _collect_pending_approvals(tmp_path)

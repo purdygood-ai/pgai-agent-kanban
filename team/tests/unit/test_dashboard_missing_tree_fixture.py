@@ -25,7 +25,7 @@ WHAT "NOTHING HANGS, PROMPTS, OR STACK-TRACES" MEANS HERE
     subprocess.TimeoutExpired rather than the test suite itself hanging.
   - Every invocation asserts exit code 0 (the documented contract: a
     missing/invalid tree degrades the pane's own content but never fails
-    the whole script, so `watch` does not spin/error).
+    the whole script).
   - Output is checked for stack-trace / crash markers ("Traceback",
     "command not found", "Segmentation fault", "syntax error") that would
     indicate a code defect rather than a graceful degrade.
@@ -185,9 +185,13 @@ _RENDER_PATH_SCRIPTS = [
     (
         "column-render.sh",
         lambda f: [
-            "input", "none", "none",
-            "--label", "REQUIREMENTS",
-            "--kanban-root", str(f.kanban_root),
+            "input",
+            "none",
+            "none",
+            "--label",
+            "REQUIREMENTS",
+            "--kanban-root",
+            str(f.kanban_root),
             "--all-projects",
         ],
     ),
@@ -196,9 +200,7 @@ _RENDER_PATH_SCRIPT_IDS = [name for name, _ in _RENDER_PATH_SCRIPTS]
 
 
 @pytest.mark.parametrize("dev_tree_mode", _MISSING_TREE_MODES)
-@pytest.mark.parametrize(
-    "script_name, build_args", _RENDER_PATH_SCRIPTS, ids=_RENDER_PATH_SCRIPT_IDS
-)
+@pytest.mark.parametrize("script_name, build_args", _RENDER_PATH_SCRIPTS, ids=_RENDER_PATH_SCRIPT_IDS)
 def test_render_path_script_degrades_gracefully_for_missing_tree(
     tmp_path: pathlib.Path, script_name: str, build_args, dev_tree_mode: str
 ) -> None:
@@ -228,10 +230,6 @@ def test_render_path_script_degrades_gracefully_for_missing_tree(
         f"{log_file.read_text(encoding='utf-8') if log_file.exists() else ''}"
     )
     if script_name == "data.sh":
-        assert (
-            "LAST_RELEASED=none" in result.stdout
-            or "LAST_RELEASED=v0.0.0" in result.stdout
-        ), (
-            f"{label}: expected LAST_RELEASED to degrade to a safe sentinel; "
-            f"got: {result.stdout!r}"
+        assert "LAST_RELEASED=none" in result.stdout or "LAST_RELEASED=v0.0.0" in result.stdout, (
+            f"{label}: expected LAST_RELEASED to degrade to a safe sentinel; " f"got: {result.stdout!r}"
         )

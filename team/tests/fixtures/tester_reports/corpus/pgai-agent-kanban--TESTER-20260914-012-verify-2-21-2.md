@@ -212,7 +212,7 @@ Step 6.12, the autonomous operation criterion, answers:
 The intervention: `ai_rc/v2.21.2` carries commit `2ea2004`, "adds
 inherited-environment-exposure-survey.md to docs-manifest" — a non-merge commit
 authored and committed directly on the RC branch by the operator
-(`purdygood <operator@example.invalid>`, 2026-09-14T10:46:19+00:00), touching
+(`operator <operator@example.invalid>`, 2026-09-14T10:46:19+00:00), touching
 `team/config/docs-manifest.txt`. It is not the product of any CODER or WRITER task
 and did not arrive through a feature branch.
 

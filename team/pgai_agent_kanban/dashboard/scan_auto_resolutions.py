@@ -82,7 +82,6 @@ from pgai_agent_kanban.overwatch.resolution_matrix import (  # noqa: E402
     resolve_max_rc_retries,
 )
 
-
 # ---------------------------------------------------------------------------
 # Project discovery
 # ---------------------------------------------------------------------------
@@ -176,23 +175,25 @@ def _collect_auto_resolutions(kanban_root: pathlib.Path) -> list[dict]:
         for entry in reversed(entries):
             attempt_from = entry.get("attempt_from")
             attempt_display = f"{attempt_from}/{ceiling}" if attempt_from is not None else f"?/{ceiling}"
-            results.append({
-                "project": project_name,
-                "rc": entry.get("rc") or "unknown",
-                "attempt_from": attempt_from,
-                "attempt_to": entry.get("attempt_to"),
-                "ceiling": ceiling,
-                "attempt_display": attempt_display,
-                "decision": entry.get("matrix_row") or "unknown",
-                "outcome": entry.get("outcome") or "pending",
-                "trigger": entry.get("trigger") or "unknown",
-                "findings": entry.get("findings") or [],
-                "evidence_paths": entry.get("evidence_paths") or [],
-                "ledger_path": ledger_path,
-                "entry_id": entry.get("entry_id") or "unknown",
-                "family_key": entry.get("family_key"),
-                "timestamp": entry.get("timestamp") or "unknown",
-            })
+            results.append(
+                {
+                    "project": project_name,
+                    "rc": entry.get("rc") or "unknown",
+                    "attempt_from": attempt_from,
+                    "attempt_to": entry.get("attempt_to"),
+                    "ceiling": ceiling,
+                    "attempt_display": attempt_display,
+                    "decision": entry.get("matrix_row") or "unknown",
+                    "outcome": entry.get("outcome") or "pending",
+                    "trigger": entry.get("trigger") or "unknown",
+                    "findings": entry.get("findings") or [],
+                    "evidence_paths": entry.get("evidence_paths") or [],
+                    "ledger_path": ledger_path,
+                    "entry_id": entry.get("entry_id") or "unknown",
+                    "family_key": entry.get("family_key"),
+                    "timestamp": entry.get("timestamp") or "unknown",
+                }
+            )
 
     return results
 
@@ -251,14 +252,14 @@ def scan_auto_resolutions(kanban_root: str, use_color: bool = True) -> None:
     """
     root = pathlib.Path(kanban_root)
 
-    RESET  = "\033[0m"    if use_color else ""
-    C_BOLD = "\033[1m"    if use_color else ""
-    C_DIM  = "\033[2m"    if use_color else ""
+    RESET = "\033[0m" if use_color else ""
+    C_BOLD = "\033[1m" if use_color else ""
+    C_DIM = "\033[2m" if use_color else ""
     C_CYAN = "\033[0;36m" if use_color else ""
-    C_YEL  = "\033[0;33m" if use_color else ""
-    C_BLU  = "\033[0;34m" if use_color else ""
-    C_GRN  = "\033[0;32m" if use_color else ""
-    GEAR   = "⚙"     if use_color else "*"  # gear
+    C_YEL = "\033[0;33m" if use_color else ""
+    C_BLU = "\033[0;34m" if use_color else ""
+    C_GRN = "\033[0;32m" if use_color else ""
+    GEAR = "⚙" if use_color else "*"  # gear
 
     records = _collect_auto_resolutions(root)
 
@@ -273,10 +274,7 @@ def scan_auto_resolutions(kanban_root: str, use_color: bool = True) -> None:
         outcome_color = C_DIM if outcome == "pending" else C_GRN
 
         # Header row: gear RC [project]
-        print(
-            f"{GEAR} {C_BOLD}{C_CYAN}{rc}{RESET}"
-            f"  {C_DIM}[{proj}]{RESET}"
-        )
+        print(f"{GEAR} {C_BOLD}{C_CYAN}{rc}{RESET}" f"  {C_DIM}[{proj}]{RESET}")
         print(
             f"  attempt: {C_YEL}{r['attempt_display']}{RESET}"
             f"   decision: {C_BLU}{r['decision']}{RESET}"

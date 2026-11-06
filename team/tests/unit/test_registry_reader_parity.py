@@ -16,8 +16,12 @@ Each fixture is written byte for byte: a plain registry, a header with
 trailing spaces or a tab, CRLF line endings (with and without trailing
 whitespace on the header), comment lines (indented, and a commented-out
 header), a file that opens with a ';' comment, an indented header, a
-project registered by two sections, and a registry whose file order,
-priorities and whitespace all differ so the order is compared too.
+project registered by two sections, a section of another kind
+([defaults]) before or between projects, a header with a trailing comment,
+and a registry whose file order, priorities and whitespace all differ so
+the order is compared too. For each of them every bash per-field reader,
+the bulk loader and the palette slot also answer, project by project, what
+ini.projects_registry reads.
 
 A ';'-comment-first file and an indented header both read as INI on both
 sides, and a project with two sections is listed once by both, the later
@@ -61,6 +65,14 @@ A header followed by a trailing comment (``[project:alpha] # first``) is no
 project in any reader. Without its definition line the Python rule refuses
 loud, naming the file.
 
+The next priority and colour a new project is handed count projects only,
+each once: ``projects_cfg_next_priority`` / ``_Registry.next_priority`` and
+``projects_cfg_next_color`` / ``_Registry.next_color`` agree on every
+fixture above, and a [defaults] section's priority, a rejected section's
+priority or a project's second section moves neither. A priority that is
+not a plain integer (``abc``, ``7abc``) reads as 999 there too, as in the
+palette-slot readers, so the next colour is none a listed project shows.
+
 The Python registry verbs (pgai_agent_kanban.ops.projects) read a header
 by the same rule: ``add_project`` finds a project whose header carries
 leading or trailing whitespace already registered and leaves projects.cfg
@@ -79,6 +91,7 @@ import subprocess
 import pytest
 
 from pgai_agent_kanban.lib import ini
+from pgai_agent_kanban.lib.palette import load_default_palette
 from pgai_agent_kanban.ops import projects as ops_projects
 from pgai_agent_kanban.ops.context import OpsContext
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
@@ -106,20 +119,10 @@ _REGISTRIES: dict[str, bytes] = {
     ),
     "semicolon-comment-first": b"; comment\n[project:p1]\npriority = 1\n",
     "indented-header": b"  [project:p1]\npriority = 1\n",
-    "indented-header-after-a-field": (
-        b"[project:p1]\n"
-        b"priority = 2\n"
-        b"\t[project:p2]\n"
-        b"priority = 1\n"
-    ),
+    "indented-header-after-a-field": (b"[project:p1]\n" b"priority = 2\n" b"\t[project:p2]\n" b"priority = 1\n"),
     "duplicate-section": b"[project:p1]\npriority = 1\n[project:p1]\npriority = 2\n",
     "duplicate-section-reorders": (
-        b"[project:p1]\n"
-        b"priority = 1\n"
-        b"[project:p2]\n"
-        b"priority = 2\n"
-        b"[project:p1]\n"
-        b"priority = 3\n"
+        b"[project:p1]\n" b"priority = 1\n" b"[project:p2]\n" b"priority = 2\n" b"[project:p1]\n" b"priority = 3\n"
     ),
     "mixed-order-crlf": (
         b"# registry\r\n"
@@ -131,6 +134,30 @@ _REGISTRIES: dict[str, bytes] = {
         b"[project:nopri]\t\r\n"
         b"[project:mid]\r\n"
         b"priority = 5\r\n"
+    ),
+    # A section of another kind between projects: its keys are no project's.
+    "foreign-section": (
+        b"[project:alpha]\n"
+        b"priority = 3\n"
+        b"[defaults]\n"
+        b"priority = 0\n"
+        b"enabled = false\n"
+        b"description = foreign\n"
+        b"dashboard_max_rows = 50\n"
+        b"dashboard_color = #000000\n"
+        b"[project:beta]\n"
+        b"priority = 2\n"
+        b"[project:gamma]\n"
+        b"priority = 1\n"
+    ),
+    "foreign-section-first": b"[defaults]\npriority = 0\n[project:p1]\npriority = 4\n[project:p2]\npriority = 3\n",
+    "header-with-trailing-comment": (
+        b"[project:alpha]\n" b"priority = 5\n" b"[project:alpha] # again\n" b"priority = 0\n"
+        b"[project:beta]\n" b"priority = 3\n"
+    ),
+    "duplicate-section-ties": (
+        b"[project:p1]\n" b"priority = 5\n" b"[project:p2]\n" b"priority = 5\n"
+        b"[project:p1]\n" b"description = later\n"
     ),
 }
 
@@ -174,15 +201,21 @@ def _bash(tmp_path: pathlib.Path, root: pathlib.Path, script: str, **extra: str)
         },
     )
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(cwd), timeout=60, stdin=subprocess.DEVNULL, check=False,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+        check=False,
     )
 
 
 def _field(stdout: str, label: str) -> str:
     for line in stdout.splitlines():
         if line.startswith(f"{label}:"):
-            return line[len(label) + 1:].strip()
+            return line[len(label) + 1 :].strip()
     raise AssertionError(f"no '{label}:' line in driver output:\n{stdout}")
 
 
@@ -204,6 +237,69 @@ def test_bash_and_python_registry_readers_list_the_same_projects(tmp_path: pathl
         assert f"has {name}: yes" in result.stdout, _say(result)
 
 
+# Every field a bash reader answers per project, for each name in $NAMES.
+_AGREEMENT_DRIVER = r"""
+set -uo pipefail
+source "$LIB_DIR/project_paths.sh"
+source "$LIB_DIR/projects.sh"
+_projects_cfg_load 2>/dev/null
+for name in $NAMES; do
+    for key in priority enabled description dashboard_max_rows dashboard_color; do
+        echo "field $name $key: $(projects_cfg_field "$name" "$key")"
+    done
+    if projects_cfg_enabled "$name"; then echo "enabled $name: yes"; else echo "enabled $name: no"; fi
+    echo "palette $name: $(_projects_cfg_palette_index_for "$name")"
+    echo "color $name: $(projects_cfg_color "$name")"
+    echo "bulk $name: ${projects_priority[$name]}|${projects_enabled[$name]}|${projects_description[$name]}|${projects_max_rows[$name]}|${projects_color[$name]}"
+done
+"""
+
+_AGREEMENT_KEYS = ("priority", "enabled", "description", "dashboard_max_rows", "dashboard_color")
+
+
+def _python_agreement_lines(root: pathlib.Path) -> list[str]:
+    """The agreement driver's output as ini.projects_registry reads the same file."""
+    palette = load_default_palette()
+    lines = []
+    for index, entry in enumerate(ini.projects_registry(root)):
+        name, options = entry.name, entry.options
+        lines.extend(f"field {name} {key}: {options.get(key, '').strip()}" for key in _AGREEMENT_KEYS)
+        lines.append(f"enabled {name}: {'yes' if ini.project_enabled(root, name) else 'no'}")
+        lines.append(f"palette {name}: {index % len(palette)}")
+        lines.append(f"color {name}: {entry.color or palette[index % len(palette)]}")
+        bulk = [options.get(key, "true" if key == "enabled" else "").strip() for key in _AGREEMENT_KEYS]
+        lines.append(f"bulk {name}: {'|'.join(bulk)}")
+    return lines
+
+
+@pytest.mark.parametrize("fixture", sorted(_REGISTRIES))
+def test_bash_and_python_registry_readers_agree_on_every_field(tmp_path: pathlib.Path, fixture: str) -> None:
+    """For every listed project each bash per-field reader, the bulk loader and
+    the palette slot answer what ini.projects_registry reads from the same file
+    -- a section of another kind ([defaults]) included."""
+    root = _root(tmp_path, _REGISTRIES[fixture])
+    expected = _python_agreement_lines(root)
+    names = [entry.name for entry in ini.projects_registry(root)]
+
+    result = _bash(tmp_path, root, _AGREEMENT_DRIVER, NAMES=" ".join(names))
+
+    assert result.returncode == 0, _say(result)
+    assert result.stdout.splitlines() == expected, _say(result)
+    for name in names:
+        assert ops_projects.project_color(root, name) == _field(result.stdout, f"color {name}")
+
+
+def test_a_foreign_section_moves_no_project(tmp_path: pathlib.Path) -> None:
+    """[defaults] between alpha and beta sets priority 0: no reader moves alpha first."""
+    root = _root(tmp_path, _REGISTRIES["foreign-section"])
+
+    result = _bash(tmp_path, root, _DRIVER, HAS_NAMES="alpha beta gamma")
+
+    assert result.returncode == 0, _say(result)
+    assert _field(result.stdout, "priority") == "gamma beta alpha", _say(result)
+    assert [entry.name for entry in ini.projects_registry(root)] == ["gamma", "beta", "alpha"]
+
+
 def test_a_header_with_trailing_spaces_lists_its_project(tmp_path: pathlib.Path) -> None:
     root = _root(tmp_path, b"[project:p1]  \npriority = 1\n")
 
@@ -217,10 +313,11 @@ def test_crlf_values_read_without_the_carriage_return(tmp_path: pathlib.Path) ->
     root = _root(tmp_path, b"[project:p1]\r\npriority = 3\r\nenabled = false\r\n")
 
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/projects.sh"\n'
         'printf "priority=[%s]\\n" "$(projects_cfg_field p1 priority)"\n'
-        'if projects_cfg_enabled p1; then echo enabled; else echo disabled; fi\n',
+        "if projects_cfg_enabled p1; then echo enabled; else echo disabled; fi\n",
     )
 
     assert result.returncode == 0, _say(result)
@@ -259,11 +356,12 @@ def test_comment_first_and_indented_registries_list_the_project_on_both_sides(
     root = _root(tmp_path, registry)
 
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/projects.sh"\n'
         'echo "format: $(projects_cfg_format "$KANBAN_ROOT/projects.cfg")"\n'
         'echo "list: $(projects_cfg_list | paste -sd" ")"\n'
-        '_projects_cfg_load\n',
+        "_projects_cfg_load\n",
     )
 
     assert [entry.name for entry in ini.projects_registry(root)] == ["p1"]
@@ -296,11 +394,12 @@ def test_a_colon_legacy_registry_still_reads_as_colon_legacy(tmp_path: pathlib.P
     root = _root(tmp_path, b"# registry\np1:1\n")
 
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/projects.sh"\n'
         'echo "format: $(projects_cfg_format "$KANBAN_ROOT/projects.cfg")"\n'
         'projects_cfg_has p1 && echo "has p1: yes"\n'
-        '_projects_cfg_load\n',
+        "_projects_cfg_load\n",
     )
 
     assert result.returncode == 0, _say(result)
@@ -319,7 +418,8 @@ def test_registry_reads_without_the_palette_file(tmp_path: pathlib.Path) -> None
     root = _root(tmp_path, b"[project:p1]\npriority = 1\n")
 
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/projects.sh"\nprojects_cfg_list\n',
         LIB_DIR=str(lib),
     )
@@ -483,7 +583,9 @@ def test_the_bulk_loader_merges_a_duplicated_section_per_key(tmp_path: pathlib.P
 
     assert result.returncode == 0, _say(result)
     entry = _entry(root, "p1")
-    bulk = {label: _field(result.stdout, label) for label in ("priority", "enabled", "description", "max_rows", "color")}
+    bulk = {
+        label: _field(result.stdout, label) for label in ("priority", "enabled", "description", "max_rows", "color")
+    }
     assert bulk == {
         "priority": "4",
         "enabled": "false",
@@ -554,7 +656,7 @@ def test_bash_and_python_header_rules_read_every_variant_alike(tmp_path: pathlib
 
 # header line -> the section name both recognisers read from it (None for
 # not a [project:...] section at all)
-_SECTION_LINES: dict[bytes, "str | None"] = {
+_SECTION_LINES: dict[bytes, str | None] = {
     b"[project:p1]": "p1",
     b"  [project:p1] \t\r": "p1",
     b"[project:bad.name]": "bad.name",
@@ -611,7 +713,8 @@ def test_bash_and_python_name_the_same_unaccepted_sections(tmp_path: pathlib.Pat
     )
     root = _root(tmp_path, registry)
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/project_paths.sh"\n'
         'source "$LIB_DIR/projects.sh"\n'
         'echo "--list"; projects_cfg_list --registration-order\n'
@@ -673,7 +776,8 @@ def test_python_name_rule_is_the_bash_definition(tmp_path: pathlib.Path) -> None
     the same text."""
     root = _root(tmp_path, b"[project:p1]\npriority = 1\n")
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/project_paths.sh"\n'
         'source "$LIB_DIR/projects.sh"\n'
         'printf "%s\\n" "$PROJECTS_CFG_NAME_RE"\n',
@@ -688,7 +792,7 @@ def test_python_name_rule_is_the_bash_definition(tmp_path: pathlib.Path) -> None
     [None, b"#!/usr/bin/env bash\n# PROJECTS_CFG_NAME_RE is documented here but not assigned\n"],
     ids=["file-missing", "no-assignment"],
 )
-def test_python_name_rule_refuses_without_its_definition(tmp_path: pathlib.Path, content: "bytes | None") -> None:
+def test_python_name_rule_refuses_without_its_definition(tmp_path: pathlib.Path, content: bytes | None) -> None:
     """A tree whose projects_cfg.sh is missing, or holds no
     PROJECTS_CFG_NAME_RE assignment, raises ProjectNameRuleError naming the
     file -- never a guessed rule."""
@@ -712,7 +816,8 @@ def test_a_header_with_a_trailing_comment_is_no_project_in_any_reader(tmp_path: 
         b"[project:alpha] # first\npriority = 1\n\n[project:beta]\npriority = 2\n",
     )
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/project_paths.sh"\n'
         'source "$LIB_DIR/projects.sh"\n'
         'echo "list: $(projects_cfg_list | paste -sd" ")"\n'
@@ -754,9 +859,7 @@ def test_mixed_case_and_underscore_names_are_rejected_by_every_reader(tmp_path: 
     reader."""
     root = _root(
         tmp_path,
-        b"[project:My_App]\npriority = 1\n\n"
-        b"[project:my_app]\npriority = 2\n\n"
-        b"[project:my-app]\npriority = 3\n",
+        b"[project:My_App]\npriority = 1\n\n" b"[project:my_app]\npriority = 2\n\n" b"[project:my-app]\npriority = 3\n",
     )
     result = _bash(tmp_path, root, _NAME_RULE_DRIVER)
     assert result.returncode == 0, _say(result)
@@ -829,8 +932,13 @@ def _rejected_sections_reading(tmp_path: pathlib.Path, registry: bytes) -> tuple
     result = _bash(tmp_path, root, _REJECTED_SECTIONS_DRIVER)
     assert result.returncode == 0, _say(result)
     labels = (
-        "priority", "registration", "priority alpha", "priority beta",
-        "color alpha", "color beta", "unaccepted",
+        "priority",
+        "registration",
+        "priority alpha",
+        "priority beta",
+        "color alpha",
+        "color beta",
+        "unaccepted",
     )
     bash = {label: _field(result.stdout, label) for label in labels}
     registry_reader = ops_projects._Registry(root)
@@ -876,6 +984,126 @@ def test_a_rejected_project_section_ends_the_section_before_it_on_both_sides(tmp
     assert baseline_bash["unaccepted"] == "" and baseline_python["unaccepted"] == []
 
 
+# ---------------------------------------------------------------------------
+# The next free priority and colour a new project is handed: only projects
+# count, each once, on both sides.
+# ---------------------------------------------------------------------------
+
+_NEXT_DRIVER = r"""
+set -uo pipefail
+source "$LIB_DIR/projects.sh"
+echo "next priority: $(projects_cfg_next_priority)"
+echo "next color: $(projects_cfg_next_color 2>/dev/null)"
+"""
+
+_ALPHA_BETA = b"[project:alpha]\nenabled = true\npriority = 1\n[project:beta]\nenabled = true\npriority = 2\n"
+# alpha (1) and beta (2), with a foreign section or beta's second section
+# around them: each reads as the two projects alone.
+_NEXT_FIXTURES: dict[str, bytes] = {
+    "defaults-after": _ALPHA_BETA + b"[defaults]\npriority = 50\n",
+    "beta-twice": (
+        b"[project:alpha]\npriority = 1\n[project:beta]\npriority = 9\ndashboard_max_rows = 30\n"
+        b"[project:beta]\npriority = 2\n"
+    ),
+    "beta-twice-defaults-between": (
+        b"[project:alpha]\npriority = 1\n[project:beta]\npriority = 2\n"
+        b"[defaults]\npriority = 50\n[project:beta]\ndescription = later\n"
+    ),
+    "rejected-name-after": _ALPHA_BETA + b"[project:bad.name]\npriority = 40\n",
+}
+
+
+def _next_reading(tmp_path: pathlib.Path, root: pathlib.Path) -> tuple[str, str, str, str]:
+    """(bash next priority, bash next colour, Python next priority, Python next colour) for *root*."""
+    result = _bash(tmp_path, root, _NEXT_DRIVER)
+    assert result.returncode == 0, _say(result)
+    reader = ops_projects._Registry(root)
+    return (
+        _field(result.stdout, "next priority"),
+        _field(result.stdout, "next color"),
+        str(reader.next_priority()),
+        reader.next_color(),
+    )
+
+
+@pytest.mark.parametrize("fixture", sorted(_REGISTRIES))
+def test_bash_and_python_hand_out_the_same_next_priority_and_colour(tmp_path: pathlib.Path, fixture: str) -> None:
+    """projects_cfg_next_priority / _Registry.next_priority and
+    projects_cfg_next_color / _Registry.next_color agree on every registry
+    fixture, and the next priority is one above the highest plain-integer
+    priority ini.projects_registry reads for a listed project."""
+    root = _root(tmp_path, _REGISTRIES[fixture])
+    priorities = [entry.options.get("priority", "").strip() for entry in ini.projects_registry(root)]
+    expected = max((int(p) for p in priorities if p.isdigit()), default=0) + 1
+
+    bash_priority, bash_color, python_priority, python_color = _next_reading(tmp_path, root)
+
+    assert bash_priority == python_priority == str(expected), (fixture, bash_priority, python_priority)
+    assert bash_color == python_color, (fixture, bash_color, python_color)
+
+
+@pytest.mark.parametrize("fixture", sorted(_NEXT_FIXTURES))
+def test_only_projects_count_toward_the_next_priority_and_colour(tmp_path: pathlib.Path, fixture: str) -> None:
+    """alpha (1) and beta (2), with [defaults] priority = 50 after them, beta
+    registered by two sections, or a rejected [project:bad.name] section:
+    both twins hand out priority 3 and the colour alpha and beta alone
+    leave free, which neither project holds."""
+    baseline = _next_reading(tmp_path / "alpha-beta", _root(tmp_path / "alpha-beta", _ALPHA_BETA))
+    root = _root(tmp_path / fixture, _NEXT_FIXTURES[fixture])
+    bash_priority, bash_color, python_priority, python_color = _next_reading(tmp_path / fixture, root)
+    held = {ops_projects.project_color(root, name) for name in ("alpha", "beta")}
+
+    assert baseline[0] == baseline[2] == "3", baseline
+    assert bash_priority == python_priority == "3", (bash_priority, python_priority)
+    assert bash_color == python_color == baseline[1] == baseline[3], (bash_color, python_color, baseline)
+    assert bash_color not in held, (bash_color, held)
+
+
+_TEXT_PRIORITY_DRIVER = r"""
+set -uo pipefail
+source "$LIB_DIR/projects.sh"
+echo "listed: $(projects_cfg_list | paste -sd' ')"
+for name in $(projects_cfg_list); do echo "color $name: $(projects_cfg_color "$name")"; done
+echo "next color: $(projects_cfg_next_color 2>/dev/null)"
+"""
+
+# alpha's priority is not a plain integer, so it reads as 999 and sorts
+# after beta; beta holds palette[0] explicitly. Read as awk's +0 (0 or 7)
+# alpha would sort first instead, and the colour left free would be the one
+# alpha shows.
+_TEXT_PRIORITY_FIXTURES: dict[str, bytes] = {
+    "abc": (
+        b"[project:alpha]\nenabled = true\npriority = abc\n"
+        b"[project:beta]\nenabled = true\npriority = 1\ndashboard_color = #378ADD\n"
+    ),
+    "leading-digits": (
+        b"[project:alpha]\nenabled = true\npriority = 7abc\n"
+        b"[project:beta]\nenabled = true\npriority = 10\ndashboard_color = #378ADD\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("fixture", sorted(_TEXT_PRIORITY_FIXTURES))
+def test_a_non_integer_priority_hands_out_no_colour_a_project_shows(tmp_path: pathlib.Path, fixture: str) -> None:
+    """A priority that is not a plain integer (abc, 7abc) reads as 999 in the
+    next-colour twins, as in the palette-slot readers: alpha sorts after
+    beta, projects_cfg_next_color and _Registry.next_color agree, and the
+    colour they hand out is none projects_cfg_color gives a listed project."""
+    root = _root(tmp_path, _TEXT_PRIORITY_FIXTURES[fixture])
+    result = _bash(tmp_path, root, _TEXT_PRIORITY_DRIVER)
+    assert result.returncode == 0, _say(result)
+    listed = _field(result.stdout, "listed").split()
+    bash_held = {name: _field(result.stdout, f"color {name}") for name in listed}
+    python_held = {name: ops_projects.project_color(root, name) for name in listed}
+    bash_color = _field(result.stdout, "next color")
+    python_color = ops_projects._Registry(root).next_color()
+
+    assert listed == ["beta", "alpha"], _say(result)
+    assert bash_held == python_held, (bash_held, python_held)
+    assert bash_color == python_color, (bash_color, python_color)
+    assert bash_color.upper() not in {color.upper() for color in bash_held.values()}, (bash_color, bash_held)
+
+
 def test_a_registry_with_only_accepted_names_names_no_unaccepted_section(tmp_path: pathlib.Path) -> None:
     """Accepted names only (and an absent projects.cfg): both sides name
     nothing, and the bash reader still exits 0."""
@@ -898,10 +1126,11 @@ def test_project_name_resolution_reads_the_registry_through_projects_cfg_list(tm
     projects_cfg_list replaced, it reports what the replacement lists."""
     root = _root(tmp_path, b"[project:p1]\npriority = 1\n")
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/project_paths.sh"\n'
         'source "$LIB_DIR/projects.sh"\n'
-        'projects_cfg_list() { echo from-the-one-reader; }\n'
+        "projects_cfg_list() { echo from-the-one-reader; }\n"
         '_pp_registered_project_names "$KANBAN_ROOT/projects.cfg"\n',
     )
     assert result.returncode == 0, _say(result)
@@ -913,10 +1142,11 @@ def test_project_name_resolution_loads_the_registry_reader_on_first_use(tmp_path
     registry (lib/projects.sh is sourced on demand)."""
     root = _root(tmp_path, b"[project:alpha-one]\npriority = 1\n[project:beta]\npriority = 2\n")
     result = _bash(
-        tmp_path, root,
+        tmp_path,
+        root,
         'source "$LIB_DIR/project_paths.sh"\n'
-        'pp_resolve_project_name alpha\n'
-        'declare -F projects_cfg_list >/dev/null && echo leaked || echo contained\n',
+        "pp_resolve_project_name alpha\n"
+        "declare -F projects_cfg_list >/dev/null && echo leaked || echo contained\n",
     )
     assert result.returncode == 0, _say(result)
     assert result.stdout.splitlines() == ["alpha-one", "contained"], _say(result)

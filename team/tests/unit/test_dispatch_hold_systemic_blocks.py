@@ -68,8 +68,7 @@ _OVERWATCH_CHAIN_DONE = "overwatch keeps no queue and dispatches no model -- cha
 _HOLD_ERROR_KEY = "wake.dispatch_held_systemic_block"
 
 #: A block time long past every backoff window.
-_LONG_AGO = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
-
+_LONG_AGO = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.UTC)
 
 
 class _Sandbox:
@@ -101,17 +100,13 @@ class _Sandbox:
             f"block_storm_window = {_WINDOW_S}\n",
             encoding="utf-8",
         )
-        (self.root / "projects.cfg").write_text(
-            f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
         (self.project / "project.cfg").write_text(
             f"[project]\nproject_name = {_PROJECT}\nworkflow_type = document\n",
             encoding="utf-8",
         )
         for agent in _AGENTS:
-            (self.queues / f"{agent}_backlog.md").write_text(
-                f"# {agent} backlog\n\n", encoding="utf-8"
-            )
+            (self.queues / f"{agent}_backlog.md").write_text(f"# {agent} backlog\n\n", encoding="utf-8")
         for name in _MIRRORED_DIRS:
             shutil.copytree(
                 _TEAM_DIR / name,
@@ -169,8 +164,7 @@ class _Sandbox:
             reason_code,
             task_id.split("-", 1)[0],
             ["worktree=gone"],
-            now=datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
-            - datetime.timedelta(minutes=minutes_ago),
+            now=datetime.datetime.now(datetime.UTC).replace(microsecond=0) - datetime.timedelta(minutes=minutes_ago),
         )
 
     def state(self, task_id: str) -> str:
@@ -214,9 +208,7 @@ def _output(result: subprocess.CompletedProcess) -> str:
 def _hold_lines(result: subprocess.CompletedProcess) -> list[str]:
     """The guard's own narration lines from the wake output."""
     return [
-        line
-        for line in (result.stdout + result.stderr).splitlines()
-        if "BLOCKED task(s) need human attention" in line
+        line for line in (result.stdout + result.stderr).splitlines() if "BLOCKED task(s) need human attention" in line
     ]
 
 
@@ -368,9 +360,7 @@ def test_held_wake_still_runs_waiting_and_blocked_rechecks(tmp_path):
             "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n"
         ),
     )
-    write_block_record(
-        transient, "transient_api_error", "CODER", ["worktree=gone"], now=_LONG_AGO
-    )
+    write_block_record(transient, "transient_api_error", "CODER", ["worktree=gone"], now=_LONG_AGO)
 
     result = box.wake("coder")
 

@@ -88,11 +88,8 @@ BOILERPLATE_LINES = [
 
 def _classify(tmp_path: pathlib.Path, line: str) -> bool:
     """Run dashboard_event_signal_is_signal on one line; return its verdict."""
-    script = (
-        f"source {_LIB} && "
-        'dashboard_event_signal_is_signal "$1" && echo SIGNAL || echo BOILERPLATE'
-    )
-    result = run_bash(tmp_path, f'bash -c \'{script}\' _ {_shquote(line)}')
+    script = f"source {_LIB} && " 'dashboard_event_signal_is_signal "$1" && echo SIGNAL || echo BOILERPLATE'
+    result = run_bash(tmp_path, f"bash -c '{script}' _ {_shquote(line)}")
     assert result.returncode == 0, result.stderr
     return "SIGNAL" in result.stdout
 
@@ -106,8 +103,8 @@ def _collapse_key(tmp_path: pathlib.Path, line: str) -> tuple[str, int]:
     empty string always means "no identity" (an identity is never empty
     in practice, but the returncode is the documented contract).
     """
-    script = f"source {_LIB} && dashboard_event_signal_collapse_key \"$1\""
-    result = run_bash(tmp_path, f'bash -c \'{script}\' _ {_shquote(line)}')
+    script = f'source {_LIB} && dashboard_event_signal_collapse_key "$1"'
+    result = run_bash(tmp_path, f"bash -c '{script}' _ {_shquote(line)}")
     return result.stdout.rstrip("\n"), result.returncode
 
 
@@ -130,9 +127,7 @@ def test_signal_lines_classified_as_signal(tmp_path: pathlib.Path, line: str) ->
 
 
 @pytest.mark.parametrize("line", BOILERPLATE_LINES)
-def test_boilerplate_lines_classified_as_boilerplate(
-    tmp_path: pathlib.Path, line: str
-) -> None:
+def test_boilerplate_lines_classified_as_boilerplate(tmp_path: pathlib.Path, line: str) -> None:
     assert _classify(tmp_path, line) is False, f"expected BOILERPLATE: {line!r}"
 
 
@@ -144,16 +139,15 @@ def test_filter_keeps_only_signal_lines_in_order(tmp_path: pathlib.Path) -> None
         fixture_lines.append(boilerplate_line)
         fixture_lines.append(signal_line)
     # Any leftover lines (the lists are different lengths) go at the end.
-    fixture_lines.extend(SIGNAL_LINES[len(BOILERPLATE_LINES):])
-    fixture_lines.extend(BOILERPLATE_LINES[len(SIGNAL_LINES):])
+    fixture_lines.extend(SIGNAL_LINES[len(BOILERPLATE_LINES) :])
+    fixture_lines.extend(BOILERPLATE_LINES[len(SIGNAL_LINES) :])
 
     fixture_path = tmp_path / "wake-fixture.log"
     fixture_path.write_text("\n".join(fixture_lines) + "\n", encoding="utf-8")
 
     result = run_bash(
         tmp_path,
-        f"set -euo pipefail; source {_LIB} && "
-        f'dashboard_event_signal_filter < "{fixture_path}"',
+        f"set -euo pipefail; source {_LIB} && " f'dashboard_event_signal_filter < "{fixture_path}"',
     )
     assert result.returncode == 0, result.stderr
 
@@ -217,9 +211,7 @@ def test_collapse_identity_differs_on_a_different_bundle(
     """A sweep-census skip naming a different bundle path is a different
     event and must not collapse into the first bundle's identity."""
     key_a, _ = _collapse_key(tmp_path, _SWEEP_CENSUS_LINE_AGENT_A)
-    key_other, rc_other = _collapse_key(
-        tmp_path, _SWEEP_CENSUS_LINE_DIFFERENT_BUNDLE
-    )
+    key_other, rc_other = _collapse_key(tmp_path, _SWEEP_CENSUS_LINE_DIFFERENT_BUNDLE)
     assert rc_other == 0
     assert key_other != key_a
 
@@ -230,9 +222,7 @@ def test_collapse_identity_differs_on_a_different_reason(
     """A sweep-census skip stating a different reason is a different event
     and must not collapse into the first reason's identity."""
     key_a, _ = _collapse_key(tmp_path, _SWEEP_CENSUS_LINE_AGENT_A)
-    key_other, rc_other = _collapse_key(
-        tmp_path, _SWEEP_CENSUS_LINE_DIFFERENT_REASON
-    )
+    key_other, rc_other = _collapse_key(tmp_path, _SWEEP_CENSUS_LINE_DIFFERENT_REASON)
     assert rc_other == 0
     assert key_other != key_a
 

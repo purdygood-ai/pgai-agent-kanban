@@ -96,7 +96,7 @@ def _rewrite(bug_path, kanban_root, project_name="proj", **overrides):
             "is_active() itself is correct and must not change"
         ),
         ground_truth_refs=[
-            "commit 5db7045: \"is_active() returns true for WORKING/BLOCKED — unchanged, correct\"",
+            'commit 5db7045: "is_active() returns true for WORKING/BLOCKED — unchanged, correct"',
             "src/dashboard/render.py:88 (pre-fix, verbatim): `if not is_active(task):`",
         ],
         kanban_root=str(kanban_root),
@@ -133,7 +133,7 @@ def test_rewrite_names_the_failed_approach_as_forbidden(tmp_path: pathlib.Path) 
 
 def test_rewrite_reproduces_ground_truth_reference_verbatim(tmp_path: pathlib.Path) -> None:
     bug_path = _write_bug(tmp_path / "bugs")
-    ref = "commit 5db7045: \"is_active() returns true for WORKING/BLOCKED — unchanged, correct\""
+    ref = 'commit 5db7045: "is_active() returns true for WORKING/BLOCKED — unchanged, correct"'
 
     result = _rewrite(bug_path, tmp_path / "kanban_root", ground_truth_refs=[ref])
 

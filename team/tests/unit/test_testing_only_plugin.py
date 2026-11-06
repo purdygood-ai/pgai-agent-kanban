@@ -205,14 +205,12 @@ def test_testing_only_plugin_loads_successfully(tmp_path: pathlib.Path) -> None:
     """wf_load_plugin returns 0 when loading the testing-only plugin."""
     script = _load_plugin_script()
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"Expected testing-only plugin to load; stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"Expected testing-only plugin to load; stderr: {result.stderr!r}"
 
 
 def test_testing_only_plugin_sets_wf_plugin_dir(tmp_path: pathlib.Path) -> None:
     """wf_load_plugin sets WF_PLUGIN_DIR to the testing-only plugin directory."""
-    script = _load_plugin_script() + "\necho \"$WF_PLUGIN_DIR\""
+    script = _load_plugin_script() + '\necho "$WF_PLUGIN_DIR"'
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     assert "testing-only" in result.stdout
@@ -233,9 +231,7 @@ def test_testing_only_plugin_sets_wf_plugin_dir(tmp_path: pathlib.Path) -> None:
         ),  # echoes back the supplied label argument unchanged
     ],
 )
-def test_testing_only_plugin_function_output(
-    tmp_path: pathlib.Path, script_suffix: str, expected: str
-) -> None:
+def test_testing_only_plugin_function_output(tmp_path: pathlib.Path, script_suffix: str, expected: str) -> None:
     """Testing-only plugin's wf_* functions echo the documented fixed values for this workflow type."""
     script = _load_plugin_script() + script_suffix
     result = run_bash(tmp_path, script)
@@ -330,8 +326,7 @@ def test_label_semantics_invariant_no_last_released_renders_open(
     assert result.returncode == 0
     render_mode = result.stdout.strip()
     assert render_mode == "label", (
-        f"wf_dashboard_render must return 'label' to prevent semver is_shipped comparison; "
-        f"got {render_mode!r}"
+        f"wf_dashboard_render must return 'label' to prevent semver is_shipped comparison; " f"got {render_mode!r}"
     )
 
     # Part 2: Verify the dashboard's is_shipped() sentinel guard returns False
@@ -360,15 +355,15 @@ def test_label_semantics_invariant_no_last_released_renders_open(
         return tv <= lv
 
     # Testing-only invariant: last_released is empty for projects using this workflow.
-    assert not is_shipped_with_sentinel("v0.5.0", ""), (
-        "label version v0.5.0 with empty last_released must not be marked as shipped"
-    )
-    assert not is_shipped_with_sentinel("v0.5.0", "none"), (
-        "label version v0.5.0 with last_released='none' must not be marked as shipped"
-    )
-    assert not is_shipped_with_sentinel("v0.5.0", "v0.0.0"), (
-        "label version v0.5.0 with last_released='v0.0.0' must not be marked as shipped"
-    )
+    assert not is_shipped_with_sentinel(
+        "v0.5.0", ""
+    ), "label version v0.5.0 with empty last_released must not be marked as shipped"
+    assert not is_shipped_with_sentinel(
+        "v0.5.0", "none"
+    ), "label version v0.5.0 with last_released='none' must not be marked as shipped"
+    assert not is_shipped_with_sentinel(
+        "v0.5.0", "v0.0.0"
+    ), "label version v0.5.0 with last_released='v0.0.0' must not be marked as shipped"
 
     # Confirm the fresh-project green-bug class case: a label version that looks
     # numerically smaller than last_released is NOT shipped when last_released
@@ -391,12 +386,7 @@ def test_label_semantics_invariant_no_last_released_renders_open(
 def test_pre_task_does_not_mutate_release_state(tmp_path: pathlib.Path) -> None:
     """wf_pre_task is a no-op that does not modify any files."""
     # Write a sentinel release-state.md to verify it is unchanged.
-    sentinel_content = (
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## Last Released\nnone\n\n"
-        "## State\nIDLE\n"
-    )
+    sentinel_content = "# Release State\n\n" "## Active RC\nnone\n\n" "## Last Released\nnone\n\n" "## State\nIDLE\n"
     release_state = tmp_path / "release-state.md"
     release_state.write_text(sentinel_content, encoding="utf-8")
 
@@ -407,19 +397,13 @@ def test_pre_task_does_not_mutate_release_state(tmp_path: pathlib.Path) -> None:
     # Verify release-state.md is byte-identical.
     actual_content = release_state.read_text(encoding="utf-8")
     assert actual_content == sentinel_content, (
-        "wf_pre_task must not modify release-state.md — "
-        "testing-only workflow never mutates release state"
+        "wf_pre_task must not modify release-state.md — " "testing-only workflow never mutates release state"
     )
 
 
 def test_post_task_does_not_mutate_release_state(tmp_path: pathlib.Path) -> None:
     """wf_post_task is a no-op that does not modify any files."""
-    sentinel_content = (
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## Last Released\nnone\n\n"
-        "## State\nIDLE\n"
-    )
+    sentinel_content = "# Release State\n\n" "## Active RC\nnone\n\n" "## Last Released\nnone\n\n" "## State\nIDLE\n"
     release_state = tmp_path / "release-state.md"
     release_state.write_text(sentinel_content, encoding="utf-8")
 
@@ -429,8 +413,7 @@ def test_post_task_does_not_mutate_release_state(tmp_path: pathlib.Path) -> None
 
     actual_content = release_state.read_text(encoding="utf-8")
     assert actual_content == sentinel_content, (
-        "wf_post_task must not modify release-state.md — "
-        "testing-only workflow never mutates release state"
+        "wf_post_task must not modify release-state.md — " "testing-only workflow never mutates release state"
     )
 
 
@@ -465,8 +448,7 @@ def test_contract_check_all_passes_for_testing_only_plugin(
     """)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, (
-        f"Contract check failed for testing-only plugin. "
-        f"stdout: {result.stdout!r}, stderr: {result.stderr!r}"
+        f"Contract check failed for testing-only plugin. " f"stdout: {result.stdout!r}, stderr: {result.stderr!r}"
     )
 
 
@@ -479,9 +461,7 @@ def test_contract_check_all_passes_for_testing_only_plugin(
         "wfc_check_capabilities",  # git_mode=ro, version_semantics=label, finalize=report
     ],
 )
-def test_contract_check_passes_for_testing_only_plugin(
-    tmp_path: pathlib.Path, wfc_function: str
-) -> None:
+def test_contract_check_passes_for_testing_only_plugin(tmp_path: pathlib.Path, wfc_function: str) -> None:
     """Each individual wfc_check_* contract function passes for the real testing-only plugin."""
     plugin_dir = _PLUGIN_DIR.resolve()
     script = textwrap.dedent(f"""\
@@ -512,6 +492,5 @@ def test_all_hooks_callable_after_load(tmp_path: pathlib.Path) -> None:
     """)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, (
-        f"Expected all hooks to be callable; "
-        f"stdout: {result.stdout!r}, stderr: {result.stderr!r}"
+        f"Expected all hooks to be callable; " f"stdout: {result.stdout!r}, stderr: {result.stderr!r}"
     )

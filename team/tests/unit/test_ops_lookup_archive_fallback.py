@@ -110,10 +110,11 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     _task(live, _BOTH_TASK, "WORKING")
     (live / "tasks" / _HOLLOW_TASK).mkdir(parents=True)  # live folder, no status.md
     _bug(live, _LIVE_BUG, "open")
-    _write(live / "tasks" / "queues" / "coder_backlog.md",
-           f"# Coder Backlog\n\n- [ ] {_LIVE_TASK}\n- [x] {_ARCHIVED_TASK}\n- [x] {_UNKNOWN_TASK}\n")
-    _write(live / "tasks" / "queues" / "bug_backlog.md",
-           f"# Bug Backlog\n\n- [x] {_ARCHIVED_BUG}\n- [ ] {_LIVE_BUG}\n")
+    _write(
+        live / "tasks" / "queues" / "coder_backlog.md",
+        f"# Coder Backlog\n\n- [ ] {_LIVE_TASK}\n- [x] {_ARCHIVED_TASK}\n- [x] {_UNKNOWN_TASK}\n",
+    )
+    _write(live / "tasks" / "queues" / "bug_backlog.md", f"# Bug Backlog\n\n- [x] {_ARCHIVED_BUG}\n- [ ] {_LIVE_BUG}\n")
 
     # The archive holds finished items only -- except _BOTH_TASK, a stale
     # copy that must never shadow its live twin, and a BLOCKED task the
@@ -141,8 +142,9 @@ def _live(root: pathlib.Path) -> pathlib.Path:
     return root / "projects" / _PROJECT
 
 
-def _run_script(script: pathlib.Path, args: list[str], root: pathlib.Path,
-                tmp_path: pathlib.Path) -> subprocess.CompletedProcess:
+def _run_script(
+    script: pathlib.Path, args: list[str], root: pathlib.Path, tmp_path: pathlib.Path
+) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     env = build_scrubbed_env(
@@ -154,8 +156,15 @@ def _run_script(script: pathlib.Path, args: list[str], root: pathlib.Path,
             "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
         },
     )
-    return subprocess.run(["bash", str(script), *args], capture_output=True, text=True,
-                          env=env, cwd=str(tmp_path), timeout=60, stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        ["bash", str(script), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -412,8 +421,10 @@ def test_board_columns_never_show_archived_items(api_env: pathlib.Path) -> None:
     archive_queues = _archive(api_env) / "tasks" / "queues"
     _write(live_queues / "coder_backlog.md", f"# Coder Backlog\n\n- [ ] {_LIVE_TASK}\n- [A] {_BOTH_TASK}\n")
     _write(live_queues / "bug_backlog.md", f"# Bug Backlog\n\n- [ ] {_LIVE_BUG}\n")
-    _write(archive_queues / "coder_backlog.md",
-           f"- [x] {_ARCHIVED_TWIN_A}\n- [x] {_ARCHIVED_TASK}\n- [x] {_ARCHIVED_TWIN_B}\n")
+    _write(
+        archive_queues / "coder_backlog.md",
+        f"- [x] {_ARCHIVED_TWIN_A}\n- [x] {_ARCHIVED_TASK}\n- [x] {_ARCHIVED_TWIN_B}\n",
+    )
     _write(archive_queues / "bug_backlog.md", f"- [x] {_ARCHIVED_BUG}\n")
     with _client(api_env) as client:
         response = client.get("/board")

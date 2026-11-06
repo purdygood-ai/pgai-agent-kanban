@@ -84,9 +84,7 @@ def _build_kanban_root_with_project(
     for name, content in all_projects.items():
         proj_dir = root / "projects" / name
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "project.cfg").write_text(
-            f"[project]\nproject_name = {name}\n", encoding="utf-8"
-        )
+        (proj_dir / "project.cfg").write_text(f"[project]\nproject_name = {name}\n", encoding="utf-8")
         if content is not None:
             queues_dir = proj_dir / "tasks" / "queues"
             queues_dir.mkdir(parents=True, exist_ok=True)
@@ -146,12 +144,10 @@ class TestMigrationIsANarratedNoOp:
 
         result = _run_migration(root, project="legacy-proj")
 
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert not queues_dir.exists(), (
-            f"The no-op migration must create nothing under {queues_dir}.\nstdout: {result.stdout}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (
+            not queues_dir.exists()
+        ), f"The no-op migration must create nothing under {queues_dir}.\nstdout: {result.stdout}"
         assert "[no-op]  legacy-proj:" in result.stdout, result.stdout
 
     def test_running_twice_changes_nothing(self, tmp_path: pathlib.Path) -> None:
@@ -160,9 +156,7 @@ class TestMigrationIsANarratedNoOp:
 
         for _ in range(2):
             result = _run_migration(root, project="legacy-proj-2")
-            assert result.returncode == 0, (
-                f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-            )
+            assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         assert sorted(str(p.relative_to(root)) for p in root.rglob("*")) == before
 
@@ -171,9 +165,7 @@ class TestMigrationPreservesExistingBacklog:
     """A leftover overwatch_backlog.md -- empty or with real entries -- is
     never touched."""
 
-    def test_existing_empty_backlog_is_left_byte_for_byte_unchanged(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_existing_empty_backlog_is_left_byte_for_byte_unchanged(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(
             tmp_path, "already-seeded-proj", seed_backlog_content="# Overwatch Backlog\n\n"
         )
@@ -181,31 +173,23 @@ class TestMigrationPreservesExistingBacklog:
         original_text = backlog.read_text(encoding="utf-8")
 
         result = _run_migration(root, project="already-seeded-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        assert backlog.read_text(encoding="utf-8") == original_text, (
-            "An existing overwatch_backlog.md must be left byte-for-byte unchanged."
-        )
+        assert (
+            backlog.read_text(encoding="utf-8") == original_text
+        ), "An existing overwatch_backlog.md must be left byte-for-byte unchanged."
 
-    def test_existing_backlog_with_real_entries_is_left_untouched(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_existing_backlog_with_real_entries_is_left_untouched(self, tmp_path: pathlib.Path) -> None:
         entries_text = "# Overwatch Backlog\n\n- [ ] some-hand-added-entry\n"
-        root = _build_kanban_root_with_project(
-            tmp_path, "operator-populated-proj", seed_backlog_content=entries_text
-        )
+        root = _build_kanban_root_with_project(tmp_path, "operator-populated-proj", seed_backlog_content=entries_text)
         backlog = _backlog_path(root, "operator-populated-proj")
 
         result = _run_migration(root, project="operator-populated-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        assert backlog.read_text(encoding="utf-8") == entries_text, (
-            "The migration must never touch an existing queue file."
-        )
+        assert (
+            backlog.read_text(encoding="utf-8") == entries_text
+        ), "The migration must never touch an existing queue file."
 
 
 class TestMigrationDryRun:
@@ -214,18 +198,14 @@ class TestMigrationDryRun:
         backlog = _backlog_path(root, "dry-run-proj")
 
         result = _run_migration(root, project="dry-run-proj", dry_run=True)
-        assert result.returncode == 0, (
-            f"dry-run failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"dry-run failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         assert not backlog.exists(), f"--dry-run wrote {backlog}.\nstdout: {result.stdout}"
         assert "[no-op]  dry-run-proj:" in result.stdout, result.stdout
 
 
 class TestMigrationFanOutOverAllProjects:
-    def test_narrates_every_registered_project_and_writes_nothing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_narrates_every_registered_project_and_writes_nothing(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(
             tmp_path,
             "fanout-proj-a",
@@ -235,9 +215,7 @@ class TestMigrationFanOutOverAllProjects:
         kept_text = kept.read_text(encoding="utf-8")
 
         result = _run_migration(root)
-        assert result.returncode == 0, (
-            f"fan-out migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"fan-out migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         for name in ("fanout-proj-a", "fanout-proj-b"):
             assert f"[no-op]  {name}:" in result.stdout, result.stdout
@@ -252,8 +230,12 @@ class TestMigrationHelp:
         env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(root)
         result = subprocess.run(
             ["bash", str(_MIGRATION_SCRIPT), "--help"],
-            capture_output=True, text=True, env=env, cwd=str(root), timeout=30,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(root),
+            timeout=30,
         )
         assert result.returncode == 0, result.stderr
         for flag in ("--project", "--dry-run", "--help"):
-            assert flag in result.stderr, result.stderr
+            assert flag in result.stdout, result.stdout

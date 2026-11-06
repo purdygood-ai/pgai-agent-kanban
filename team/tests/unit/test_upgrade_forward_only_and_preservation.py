@@ -89,6 +89,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="upgrade-forward-only-and-preservation")
 
+
 # ---------------------------------------------------------------------------
 # Paths to the real scripts and libraries under test
 # ---------------------------------------------------------------------------
@@ -109,6 +110,8 @@ _REAL_LIBS = [
     _TEAM_DIR / "scripts" / "lib" / "subagent_deploy.sh",
     _TEAM_DIR / "scripts" / "lib" / "script_common.sh",
     _TEAM_DIR / "scripts" / "lib" / "config_loader.sh",
+    _TEAM_DIR / "scripts" / "lib" / "dev_tree.sh",
+    _TEAM_DIR / "scripts" / "lib" / "pp_run_ops.sh",
 ]
 
 _TIMEOUT = 120
@@ -124,9 +127,7 @@ _TAG_B = "v200.1.0"
 _TAG_C = "v200.2.0"
 _ASCENDING_TAGS = [_TAG_A, _TAG_B, _TAG_C]
 
-_FIXTURE_COPY_IGNORE = shutil.ignore_patterns(
-    ".git", "__pycache__", "*.pyc", ".pytest_cache"
-)
+_FIXTURE_COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".pytest_cache")
 
 
 # ---------------------------------------------------------------------------
@@ -196,9 +197,7 @@ def _build_tagged_source_repo(
     return repo
 
 
-def _build_installed_kanban_root(
-    tmp_path: pathlib.Path, subdir: str, installed_version: str
-) -> pathlib.Path:
+def _build_installed_kanban_root(tmp_path: pathlib.Path, subdir: str, installed_version: str) -> pathlib.Path:
     """Build a minimal live-layout install rooted at *subdir* under *tmp_path*.
 
     Contains the installed (phase-1) upgrade.sh plus the library helpers it
@@ -236,21 +235,16 @@ def _build_installed_kanban_root(
 # statically protected alongside them.
 _PROTECTED_FIXTURE_CONTENT: dict[str, str] = {
     "kanban.cfg": (
-        "# fixture kanban.cfg — must not change across a version-targeted upgrade\n"
-        "[paths]\n"
-        "placeholder = true\n"
+        "# fixture kanban.cfg — must not change across a version-targeted upgrade\n" "[paths]\n" "placeholder = true\n"
     ),
     "secrets": (
-        "# fixture secrets — must not change across a version-targeted upgrade\n"
-        "API_KEY=fixture-marker-value\n"
+        "# fixture secrets — must not change across a version-targeted upgrade\n" "API_KEY=fixture-marker-value\n"
     ),
     "shell-env": (
-        "# fixture shell-env — must not change across a version-targeted upgrade\n"
-        "export FIXTURE_MARKER=1\n"
+        "# fixture shell-env — must not change across a version-targeted upgrade\n" "export FIXTURE_MARKER=1\n"
     ),
     "pseudocron.env": (
-        "# fixture pseudocron.env — must not change across a version-targeted upgrade\n"
-        "FIXTURE_MARKER=1\n"
+        "# fixture pseudocron.env — must not change across a version-targeted upgrade\n" "FIXTURE_MARKER=1\n"
     ),
     "projects.cfg": (
         "# fixture projects.cfg — must not change across a version-targeted upgrade\n"
@@ -276,10 +270,7 @@ def _populate_protected_fixture_content(kanban_root: pathlib.Path) -> None:
 
 
 def _read_protected_fixture_content(kanban_root: pathlib.Path) -> dict[str, str]:
-    return {
-        rel_path: (kanban_root / rel_path).read_text(encoding="utf-8")
-        for rel_path in _PROTECTED_FIXTURE_CONTENT
-    }
+    return {rel_path: (kanban_root / rel_path).read_text(encoding="utf-8") for rel_path in _PROTECTED_FIXTURE_CONTENT}
 
 
 def _run_upgrade(
@@ -371,16 +362,18 @@ def test_forward_only_sequence_lands_vb_refuses_older_and_equal_relay_then_lands
       5. upgrade.sh vC -> succeeds, VERSION becomes vC.
     """
     source_repo = _build_tagged_source_repo(tmp_path, "source_repo")
-    kanban_root = _build_installed_kanban_root(
-        tmp_path, "kanban_root", installed_version=_TAG_A
-    )
+    kanban_root = _build_installed_kanban_root(tmp_path, "kanban_root", installed_version=_TAG_A)
     home = tmp_path / "home"
     pgai_temp = tmp_path / "pgai_temp"
 
     # Step 2: land vB while vC still exists in the source repo.
     result_b = _run_upgrade(
-        kanban_root, source_repo, tmp_path,
-        version_arg=_TAG_B, home=home, pgai_temp=pgai_temp,
+        kanban_root,
+        source_repo,
+        tmp_path,
+        version_arg=_TAG_B,
+        home=home,
+        pgai_temp=pgai_temp,
     )
     output_b = _combined_output(result_b)
     assert result_b.returncode == 0, f"upgrade.sh {_TAG_B} failed:\n{output_b}"
@@ -399,8 +392,12 @@ def test_forward_only_sequence_lands_vb_refuses_older_and_equal_relay_then_lands
 
     # Step 3: refuse an older-than-installed target (vA < installed vB).
     result_older = _run_upgrade(
-        kanban_root, source_repo, tmp_path,
-        version_arg=_TAG_A, home=home, pgai_temp=pgai_temp,
+        kanban_root,
+        source_repo,
+        tmp_path,
+        version_arg=_TAG_A,
+        home=home,
+        pgai_temp=pgai_temp,
     )
     output_older = _combined_output(result_older)
     assert result_older.returncode != 0, (
@@ -426,8 +423,12 @@ def test_forward_only_sequence_lands_vb_refuses_older_and_equal_relay_then_lands
 
     # Step 4: refuse an equal-version re-lay (vB re-lay while installed is vB).
     result_equal = _run_upgrade(
-        kanban_root, source_repo, tmp_path,
-        version_arg=_TAG_B, home=home, pgai_temp=pgai_temp,
+        kanban_root,
+        source_repo,
+        tmp_path,
+        version_arg=_TAG_B,
+        home=home,
+        pgai_temp=pgai_temp,
     )
     output_equal = _combined_output(result_equal)
     assert result_equal.returncode != 0, (
@@ -436,12 +437,10 @@ def test_forward_only_sequence_lands_vb_refuses_older_and_equal_relay_then_lands
     )
     assert "is ALREADY the installed version" in output_equal, output_equal
     assert (
-        "upgrade.sh's forward-only rule refuses same-version re-lays as well "
-        "as downgrades." in output_equal
+        "upgrade.sh's forward-only rule refuses same-version re-lays as well " "as downgrades." in output_equal
     ), output_equal
     assert "./install.sh --force" in output_equal, (
-        f"Equal-relay refusal must point at install.sh --force as the "
-        f"repair path.\n{output_equal}"
+        f"Equal-relay refusal must point at install.sh --force as the " f"repair path.\n{output_equal}"
     )
     assert "Nothing has been deposited" in output_equal, output_equal
     assert _installed_version(kanban_root) == _TAG_B, (
@@ -451,15 +450,18 @@ def test_forward_only_sequence_lands_vb_refuses_older_and_equal_relay_then_lands
 
     # Step 5: land vC.
     result_c = _run_upgrade(
-        kanban_root, source_repo, tmp_path,
-        version_arg=_TAG_C, home=home, pgai_temp=pgai_temp,
+        kanban_root,
+        source_repo,
+        tmp_path,
+        version_arg=_TAG_C,
+        home=home,
+        pgai_temp=pgai_temp,
     )
     output_c = _combined_output(result_c)
     assert result_c.returncode == 0, f"upgrade.sh {_TAG_C} failed:\n{output_c}"
     assert f"resolved to tag '{_TAG_C}'" in output_c, output_c
     assert _installed_version(kanban_root) == _TAG_C, (
-        f"Installed VERSION must equal {_TAG_C!r} after landing it.\n"
-        f"Got: {_installed_version(kanban_root)!r}"
+        f"Installed VERSION must equal {_TAG_C!r} after landing it.\n" f"Got: {_installed_version(kanban_root)!r}"
     )
 
 
@@ -480,9 +482,7 @@ def test_upgrade_summary_narrates_installed_arrow_target_from_tag(
     installed -> target transition and names the resolved tag, in the
     exact form: ``upgraded <installed> -> <target> (from tag <tag>)``."""
     source_repo = _build_tagged_source_repo(tmp_path, "source_repo")
-    kanban_root = _build_installed_kanban_root(
-        tmp_path, "kanban_root", installed_version=_TAG_A
-    )
+    kanban_root = _build_installed_kanban_root(tmp_path, "kanban_root", installed_version=_TAG_A)
 
     result = _run_upgrade(kanban_root, source_repo, tmp_path, version_arg=_TAG_B)
     output = _combined_output(result)
@@ -491,8 +491,7 @@ def test_upgrade_summary_narrates_installed_arrow_target_from_tag(
 
     expected_narration = f"upgraded {_TAG_A} -> {_TAG_B} (from tag {_TAG_B})"
     assert expected_narration in output, (
-        f"Expected the upgrade summary to narrate {expected_narration!r}.\n"
-        f"Full output:\n{output}"
+        f"Expected the upgrade summary to narrate {expected_narration!r}.\n" f"Full output:\n{output}"
     )
 
 
@@ -517,20 +516,15 @@ def test_protected_files_unchanged_across_version_targeted_upgrade(
     confirming the version-targeted code path introduces no change to the
     existing preservation contract."""
     source_repo = _build_tagged_source_repo(tmp_path, "source_repo")
-    kanban_root = _build_installed_kanban_root(
-        tmp_path, "kanban_root", installed_version=_TAG_A
-    )
+    kanban_root = _build_installed_kanban_root(tmp_path, "kanban_root", installed_version=_TAG_A)
     _populate_protected_fixture_content(kanban_root)
     before = _read_protected_fixture_content(kanban_root)
 
     result = _run_upgrade(kanban_root, source_repo, tmp_path, version_arg=_TAG_B)
     output = _combined_output(result)
-    assert result.returncode == 0, (
-        f"Setup: the version-targeted upgrade must itself succeed.\n{output}"
-    )
+    assert result.returncode == 0, f"Setup: the version-targeted upgrade must itself succeed.\n{output}"
     assert _installed_version(kanban_root) == _TAG_B, (
-        f"Setup: VERSION must have advanced to {_TAG_B!r}.\n"
-        f"Got: {_installed_version(kanban_root)!r}"
+        f"Setup: VERSION must have advanced to {_TAG_B!r}.\n" f"Got: {_installed_version(kanban_root)!r}"
     )
 
     after = _read_protected_fixture_content(kanban_root)
@@ -561,18 +555,13 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_refus
     (older-than-installed) one — proving the operator's checkout is never
     touched on either path, and no detached worktree is leaked."""
     source_repo = _build_tagged_source_repo(tmp_path, "source_repo")
-    kanban_root = _build_installed_kanban_root(
-        tmp_path, "kanban_root", installed_version=_TAG_B
-    )
+    kanban_root = _build_installed_kanban_root(tmp_path, "kanban_root", installed_version=_TAG_B)
 
     baseline = _git_state_snapshot(source_repo)
 
-    success_result = _run_upgrade(
-        kanban_root, source_repo, tmp_path, version_arg=_TAG_C
-    )
+    success_result = _run_upgrade(kanban_root, source_repo, tmp_path, version_arg=_TAG_C)
     assert success_result.returncode == 0, (
-        f"Setup: the success-path upgrade must itself succeed.\n"
-        f"{_combined_output(success_result)}"
+        f"Setup: the success-path upgrade must itself succeed.\n" f"{_combined_output(success_result)}"
     )
     after_success = _git_state_snapshot(source_repo)
     assert after_success == baseline, (
@@ -582,12 +571,9 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_refus
     )
 
     # Installed is now vC; requesting vA (older than installed) is refused.
-    failure_result = _run_upgrade(
-        kanban_root, source_repo, tmp_path, version_arg=_TAG_A
-    )
+    failure_result = _run_upgrade(kanban_root, source_repo, tmp_path, version_arg=_TAG_A)
     assert failure_result.returncode != 0, (
-        f"Setup: the refusal-path upgrade must itself fail.\n"
-        f"{_combined_output(failure_result)}"
+        f"Setup: the refusal-path upgrade must itself fail.\n" f"{_combined_output(failure_result)}"
     )
     after_failure = _git_state_snapshot(source_repo)
     assert after_failure == baseline, (
@@ -597,10 +583,7 @@ def test_source_repo_branch_and_worktree_list_unchanged_across_success_and_refus
     )
 
     # No leftover worktree metadata after either run.
-    assert (
-        "worktree " in after_failure[1]
-        and after_failure[1].count("worktree ") == 1
-    ), (
+    assert "worktree " in after_failure[1] and after_failure[1].count("worktree ") == 1, (
         f"Exactly one worktree (the source repo's own) must be registered "
         f"after both runs — no leaked detached worktrees from either the "
         f"success or the refusal path.\ngit worktree list --porcelain:\n"
@@ -628,9 +611,7 @@ def test_version_targeted_upgrade_stamps_resolved_tag_in_version_detail(
     """
     source_repo = _build_tagged_source_repo(tmp_path, "source_repo")
     tag_sha = _run_git(source_repo, "rev-parse", f"{_TAG_B}^{{commit}}").stdout.strip()
-    kanban_root = _build_installed_kanban_root(
-        tmp_path, "kanban_root", installed_version=_TAG_A
-    )
+    kanban_root = _build_installed_kanban_root(tmp_path, "kanban_root", installed_version=_TAG_A)
 
     result = _run_upgrade(kanban_root, source_repo, tmp_path, version_arg=_TAG_B)
     output = _combined_output(result)
@@ -639,9 +620,7 @@ def test_version_targeted_upgrade_stamps_resolved_tag_in_version_detail(
     assert _installed_version(kanban_root) == _TAG_B, output
 
     detail_file = kanban_root / "VERSION_DETAIL"
-    assert detail_file.exists(), (
-        f"VERSION_DETAIL was not written by a version-targeted upgrade:\n{output}"
+    assert detail_file.exists(), f"VERSION_DETAIL was not written by a version-targeted upgrade:\n{output}"
+    assert detail_file.read_text(encoding="utf-8") == (f"{_TAG_B}  deposit-sha={tag_sha}\n"), detail_file.read_text(
+        encoding="utf-8"
     )
-    assert detail_file.read_text(encoding="utf-8") == (
-        f"{_TAG_B}  deposit-sha={tag_sha}\n"
-    ), detail_file.read_text(encoding="utf-8")

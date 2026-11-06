@@ -235,6 +235,21 @@ it writes, see "When OVERWATCH resolves a halt for you" in
 - **A project HALT defers task verbs.** Only `clear-chain-halt` and
   `resolution-stage`, whose subject is that HALT, run while it is present.
   An operator HALT is never touched.
+- **A time limit on the resolution stage's scripts.** Each script the
+  resolution stage runs is bounded by
+  `kanban.cfg [overwatch] verb_timeout_seconds` (default `3600`). That
+  covers `cm/cancel-rc.sh` and `unwind-rc.sh` in the cancel drills, and
+  `cm/release.sh` for a declared-intent ship. The script runs in its own
+  process group. Past the limit, the whole group is stopped (SIGTERM,
+  then SIGKILL after 5 seconds) and the verb is recorded as failed with
+  the reason code `overwatch.verb-timeout`. The drill then takes its
+  ordinary failure path: nothing after the failed step runs, and the
+  ship-policy HALT stays. The decision wake continues. The key is read
+  from `kanban.cfg` only. If it is absent, blank or not a positive whole
+  number, the default applies, with a warning for a bad value. Keep it
+  above what a release takes, hooks included
+  (`[release] hook_timeout_seconds`, "Release Lifecycle Hooks" in
+  [OPERATIONS.md](OPERATIONS.md)).
 - **Backup first.** Every file a verb changes is copied under the project's
   `overwatch/backups/<firing timestamp>/` before the write.
 - **Budgets.** A row's decision verb runs at most its `budget` times on one
@@ -572,7 +587,7 @@ requeue_reasons: none
 | `cooldown_until` | No triage action before this time; `none` for no window |
 | `evidence` | `; `-joined `key=value` pointers (`worktree`, `branch`, `ahead`, `merged`, `batch_log`, `diag`), or `none` |
 | `resume` | `branch` re-dispatches onto the existing feature branch; `fresh` starts a new one |
-| `requeues` | Times triage returned the task to its owner over the record's whole life |
+| `requeues` | Times triage, or the wake after a per-task timeout that left commits on the feature branch, returned the task to its owner over the record's whole life |
 | `requeue_reasons` | The reason code of each requeue, oldest first |
 
 The record is created by the first block, updated on each re-block
@@ -848,7 +863,9 @@ names each module, the projects it runs for, and its fix. Three rules
 bound every auto-fix:
 
 - **Never destructive.** Files are renamed (`.orphan`) or backed up first;
-  branch deletion uses `git branch -d`.
+  branch deletion uses `git branch -D`, only once the shipped tag is
+  proven to hold the branch's work; otherwise the branch is kept and a
+  bug filed.
 - **Backup, then act.** If the backup fails, the fix aborts and OVERWATCH
   files a bug.
 - **Never modify a running task.** A `WORKING` task's `status.md` is not
@@ -865,17 +882,22 @@ task's worktree or scratch directory is skipped, and so is one younger than
 
 ### The push-lag check
 
-`check-push-lag` is the one check that touches origin. It looks for the
-project's own `<branch_prefix>main` ahead of origin, or
-`<branch_prefix>vX.Y.Z` tags origin does not have. It pushes only when the
-project is registered in `projects.cfg`, its `project.cfg` exists and names
-a `dev_tree_path`, and `push_to_remote` there is explicitly `true`, and only
-while no agent holds the project's repo lock.
+Two checks touch origin: `check-push-lag` pushes main and tags, and
+`check-orphan-rc-branches` deletes a proven orphan RC branch on the remote.
+Both are gated on the project's push decision. With `push_to_remote = false`
+neither contacts a remote, so neither writes to one: `check-push-lag` measures
+no tag lag against origin and pushes nothing.
+
+`check-push-lag` looks for the project's own `<branch_prefix>main` ahead of
+origin, or `<branch_prefix>vX.Y.Z` tags origin does not have. It pushes only
+when the project is registered in `projects.cfg`, its `project.cfg` exists
+and names a `dev_tree_path`, and `push_to_remote` there is explicitly `true`,
+and only while no agent holds the project's repo lock.
 
 | Resolver answer | What the check does |
 |---|---|
-| `push`, with `push_to_remote = true` | Pushes `<branch_prefix>main` and each missing release tag by explicit ref; logs `pushed-main-to-origin`, `pushed-tag-to-origin`, `push-main-failed` or `push-tag-failed` |
-| `no-push`, or `push_to_remote` absent | Measures the lag and pushes nothing; logs `staged-by-design` when it finds lag |
+| `push`, with `push_to_remote = true` | Pushes `<branch_prefix>main` and each missing release tag by explicit ref; logs `pushed-main-to-origin`, `pushed-tag-to-origin`, `push-main-failed` or `push-tag-failed`. When the remote cannot be listed, logs one `remote-unreachable` row naming the remote and the git error, measures no tag lag and pushes nothing |
+| `no-push`, or `push_to_remote` absent | Contacts no remote and pushes nothing. Compares `<branch_prefix>main` with its local remote-tracking ref and logs `staged-by-design` when main is ahead; tag lag against origin is not measured |
 | `unresolved` | Runs no git command, contacts no remote, prints one `skipped-unresolved-project` line naming the missing piece (`registration`, `project-cfg`, `dev-tree-path` or `resolver`) |
 
 ### Backups and revert

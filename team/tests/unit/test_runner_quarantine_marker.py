@@ -135,8 +135,19 @@ def test_quarantine_marker_is_registered_so_strict_markers_accepts_it(tmp_path: 
     env = build_scrubbed_env(home_dir=home, extra_path_dirs=[pathlib.Path(sys.executable).parent])
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:randomly", "--strict-markers",
-         "--collect-only", "-q", "-m", "quarantine", _MIXED_FILE],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:randomly",
+            "--strict-markers",
+            "--collect-only",
+            "-q",
+            "-m",
+            "quarantine",
+            _MIXED_FILE,
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -146,8 +157,7 @@ def test_quarantine_marker_is_registered_so_strict_markers_accepts_it(tmp_path: 
 
     assert result.returncode == 0, (
         "pytest --strict-markers refused the quarantine marker: it must be "
-        "registered under [tool.pytest.ini_options] markers in team/pyproject.toml\n"
-        + _describe(result)
+        "registered under [tool.pytest.ini_options] markers in team/pyproject.toml\n" + _describe(result)
     )
     assert f"{_MIXED_FILE}::test_quarantined_case_in_mixed_file" in result.stdout, _describe(result)
     assert _PLAIN not in result.stdout, _describe(result)
@@ -216,10 +226,10 @@ def test_default_run_deselects_every_quarantined_test(runner_name: str, tmp_path
 
     assert result.returncode == 0, _describe(result)
     passed = _passed_names(result.stdout)
-    assert passed == {_PLAIN, "test_named_passes"}, (
-        f"a default run must run every unmarked test and no quarantined one; ran {sorted(passed)}\n"
-        + _describe(result)
-    )
+    assert passed == {
+        _PLAIN,
+        "test_named_passes",
+    }, f"a default run must run every unmarked test and no quarantined one; ran {sorted(passed)}\n" + _describe(result)
     assert "2 deselected" in result.stdout, _describe(result)
     assert 'Marker selection: -m "not quarantine"' in result.stdout, _describe(result)
 
@@ -233,9 +243,9 @@ def test_quarantined_flag_runs_exactly_the_quarantined_tests(runner_name: str, t
 
     assert result.returncode == 0, _describe(result)
     passed = _passed_names(result.stdout)
-    assert passed == set(_QUARANTINED), (
-        f"--quarantined must run exactly the quarantined tests; ran {sorted(passed)}\n" + _describe(result)
-    )
+    assert passed == set(
+        _QUARANTINED
+    ), f"--quarantined must run exactly the quarantined tests; ran {sorted(passed)}\n" + _describe(result)
     assert 'Marker selection: -m "quarantine"' in result.stdout, _describe(result)
 
 
@@ -258,9 +268,7 @@ def test_targeted_run_with_quarantined_runs_only_the_quarantined_tests_in_the_na
     team = _build_marker_fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
 
-    result = sandbox.run(
-        team, runner_name, "--files", _rel(runner_name, _MIXED_FILE), "--quarantined", "--verbose"
-    )
+    result = sandbox.run(team, runner_name, "--files", _rel(runner_name, _MIXED_FILE), "--quarantined", "--verbose")
 
     assert result.returncode == 0, _describe(result)
     assert _passed_names(result.stdout) == {"test_quarantined_case_in_mixed_file"}, _describe(result)
@@ -333,9 +341,10 @@ def test_pasted_replay_line_reproduces_the_marker_selection(
     )
 
     assert replayed.returncode == 0, f"replay command: {replay}\n" + _describe(replayed)
-    assert _passed_names(replayed.stdout) == expected_passed, (
-        f"the pasted replay line must select the same tests the runner ran; "
-        f"replay command: {replay}\n" + _describe(replayed)
+    assert (
+        _passed_names(replayed.stdout) == expected_passed
+    ), f"the pasted replay line must select the same tests the runner ran; " f"replay command: {replay}\n" + _describe(
+        replayed
     )
 
 

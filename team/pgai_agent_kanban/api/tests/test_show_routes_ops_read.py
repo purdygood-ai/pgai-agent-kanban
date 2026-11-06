@@ -35,7 +35,7 @@ import os
 import pathlib
 import re
 import subprocess
-from typing import Callable, Generator
+from collections.abc import Callable, Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,9 +63,11 @@ def _write(path: pathlib.Path, text: str) -> None:
 
 
 def _build_board(root: pathlib.Path) -> pathlib.Path:
-    _write(root / "projects.cfg",
-           f"[project:{_PROJECT}]\npriority = 1\n[project:{_OTHER}]\npriority = 2\n"
-           f"[project:{_UNBUILT}]\npriority = 3\n")
+    _write(
+        root / "projects.cfg",
+        f"[project:{_PROJECT}]\npriority = 1\n[project:{_OTHER}]\npriority = 2\n"
+        f"[project:{_UNBUILT}]\npriority = 3\n",
+    )
     _write(root / "kanban.cfg", "[providers]\nactive = codex\n")
     project = root / "projects" / _PROJECT
     for task_id, state in ((_WORKING, "WORKING"), (_BACKLOG, "BACKLOG")):
@@ -142,12 +144,24 @@ def _spy(monkeypatch: pytest.MonkeyPatch, name: str) -> list[tuple]:
 
 
 def _cli(script: str, args: list[str], root: pathlib.Path, temp: pathlib.Path) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("PGAI_PROJECT_NAME", "PGAI_PROJECT_ROOT", "PGAI_TASKS_DIR")}
-    env.update({"PGAI_AGENT_KANBAN_ROOT_PATH": str(root), "KANBAN_ROOT": str(root),
-                "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp), "TERM": "dumb"})
-    return subprocess.run(["bash", str(_SCRIPTS_DIR / script), *args], capture_output=True, text=True,
-                          env=env, cwd=str(_TEAM_DIR), timeout=60, stdin=subprocess.DEVNULL)
+    env = {k: v for k, v in os.environ.items() if k not in ("PGAI_PROJECT_NAME", "PGAI_PROJECT_ROOT", "PGAI_TASKS_DIR")}
+    env.update(
+        {
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(temp),
+            "TERM": "dumb",
+        }
+    )
+    return subprocess.run(
+        ["bash", str(_SCRIPTS_DIR / script), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -248,9 +262,7 @@ def test_show_unregistered_project_refuses_with_the_resolver_block(
     assert calls == []
 
 
-def test_show_unknown_key_exits_three_with_the_key_not_found_line(
-    client: TestClient, no_subprocess: list[str]
-) -> None:
+def test_show_unknown_key_exits_three_with_the_key_not_found_line(client: TestClient, no_subprocess: list[str]) -> None:
     resp = client.get("/show", params={"project": _PROJECT, "key": "NOPE-1"})
     body = resp.json()
     assert resp.status_code == 404
@@ -319,8 +331,9 @@ def test_show_queues_no_project_on_a_single_project_root_refuses_the_same_way(
     ],
     ids=["status", "prefix-readme", "not-found"],
 )
-def test_show_rest_matches_the_cli(client: TestClient, board: pathlib.Path, tmp_path: pathlib.Path,
-                                   params: dict) -> None:
+def test_show_rest_matches_the_cli(
+    client: TestClient, board: pathlib.Path, tmp_path: pathlib.Path, params: dict
+) -> None:
     argv = [arg for key, value in params.items() for arg in (f"--{key}", value)]
     cli = _cli("show.sh", argv, board, tmp_path / "cli_tmp")
     body = client.get("/show", params=params).json()
@@ -328,8 +341,9 @@ def test_show_rest_matches_the_cli(client: TestClient, board: pathlib.Path, tmp_
 
 
 @pytest.mark.parametrize("params", [{"project": _PROJECT}, {"project": _OTHER}], ids=["working", "idle"])
-def test_show_queues_rest_matches_the_cli(client: TestClient, board: pathlib.Path, tmp_path: pathlib.Path,
-                                          params: dict) -> None:
+def test_show_queues_rest_matches_the_cli(
+    client: TestClient, board: pathlib.Path, tmp_path: pathlib.Path, params: dict
+) -> None:
     cli = _cli("dashboard/show-queues.sh", ["--project", params["project"]], board, tmp_path / "cli_tmp")
     body = client.get("/show-queues", params=params).json()
     assert cli.returncode == 0, cli.stderr

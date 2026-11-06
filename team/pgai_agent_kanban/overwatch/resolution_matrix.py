@@ -91,7 +91,7 @@ import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, fields
-from typing import NoReturn, Optional
+from typing import NoReturn
 
 import yaml
 
@@ -111,6 +111,7 @@ from pgai_agent_kanban.cm.ship_policy_report_inputs import all_findings  # noqa:
 from pgai_agent_kanban.reports.tester_report import TesterReport, parse_report  # noqa: E402
 from pgai_agent_kanban.lib import ini, project_cfg  # noqa: E402
 from pgai_agent_kanban.lib.branch_prefix import release_tag_name  # noqa: E402
+from pgai_agent_kanban.lib.dataclass_records import from_known_fields  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -278,6 +279,21 @@ class EvidenceError(ResolutionMatrixError):
 # Matrix row / fact dataclasses
 # ---------------------------------------------------------------------------
 
+# The six facts a block is matched on, in the order every facts_key() returns them.
+_MATCHED_FACTS = (
+    "trigger_class",
+    "findings_all_filed",
+    "shipped_or_tagged",
+    "approval_gate_present",
+    "operator_commits_in_lineage",
+    "attempts_below_ceiling",
+)
+
+
+def _facts_key(record: object) -> tuple:
+    """*record*'s six matched facts as an order-stable tuple."""
+    return tuple(getattr(record, name) for name in _MATCHED_FACTS)
+
 
 @dataclass(frozen=True)
 class MatrixRow:
@@ -293,14 +309,7 @@ class MatrixRow:
 
     def facts_key(self) -> tuple:
         """Return the six facts as an order-stable tuple for equality comparison."""
-        return (
-            self.trigger_class,
-            self.findings_all_filed,
-            self.shipped_or_tagged,
-            self.approval_gate_present,
-            self.operator_commits_in_lineage,
-            self.attempts_below_ceiling,
-        )
+        return _facts_key(self)
 
 
 @dataclass(frozen=True)
@@ -320,19 +329,12 @@ class BlockFacts:
     approval_gate_present: bool
     operator_commits_in_lineage: bool
     attempts_below_ceiling: bool
-    attempt: Optional[int] = None
-    ceiling: Optional[int] = None
+    attempt: int | None = None
+    ceiling: int | None = None
 
     def facts_key(self) -> tuple:
         """Return the six matchable facts as an order-stable tuple."""
-        return (
-            self.trigger_class,
-            self.findings_all_filed,
-            self.shipped_or_tagged,
-            self.approval_gate_present,
-            self.operator_commits_in_lineage,
-            self.attempts_below_ceiling,
-        )
+        return _facts_key(self)
 
     def to_dict(self) -> dict:
         """Return every block fact as a dict, keyed by field name."""
@@ -345,7 +347,7 @@ class ResolutionResult:
 
     resolution: str
     facts: BlockFacts
-    matched_row: Optional[MatrixRow]
+    matched_row: MatrixRow | None
 
     def to_dict(self) -> dict:
         """Return the result as a JSON-ready dict.
@@ -424,27 +426,26 @@ class BlockEvidence:
                                is not given directly.
     """
 
-    trigger_class: Optional[str] = None
-    halt_file_path: Optional[str] = None
-    tester_findings: Optional[list] = None
-    tester_report_path: Optional[str] = None
-    release_state_path: Optional[str] = None
-    dev_tree_path: Optional[str] = None
-    target_version: Optional[str] = None
-    branch_prefix: Optional[str] = None
-    rc_branch: Optional[str] = None
-    base_branch: Optional[str] = None
-    project_tasks_dir: Optional[str] = None
-    attempt: Optional[int] = None
-    max_rc_retries: Optional[int] = None
-    project_name: Optional[str] = None
-    kanban_root: Optional[str] = None
+    trigger_class: str | None = None
+    halt_file_path: str | None = None
+    tester_findings: list | None = None
+    tester_report_path: str | None = None
+    release_state_path: str | None = None
+    dev_tree_path: str | None = None
+    target_version: str | None = None
+    branch_prefix: str | None = None
+    rc_branch: str | None = None
+    base_branch: str | None = None
+    project_tasks_dir: str | None = None
+    attempt: int | None = None
+    max_rc_retries: int | None = None
+    project_name: str | None = None
+    kanban_root: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict) -> "BlockEvidence":
+    def from_dict(cls, data: dict) -> BlockEvidence:
         """Construct from a plain dict (e.g. parsed JSON), ignoring unknown keys."""
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        return from_known_fields(cls, data)
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +458,7 @@ def _default_matrix_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "resolution-matrix.yaml")
 
 
-def _resolve_matrix_path(matrix_path: Optional[str], kanban_root: Optional[str]) -> str:
+def _resolve_matrix_path(matrix_path: str | None, kanban_root: str | None) -> str:
     """Resolve the matrix file to load.
 
     Search order (first match wins), mirroring the project-local-override
@@ -482,16 +483,13 @@ def _resolve_matrix_path(matrix_path: Optional[str], kanban_root: Optional[str])
 
 def _validate_row(raw: dict, index: int, path: str) -> MatrixRow:
     if not isinstance(raw, dict):
-        raise MatrixError(
-            f"Row {index} in matrix '{path}' must be a mapping, got {type(raw).__name__}"
-        )
+        raise MatrixError(f"Row {index} in matrix '{path}' must be a mapping, got {type(raw).__name__}")
     keys = set(raw.keys())
     missing = _REQUIRED_ROW_KEYS - keys
     extra = keys - _REQUIRED_ROW_KEYS
     if missing:
         raise MatrixError(
-            f"Row {index} in matrix '{path}' is missing required key(s): "
-            f"{', '.join(sorted(missing))}"
+            f"Row {index} in matrix '{path}' is missing required key(s): " f"{', '.join(sorted(missing))}"
         )
     if extra:
         raise MatrixError(
@@ -514,8 +512,7 @@ def _validate_row(raw: dict, index: int, path: str) -> MatrixRow:
     resolution = raw["resolution"]
     if not isinstance(resolution, str) or not resolution.strip():
         raise MatrixError(
-            f"Row {index} in matrix '{path}': field 'resolution' must be a "
-            f"non-empty string, got {resolution!r}"
+            f"Row {index} in matrix '{path}': field 'resolution' must be a " f"non-empty string, got {resolution!r}"
         )
     if resolution.strip() == HALT_HARD:
         raise MatrixError(
@@ -535,8 +532,8 @@ def _validate_row(raw: dict, index: int, path: str) -> MatrixRow:
 
 
 def load_matrix(
-    matrix_path: Optional[str] = None,
-    kanban_root: Optional[str] = None,
+    matrix_path: str | None = None,
+    kanban_root: str | None = None,
 ) -> list:
     """Load and validate the resolution matrix.
 
@@ -551,7 +548,7 @@ def load_matrix(
     """
     path = _resolve_matrix_path(matrix_path, kanban_root)
     try:
-        text = open(path, "r", encoding="utf-8").read()
+        text = open(path, encoding="utf-8").read()
     except OSError as exc:
         raise MatrixError(f"Cannot read resolution matrix '{path}': {exc}") from exc
     try:
@@ -564,9 +561,7 @@ def load_matrix(
     if raw_rows is None:
         raise MatrixError(f"Resolution matrix '{path}' is missing the required 'rows' list")
     if not isinstance(raw_rows, list):
-        raise MatrixError(
-            f"Resolution matrix '{path}': 'rows' must be a list, got {type(raw_rows).__name__}"
-        )
+        raise MatrixError(f"Resolution matrix '{path}': 'rows' must be a list, got {type(raw_rows).__name__}")
     return [_validate_row(raw, i, path) for i, raw in enumerate(raw_rows)]
 
 
@@ -666,8 +661,8 @@ def _validate_trigger_row(raw: object, index: int, path: str) -> TriggerRow:
 
 
 def load_trigger_rows(
-    matrix_path: Optional[str] = None,
-    kanban_root: Optional[str] = None,
+    matrix_path: str | None = None,
+    kanban_root: str | None = None,
 ) -> dict:
     """Load the matrix file's ``triggers`` list, keyed by trigger number.
 
@@ -684,7 +679,7 @@ def load_trigger_rows(
     """
     path = _resolve_matrix_path(matrix_path, kanban_root)
     try:
-        text = open(path, "r", encoding="utf-8").read()
+        text = open(path, encoding="utf-8").read()
     except OSError as exc:
         raise MatrixError(f"Cannot read resolution matrix '{path}': {exc}") from exc
     try:
@@ -797,7 +792,7 @@ def matrix_findings(report: TesterReport) -> list:
 # ---------------------------------------------------------------------------
 
 
-def extract_bug_ids(text: Optional[str]) -> list:
+def extract_bug_ids(text: str | None) -> list:
     """Order-preserving, de-duplicated list of BUG-NNNN ids named in *text*
     (the short id only — any trailing slug is not part of the match).
     Returns [] for empty or None text.
@@ -828,7 +823,7 @@ def cargo_bug_ids(cargo: list) -> set:
     return result
 
 
-def find_regression_source_finding(findings: list, cargo_ids) -> Optional[tuple]:
+def find_regression_source_finding(findings: list, cargo_ids) -> tuple | None:
     """Return (finding, bug_id) for the first finding (document order) that
     is Lane A's bad-fix-regression shape: carries Regression=yes AND its
     body text names a BUG-NNNN id that is a member of *cargo_ids* — i.e.
@@ -861,7 +856,7 @@ _IDENTIFIER_RE = re.compile(
 _BUG_ID_ONLY_RE = re.compile(r"BUG-\d{4}")
 
 
-def extract_identifiers(*texts: Optional[str]) -> list:
+def extract_identifiers(*texts: str | None) -> list:
     """Deterministic, order-preserving, de-duplicated list of "identifier"
     tokens found across *texts* — see _IDENTIFIER_RE above for the exact
     vocabulary.
@@ -902,7 +897,7 @@ def intent_entry_fully_explains(declaration: str, identifiers: list) -> bool:
     return all(token in declaration for token in identifiers)
 
 
-def find_lane_b_declaration(identifiers: list, declarations: list) -> Optional[int]:
+def find_lane_b_declaration(identifiers: list, declarations: list) -> int | None:
     """Return the index of the first declaration (file/ledger order) that
     fully explains *identifiers*, or None when no declaration does —
     including when *declarations* is empty (an emptied or never-populated
@@ -924,9 +919,9 @@ class LaneClassification:
 
     lane: str  # LANE_A | LANE_B | LANE_C
     reason: str
-    regression_finding: Optional[dict] = None
-    regression_bug_id: Optional[str] = None
-    intent_declaration: Optional[str] = None
+    regression_finding: dict | None = None
+    regression_bug_id: str | None = None
+    intent_declaration: str | None = None
     identifiers: tuple = ()
 
     def to_dict(self) -> dict:
@@ -1047,7 +1042,7 @@ def findings_all_filed(findings: list) -> bool:
 
 def _cfg_key_chain(
     kanban_root: str,
-    project_root: Optional[str],
+    project_root: str | None,
     section: str,
     key: str,
     *,
@@ -1068,9 +1063,7 @@ def _cfg_key_chain(
     names. ``("", "")`` when neither file carries a non-blank value. No
     validation here: each resolver validates the winning value itself.
     """
-    found = project_cfg.resolve_tiered_cfg_value(
-        kanban_root, project_root, section, key, legacy=legacy
-    )
+    found = project_cfg.resolve_tiered_cfg_value(kanban_root, project_root, section, key, legacy=legacy)
     if found.tier == project_cfg.TIER_PROJECT_CFG:
         return found.value, os.path.join(project_root, os.path.basename(found.source))
     if found.tier == project_cfg.TIER_KANBAN_CFG:
@@ -1078,7 +1071,7 @@ def _cfg_key_chain(
     return "", ""
 
 
-def _ini_parse_error(cfg_path: str) -> Optional[Exception]:
+def _ini_parse_error(cfg_path: str) -> Exception | None:
     """Return the :func:`ini.load` error for *cfg_path*, or None when it parses.
 
     None as well when the file is absent. The tier walk reads line by line
@@ -1105,7 +1098,7 @@ def _switch_key_chain(project_name: str, kanban_root: str, section: str, key: st
     documented default rather than erroring on an unreadable file.
     ``("", "")`` when no readable file carries a non-blank value.
     """
-    project_root: Optional[str] = os.path.join(kanban_root, "projects", project_name)
+    project_root: str | None = os.path.join(kanban_root, "projects", project_name)
     kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
     if _ini_parse_error(os.path.join(project_root, "project.cfg")) is not None:
         project_root = None
@@ -1138,9 +1131,7 @@ def resolve_max_rc_retries(project_name: str, kanban_root: str) -> int:
     project_cfg_path = os.path.join(project_root, "project.cfg")
     kanban_cfg = os.path.join(kanban_root, "kanban.cfg")
 
-    raw, source = _cfg_key_chain(
-        kanban_root, project_root, "release", "max_rc_retries", legacy=False
-    )
+    raw, source = _cfg_key_chain(kanban_root, project_root, "release", "max_rc_retries", legacy=False)
     consulted = (project_cfg_path,) if source == project_cfg_path else (project_cfg_path, kanban_cfg)
     for cfg_path in consulted:
         exc = _ini_parse_error(cfg_path)
@@ -1246,7 +1237,7 @@ def resolve_block_triage(project_name: str, kanban_root: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _project_pushes_to_remote(project_cfg_path: Optional[str]) -> bool:
+def _project_pushes_to_remote(project_cfg_path: str | None) -> bool:
     """Whether the project is configured to publish to origin (the posture guard's rule).
 
     This is the configured intent bash ``pp_ship_posture`` reads through
@@ -1320,9 +1311,7 @@ def resolve_ship_posture(project_name: str, kanban_root: str, *, stream=None) ->
     if not _project_pushes_to_remote(project_cfg_path):
         return SHIP_POSTURE_ALWAYS
 
-    confirm_raw, confirm_source = _cfg_key_chain(
-        kanban_root, project_root, "release", "ship_posture_confirm_remote"
-    )
+    confirm_raw, confirm_source = _cfg_key_chain(kanban_root, project_root, "release", "ship_posture_confirm_remote")
     if confirm_raw == "true":
         return SHIP_POSTURE_ALWAYS
 
@@ -1366,9 +1355,7 @@ def _run_git(dev_tree_path: str, args: list) -> str:
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         stderr = getattr(exc, "stderr", "") or ""
-        raise EvidenceError(
-            f"git {' '.join(args)} failed in '{dev_tree_path}': {exc} {stderr}".strip()
-        ) from exc
+        raise EvidenceError(f"git {' '.join(args)} failed in '{dev_tree_path}': {exc} {stderr}".strip()) from exc
     return result.stdout
 
 
@@ -1429,7 +1416,7 @@ def _fact_trigger_class(evidence: BlockEvidence) -> str:
         return evidence.trigger_class
     if evidence.halt_file_path and os.path.isfile(evidence.halt_file_path):
         try:
-            content = open(evidence.halt_file_path, "r", encoding="utf-8").read()
+            content = open(evidence.halt_file_path, encoding="utf-8").read()
         except OSError:
             return "unknown"
         if _CM_HALT_HEADER_RE.search(content):
@@ -1439,7 +1426,7 @@ def _fact_trigger_class(evidence: BlockEvidence) -> str:
     return "unknown"
 
 
-def _resolve_findings(evidence: BlockEvidence) -> Optional[list]:
+def _resolve_findings(evidence: BlockEvidence) -> list | None:
     if evidence.tester_findings is not None:
         return evidence.tester_findings
     if evidence.tester_report_path and os.path.isfile(evidence.tester_report_path):
@@ -1461,11 +1448,11 @@ def _fact_findings_all_filed(evidence: BlockEvidence) -> bool:
     return findings_all_filed(findings)
 
 
-def _read_release_state(path: Optional[str]) -> dict:
+def _read_release_state(path: str | None) -> dict:
     if not path or not os.path.isfile(path):
         return {}
     try:
-        return json.loads(open(path, "r", encoding="utf-8").read())
+        return json.loads(open(path, encoding="utf-8").read())
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -1501,9 +1488,7 @@ def _fact_approval_gate_present(evidence: BlockEvidence) -> bool:
     """
     if not evidence.project_tasks_dir or not evidence.target_version:
         return True
-    pattern = os.path.join(
-        evidence.project_tasks_dir, f"HUMAN-APPROVE-{evidence.target_version}-*"
-    )
+    pattern = os.path.join(evidence.project_tasks_dir, f"HUMAN-APPROVE-{evidence.target_version}-*")
     return len(glob.glob(pattern)) > 0
 
 
@@ -1513,12 +1498,10 @@ def _fact_operator_commits_in_lineage(evidence: BlockEvidence) -> bool:
     """
     if not (evidence.dev_tree_path and evidence.rc_branch and evidence.base_branch):
         return True
-    return operator_commit_in_rc_lineage(
-        evidence.dev_tree_path, evidence.rc_branch, evidence.base_branch
-    )
+    return operator_commit_in_rc_lineage(evidence.dev_tree_path, evidence.rc_branch, evidence.base_branch)
 
 
-def _resolve_attempt(evidence: BlockEvidence) -> Optional[int]:
+def _resolve_attempt(evidence: BlockEvidence) -> int | None:
     if evidence.attempt is not None:
         return evidence.attempt
     state = _read_release_state(evidence.release_state_path)
@@ -1606,8 +1589,8 @@ def extract_facts(evidence: BlockEvidence) -> BlockFacts:
 
 def resolve_block(
     evidence: BlockEvidence,
-    matrix_path: Optional[str] = None,
-    kanban_root: Optional[str] = None,
+    matrix_path: str | None = None,
+    kanban_root: str | None = None,
 ) -> ResolutionResult:
     """Load the matrix, extract facts from *evidence*, and match — the one
     call OVERWATCH's resolution stage needs.
@@ -1668,18 +1651,17 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "resolve":
-        data = json.loads(open(args.evidence_json, "r", encoding="utf-8").read())
+        data = json.loads(open(args.evidence_json, encoding="utf-8").read())
         evidence = BlockEvidence.from_dict(data)
         result = resolve_block(evidence, matrix_path=args.matrix, kanban_root=args.kanban_root)
         sys.stdout.write(json.dumps(result.to_dict(), indent=2, sort_keys=True) + "\n")
     elif args.command == "match":
-        data = json.loads(open(args.facts_json, "r", encoding="utf-8").read())
+        data = json.loads(open(args.facts_json, encoding="utf-8").read())
         facts = _facts_from_dict(data)
         matrix = load_matrix(matrix_path=args.matrix, kanban_root=args.kanban_root)
         resolution = match_resolution(facts, matrix)
         sys.stdout.write(
-            json.dumps({"resolution": resolution, "facts": facts.to_dict()}, indent=2, sort_keys=True)
-            + "\n"
+            json.dumps({"resolution": resolution, "facts": facts.to_dict()}, indent=2, sort_keys=True) + "\n"
         )
 
 

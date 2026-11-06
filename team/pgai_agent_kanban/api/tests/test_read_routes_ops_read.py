@@ -43,7 +43,7 @@ import pathlib
 import subprocess
 import time
 import types
-from typing import Callable, Generator
+from collections.abc import Callable, Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,10 +78,15 @@ def _build_board(root: pathlib.Path) -> pathlib.Path:
     _write(root / "projects.cfg", f"[project:{_PROJECT}]\npriority = 1\n")
     project = root / "projects" / _PROJECT
     opened = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(time.time() - 10 * 86400 - 600))
-    _write(project / "release-state.md",
-           f"## Active RC\nv1.0.0\n\n## RC Opened At\n{opened}\n\n## Last Released\nv0.9.0\n")
-    for task_id, state, role in ((_TESTER, "DONE", "TESTER"), (_AMBIG_A, "DONE", "TESTER"),
-                                 (_AMBIG_B, "DONE", "TESTER"), (_CODER, "BLOCKED", "CODER")):
+    _write(
+        project / "release-state.md", f"## Active RC\nv1.0.0\n\n## RC Opened At\n{opened}\n\n## Last Released\nv0.9.0\n"
+    )
+    for task_id, state, role in (
+        (_TESTER, "DONE", "TESTER"),
+        (_AMBIG_A, "DONE", "TESTER"),
+        (_AMBIG_B, "DONE", "TESTER"),
+        (_CODER, "BLOCKED", "CODER"),
+    ):
         _write(project / "tasks" / task_id / "status.md", f"## State\n{state}\n")
         _write(project / "tasks" / task_id / "README.md", f"# {task_id}\n\n## Role\n{role}\n")
     for task_id in (_TESTER, _AMBIG_A, _AMBIG_B):
@@ -151,17 +156,26 @@ def _spy(monkeypatch: pytest.MonkeyPatch, name: str) -> list[tuple]:
 def _script_env(root: pathlib.Path, tmp_path: pathlib.Path) -> dict:
     scratch = tmp_path / "cli_tmp"
     scratch.mkdir(exist_ok=True)
-    return build_scrubbed_env(home_dir=tmp_path / "home", extra_env={
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "KANBAN_ROOT": str(root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch),
-    })
+    return build_scrubbed_env(
+        home_dir=tmp_path / "home",
+        extra_env={
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch),
+        },
+    )
 
 
 def _script(script: str, args: list[str], root: pathlib.Path, tmp_path: pathlib.Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(_SCRIPTS_DIR / script), *args], capture_output=True, text=True,
-                          env=_script_env(root, tmp_path), cwd=str(tmp_path), timeout=120,
-                          stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        ["bash", str(_SCRIPTS_DIR / script), *args],
+        capture_output=True,
+        text=True,
+        env=_script_env(root, tmp_path),
+        cwd=str(tmp_path),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -231,35 +245,64 @@ def test_rejected_calls_list_rejected_with_and_without_a_project(
 
 
 def _row(name: str, function: str, route: str, script: str) -> types.SimpleNamespace:
-    return types.SimpleNamespace(name=name, impl=f"module:pgai_agent_kanban.ops.read.{function}",
-                                 rest_method="GET", rest_route=route, script=f"scripts/{script}")
+    return types.SimpleNamespace(
+        name=name,
+        impl=f"module:pgai_agent_kanban.ops.read.{function}",
+        rest_method="GET",
+        rest_route=route,
+        script=f"scripts/{script}",
+    )
 
 
 @pytest.mark.parametrize(
     ("row", "params", "cli_args", "exit_code"),
     [
-        (_row("status", "get_status", "/status", "kanban-status.sh"),
-         {"project": _PROJECT}, ["--project", _PROJECT], 0),
-        (_row("test-report", "get_test_report", "/test-report", "show-test-report.sh"),
-         {"project": _PROJECT, "key": _TESTER}, ["--project", _PROJECT, "--key", _TESTER], 0),
-        (_row("readme", "get_task_readme", f"/projects/{_PROJECT}/tasks/{_CODER}/readme", "show-readme.sh"),
-         None, ["--project", _PROJECT, "--key", _CODER], 0),
-        (_row("rejected", "list_rejected", "/rejected", "list-rejected.sh"),
-         {"project": _PROJECT}, ["--project", _PROJECT], 0),
+        (
+            _row("status", "get_status", "/status", "kanban-status.sh"),
+            {"project": _PROJECT},
+            ["--project", _PROJECT],
+            0,
+        ),
+        (
+            _row("test-report", "get_test_report", "/test-report", "show-test-report.sh"),
+            {"project": _PROJECT, "key": _TESTER},
+            ["--project", _PROJECT, "--key", _TESTER],
+            0,
+        ),
+        (
+            _row("readme", "get_task_readme", f"/projects/{_PROJECT}/tasks/{_CODER}/readme", "show-readme.sh"),
+            None,
+            ["--project", _PROJECT, "--key", _CODER],
+            0,
+        ),
+        (
+            _row("rejected", "list_rejected", "/rejected", "list-rejected.sh"),
+            {"project": _PROJECT},
+            ["--project", _PROJECT],
+            0,
+        ),
     ],
     ids=["status", "test-report", "readme", "rejected"],
 )
 def test_route_and_script_reach_the_same_function(
-    row: types.SimpleNamespace, params: dict | None, cli_args: list[str], exit_code: int,
-    board: pathlib.Path, tmp_path: pathlib.Path,
+    row: types.SimpleNamespace,
+    params: dict | None,
+    cli_args: list[str],
+    exit_code: int,
+    board: pathlib.Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     cli_board = _build_board(tmp_path / "cli-board")
     scratch = tmp_path / "parity-scratch"
     scratch.mkdir()
     with build_api_client(board) as api:
         result = assert_route_cli_parity(
-            row, api, params=params, cli_args=cli_args,
-            env=_script_env(cli_board, tmp_path), scratch_dir=scratch,
+            row,
+            api,
+            params=params,
+            cli_args=cli_args,
+            env=_script_env(cli_board, tmp_path),
+            scratch_dir=scratch,
         )
 
     assert result.response.status_code == 200
@@ -277,25 +320,59 @@ def test_route_and_script_reach_the_same_function(
     [
         ("/status", {"project": _PROJECT}, "kanban-status.sh", ["--project", _PROJECT]),
         ("/status", {"project": "nosuch"}, "kanban-status.sh", ["--project", "nosuch"]),
-        ("/test-report", {"project": _PROJECT, "key": "v1.0.0"}, "show-test-report.sh",
-         ["--project", _PROJECT, "--key", "v1.0.0"]),
-        ("/test-report", {"project": _PROJECT, "key": "TESTER-20260102-002"}, "show-test-report.sh",
-         ["--project", _PROJECT, "--key", "TESTER-20260102-002"]),
-        ("/test-report", {"project": _PROJECT, "key": "CODER-20260101-003"}, "show-test-report.sh",
-         ["--project", _PROJECT, "--key", "CODER-20260101-003"]),
-        ("/test-report", {"project": _PROJECT, "key": "TESTER-99999999-999"}, "show-test-report.sh",
-         ["--project", _PROJECT, "--key", "TESTER-99999999-999"]),
-        ("/test-report", {"project": "nosuch", "key": _TESTER}, "show-test-report.sh",
-         ["--project", "nosuch", "--key", _TESTER]),
+        (
+            "/test-report",
+            {"project": _PROJECT, "key": "v1.0.0"},
+            "show-test-report.sh",
+            ["--project", _PROJECT, "--key", "v1.0.0"],
+        ),
+        (
+            "/test-report",
+            {"project": _PROJECT, "key": "TESTER-20260102-002"},
+            "show-test-report.sh",
+            ["--project", _PROJECT, "--key", "TESTER-20260102-002"],
+        ),
+        (
+            "/test-report",
+            {"project": _PROJECT, "key": "CODER-20260101-003"},
+            "show-test-report.sh",
+            ["--project", _PROJECT, "--key", "CODER-20260101-003"],
+        ),
+        (
+            "/test-report",
+            {"project": _PROJECT, "key": "TESTER-99999999-999"},
+            "show-test-report.sh",
+            ["--project", _PROJECT, "--key", "TESTER-99999999-999"],
+        ),
+        (
+            "/test-report",
+            {"project": "nosuch", "key": _TESTER},
+            "show-test-report.sh",
+            ["--project", "nosuch", "--key", _TESTER],
+        ),
         ("/rejected", None, "list-rejected.sh", []),
         ("/rejected", {"project": "nosuch"}, "list-rejected.sh", ["--project", "nosuch"]),
     ],
-    ids=["status", "status-unknown-project", "report-version", "report-ambiguous", "report-not-tester",
-         "report-unknown-key", "report-unknown-project", "rejected", "rejected-unknown-project"],
+    ids=[
+        "status",
+        "status-unknown-project",
+        "report-version",
+        "report-ambiguous",
+        "report-not-tester",
+        "report-unknown-key",
+        "report-unknown-project",
+        "rejected",
+        "rejected-unknown-project",
+    ],
 )
 def test_envelope_equals_the_script_output(
-    client: TestClient, board: pathlib.Path, tmp_path: pathlib.Path,
-    route: str, params: dict | None, script: str, args: list[str],
+    client: TestClient,
+    board: pathlib.Path,
+    tmp_path: pathlib.Path,
+    route: str,
+    params: dict | None,
+    script: str,
+    args: list[str],
 ) -> None:
     body = client.get(route, params=params).json()
     cli = _script(script, args, board, tmp_path)
@@ -319,8 +396,12 @@ def test_readme_route_matches_the_script(
         assert resp.json()["stdout"] == cli.stdout
     else:
         assert resp.status_code == 404
-        assert resp.json() == {"error": "task readme not found", "project": _PROJECT, "key": key,
-                               "detail": cli.stderr.strip()}
+        assert resp.json() == {
+            "error": "task readme not found",
+            "project": _PROJECT,
+            "key": key,
+            "detail": cli.stderr.strip(),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -346,14 +427,12 @@ def test_status_no_color_renders_plain_text_under_a_colour_terminal(
 
 _POSTURE_PROJECTS: dict[str, tuple[str, str]] = {
     # project -> (project.cfg text, the posture it resolves to)
-    "posture-always": (
-        "[project]\npush_to_remote = false\n\n[release]\nship_posture = always\n", "always"),
+    "posture-always": ("[project]\npush_to_remote = false\n\n[release]\nship_posture = always\n", "always"),
     # An absent key takes the default, always, on a local-only lane; on a
     # remote lane that default is unconfirmed and reads matrix, silently.
     "posture-absent": ("[project]\npush_to_remote = false\n", "always"),
     "posture-absent-remote": ("[project]\npush_to_remote = true\n", "matrix"),
-    "posture-remote-unconfirmed": (
-        "[project]\npush_to_remote = true\n\n[release]\nship_posture = always\n", "matrix"),
+    "posture-remote-unconfirmed": ("[project]\npush_to_remote = true\n\n[release]\nship_posture = always\n", "matrix"),
 }
 
 
@@ -366,8 +445,7 @@ def _add_posture_projects(root: pathlib.Path) -> None:
     registry.write_text(registry.read_text(encoding="utf-8") + entries, encoding="utf-8")
     for name, (cfg_text, _expected) in _POSTURE_PROJECTS.items():
         _write(root / "projects" / name / "project.cfg", cfg_text)
-        _write(root / "projects" / name / "tasks" / f"CODER-20260101-001-{name}" / "status.md",
-               "## State\nDONE\n")
+        _write(root / "projects" / name / "tasks" / f"CODER-20260101-001-{name}" / "status.md", "## State\nDONE\n")
 
 
 @pytest.mark.parametrize("project", list(_POSTURE_PROJECTS), ids=list(_POSTURE_PROJECTS))

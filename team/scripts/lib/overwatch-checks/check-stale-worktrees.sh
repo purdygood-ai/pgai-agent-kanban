@@ -21,8 +21,10 @@
 # Bug-file path (branch-carrying worktree):
 #   - If the worktree branch has commits no integration branch holds — main
 #     and <branch_prefix>main, rc/* and <branch_prefix>rc/*, with
-#     branch_prefix read from the project's project.cfg — write a bug report
-#     and log it.
+#     branch_prefix read from the project's project.cfg — file a bug report
+#     through intake (overwatch_deposit_bug) and log it. Intake claims the
+#     bug's number; a report for a task whose earlier report is still live
+#     is refused as the same defect and filed no second time.
 #   - Never auto-remove a branch-carrying worktree.
 #
 # Report path (worktree holding changes):
@@ -69,8 +71,14 @@
 #   0 — completed (anomalies found and handled, or none found)
 #   1 — internal error
 
+# The lib directory above this file, as an absolute path
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CSW_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || _CSW_LIB_DIR=""
+
 # overwatch_registered_projects and overwatch_branch_prefix: the shared
-# projects.cfg and branch_prefix readers.
+# projects.cfg and branch_prefix readers; overwatch_deposit_bug: filing
+# through intake.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
@@ -81,29 +89,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _csw_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-stale-worktrees: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-stale-worktrees: ERROR: OVERWATCH_PROJECT not set and multiple projects registered." >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-stale-worktrees: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-stale-worktrees || return 1
 
     # Resolve dev tree path from project.cfg.
     local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
@@ -115,14 +101,9 @@ _csw_resolve_env() {
     fi
 
     _CSW_DEV_TREE=""
-    if [[ -n "${_cfg_file}" ]]; then
-        _CSW_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-    fi
-    if [[ -z "${_CSW_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        _CSW_DEV_TREE="${PGAI_DEV_TREE_PATH}"
-    fi
+    # The documented dev_tree_path chain (overwatch_dev_tree, overwatch_config.sh):
+    # project.cfg, then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    _CSW_DEV_TREE="$(overwatch_dev_tree "${OVERWATCH_PROJECT}")" || _CSW_DEV_TREE=""
 
     # Resolve this project's configured branch_prefix through the shared
     # reader (pp_branch_prefix, the source pp_prefix_branch uses), so
@@ -155,7 +136,8 @@ _csw_resolve_env() {
 # ---------------------------------------------------------------------------
 _csw_load_protocol() {
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || {
+    lib_dir="${_CSW_LIB_DIR}"
+    [[ -n "${lib_dir}" ]] || {
         echo "check-stale-worktrees: cannot resolve lib dir" >&2
         return 1
     }
@@ -227,7 +209,7 @@ _csw_load_md_field() {
     local runner=""
     runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
     # shellcheck source=../md_field.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    source "${_CSW_LIB_DIR}/md_field.sh" || return 1
     [[ -n "${runner}" ]] && eval "${runner}"
     declare -F read_md_field >/dev/null 2>&1
 }
@@ -371,30 +353,44 @@ _csw_worktree_has_extra_commits() {
 }
 
 # ---------------------------------------------------------------------------
-# _csw_bug_file <task_id> <wt_path> <reason> <bugs_dir>
-# Write a bug report for a branch-carrying stale worktree.
-# Echoes the path to the created bug file.
-# Returns 0 on success, 1 on failure.
+# _csw_bug_slug <task_id>
+# Echo the slug a branch-carrying worktree's report is filed under: the task
+# ID in lower-case kebab between fixed words, ending in a word, so reports
+# for two tasks never read to intake as one defect filed again with a
+# trailing counter.
 # ---------------------------------------------------------------------------
-_csw_bug_file() {
-    local task_id="$1"
-    local wt_path="$2"
-    local reason="$3"
-    local bugs_dir="$4"
+_csw_bug_slug() {
+    local id="${1:-unknown}"
+    local slug="stale-worktree-${id//[^A-Za-z0-9]/-}-carries-commits"
+    slug="${slug,,}"
+    while [[ "${slug}" == *--* ]]; do
+        slug="${slug//--/-}"
+    done
+    printf '%s\n' "${slug}"
+}
+
+# ---------------------------------------------------------------------------
+# _csw_file_bug <project_name> <task_id> <wt_path> <reason>
+# File a bug report for a branch-carrying stale worktree through intake
+# (overwatch_deposit_bug): intake claims its number, and a report for a task
+# whose earlier report is still live is refused as the same defect and filed
+# no second time.
+# Echoes one line and returns overwatch_deposit_bug's code:
+#   0 -- filed: the deposited bug's path
+#   2 -- already filed: the live bug's path (or ID)
+#   1 -- not filed (intake's message is on stderr; nothing echoed)
+# ---------------------------------------------------------------------------
+_csw_file_bug() {
+    local project_name="$1"
+    local task_id="${2:-unknown}"
+    local wt_path="$3"
+    local reason="$4"
     local timestamp
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    local safe_id
-    safe_id="$(echo "${task_id:-unknown}" | tr '/' '-')"
-    local bug_file="${bugs_dir}/BUG-overwatch-stale-worktree-${safe_id}-${timestamp}.md"
 
-    mkdir -p "${bugs_dir}" 2>/dev/null || {
-        echo "check-stale-worktrees: cannot create bugs dir: ${bugs_dir}" >&2
-        return 1
-    }
-
-    cat > "${bug_file}" <<EOF
-# Bug: Stale Worktree With Commits — ${task_id:-unknown}
-
+    overwatch_deposit_bug check-stale-worktrees "${project_name}" \
+        "$(_csw_bug_slug "${task_id}")" \
+        "Stale worktree of finished task ${task_id} carries commits" <<EOF
 ## Status
 open
 
@@ -405,7 +401,7 @@ overwatch/check-stale-worktrees
 ${timestamp}
 
 ## Task
-${task_id:-unknown}
+${task_id}
 
 ## Worktree Path
 ${wt_path}
@@ -419,9 +415,6 @@ WONT-DO) but which carries local commits not reachable from any other branch. Th
 cannot be auto-pruned. Manual inspection is required to determine whether the
 commits should be merged, abandoned, or preserved.
 EOF
-
-    echo "${bug_file}"
-    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -494,7 +487,6 @@ overwatch_check_stale_worktrees() {
 
     local project_name="${OVERWATCH_PROJECT}"
     local project_root="${KANBAN_ROOT}/projects/${project_name}"
-    local bugs_dir="${project_root}/bugs"
     local tasks_root="${_CSW_TASKS_ROOT}"
     local dev_tree="${_CSW_DEV_TREE:-}"
     local branch_prefix="${_CSW_BRANCH_PREFIX:-}"
@@ -610,22 +602,36 @@ overwatch_check_stale_worktrees() {
             # Carries commits — bug-file, never auto-prune.
             echo "check-stale-worktrees: worktree ${wt_path}: carries commits; bug-filing" >&2
             if (( dry_run == 0 )); then
-                local bug_path
-                bug_path="$(_csw_bug_file "${task_id}" "${wt_path}" \
-                    "Stale worktree for finished task ${task_id} carries local commits; manual inspection required" \
-                    "${bugs_dir}")" || {
-                    echo "check-stale-worktrees: bug-file write failed for ${wt_path}" >&2
-                    continue
-                }
-                overwatch_log_action \
-                    "check-stale-worktrees" \
-                    "${wt_path}" \
-                    "bug-filed:branch-carrying-worktree" \
-                    "none" \
-                    "Stale worktree for finished task ${task_id} carries commits; bug filed at ${bug_path}" \
-                || true
-                bug_count=$(( bug_count + 1 ))
-                echo "check-stale-worktrees: bug filed at ${bug_path}" >&2
+                local bug_path="" deposit_rc=0
+                bug_path="$(_csw_file_bug "${project_name}" "${task_id}" "${wt_path}" \
+                    "Stale worktree for finished task ${task_id} carries local commits; manual inspection required")" \
+                    || deposit_rc=$?
+                case "${deposit_rc}" in
+                    0)
+                        overwatch_log_action \
+                            "check-stale-worktrees" \
+                            "${wt_path}" \
+                            "bug-filed:branch-carrying-worktree" \
+                            "none" \
+                            "Stale worktree for finished task ${task_id} carries commits; bug filed at ${bug_path}" \
+                        || true
+                        bug_count=$(( bug_count + 1 ))
+                        echo "check-stale-worktrees: bug filed at ${bug_path}" >&2
+                        ;;
+                    2)
+                        overwatch_log_action \
+                            "check-stale-worktrees" \
+                            "${wt_path}" \
+                            "bug-filed:branch-carrying-worktree" \
+                            "none" \
+                            "Stale worktree for finished task ${task_id} carries commits; already filed as ${bug_path}, not filed again" \
+                        || true
+                        echo "check-stale-worktrees: already filed as ${bug_path}; not filed again" >&2
+                        ;;
+                    *)
+                        echo "check-stale-worktrees: bug report for ${wt_path} not filed (see the intake message above)" >&2
+                        ;;
+                esac
             else
                 echo "check-stale-worktrees: [dry-run] would bug-file worktree ${wt_path} (carries commits)" >&2
                 overwatch_log_action \

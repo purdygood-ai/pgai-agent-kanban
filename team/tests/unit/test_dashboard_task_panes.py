@@ -54,8 +54,9 @@ _LONG_REASON = "A reason long enough that the status window has to cut it short 
 _NOW = 1_800_000_000
 
 
-def _task(tasks: pathlib.Path, name: str, status_body: str, role: str | None = None,
-          age: int | None = None) -> pathlib.Path:
+def _task(
+    tasks: pathlib.Path, name: str, status_body: str, role: str | None = None, age: int | None = None
+) -> pathlib.Path:
     """Write tasks/<name>/status.md (and README.md when *role* is given)."""
     folder = tasks / name
     folder.mkdir(parents=True)
@@ -72,9 +73,14 @@ def _task(tasks: pathlib.Path, name: str, status_body: str, role: str | None = N
 def blocked_tasks(tmp_path: pathlib.Path) -> pathlib.Path:
     """A tasks directory with three BLOCKED tasks among others and non-task folders."""
     tasks = tmp_path / "tasks"
-    _task(tasks, "CODER-001-long", "## State\nBLOCKED\n\n"
-          f"## Blocked Reason\n{_LONG_REASON}\nline two\nline three\nline four\n\n"
-          "## Next Recommended Step\nFix the thing\nrerun\n", age=7500)
+    _task(
+        tasks,
+        "CODER-001-long",
+        "## State\nBLOCKED\n\n"
+        f"## Blocked Reason\n{_LONG_REASON}\nline two\nline three\nline four\n\n"
+        "## Next Recommended Step\nFix the thing\nrerun\n",
+        age=7500,
+    )
     _task(tasks, "CODER-002-blockers", "## State\nblocked\n\n## Blockers\nshort blocker\n", age=42)
     _task(tasks, "CODER-003-working", "## State\nWORKING\n", age=10)
     _task(tasks, "WRITER-004-bare", "## State\nBLOCKED\n", age=600)
@@ -158,8 +164,7 @@ def test_attention_renders_since_reason_and_next_step_blocks(blocked_tasks: path
 
 
 def test_attention_in_colour_uses_the_arrow_glyph_and_escapes(blocked_tasks: pathlib.Path) -> None:
-    lines = list(attention_blocked_lines(
-        str(blocked_tasks), True, RESET, RED, BOLD, DIM, CYAN, YELLOW, now=_NOW))
+    lines = list(attention_blocked_lines(str(blocked_tasks), True, RESET, RED, BOLD, DIM, CYAN, YELLOW, now=_NOW))
     since = _since(blocked_tasks / "CODER-001-long" / "status.md")
     assert lines[:3] == [
         f"▶ {RED}{BOLD}CODER-001-long{RESET}",
@@ -171,7 +176,8 @@ def test_attention_in_colour_uses_the_arrow_glyph_and_escapes(blocked_tasks: pat
 
 @pytest.mark.parametrize("which", ["empty", "missing"])
 def test_attention_shows_the_running_normally_line_without_blocked_tasks(
-    tmp_path: pathlib.Path, which: str,
+    tmp_path: pathlib.Path,
+    which: str,
 ) -> None:
     tasks = tmp_path / "tasks"
     if which == "empty":
@@ -183,7 +189,8 @@ def test_attention_shows_the_running_normally_line_without_blocked_tasks(
 
 
 def test_blocked_scans_given_an_empty_path_render_the_empty_state_not_the_cwd(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cwd = tmp_path / "caller-cwd"
     _task(cwd, "CODER-20260101-001-not-a-real-task", "## State\nBLOCKED\n\n## Blockers\ncwd folder\n")
@@ -228,12 +235,8 @@ def test_document_pipeline_counts_each_role(pipeline_tasks: pathlib.Path) -> Non
 
 
 def test_document_pipeline_in_colour_colours_each_code(pipeline_tasks: pathlib.Path) -> None:
-    lines = list(document_pipeline_lines(
-        str(pipeline_tasks), True, CYAN, GREEN, YELLOW, RED, DIM, RESET))
-    assert lines[0] == (
-        f"{CYAN}writer: {RESET}{GREEN}1/3{RESET}  {YELLOW}1W{RESET} {RED}1B{RESET}"
-        f"{' ' * 15}33%"
-    )
+    lines = list(document_pipeline_lines(str(pipeline_tasks), True, CYAN, GREEN, YELLOW, RED, DIM, RESET))
+    assert lines[0] == (f"{CYAN}writer: {RESET}{GREEN}1/3{RESET}  {YELLOW}1W{RESET} {RED}1B{RESET}" f"{' ' * 15}33%")
     assert lines[1] == f"{CYAN}tester: {RESET}{GREEN}0/1{RESET}  {DIM}1Wa{RESET}{' ' * 18}0%"
 
 
@@ -251,7 +254,9 @@ def test_document_pipeline_shows_zero_of_zero_without_tasks(tmp_path: pathlib.Pa
 
 @pytest.mark.parametrize("tasks_path", ["", "   "], ids=["empty", "blank"])
 def test_document_pipeline_given_an_empty_path_counts_nothing_from_the_cwd(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, tasks_path: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tasks_path: str,
 ) -> None:
     cwd = tmp_path / "caller-cwd"
     _task(cwd, "WRITER-20260101-002-doc-task", "## State\nWORKING\n", role="WRITER")
@@ -270,28 +275,57 @@ def test_document_pipeline_given_an_empty_path_counts_nothing_from_the_cwd(
 
 
 def _pp_run_ops(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    env = build_scrubbed_env(home_dir=tmp_path / "home",
-                             extra_path_dirs=[pathlib.Path(sys.executable).parent])
+    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_path_dirs=[pathlib.Path(sys.executable).parent])
     return subprocess.run(
         ["bash", str(_PP_RUN_OPS), _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
 def test_cli_verbs_print_the_lines_the_functions_yield(
-    tmp_path: pathlib.Path, blocked_tasks: pathlib.Path,
+    tmp_path: pathlib.Path,
+    blocked_tasks: pathlib.Path,
 ) -> None:
-    window = _pp_run_ops(tmp_path, "status-window-blocked", str(blocked_tasks),
-                         "--reset", RESET, "--red", RED, "--dim", DIM, "--bold", BOLD)
+    window = _pp_run_ops(
+        tmp_path,
+        "status-window-blocked",
+        str(blocked_tasks),
+        "--reset",
+        RESET,
+        "--red",
+        RED,
+        "--dim",
+        DIM,
+        "--bold",
+        BOLD,
+    )
     assert window.returncode == 0, window.stderr
     assert window.stdout == "".join(
-        f"{line}\n" for line in status_window_blocked_lines(str(blocked_tasks), RESET, RED, DIM, BOLD))
+        f"{line}\n" for line in status_window_blocked_lines(str(blocked_tasks), RESET, RED, DIM, BOLD)
+    )
 
-    pipeline = _pp_run_ops(tmp_path, "document-pipeline", str(blocked_tasks), "--use-color", "TRUE",
-                           "--label", CYAN, "--dim", DIM, "--reset", RESET)
+    pipeline = _pp_run_ops(
+        tmp_path,
+        "document-pipeline",
+        str(blocked_tasks),
+        "--use-color",
+        "TRUE",
+        "--label",
+        CYAN,
+        "--dim",
+        DIM,
+        "--reset",
+        RESET,
+    )
     assert pipeline.returncode == 0, pipeline.stderr
     assert pipeline.stdout == "".join(
-        f"{line}\n" for line in document_pipeline_lines(str(blocked_tasks), True, CYAN, dim=DIM, reset=RESET))
+        f"{line}\n" for line in document_pipeline_lines(str(blocked_tasks), True, CYAN, dim=DIM, reset=RESET)
+    )
 
     attention = _pp_run_ops(tmp_path, "attention-blocked", str(tmp_path / "absent"), "--use-color", "false")
     assert attention.returncode == 0, attention.stderr
@@ -324,7 +358,12 @@ def _pane(tmp_path: pathlib.Path, script: str, *args: str) -> subprocess.Complet
     )
     return subprocess.run(
         ["bash", str(_DASHBOARD / script), "--kanban-root", str(root), *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
+        check=False,
     )
 
 

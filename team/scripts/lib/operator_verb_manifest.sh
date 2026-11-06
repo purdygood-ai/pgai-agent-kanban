@@ -41,12 +41,17 @@
 #   ovm_verb_names
 #   ovm_verb_flags halt
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_OVM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _OVM_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # ovm_manifest_path
 # ---------------------------------------------------------------------------
 ovm_manifest_path() {
   local lib_dir
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  lib_dir="${_OVM_LIB_DIR}"
   # lib/ -> scripts/ -> team/ -> config/operator_verbs.manifest
   echo "${lib_dir}/../../config/operator_verbs.manifest"
 }

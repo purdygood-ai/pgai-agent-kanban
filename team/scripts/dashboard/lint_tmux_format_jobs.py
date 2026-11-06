@@ -62,9 +62,7 @@ _DEFAULT_SCAN_DIR = _TEAM_DIR / "scripts" / "dashboard"
 # A tmux invocation that sets an option, or a pane title. The subcommand
 # must be followed by whitespace so set-hook / set-environment / set-buffer
 # are not mistaken for set.
-_OPTION_SETTER_RE = re.compile(
-    r"\btmux\b.*?\b(?:set-option|set-window-option|setw|set)(?=\s)", re.DOTALL
-)
+_OPTION_SETTER_RE = re.compile(r"\btmux\b.*?\b(?:set-option|set-window-option|setw|set)(?=\s)", re.DOTALL)
 _PANE_TITLE_RE = re.compile(r"\btmux\b.*?\bselect-pane\b.*?\s-T\b", re.DOTALL)
 _FORMAT_JOB = "#("
 
@@ -124,7 +122,7 @@ def _display(path: pathlib.Path) -> str:
         return str(path)
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the tmux format-job lint over the dashboard scripts.
 
     Exit codes: 0 no tmux option set by a scanned script runs a ``#()`` job;
@@ -141,9 +139,12 @@ def main(argv: "list[str] | None" = None) -> int:
         ),
     )
     parser.add_argument(
-        "--path", action="append", default=[], metavar="PATH",
+        "--path",
+        action="append",
+        default=[],
+        metavar="PATH",
         help="a shell script, or a directory scanned for *.sh recursively; "
-             "repeatable (default: team/scripts/dashboard/)",
+        "repeatable (default: team/scripts/dashboard/)",
     )
     args = parser.parse_args(argv)
 
@@ -168,8 +169,7 @@ def main(argv: "list[str] | None" = None) -> int:
         return 0
 
     for script, number, line in findings:
-        print(f"lint_tmux_format_jobs: {_display(script)}:{number}: #() job in a tmux option: {line}",
-              file=sys.stderr)
+        print(f"lint_tmux_format_jobs: {_display(script)}:{number}: #() job in a tmux option: {line}", file=sys.stderr)
 
     first_script, first_line, _ = findings[0]
     # CONVERT (team/SOP-core.md "Blocking Severity"): a #() job in a tmux

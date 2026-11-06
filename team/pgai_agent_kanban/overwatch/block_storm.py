@@ -93,7 +93,7 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 # Run by file path or loaded from a file outside its package, this module
 # has no parent package and only its own directory is on sys.path; put its
@@ -161,8 +161,8 @@ class HumanGatedBlock:
 
     task_id: str
     status_file: Path
-    reason_code: Optional[str]
-    blocked_at: Optional[datetime.datetime]
+    reason_code: str | None
+    blocked_at: datetime.datetime | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -177,11 +177,11 @@ class GateDecision:
 
     verdict: str
     count: int
-    reason_code: Optional[str]
+    reason_code: str | None
     why: str
     tasks: tuple[str, ...] = ()
     remedy: str = NONE_VALUE
-    lifts_at: Optional[datetime.datetime] = None
+    lifts_at: datetime.datetime | None = None
 
     @property
     def systemic(self) -> bool:
@@ -227,9 +227,9 @@ def _classify(task_id: str, status_file: Path, status_text: str) -> HumanGatedBl
 
 
 def scan_human_gated_blocks(
-    queue_dir: "Path | str",
-    tasks_root: "Path | str",
-    id_pattern: Optional[str] = None,
+    queue_dir: Path | str,
+    tasks_root: Path | str,
+    id_pattern: str | None = None,
 ) -> list[HumanGatedBlock]:
     """Return every human-gated block across the project's agent queues.
 
@@ -277,7 +277,7 @@ def scan_human_gated_blocks(
 # ---------------------------------------------------------------------------
 
 
-def parse_systemic_codes(value: Optional[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def parse_systemic_codes(value: str | None) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Parse a systemic-list value into ``(codes, unknown)``.
 
     Blank or None gives :data:`DEFAULT_SYSTEMIC_REASON_CODES`; ``none`` (any
@@ -306,7 +306,7 @@ def parse_systemic_codes(value: Optional[str]) -> tuple[tuple[str, ...], tuple[s
     return tuple(codes), tuple(unknown)
 
 
-def parse_window(value: Optional[str], default: int = DEFAULT_STORM_WINDOW_S) -> tuple[int, Optional[str]]:
+def parse_window(value: str | None, default: int = DEFAULT_STORM_WINDOW_S) -> tuple[int, str | None]:
     """Parse a whole-seconds value into ``(seconds, rejected)``.
 
     Blank or None gives *default* (:data:`DEFAULT_STORM_WINDOW_S` unless
@@ -333,12 +333,12 @@ class _Hold:
     only resolution ends it), and when it lifts with the cap applied."""
 
     start: datetime.datetime
-    natural_end: Optional[datetime.datetime]
+    natural_end: datetime.datetime | None
     end: datetime.datetime
 
 
 def _holds(
-    intervals: Iterable[tuple[datetime.datetime, Optional[datetime.datetime]]],
+    intervals: Iterable[tuple[datetime.datetime, datetime.datetime | None]],
     cap: datetime.timedelta,
 ) -> list[_Hold]:
     """Merge the spans in which blocks call for a hold into capped holds.
@@ -362,10 +362,10 @@ def _holds(
 
 
 def _held_until(
-    intervals: Iterable[tuple[datetime.datetime, Optional[datetime.datetime]]],
+    intervals: Iterable[tuple[datetime.datetime, datetime.datetime | None]],
     cap_s: int,
     now: datetime.datetime,
-) -> Optional[datetime.datetime]:
+) -> datetime.datetime | None:
     """When the hold covering *now* lifts, or None when *now* is not held."""
     for hold in _holds(intervals, datetime.timedelta(seconds=cap_s)):
         if hold.start <= now <= hold.end:
@@ -375,7 +375,7 @@ def _held_until(
 
 def _storm_intervals(
     times: Sequence[datetime.datetime], window_s: int
-) -> list[tuple[datetime.datetime, Optional[datetime.datetime]]]:
+) -> list[tuple[datetime.datetime, datetime.datetime | None]]:
     """The spans in which two of *times* lie within *window_s* back from then.
 
     Two blocks at ``a <= b`` are both inside the window from ``b`` until
@@ -383,11 +383,7 @@ def _storm_intervals(
     """
     window = datetime.timedelta(seconds=window_s)
     ordered = sorted(times)
-    return [
-        (later, earlier + window)
-        for earlier, later in zip(ordered, ordered[1:])
-        if later - earlier <= window
-    ]
+    return [(later, earlier + window) for earlier, later in zip(ordered, ordered[1:]) if later - earlier <= window]
 
 
 def _remedy(blocks: Iterable[HumanGatedBlock]) -> str:
@@ -406,7 +402,7 @@ def decide(
     window_s: int = DEFAULT_STORM_WINDOW_S,
     systemic_codes: Sequence[str] = DEFAULT_SYSTEMIC_REASON_CODES,
     cap_s: int = DEFAULT_HOLD_CAP_S,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> GateDecision:
     """Decide whether *blocks* hold the project's task dispatch at *now*.
 
@@ -434,7 +430,7 @@ def decide(
     if count == 0:
         return GateDecision(VERDICT_NONE, 0, None, "no human-gated block")
     if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
     window = datetime.timedelta(seconds=window_s)
 
     # Timed blocks per reason code; a block cannot have happened after now.
@@ -565,10 +561,7 @@ def _parser() -> argparse.ArgumentParser:
     p_decide.add_argument(
         "--hold-cap",
         default="",
-        help=(
-            "longest hold in whole seconds ([wake] block_hold_cap); "
-            f"blank means {DEFAULT_HOLD_CAP_S}"
-        ),
+        help=("longest hold in whole seconds ([wake] block_hold_cap); " f"blank means {DEFAULT_HOLD_CAP_S}"),
     )
     p_decide.add_argument(
         "--now",
@@ -589,14 +582,13 @@ def _parser() -> argparse.ArgumentParser:
         "defaults",
         help="print the default storm window, hold cap and systemic list",
         description=(
-            "Print window=SECONDS, hold_cap=SECONDS and systemic_codes=LIST, "
-            "the values a blank setting means."
+            "Print window=SECONDS, hold_cap=SECONDS and systemic_codes=LIST, " "the values a blank setting means."
         ),
     )
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the block-storm CLI.
 
     ``defaults`` prints the default ``window``, ``hold_cap`` and

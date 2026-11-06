@@ -95,7 +95,8 @@ import os
 import pathlib
 import re
 import sys
-from typing import Iterable, Mapping, Optional, Union
+from typing import Union
+from collections.abc import Iterable, Mapping
 
 # Run by file path (``python3 .../bundle_items.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -260,10 +261,7 @@ def bundle_listings(requirements_dir: PathLike) -> dict[str, list[str]]:
     """Map each item file name a bundle lists to the statuses of the bundles
     that list it, in file-name order of the bundles (see
     :func:`listing_bundles`, which also keeps each bundle's path)."""
-    return {
-        name: [bundle.status for bundle in bundles]
-        for name, bundles in listing_bundles(requirements_dir).items()
-    }
+    return {name: [bundle.status for bundle in bundles] for name, bundles in listing_bundles(requirements_dir).items()}
 
 
 def carried_names_from(listings: Mapping[str, list[str]]) -> frozenset[str]:
@@ -304,7 +302,7 @@ def _item_status(path: pathlib.Path) -> str:
     return canonical_state(tokens[0]) if tokens else ""
 
 
-def _item_file(project_root: pathlib.Path, listed_path: str) -> Optional[pathlib.Path]:
+def _item_file(project_root: pathlib.Path, listed_path: str) -> pathlib.Path | None:
     """The live file of a listed item: by name in the intake directories
     beside the bundle, else the path as listed; ``None`` when neither exists."""
     name = pathlib.PurePath(listed_path).name
@@ -373,11 +371,11 @@ class SlotAnswer:
         stuck:   Every stuck bundle of the type, in file-name order.
     """
 
-    pending: Optional[pathlib.Path]
+    pending: pathlib.Path | None
     stuck: tuple[StuckBundle, ...] = ()
 
 
-def _read_active_rc(release_state: pathlib.Path) -> Optional[str]:
+def _read_active_rc(release_state: pathlib.Path) -> str | None:
     """The validated ``## Active RC``; ``none`` when the file is absent;
     ``None`` (unknown) when it fails validation or cannot be read."""
     try:
@@ -404,9 +402,7 @@ def bundle_pm_task(text: str) -> str:
     return pm_task
 
 
-def _stuck(
-    path: pathlib.Path, text: str, tasks_dir: pathlib.Path, active_rc: Optional[str]
-) -> Optional[StuckBundle]:
+def _stuck(path: pathlib.Path, text: str, tasks_dir: pathlib.Path, active_rc: str | None) -> StuckBundle | None:
     """The :class:`StuckBundle` for a ``running`` bundle, or ``None`` when it
     may still ship (or when anything needed to tell is unknown)."""
     pm_task = bundle_pm_task(text)
@@ -429,8 +425,8 @@ def _stuck(
 def pending_bundle(
     requirements_dir: PathLike,
     type_slug: str,
-    tasks_dir: Optional[PathLike] = None,
-    release_state: Optional[PathLike] = None,
+    tasks_dir: PathLike | None = None,
+    release_state: PathLike | None = None,
 ) -> SlotAnswer:
     """Find the ``*-<type_slug>-bundle-*.md`` bundle holding discovery's slot.
 
@@ -460,9 +456,9 @@ def pending_bundle(
     state_file = pathlib.Path(release_state) if release_state else root.parent / "release-state.md"
     if not root.is_dir():
         return SlotAnswer(None)
-    pending: Optional[pathlib.Path] = None
+    pending: pathlib.Path | None = None
     stuck: list[StuckBundle] = []
-    active_rc: Optional[str] = None
+    active_rc: str | None = None
     active_rc_read = False
     for bundle in sorted(root.glob(f"*-{type_slug}-bundle-*.md")):
         if is_superseded_name(bundle.name) or not bundle.is_file():
@@ -493,7 +489,7 @@ _USAGE = {
 _ARITY = {"pending": (2, 4), "running-items": (1, 1)}
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
@@ -502,12 +498,16 @@ def main(argv: Optional[list] = None) -> int:
     command, rest = args[0], args[1:]
     arity = _ARITY.get(command)
     if arity is None or not arity[0] <= len(rest) <= arity[1]:
-        print("usage: python3 -m pgai_agent_kanban.lib.bundle_items "
-              + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} ..."), file=sys.stderr)
+        print(
+            "usage: python3 -m pgai_agent_kanban.lib.bundle_items "
+            + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} ..."),
+            file=sys.stderr,
+        )
         return 2
     if command == "pending":
         answer = pending_bundle(
-            rest[0], rest[1],
+            rest[0],
+            rest[1],
             rest[2] if len(rest) > 2 else None,
             rest[3] if len(rest) > 3 else None,
         )

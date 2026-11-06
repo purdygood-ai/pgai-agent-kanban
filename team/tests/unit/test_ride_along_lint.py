@@ -48,7 +48,7 @@ _DELIVERABLES = (
 )
 
 
-def _root(tmp_path: pathlib.Path, mixing: "str | None" = "ride-along", max_count: "str | None" = None) -> pathlib.Path:
+def _root(tmp_path: pathlib.Path, mixing: str | None = "ride-along", max_count: str | None = None) -> pathlib.Path:
     root = tmp_path / "root"
     project_root = root / "projects" / _PROJECT
     for sub in ("bugs", "requirements", "tasks/queues"):
@@ -83,7 +83,7 @@ def _bug(root: pathlib.Path, stem: str, severity: str = "low", status: str = "op
     return path
 
 
-def _lint(root: pathlib.Path, entries, requirement: "pathlib.Path | str | None"):
+def _lint(root: pathlib.Path, entries, requirement: pathlib.Path | str | None):
     return lint.lint_ride_along(entries, kanban_root=root, project=_PROJECT, requirements_path=requirement)
 
 
@@ -100,7 +100,9 @@ def test_three_eligible_bugs_are_accepted_in_plan_order(tmp_path) -> None:
 
     assert result.ok, lint.describe(result.findings)
     assert [bug.path.name for bug in result.accepted] == [
-        "BUG-9801-dashboard-glyph.md", "BUG-9802-help-typo.md", "BUG-9803-log-prefix.md",
+        "BUG-9801-dashboard-glyph.md",
+        "BUG-9802-help-typo.md",
+        "BUG-9803-log-prefix.md",
     ]
 
 

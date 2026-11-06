@@ -120,9 +120,7 @@ def _explain(proc: subprocess.CompletedProcess) -> str:
     return f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"
 
 
-def test_lib_readers_read_release_state_from_an_install_root(
-    tmp_path: pathlib.Path, kanban_root: pathlib.Path
-) -> None:
+def test_lib_readers_read_release_state_from_an_install_root(tmp_path: pathlib.Path, kanban_root: pathlib.Path) -> None:
     lib = kanban_root / "scripts" / "lib"
     proj = kanban_root / "projects" / _project(kanban_root)
     other = kanban_root / "projects" / _OTHER

@@ -105,9 +105,11 @@ def _materialize(plan: dict, tmp_path: pathlib.Path, extra_env=None):
         },
     )
     result = subprocess.run(
-        [sys.executable, str(_MATERIALIZE_SCRIPT), str(plan_path),
-         "--team-root", str(team_root), "--owner", "CLAUDE"],
-        capture_output=True, text=True, env=env, timeout=120,
+        [sys.executable, str(_MATERIALIZE_SCRIPT), str(plan_path), "--team-root", str(team_root), "--owner", "CLAUDE"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
     )
     return result, team_root
 
@@ -121,9 +123,10 @@ def _task_dirs(team_root: pathlib.Path) -> list:
 
 def _prereqs(task_dir: pathlib.Path) -> list:
     """The task IDs a materialized README lists under ## Prerequisites."""
-    body = read_section(
-        (task_dir / "README.md").read_text(encoding="utf-8"), "Prerequisites", end_at_subheading=True
-    ) or ""
+    body = (
+        read_section((task_dir / "README.md").read_text(encoding="utf-8"), "Prerequisites", end_at_subheading=True)
+        or ""
+    )
     return [line.strip()[2:].strip() for line in body.splitlines() if line.strip().startswith("- ")]
 
 
@@ -134,7 +137,7 @@ def _only(dirs: list, role: str, contains: str = "") -> pathlib.Path:
 
 
 def _refusal(result) -> dict:
-    parsed = parse_error_contract(result.stderr[result.stderr.find("error:"):])
+    parsed = parse_error_contract(result.stderr[result.stderr.find("error:") :])
     assert parsed is not None, f"no dual-channel refusal on stderr:\n{result.stderr}"
     return parsed
 
@@ -156,11 +159,19 @@ def _assert_wrote_nothing(result, team_root: pathlib.Path) -> None:
 
 def _git(repo: pathlib.Path, *args: str) -> None:
     subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-        env=build_scrubbed_env(home_dir=repo.parent / "githome", extra_env={
-            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
-        }),
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=build_scrubbed_env(
+            home_dir=repo.parent / "githome",
+            extra_env={
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.com",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.com",
+            },
+        ),
     )
 
 
@@ -230,8 +241,7 @@ def test_explicit_release_version_materializes_and_names_the_bookends(tmp_path):
 
 
 def test_workflow_without_release_bookends_reads_absent_version_as_none(tmp_path):
-    plan = _release_plan([_plan_task(1, "verify-the-implementation", role="TESTER")],
-                         workflow_type="testing-only")
+    plan = _release_plan([_plan_task(1, "verify-the-implementation", role="TESTER")], workflow_type="testing-only")
     del plan["target_version"]
 
     result, team_root = _materialize(plan, tmp_path)
@@ -242,8 +252,9 @@ def test_workflow_without_release_bookends_reads_absent_version_as_none(tmp_path
 
 
 def test_auto_is_refused_even_without_release_bookends(tmp_path):
-    plan = _release_plan([_plan_task(1, "verify-the-implementation", role="TESTER")],
-                         target_version="auto", workflow_type="testing-only")
+    plan = _release_plan(
+        [_plan_task(1, "verify-the-implementation", role="TESTER")], target_version="auto", workflow_type="testing-only"
+    )
 
     result, team_root = _materialize(plan, tmp_path)
 
@@ -287,10 +298,12 @@ def test_environment_dev_tree_is_the_fallback_when_the_project_names_none(tmp_pa
 
 
 def test_pm_emitted_tester_leaves_one_tester_that_does_not_wait_on_itself(tmp_path):
-    plan = _release_plan([
-        _plan_task(1, "implement-thing"),
-        _plan_task(2, "verify-the-work", role="TESTER"),
-    ])
+    plan = _release_plan(
+        [
+            _plan_task(1, "implement-thing"),
+            _plan_task(2, "verify-the-work", role="TESTER"),
+        ]
+    )
 
     result, team_root = _materialize(plan, tmp_path)
 
@@ -303,17 +316,19 @@ def test_pm_emitted_tester_leaves_one_tester_that_does_not_wait_on_itself(tmp_pa
     assert _prereqs(tester) == [coder.name], _prereqs(tester)
     kept = {d.name for d in dirs}
     assert tester.name in _prereqs(release)
-    assert set(_prereqs(release)) <= kept, (
-        f"CM-release lists a task that was not written: {set(_prereqs(release)) - kept}"
-    )
+    assert (
+        set(_prereqs(release)) <= kept
+    ), f"CM-release lists a task that was not written: {set(_prereqs(release)) - kept}"
     assert release.name not in _prereqs(release)
 
 
 def test_pm_emitted_release_task_leaves_one_release_that_does_not_wait_on_itself(tmp_path):
-    plan = _release_plan([
-        _plan_task(1, "implement-thing"),
-        _plan_task(2, "ship-the-release", role="CM"),
-    ])
+    plan = _release_plan(
+        [
+            _plan_task(1, "implement-thing"),
+            _plan_task(2, "ship-the-release", role="CM"),
+        ]
+    )
 
     result, team_root = _materialize(plan, tmp_path)
 
@@ -335,10 +350,12 @@ def test_pm_emitted_release_task_leaves_one_release_that_does_not_wait_on_itself
 
 
 def test_two_task_depends_on_cycle_is_refused_naming_both_tasks(tmp_path):
-    plan = _release_plan([
-        _plan_task(1, "first-half", depends_on=[2]),
-        _plan_task(2, "second-half", depends_on=[1]),
-    ])
+    plan = _release_plan(
+        [
+            _plan_task(1, "first-half", depends_on=[2]),
+            _plan_task(2, "second-half", depends_on=[1]),
+        ]
+    )
 
     result, team_root = _materialize(plan, tmp_path)
 
@@ -352,10 +369,12 @@ def test_two_task_depends_on_cycle_is_refused_naming_both_tasks(tmp_path):
 
 
 def test_depends_on_naming_a_missing_sequence_is_refused(tmp_path):
-    plan = _release_plan([
-        _plan_task(1, "implement-thing"),
-        _plan_task(2, "follow-up", depends_on=[7]),
-    ])
+    plan = _release_plan(
+        [
+            _plan_task(1, "implement-thing"),
+            _plan_task(2, "follow-up", depends_on=[7]),
+        ]
+    )
 
     result, team_root = _materialize(plan, tmp_path)
 
@@ -379,10 +398,12 @@ def test_task_depending_on_itself_is_refused(tmp_path):
 
 
 def test_quoted_sequence_numbers_still_resolve(tmp_path):
-    plan = _release_plan([
-        _plan_task(1, "implement-thing"),
-        _plan_task(2, "follow-up", depends_on=["1"]),
-    ])
+    plan = _release_plan(
+        [
+            _plan_task(1, "implement-thing"),
+            _plan_task(2, "follow-up", depends_on=["1"]),
+        ]
+    )
 
     result, team_root = _materialize(plan, tmp_path)
 
@@ -398,8 +419,12 @@ def test_quoted_sequence_numbers_still_resolve(tmp_path):
 
 
 def _t(task_id, prereqs=(), synthetic=False, **extra):
-    task = {"task_id": task_id, "role": task_id.split("-")[0], "slug": task_id.lower(),
-            "prerequisite_ids": list(prereqs)}
+    task = {
+        "task_id": task_id,
+        "role": task_id.split("-")[0],
+        "slug": task_id.lower(),
+        "prerequisite_ids": list(prereqs),
+    }
     if synthetic:
         task["_synthetic"] = True
     task.update(extra)
@@ -407,14 +432,22 @@ def _t(task_id, prereqs=(), synthetic=False, **extra):
 
 
 def test_validate_task_graph_accepts_a_sound_graph():
-    tasks = [_t("CM-open"), _t("CODER-a", ["CM-open"]), _t("TESTER-v", ["CODER-a"]),
-             _t("CM-rel", ["CODER-a", "TESTER-v"])]
+    tasks = [
+        _t("CM-open"),
+        _t("CODER-a", ["CM-open"]),
+        _t("TESTER-v", ["CODER-a"]),
+        _t("CM-rel", ["CODER-a", "TESTER-v"]),
+    ]
     assert pm.validate_task_graph(tasks) == []
 
 
 def test_validate_task_graph_reports_only_the_cycle_members():
-    tasks = [_t("CODER-a", ["CODER-c"]), _t("CODER-b", ["CODER-a"]), _t("CODER-c", ["CODER-b"]),
-             _t("TESTER-v", ["CODER-a"])]
+    tasks = [
+        _t("CODER-a", ["CODER-c"]),
+        _t("CODER-b", ["CODER-a"]),
+        _t("CODER-c", ["CODER-b"]),
+        _t("TESTER-v", ["CODER-a"]),
+    ]
     problems = pm.validate_task_graph(tasks)
     assert len(problems) == 1, problems
     assert "CODER-a, CODER-b, CODER-c" in problems[0]
@@ -426,8 +459,10 @@ def test_validate_task_graph_ignores_prerequisites_outside_the_batch():
 
 
 def test_resolve_prerequisites_returns_unresolvable_entries():
-    tasks = [{"sequence": 1, "task_id": "CODER-a", "depends_on": [9]},
-             {"sequence": 2, "task_id": "CODER-b", "depends_on": [1]}]
+    tasks = [
+        {"sequence": 1, "task_id": "CODER-a", "depends_on": [9]},
+        {"sequence": 2, "task_id": "CODER-b", "depends_on": [1]},
+    ]
     assert pm.resolve_prerequisites(tasks) == [("CODER-a", 9)]
     assert tasks[1]["prerequisite_ids"] == ["CODER-a"]
 
@@ -438,10 +473,13 @@ def test_dedupe_drops_removed_closer_duplicates_from_synthetic_closers():
         _t("CODER-a", ["CM-open"]),
         _t("TESTER-pm", ["CM-open"]),
         _t("CM-pm-release", ["CM-open"], slug="ship-the-release"),
-        _t("TESTER-v", ["CODER-a", "TESTER-pm", "CM-pm-release"], synthetic=True,
-           inputs=["CODER-a", "TESTER-pm", "CM-pm-release"]),
-        _t("CM-rel", ["CODER-a", "TESTER-pm", "CM-pm-release", "TESTER-v"], synthetic=True,
-           cm_operation="release"),
+        _t(
+            "TESTER-v",
+            ["CODER-a", "TESTER-pm", "CM-pm-release"],
+            synthetic=True,
+            inputs=["CODER-a", "TESTER-pm", "CM-pm-release"],
+        ),
+        _t("CM-rel", ["CODER-a", "TESTER-pm", "CM-pm-release", "TESTER-v"], synthetic=True, cm_operation="release"),
     ]
 
     kept, _, count = pm.dedupe_materialization_tasks(tasks)

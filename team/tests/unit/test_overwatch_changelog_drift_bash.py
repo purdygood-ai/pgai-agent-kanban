@@ -57,6 +57,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="overwatch-changelog-drift-bash")
 
+
 # ---------------------------------------------------------------------------
 # Paths to the check module and related scripts.
 # When pytest is run from team/ (the standard invocation via run-unit-tests.sh),
@@ -70,6 +71,7 @@ _FRESHNESS_PY = "scripts/lint_changelog_freshness.py"
 # ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
+
 
 def _git(repo: pathlib.Path, *args: str) -> str:
     """Run a git command inside repo; return stripped stdout."""
@@ -104,6 +106,7 @@ def _git_head_sha(repo: pathlib.Path) -> str:
 # Fixture builder helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_kanban(
     kanban_root: pathlib.Path,
     project_name: str,
@@ -122,10 +125,7 @@ def _build_kanban(
 
     # Minimal project.cfg
     (proj_dir / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name={project_name}\n"
-        f"dev_tree_path={dev_tree}\n"
-        f"branch_prefix={branch_prefix}\n",
+        "[project]\n" f"project_name={project_name}\n" f"dev_tree_path={dev_tree}\n" f"branch_prefix={branch_prefix}\n",
         encoding="utf-8",
     )
 
@@ -161,9 +161,7 @@ def _write_minimal_changelog(path: pathlib.Path) -> None:
 def _write_stale_changelog(path: pathlib.Path) -> None:
     """Write a CHANGELOG.md that the writer would not produce (stale content)."""
     path.write_text(
-        "# Changelog\n\n"
-        "<!-- STALE: this content is intentionally wrong for testing drift detection -->\n"
-        "\n---\n",
+        "# Changelog\n\n" "<!-- STALE: this content is intentionally wrong for testing drift detection -->\n" "\n---\n",
         encoding="utf-8",
     )
 
@@ -198,32 +196,33 @@ def _build_minimal_dev_tree(
     # We point team/ at the real team directory resolved from this test file.
     # The real changelog_writer.py is at team/pgai_agent_kanban/cm/changelog_writer.py.
     import os
+
     real_team = pathlib.Path(__file__).parent.parent.parent  # team/
     team_link = dev_tree / "team"
     if not team_link.exists():
         os.symlink(str(real_team), str(team_link))
 
 
-def _regenerate_changelog_for_tree(
-    dev_tree: pathlib.Path, bugs_dir: pathlib.Path
-) -> str:
+def _regenerate_changelog_for_tree(dev_tree: pathlib.Path, bugs_dir: pathlib.Path) -> str:
     """Run changelog_writer.py for the given dev tree and return the output."""
     import os
+
     env = dict(os.environ)
     env["PYTHONHASHSEED"] = "0"
     env["PYTHONPATH"] = str(dev_tree / "team")
     result = subprocess.run(
         [
-            "python3", "-m", "pgai_agent_kanban.cm.changelog_writer",
-            str(dev_tree), str(bugs_dir),
+            "python3",
+            "-m",
+            "pgai_agent_kanban.cm.changelog_writer",
+            str(dev_tree),
+            str(bugs_dir),
         ],
         capture_output=True,
         text=True,
         env=env,
     )
-    assert result.returncode == 0, (
-        f"changelog_writer failed:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"changelog_writer failed:\n{result.stderr}"
     return result.stdout
 
 
@@ -263,9 +262,7 @@ def test_drift_detected_regenerates_and_commits(tmp_path: pathlib.Path) -> None:
 
     # Add a bug file to the kanban bugs dir (simulates post-release bug filing).
     (bugs_dir / "BUG-9999-test-drift.md").write_text(
-        "# BUG-9999-test-drift\n\n"
-        "## Status\nopen\n\n"
-        "## Symptom\nTest drift scenario.\n",
+        "# BUG-9999-test-drift\n\n" "## Status\nopen\n\n" "## Symptom\nTest drift scenario.\n",
         encoding="utf-8",
     )
 
@@ -308,8 +305,7 @@ def test_drift_detected_regenerates_and_commits(tmp_path: pathlib.Path) -> None:
 
     result = run_bash(tmp_path, script, timeout=60)
     assert result.returncode == 0, (
-        f"check-changelog-drift should exit 0\n"
-        f"stdout={result.stdout}\nstderr={result.stderr}"
+        f"check-changelog-drift should exit 0\n" f"stdout={result.stdout}\nstderr={result.stderr}"
     )
 
     # A new commit should exist.
@@ -322,15 +318,11 @@ def test_drift_detected_regenerates_and_commits(tmp_path: pathlib.Path) -> None:
     # CHANGELOG.md should now be byte-identical to a fresh regeneration.
     fresh = _regenerate_changelog_for_tree(dev_tree, bugs_dir)
     actual = (dev_tree / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert actual == fresh, (
-        "CHANGELOG.md after fix should be byte-identical to fresh writer output"
-    )
+    assert actual == fresh, "CHANGELOG.md after fix should be byte-identical to fresh writer output"
 
     # Action log should record the fix.
     log = _action_log(proj_dir)
-    assert "changelog-drift-fixed" in log, (
-        f"Expected 'changelog-drift-fixed' in action log, got:\n{log}"
-    )
+    assert "changelog-drift-fixed" in log, f"Expected 'changelog-drift-fixed' in action log, got:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +359,7 @@ def test_no_drift_no_commit(tmp_path: pathlib.Path) -> None:
 
     sha_before = _git_head_sha(dev_tree)
 
-    proj_dir = _build_kanban(
-        kanban_root, project_name, dev_tree, branch_prefix="ai_"
-    )
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, branch_prefix="ai_")
 
     script = textwrap.dedent(f"""\
         set -euo pipefail
@@ -392,19 +382,14 @@ def test_no_drift_no_commit(tmp_path: pathlib.Path) -> None:
 
     result = run_bash(tmp_path, script, timeout=60)
     assert result.returncode == 0, (
-        f"check-changelog-drift should exit 0 with no drift\n"
-        f"stdout={result.stdout}\nstderr={result.stderr}"
+        f"check-changelog-drift should exit 0 with no drift\n" f"stdout={result.stdout}\nstderr={result.stderr}"
     )
 
     sha_after = _git_head_sha(dev_tree)
-    assert sha_after == sha_before, (
-        "No commit should be made when CHANGELOG.md is fresh"
-    )
+    assert sha_after == sha_before, "No commit should be made when CHANGELOG.md is fresh"
 
     log = _action_log(proj_dir)
-    assert "changelog-drift-none" in log, (
-        f"Expected 'changelog-drift-none' in action log, got:\n{log}"
-    )
+    assert "changelog-drift-none" in log, f"Expected 'changelog-drift-none' in action log, got:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +422,10 @@ def test_active_rc_skips(tmp_path: pathlib.Path) -> None:
     sha_before = _git_head_sha(dev_tree)
 
     proj_dir = _build_kanban(
-        kanban_root, project_name, dev_tree, branch_prefix="ai_",
+        kanban_root,
+        project_name,
+        dev_tree,
+        branch_prefix="ai_",
         active_rc="v1.23.10",
     )
 
@@ -467,12 +455,10 @@ def test_active_rc_skips(tmp_path: pathlib.Path) -> None:
     )
 
     sha_after = _git_head_sha(dev_tree)
-    assert sha_after == sha_before, (
-        "No commit should be made when an active RC is present"
-    )
-    assert (dev_tree / "CHANGELOG.md").read_text(encoding="utf-8") == "# STALE\n", (
-        "CHANGELOG.md must be left untouched while an RC is active"
-    )
+    assert sha_after == sha_before, "No commit should be made when an active RC is present"
+    assert (dev_tree / "CHANGELOG.md").read_text(
+        encoding="utf-8"
+    ) == "# STALE\n", "CHANGELOG.md must be left untouched while an RC is active"
     assert "drift detected" in result.stderr
     assert "active RC 'v1.23.10' in progress; nothing was changed" in result.stderr
     assert "changelog-drift-skipped-active-rc" in _action_log(proj_dir)
@@ -508,9 +494,7 @@ def test_non_main_branch_skips(tmp_path: pathlib.Path) -> None:
 
     sha_before = _git_head_sha(dev_tree)
 
-    proj_dir = _build_kanban(
-        kanban_root, project_name, dev_tree, branch_prefix="ai_"
-    )
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, branch_prefix="ai_")
 
     script = textwrap.dedent(f"""\
         set -euo pipefail
@@ -533,14 +517,11 @@ def test_non_main_branch_skips(tmp_path: pathlib.Path) -> None:
 
     result = run_bash(tmp_path, script, timeout=30)
     assert result.returncode == 0, (
-        f"check-changelog-drift should exit 0 on non-main branch\n"
-        f"stdout={result.stdout}\nstderr={result.stderr}"
+        f"check-changelog-drift should exit 0 on non-main branch\n" f"stdout={result.stdout}\nstderr={result.stderr}"
     )
 
     sha_after = _git_head_sha(dev_tree)
-    assert sha_after == sha_before, (
-        "No commit should be made when HEAD is not on the main branch"
-    )
+    assert sha_after == sha_before, "No commit should be made when HEAD is not on the main branch"
 
 
 # ---------------------------------------------------------------------------
@@ -571,9 +552,7 @@ def test_dry_run_detects_drift_without_commit(tmp_path: pathlib.Path) -> None:
 
     sha_before = _git_head_sha(dev_tree)
 
-    proj_dir = _build_kanban(
-        kanban_root, project_name, dev_tree, branch_prefix="ai_"
-    )
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, branch_prefix="ai_")
 
     script = textwrap.dedent(f"""\
         set -euo pipefail
@@ -596,19 +575,14 @@ def test_dry_run_detects_drift_without_commit(tmp_path: pathlib.Path) -> None:
 
     result = run_bash(tmp_path, script, timeout=30)
     assert result.returncode == 0, (
-        f"check-changelog-drift --dry-run should exit 0\n"
-        f"stdout={result.stdout}\nstderr={result.stderr}"
+        f"check-changelog-drift --dry-run should exit 0\n" f"stdout={result.stdout}\nstderr={result.stderr}"
     )
 
     sha_after = _git_head_sha(dev_tree)
-    assert sha_after == sha_before, (
-        "No commit should be made in --dry-run mode"
-    )
+    assert sha_after == sha_before, "No commit should be made in --dry-run mode"
 
     log = _action_log(proj_dir)
-    assert "changelog-drift-dry-run" in log, (
-        f"Expected 'changelog-drift-dry-run' in action log, got:\n{log}"
-    )
+    assert "changelog-drift-dry-run" in log, f"Expected 'changelog-drift-dry-run' in action log, got:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -659,9 +633,7 @@ def test_bash_n_passes(tmp_path: pathlib.Path) -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"bash -n failed for {_CHECK_DRIFT}\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"bash -n failed for {_CHECK_DRIFT}\nstderr={result.stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -733,9 +705,9 @@ def test_repo_lock_held_by_another_holder_skips_and_narrates(tmp_path: pathlib.P
         held.release()
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert _git_head_sha(dev_tree) == sha_before, (
-        f"a commit was made while another holder had the repo lock\nstderr={result.stderr}"
-    )
+    assert (
+        _git_head_sha(dev_tree) == sha_before
+    ), f"a commit was made while another holder had the repo lock\nstderr={result.stderr}"
     assert (dev_tree / "CHANGELOG.md").read_text(encoding="utf-8") == "# STALE\n"
     assert _git(dev_tree, "status", "--porcelain") == ""
     assert "drift detected" in result.stderr
@@ -858,8 +830,13 @@ def test_failed_backup_aborts_the_repair(tmp_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _buffer_probe_script(kanban_root: pathlib.Path, proj_dir: pathlib.Path, mktemp_log: pathlib.Path,
-                         temp_env: str, check: str = _CHECK_DRIFT) -> str:
+def _buffer_probe_script(
+    kanban_root: pathlib.Path,
+    proj_dir: pathlib.Path,
+    mktemp_log: pathlib.Path,
+    temp_env: str,
+    check: str = _CHECK_DRIFT,
+) -> str:
     """A --dry-run invocation whose ``mktemp`` records each template it is handed.
 
     *temp_env* is the bash line that sets (or unsets) PGAI_AGENT_KANBAN_TEMP_DIR.
@@ -898,8 +875,7 @@ def test_regen_buffer_lands_under_the_temp_dir_override(tmp_path: pathlib.Path) 
     sandbox = tmp_path / "sandbox_tmp"
     mktemp_log = tmp_path / "mktemp.log"
 
-    script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log,
-                                  f'export PGAI_AGENT_KANBAN_TEMP_DIR="{sandbox}"')
+    script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log, f'export PGAI_AGENT_KANBAN_TEMP_DIR="{sandbox}"')
     result = run_bash(tmp_path, script, timeout=60)
 
     assert "check-rc=0" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
@@ -914,15 +890,15 @@ def test_regen_buffer_follows_kanban_cfg_paths_without_an_override(tmp_path: pat
     kanban_root, _dev_tree, proj_dir, _sha = _stale_fixture(tmp_path)
     configured = tmp_path / "configured"
     (kanban_root / "kanban.cfg").write_text(
-        f"[paths]\ntmp_root = {configured}\ntmp_subdir = scratch\n", encoding="utf-8")
+        f"[paths]\ntmp_root = {configured}\ntmp_subdir = scratch\n", encoding="utf-8"
+    )
     mktemp_log = tmp_path / "mktemp.log"
 
     script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log, "unset PGAI_AGENT_KANBAN_TEMP_DIR")
     result = run_bash(tmp_path, script, timeout=60)
 
     assert "check-rc=0" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert _recorded_templates(mktemp_log) == [
-        f"{configured}/scratch/changelog_drift/changelog_drift_XXXXXX.md"]
+    assert _recorded_templates(mktemp_log) == [f"{configured}/scratch/changelog_drift/changelog_drift_XXXXXX.md"]
     assert "changelog-drift-dry-run" in _action_log(proj_dir)
 
 
@@ -930,14 +906,19 @@ def test_missing_temp_sh_refuses_and_changes_nothing(tmp_path: pathlib.Path) -> 
     """Fixture (O): no temp.sh beside the module's lib/ -> return 1, named path, no change."""
     kanban_root, dev_tree, proj_dir, sha_before = _stale_fixture(tmp_path)
     lib = tmp_path / "broken_install" / "scripts" / "lib"
-    shutil.copytree(pathlib.Path(_CHECK_DRIFT).resolve().parents[1], lib,
-                    ignore=shutil.ignore_patterns("temp.sh", "__pycache__"))
+    shutil.copytree(
+        pathlib.Path(_CHECK_DRIFT).resolve().parents[1], lib, ignore=shutil.ignore_patterns("temp.sh", "__pycache__")
+    )
     sandbox = tmp_path / "sandbox_tmp"
     mktemp_log = tmp_path / "mktemp.log"
 
-    script = _buffer_probe_script(kanban_root, proj_dir, mktemp_log,
-                                  f'export PGAI_AGENT_KANBAN_TEMP_DIR="{sandbox}"',
-                                  check=str(lib / "overwatch-checks" / "check-changelog-drift.sh"))
+    script = _buffer_probe_script(
+        kanban_root,
+        proj_dir,
+        mktemp_log,
+        f'export PGAI_AGENT_KANBAN_TEMP_DIR="{sandbox}"',
+        check=str(lib / "overwatch-checks" / "check-changelog-drift.sh"),
+    )
     result = run_bash(tmp_path, script, timeout=60)
 
     assert "check-rc=1" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"

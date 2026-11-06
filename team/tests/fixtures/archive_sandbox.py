@@ -66,7 +66,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import pathlib
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 #: The project every sandbox builds unless the caller names another.
 DEFAULT_PROJECT = "archive-demo"
@@ -117,9 +117,7 @@ class ArchiveSandbox:
         for agent in QUEUE_AGENTS:
             queue = self.queue_file(agent)
             if not queue.exists():
-                queue.write_text(
-                    _QUEUE_HEADER.format(title=agent.capitalize(), agent=agent), encoding="utf-8"
-                )
+                queue.write_text(_QUEUE_HEADER.format(title=agent.capitalize(), agent=agent), encoding="utf-8")
         self.set_release_state(active_rc, last_released)
 
     # ------------------------------------------------------------------
@@ -127,7 +125,7 @@ class ArchiveSandbox:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def task_id(agent: str, sequence: int, date: str = "20260301", slug: Optional[str] = None) -> str:
+    def task_id(agent: str, sequence: int, date: str = "20260301", slug: str | None = None) -> str:
         """A canonical task ID, ``<AGENT>-<date>-<NNN>-<slug>``."""
         return f"{agent.upper()}-{date}-{sequence:03d}-{slug or f'item-{sequence}'}"
 
@@ -144,7 +142,7 @@ class ArchiveSandbox:
         (self.root / "kanban.cfg").write_text(f"[archive]\narchive_count = {value}\n", encoding="utf-8")
 
     def set_release_state(
-        self, active_rc: str = "none", last_released: str = "v1.0.0", *, text: Optional[str] = None
+        self, active_rc: str = "none", last_released: str = "v1.0.0", *, text: str | None = None
     ) -> pathlib.Path:
         """Write release-state.md; *text*, when given, is written verbatim instead."""
         path = self.project_root / "release-state.md"
@@ -165,7 +163,7 @@ class ArchiveSandbox:
     # Items
     # ------------------------------------------------------------------
 
-    def _intake(self, directory: str, prefix: str, number: int, status: Optional[str], slug: Optional[str]) -> pathlib.Path:
+    def _intake(self, directory: str, prefix: str, number: int, status: str | None, slug: str | None) -> pathlib.Path:
         name = f"{prefix}-{number:04d}-{slug or f'item-{number}'}"
         path = self.project_root / directory / f"{name}.md"
         status_block = "" if status is None else f"## Status\n{status}\n\n"
@@ -175,21 +173,21 @@ class ArchiveSandbox:
         )
         return path
 
-    def add_bug(self, number: int, status: Optional[str] = "done", slug: Optional[str] = None) -> pathlib.Path:
+    def add_bug(self, number: int, status: str | None = "done", slug: str | None = None) -> pathlib.Path:
         """Write ``bugs/BUG-NNNN-<slug>.md``; *status* ``None`` omits ``## Status``."""
         return self._intake("bugs", "BUG", number, status, slug)
 
-    def add_priority(self, number: int, status: Optional[str] = "done", slug: Optional[str] = None) -> pathlib.Path:
+    def add_priority(self, number: int, status: str | None = "done", slug: str | None = None) -> pathlib.Path:
         """Write ``priority/PRIORITY-NNNN-<slug>.md``; *status* ``None`` omits ``## Status``."""
         return self._intake("priority", "PRIORITY", number, status, slug)
 
     def add_requirement(
         self,
         version: str,
-        status: Optional[str] = "done",
+        status: str | None = "done",
         *,
         slug: str = "feature",
-        target_version: Optional[str] = None,
+        target_version: str | None = None,
         bundled: Iterable[pathlib.Path] = (),
     ) -> pathlib.Path:
         """Write ``requirements/<version>-<slug>.md``.
@@ -213,7 +211,7 @@ class ArchiveSandbox:
     def add_task(
         self,
         task_id: str,
-        state: Optional[str] = "DONE",
+        state: str | None = "DONE",
         *,
         release_version: str = "v1.0.0",
         prerequisites: Iterable[str] = (),
@@ -242,9 +240,7 @@ class ArchiveSandbox:
         )
         return task_dir
 
-    def add_queue_line(
-        self, agent: str, item_token: str, *, marker: str = "x", description: Optional[str] = None
-    ) -> str:
+    def add_queue_line(self, agent: str, item_token: str, *, marker: str = "x", description: str | None = None) -> str:
         """Append ``- [<marker>] <item_token> — <description>`` to an agent's queue; return the line."""
         line = f"- [{marker}] {item_token}" + (f" — {description}" if description else "")
         with self.queue_file(agent).open("a", encoding="utf-8") as handle:

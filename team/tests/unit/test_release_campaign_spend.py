@@ -179,9 +179,7 @@ def test_resolver_falls_through_to_cfg_tiers_after_a_spend(tmp_path: pathlib.Pat
     assert spend_result.returncode == 0
     assert not campaign_file.exists()
 
-    resolve_script = (
-        f"source {str(_DEFER_POSTURE)!r} && resolve_defer_posture demo"
-    )
+    resolve_script = f"source {str(_DEFER_POSTURE)!r} && resolve_defer_posture demo"
     resolve_env = {"KANBAN_ROOT": str(kanban_root), "PATH": "/usr/bin:/bin"}
     resolve_result = subprocess.run(
         ["bash", "-c", resolve_script],

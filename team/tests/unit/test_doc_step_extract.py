@@ -53,9 +53,7 @@ def _line_of(lines: list[str], text: str) -> int:
     return hits[0]
 
 
-def _extract(
-    tmp_path: pathlib.Path, doc: pathlib.Path, heading: str, *extra: str
-) -> subprocess.CompletedProcess:
+def _extract(tmp_path: pathlib.Path, doc: pathlib.Path, heading: str, *extra: str) -> subprocess.CompletedProcess:
     """Run the shipped extractor from a foreign cwd under a scrubbed environment."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -161,15 +159,13 @@ class TestTaggedFencesBeforeAShellBlock:
         result = _extract(tmp_path, doc, "Step 1", "--block-index", "0", "--tsv")
         assert result.returncode == 0, _diagnostic(result)
         cmd_rows = [row for row in result.stdout.splitlines() if row.startswith("CMD\t")]
-        assert cmd_rows == [f"CMD\t{_line_of(_TAGGED_BEFORE_SHELL, 'echo first-shell')}\techo first-shell"], (
-            _diagnostic(result)
-        )
+        assert cmd_rows == [
+            f"CMD\t{_line_of(_TAGGED_BEFORE_SHELL, 'echo first-shell')}\techo first-shell"
+        ], _diagnostic(result)
 
 
 class TestFenceNesting:
-    def test_four_backtick_fence_hides_the_three_backtick_bash_block_it_wraps(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_four_backtick_fence_hides_the_three_backtick_bash_block_it_wraps(self, tmp_path: pathlib.Path) -> None:
         lines = [
             "## Step 1",
             "",
@@ -192,9 +188,7 @@ class TestFenceNesting:
         assert result.returncode == 1, _diagnostic(result)
         assert "only 1 bash/sh fenced block(s)" in result.stderr, _diagnostic(result)
 
-    def test_four_backtick_bash_fence_closes_only_on_four_or_more_backticks(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_four_backtick_bash_fence_closes_only_on_four_or_more_backticks(self, tmp_path: pathlib.Path) -> None:
         lines = [
             "## Step 1",
             "",
@@ -258,9 +252,7 @@ class TestWhichFencesAreShellBlocks:
         result = _extract(tmp_path, doc, "Step 1", "--block-index", "1")
         assert result.returncode == 1, _diagnostic(result)
 
-    def test_shell_tag_is_read_from_the_info_strings_first_word_in_any_case(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_shell_tag_is_read_from_the_info_strings_first_word_in_any_case(self, tmp_path: pathlib.Path) -> None:
         lines = [
             "## Step 1",
             "",

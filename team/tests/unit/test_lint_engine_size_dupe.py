@@ -75,7 +75,6 @@ import pytest
 
 from tests.fixtures.lint_findings import run_main
 
-
 # ---------------------------------------------------------------------------
 # Load lint_engine_size_dupe.py as a module.
 # Path: team/tests/unit/ -> team/ (two levels up) -> scripts/
@@ -94,9 +93,7 @@ _REAL_PACKAGE_DIR = _TEAM_DIR / "pgai_agent_kanban"
 
 def _import_lint_module():
     """Import lint_engine_size_dupe as a module."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_engine_size_dupe", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_engine_size_dupe", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -162,16 +159,12 @@ def test_seeded_oversized_fixture_triggers_violation() -> None:
     fixture_file = _OVERSIZED_FIXTURE_DIR / "lib" / "discovery.sh"
     assert fixture_file.is_file(), f"Seeded fixture missing: {fixture_file}"
     line_count = sum(1 for _ in fixture_file.read_text(encoding="utf-8").splitlines())
-    assert line_count > 800, (
-        f"Seeded fixture must exceed 800 lines to exercise the ceiling, "
-        f"but has {line_count}."
-    )
+    assert line_count > 800, f"Seeded fixture must exceed 800 lines to exercise the ceiling, " f"but has {line_count}."
 
     violations = _lint.check_engine_sizes(_OVERSIZED_FIXTURE_DIR)
 
     assert "lib/discovery.sh" in violations, (
-        f"Expected 'lib/discovery.sh' to be reported as oversized, "
-        f"but got: {violations}"
+        f"Expected 'lib/discovery.sh' to be reported as oversized, " f"but got: {violations}"
     )
     assert violations["lib/discovery.sh"] == line_count
 
@@ -194,12 +187,8 @@ def test_seeded_oversized_fixture_main_records_size_finding_and_exits_zero(
 
 def test_size_allow_file_suppresses_violation() -> None:
     """--size-allow-file exempts a manifest entry from the ceiling."""
-    violations = _lint.check_engine_sizes(
-        _OVERSIZED_FIXTURE_DIR, allow_files=frozenset({"lib/discovery.sh"})
-    )
-    assert not violations, (
-        f"Expected the size allow-list to suppress the violation, got: {violations}"
-    )
+    violations = _lint.check_engine_sizes(_OVERSIZED_FIXTURE_DIR, allow_files=frozenset({"lib/discovery.sh"}))
+    assert not violations, f"Expected the size allow-list to suppress the violation, got: {violations}"
 
 
 def test_nonexistent_manifest_entry_is_silently_skipped(tmp_path: Path) -> None:
@@ -209,9 +198,7 @@ def test_nonexistent_manifest_entry_is_silently_skipped(tmp_path: Path) -> None:
 
     violations = _lint.check_engine_sizes(empty_dir)
 
-    assert not violations, (
-        f"Expected no violations when no manifest files exist, got: {violations}"
-    )
+    assert not violations, f"Expected no violations when no manifest files exist, got: {violations}"
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +238,7 @@ def test_clean_real_tree_main_never_records_the_dupe_class(tmp_path: Path) -> No
     # Deliberately exercises the real team/scripts/ tree (not a fixture):
     # this is a live regression guard, not an isolated behavior a fixture
     # could stand in for.
-    exit_code, findings = run_main(
-        _lint.main, ["--scripts-dir", str(_REAL_SCRIPTS_DIR)], tmp_path / "findings.json"
-    )
+    exit_code, findings = run_main(_lint.main, ["--scripts-dir", str(_REAL_SCRIPTS_DIR)], tmp_path / "findings.json")
 
     assert exit_code == 0, f"Expected exit code 0, got {exit_code}."
     collisions = [f for f in findings if f["kind"] == "duplicate-function"]
@@ -266,13 +251,11 @@ def test_clean_real_tree_main_never_records_the_dupe_class(tmp_path: Path) -> No
 def test_seeded_duplicate_fixture_triggers_violation() -> None:
     """Acceptance criterion: a seeded function defined in two files that are
     both reachable from a common driver is reported, naming both files."""
-    violations = _lint.find_duplicate_functions(
-        _DUPLICATE_FIXTURE_DIR, allow_files=frozenset()
-    )
+    violations = _lint.find_duplicate_functions(_DUPLICATE_FIXTURE_DIR, allow_files=frozenset())
 
-    assert "seeded_shared_helper" in violations, (
-        f"Expected 'seeded_shared_helper' to be reported, got: {sorted(violations.keys())}"
-    )
+    assert (
+        "seeded_shared_helper" in violations
+    ), f"Expected 'seeded_shared_helper' to be reported, got: {sorted(violations.keys())}"
     assert violations["seeded_shared_helper"] == [
         "lib/stage_a.sh",
         "lib/stage_b.sh",
@@ -284,10 +267,16 @@ def test_seeded_duplicate_fixture_main_records_finding_and_names_both_files(
 ) -> None:
     """main() returns 0 and records one ``duplicate-function`` finding
     naming both colliding files."""
-    exit_code, findings = run_main(_lint.main, [
-        "--scripts-dir", str(_DUPLICATE_FIXTURE_DIR),
-        "--allow-file", "__no_file_allowed__",
-    ], tmp_path / "findings.json")
+    exit_code, findings = run_main(
+        _lint.main,
+        [
+            "--scripts-dir",
+            str(_DUPLICATE_FIXTURE_DIR),
+            "--allow-file",
+            "__no_file_allowed__",
+        ],
+        tmp_path / "findings.json",
+    )
     assert exit_code == 0, f"Expected exit code 0, got {exit_code}."
     assert [f["kind"] for f in findings] == ["duplicate-function"], findings
     finding = findings[0]
@@ -300,16 +289,22 @@ def test_direct_run_on_the_seeded_collision(tmp_path: Path) -> None:
     --findings-file and exits 0."""
     findings_path = tmp_path / "out" / "findings.json"
     proc = subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), "--scripts-dir", str(_DUPLICATE_FIXTURE_DIR),
-         "--allow-file", "__no_file_allowed__", "--findings-file", str(findings_path)],
+        [
+            sys.executable,
+            str(_LINT_SCRIPT),
+            "--scripts-dir",
+            str(_DUPLICATE_FIXTURE_DIR),
+            "--allow-file",
+            "__no_file_allowed__",
+            "--findings-file",
+            str(findings_path),
+        ],
         capture_output=True,
         text=True,
         check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "seeded_shared_helper() -- defined in: lib/stage_a.sh, lib/stage_b.sh" in proc.stdout, (
-        proc.stdout
-    )
+    assert "seeded_shared_helper() -- defined in: lib/stage_a.sh, lib/stage_b.sh" in proc.stdout, proc.stdout
     assert "error:   lint.engine-size-dupe" in proc.stderr, proc.stderr
     findings = json.loads(findings_path.read_text(encoding="utf-8"))
     assert [f["function"] for f in findings] == ["seeded_shared_helper"], findings
@@ -350,9 +345,10 @@ def test_size_and_dupe_violations_together_are_both_recorded(tmp_path: Path) -> 
     )
 
     assert exit_code == 0, f"Expected exit code 0 when both classes fire, got {exit_code}."
-    assert sorted(f["kind"] for f in findings) == ["duplicate-function", "engine-size"], (
-        f"Expected one finding of each kind when both fire, got {findings}"
-    )
+    assert sorted(f["kind"] for f in findings) == [
+        "duplicate-function",
+        "engine-size",
+    ], f"Expected one finding of each kind when both fire, got {findings}"
 
 
 def test_unreachable_duplicate_is_not_a_false_positive(tmp_path: Path) -> None:
@@ -371,9 +367,7 @@ def test_unreachable_duplicate_is_not_a_false_positive(tmp_path: Path) -> None:
 
     violations = _lint.find_duplicate_functions(scripts_dir, allow_files=frozenset())
 
-    assert not violations, (
-        f"Expected no violation for two never-co-sourced files, got: {violations}"
-    )
+    assert not violations, f"Expected no violation for two never-co-sourced files, got: {violations}"
 
 
 def test_reachable_duplicate_via_third_party_driver_is_flagged(tmp_path: Path) -> None:
@@ -417,9 +411,7 @@ def test_allow_listed_file_is_never_a_violation_source(tmp_path: Path) -> None:
 
     violations = _lint.find_duplicate_functions(scripts_dir)  # default allow-list
 
-    assert not violations, (
-        f"Expected the default allow-list to suppress the provider pair, got: {violations}"
-    )
+    assert not violations, f"Expected the default allow-list to suppress the provider pair, got: {violations}"
 
 
 def test_allow_listed_file_removed_does_not_blind_remaining_pair(tmp_path: Path) -> None:
@@ -447,14 +439,10 @@ def test_allow_listed_file_removed_does_not_blind_remaining_pair(tmp_path: Path)
         ],
     )
 
-    violations = _lint.find_duplicate_functions(
-        scripts_dir, allow_files=frozenset({"harness.sh"})
-    )
+    violations = _lint.find_duplicate_functions(scripts_dir, allow_files=frozenset({"harness.sh"}))
 
     assert "shared_name" in violations
-    assert violations["shared_name"] == sorted(
-        ["lib/unexpected_dup_a.sh", "lib/unexpected_dup_b.sh"]
-    )
+    assert violations["shared_name"] == sorted(["lib/unexpected_dup_a.sh", "lib/unexpected_dup_b.sh"])
 
 
 # ---------------------------------------------------------------------------
@@ -499,9 +487,7 @@ def test_package_beside_the_scripts_dir_is_scanned_by_default(tmp_path: Path) ->
             "def shared_helper(value):\n    return str(value).strip().lower()\n", encoding="utf-8"
         )
 
-    exit_code, findings = run_main(
-        _lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json"
-    )
+    exit_code, findings = run_main(_lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json")
 
     assert exit_code == 0
     assert [(f["kind"], f["function"]) for f in findings] == [("duplicate-python-def", "shared_helper")], findings
@@ -511,9 +497,7 @@ def test_no_package_beside_the_scripts_dir_scans_no_python(tmp_path: Path) -> No
     scripts_dir = tmp_path / "scripts"
     _write_sh(scripts_dir / "solo.sh", ["solo_func"])
 
-    exit_code, findings = run_main(
-        _lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json"
-    )
+    exit_code, findings = run_main(_lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json")
 
     assert exit_code == 0 and findings == [], findings
 
@@ -551,11 +535,7 @@ def test_real_package_has_no_copy_of_the_consolidated_helpers() -> None:
 def test_find_functions_skips_comments(tmp_path: Path) -> None:
     fixture = tmp_path / "fixture.sh"
     fixture.write_text(
-        "#!/usr/bin/env bash\n"
-        "# not_a_func() -- comment\n"
-        "real_func() {\n"
-        '    echo "defined"\n'
-        "}\n",
+        "#!/usr/bin/env bash\n" "# not_a_func() -- comment\n" "real_func() {\n" '    echo "defined"\n' "}\n",
         encoding="utf-8",
     )
 
@@ -579,8 +559,7 @@ def test_source_graph_resolves_dirname_bash_source_pattern(tmp_path: Path) -> No
     lib_dir.mkdir()
     (lib_dir / "target.sh").write_text("#!/usr/bin/env bash\ntarget_func() { :; }\n", encoding="utf-8")
     (scripts_dir / "caller.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        'source "$(dirname "${BASH_SOURCE[0]}")/lib/target.sh"\n',
+        "#!/usr/bin/env bash\n" 'source "$(dirname "${BASH_SOURCE[0]}")/lib/target.sh"\n',
         encoding="utf-8",
     )
 
@@ -590,8 +569,7 @@ def test_source_graph_resolves_dirname_bash_source_pattern(tmp_path: Path) -> No
     caller = scripts_dir / "caller.sh"
     target = (lib_dir / "target.sh").resolve()
     assert target in graph[caller], (
-        f"Expected caller.sh to have a resolved edge to lib/target.sh, "
-        f"got edges: {graph[caller]}"
+        f"Expected caller.sh to have a resolved edge to lib/target.sh, " f"got edges: {graph[caller]}"
     )
 
 
@@ -602,8 +580,7 @@ def test_unresolvable_source_argument_is_skipped_not_guessed(tmp_path: Path) -> 
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
     (scripts_dir / "caller.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        'source "$COMPUTED_ELSEWHERE"\n',
+        "#!/usr/bin/env bash\n" 'source "$COMPUTED_ELSEWHERE"\n',
         encoding="utf-8",
     )
 
@@ -628,9 +605,7 @@ def test_main_returns_zero_for_clean_synthetic_tree(tmp_path: Path) -> None:
     scripts_dir = tmp_path / "scripts"
     _write_sh(scripts_dir / "solo.sh", ["solo_func"])
 
-    exit_code, findings = run_main(
-        _lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json"
-    )
+    exit_code, findings = run_main(_lint.main, ["--scripts-dir", str(scripts_dir)], tmp_path / "findings.json")
 
     assert exit_code == 0 and findings == [], findings
 

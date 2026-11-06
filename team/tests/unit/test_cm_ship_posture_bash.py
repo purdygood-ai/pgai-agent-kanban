@@ -35,6 +35,10 @@ Coverage:
     warning; trigger 3 resolves the large-fix findings, not the others.
   - The Step 12 append writes one Auto-Ship Event block per recorded stop
     and a writer failure is a warning, never an exit.
+  - A notes stamp or an event append whose target cannot be written leaves
+    exactly one operator inbox entry naming the file and the by-hand
+    command, and the function still returns success; when both writes
+    succeed, no inbox entry is written.
 """
 
 from __future__ import annotations
@@ -92,19 +96,33 @@ _ROWS = [
     # A BLOCKED TESTER task is requeued once under either posture, never HALT.
     MatrixRow("blocked_high_pass", ("blocked", "high", "pass", "no", "yes", "no", "none"), "REQUEUE-VERIFICATION", ""),
     MatrixRow(
-        "blocked_low_concerns", ("blocked", "low", "ship-with-concerns", "no", "yes", "no", "none"),
-        "REQUEUE-VERIFICATION", "",
+        "blocked_low_concerns",
+        ("blocked", "low", "ship-with-concerns", "no", "yes", "no", "none"),
+        "REQUEUE-VERIFICATION",
+        "",
     ),
     MatrixRow("done_low_pass", ("done", "low", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"),
-    MatrixRow("done_medium_pass", ("done", "medium", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"),
-    MatrixRow("done_low_concerns", ("done", "low", "ship-with-concerns", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
     MatrixRow(
-        "done_serious_small_fix", ("done", "medium", "ship-with-serious-concerns", "no", "yes", "no", "none"),
-        "SHIP-NON-FUNCTIONAL", "NON-FUNCTIONAL",
+        "done_medium_pass", ("done", "medium", "pass", "no", "yes", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"
     ),
     MatrixRow(
-        "done_serious_large_fix", ("done", "medium", "ship-with-serious-concerns", "yes", "yes", "no", "none"),
-        "HALT", "", _KEY_T3,
+        "done_low_concerns",
+        ("done", "low", "ship-with-concerns", "no", "yes", "no", "none"),
+        "SHIP-KNOWN-BUGS",
+        "KNOWN-BUGS",
+    ),
+    MatrixRow(
+        "done_serious_small_fix",
+        ("done", "medium", "ship-with-serious-concerns", "no", "yes", "no", "none"),
+        "SHIP-NON-FUNCTIONAL",
+        "NON-FUNCTIONAL",
+    ),
+    MatrixRow(
+        "done_serious_large_fix",
+        ("done", "medium", "ship-with-serious-concerns", "yes", "yes", "no", "none"),
+        "HALT",
+        "",
+        _KEY_T3,
     ),
     MatrixRow("no_tester_task", ("none", "none", "none", "no", "no", "no", "none"), "SHIP-FUNCTIONAL", "FUNCTIONAL"),
     # An unrecognised TESTER state takes the SHIP-WITH-CONCERNS row, never HALT.
@@ -112,25 +130,48 @@ _ROWS = [
     MatrixRow("found_wont_do", ("wont-do", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
     MatrixRow("found_empty_state", ("", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
     MatrixRow(
-        "high_regression", ("done", "high", "ship-with-serious-concerns", "no", "yes", "yes", "none"),
-        "HALT", "", _KEY_T2,
+        "high_regression",
+        ("done", "high", "ship-with-serious-concerns", "no", "yes", "yes", "none"),
+        "HALT",
+        "",
+        _KEY_T2,
     ),
     MatrixRow(
-        "high_preexisting_small", ("done", "high", "ship-with-serious-concerns", "no", "yes", "no", "none"),
-        "SHIP-KNOWN-ISSUE", "KNOWN-ISSUE",
+        "high_preexisting_small",
+        ("done", "high", "ship-with-serious-concerns", "no", "yes", "no", "none"),
+        "SHIP-KNOWN-ISSUE",
+        "KNOWN-ISSUE",
     ),
     MatrixRow("high_integrity_breakage", ("done", "high", "pass", "no", "yes", "no", "breakage"), "HALT", "", _KEY_T2),
-    MatrixRow("high_integrity_destructive", ("done", "high", "pass", "no", "yes", "no", "destructive"), "HALT", "", _KEY_T2),
+    MatrixRow(
+        "high_integrity_destructive", ("done", "high", "pass", "no", "yes", "no", "destructive"), "HALT", "", _KEY_T2
+    ),
     MatrixRow("high_large_fix", ("done", "high", "pass", "yes", "yes", "no", "none"), "HALT", "", _KEY_T2),
-    MatrixRow("high_dimensions_unknown", ("done", "high", "pass", "no", "yes", "unknown", "unknown"), "HALT", "", _KEY_T2),
+    MatrixRow(
+        "high_dimensions_unknown", ("done", "high", "pass", "no", "yes", "unknown", "unknown"), "HALT", "", _KEY_T2
+    ),
     MatrixRow(
         "high_regression_breakage_serious_large",
         ("done", "high", "ship-with-serious-concerns", "yes", "yes", "yes", "breakage"),
-        "HALT", "", _KEY_T2,
+        "HALT",
+        "",
+        _KEY_T2,
     ),
-    MatrixRow("unparseable_recommendation", ("done", "low", "unparseable", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
-    MatrixRow("unparseable_risk_pass", ("done", "unparseable", "pass", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
-    MatrixRow("absent_recommendation", ("done", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"),
+    MatrixRow(
+        "unparseable_recommendation",
+        ("done", "low", "unparseable", "no", "yes", "no", "none"),
+        "SHIP-KNOWN-BUGS",
+        "KNOWN-BUGS",
+    ),
+    MatrixRow(
+        "unparseable_risk_pass",
+        ("done", "unparseable", "pass", "no", "yes", "no", "none"),
+        "SHIP-KNOWN-BUGS",
+        "KNOWN-BUGS",
+    ),
+    MatrixRow(
+        "absent_recommendation", ("done", "none", "none", "no", "yes", "no", "none"), "SHIP-KNOWN-BUGS", "KNOWN-BUGS"
+    ),
 ]
 
 _LOCAL = "[project]\npush_to_remote = false\n"
@@ -183,13 +224,13 @@ def _decide(tmp_path: pathlib.Path, root: pathlib.Path, row: MatrixRow):
         f"_TESTER_TASK_FOUND={_q(found)} && "
         f"_SHIP_DECISION=\"$(cm_ship_policy {' '.join(_q(a) for a in row.args)})\" && "
         f"{{ cm_ship_posture_read; cm_ship_posture_apply_decision; }} > {_q(str(narration))} && "
-        "echo \"posture=$_SHIP_POSTURE\" && "
-        "echo \"decision=$_SHIP_DECISION\" && "
-        "echo \"notes_status=$(cm_ship_policy_notes_status \"$_SHIP_DECISION\")\" && "
-        "echo \"halt_key=$_SHIP_HALT_KEY\" && "
-        "echo \"auto_ship_trigger=$_AUTO_SHIP_TRIGGER\" && "
-        "echo \"events=${#_CM_AUTO_SHIP_EVENTS[@]}\" && "
-        "for e in \"${_CM_AUTO_SHIP_EVENTS[@]}\"; do printf 'event=%s\\n' \"$e\"; done"
+        'echo "posture=$_SHIP_POSTURE" && '
+        'echo "decision=$_SHIP_DECISION" && '
+        'echo "notes_status=$(cm_ship_policy_notes_status "$_SHIP_DECISION")" && '
+        'echo "halt_key=$_SHIP_HALT_KEY" && '
+        'echo "auto_ship_trigger=$_AUTO_SHIP_TRIGGER" && '
+        'echo "events=${#_CM_AUTO_SHIP_EVENTS[@]}" && '
+        'for e in "${_CM_AUTO_SHIP_EVENTS[@]}"; do printf \'event=%s\\n\' "$e"; done'
     )
     result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(root), "PGAI_PROJECT_NAME": ""})
     values: dict = {}
@@ -262,7 +303,7 @@ def test_unmatched_halt_row_still_halts_under_always(tmp_path):
         "_SHIP_DECISION=HALT _TESTER_STATUS=done _TESTER_TASK_FOUND=yes "
         "_TESTER_SYSTEMIC_RISK=HIGH _TESTER_RECOMMENDATION=pass _HAS_LARGE_FIX_EFFORT=no && "
         "cm_ship_posture_apply_decision && "
-        "echo \"$_SHIP_DECISION $_SHIP_HALT_KEY ${#_CM_AUTO_SHIP_EVENTS[@]}\""
+        'echo "$_SHIP_DECISION $_SHIP_HALT_KEY ${#_CM_AUTO_SHIP_EVENTS[@]}"'
     )
     result = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(root)})
     assert result.returncode == 0, _diag(result)
@@ -338,7 +379,7 @@ def _pattern_stop(tmp_path: pathlib.Path, root: pathlib.Path, calls: int = 1):
         f"_CM_PROJECT_ROOT={_q(str(root / 'projects' / _PROJECT))} && "
         "cm_ship_posture_read && "
         + " && ".join([call] * calls)
-        + " && for e in \"${_CM_AUTO_SHIP_EVENTS[@]}\"; do printf 'event=%s\\n' \"$e\"; done"
+        + ' && for e in "${_CM_AUTO_SHIP_EVENTS[@]}"; do printf \'event=%s\\n\' "$e"; done'
     )
     return run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(root)}), notes_dir
 
@@ -443,14 +484,24 @@ def _write_bug(bugs_dir: pathlib.Path, bug_id: str, slug: str, symptom: str) -> 
 @pytest.mark.parametrize(
     "trigger, named, not_named",
     [
-        ("2", "The parallel unit lane collects different tests in each worker", "Inline Python remains above the reduction target"),
-        ("3", "Inline Python remains above the reduction target", "The parallel unit lane collects different tests in each worker"),
+        (
+            "2",
+            "The parallel unit lane collects different tests in each worker",
+            "Inline Python remains above the reduction target",
+        ),
+        (
+            "3",
+            "Inline Python remains above the reduction target",
+            "The parallel unit lane collects different tests in each worker",
+        ),
     ],
 )
 def test_known_issues_block_names_the_bugs_behind_the_stop(tmp_path, trigger, named, not_named):
     root = _build_root(tmp_path, *_ALWAYS_CONFIG)
     bugs_dir = root / "projects" / _PROJECT / "bugs"
-    _write_bug(bugs_dir, "BUG-0042", "unit-lane-collection", "The parallel unit lane collects different tests in each worker.")
+    _write_bug(
+        bugs_dir, "BUG-0042", "unit-lane-collection", "The parallel unit lane collects different tests in each worker."
+    )
     _write_bug(bugs_dir, "BUG-0043", "inline-python-target", "Inline Python remains above the reduction target.")
     report = tmp_path / "report.md"
     report.write_text(_REPORT, encoding="utf-8")
@@ -494,7 +545,7 @@ def test_known_issues_resolution_does_nothing_after_an_ordinary_decision(tmp_pat
     result = run_bash(
         tmp_path,
         f"{_SOURCES} && _AUTO_SHIP_TRIGGER=none _KNOWN_ISSUE_NOTES_BLOCK=unchanged && "
-        "cm_ship_posture_resolve_known_issues && echo \"$_KNOWN_ISSUE_NOTES_BLOCK\"",
+        'cm_ship_posture_resolve_known_issues && echo "$_KNOWN_ISSUE_NOTES_BLOCK"',
     )
     assert result.returncode == 0, _diag(result)
     assert result.stdout == "unchanged\n", _diag(result)
@@ -563,3 +614,110 @@ def test_no_recorded_event_appends_nothing(tmp_path):
     assert result.returncode == 0, _diag(result)
     assert result.stdout == ""
     assert state.read_text(encoding="utf-8") == _RELEASE_STATE
+
+
+# ---------------------------------------------------------------------------
+# A write that fails after the gates leaves one operator inbox entry
+# ---------------------------------------------------------------------------
+
+
+def _inbox_root(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A throwaway kanban root with the project directory the inbox lives in,
+    and this tree's package where $KANBAN_ROOT/pgai_agent_kanban is read."""
+    root = tmp_path / "kanban"
+    (root / "projects" / _PROJECT).mkdir(parents=True)
+    (root / "pgai_agent_kanban").symlink_to(_TEAM_DIR / "pgai_agent_kanban", target_is_directory=True)
+    return root
+
+
+def _inbox_env(tmp_path: pathlib.Path, root: pathlib.Path) -> dict:
+    return {
+        "KANBAN_ROOT": str(root),
+        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+        "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "tmp"),
+    }
+
+
+def _open_inbox_entries(root: pathlib.Path) -> list:
+    inbox = root / "projects" / _PROJECT / "operator-inbox.md"
+    if not inbox.exists():
+        return []
+    open_body = inbox.read_text(encoding="utf-8").split("## Open", 1)[1].split("\n## ", 1)[0]
+    return open_body.split("### INBOX-")[1:]
+
+
+def _read_only_dir(path: pathlib.Path):
+    """Make *path* a directory nothing can be written into; return a restorer."""
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(0o555)
+    return lambda: path.chmod(0o755)
+
+
+@pytest.mark.parametrize("calls", [1, 2])
+def test_event_append_to_an_unwritable_release_state_leaves_one_inbox_entry(tmp_path, calls):
+    root = _inbox_root(tmp_path)
+    locked = tmp_path / "locked"
+    restore = _read_only_dir(locked)
+    state = locked / "release-state.md"
+    append = " && ".join(["cm_release_append_auto_ship_events"] * calls)
+    script = (
+        f"{_SOURCES} && set -euo pipefail && PROJECT_NAME={_PROJECT} ACTIVE_RC={_VERSION} "
+        f"RELEASE_STATE={_q(str(state))} _SHIP_POSTURE=always _TESTER_TASK_ID=none && "
+        f"_cm_record_auto_ship_event 2 {_KEY_T2} >/dev/null && "
+        f"{append} && echo continued"
+    )
+    try:
+        result = run_bash(tmp_path, script, extra_env=_inbox_env(tmp_path, root))
+    finally:
+        restore()
+
+    assert result.returncode == 0, _diag(result)
+    assert result.stdout.strip().endswith("continued"), _diag(result)
+    assert "WARNING: the Auto-Ship Event for trigger 2 could not be appended" in result.stderr
+    assert "Operator inbox: INBOX-0001" in result.stdout, _diag(result)
+    entries = _open_inbox_entries(root)
+    assert len(entries) == 1, entries
+    assert f"**Source:** rc:{_VERSION}" in entries[0], entries[0]
+    assert str(state) in entries[0] and "write_rc_state.py auto-ship-event" in entries[0], entries[0]
+    assert not state.exists()
+
+
+def test_notes_stamp_on_an_unwritable_notes_file_leaves_one_inbox_entry(tmp_path):
+    root = _inbox_root(tmp_path)
+    notes = tmp_path / "release-notes" / f"{_VERSION}.md"
+    script = (
+        f"{_SOURCES} && set -euo pipefail && PROJECT_NAME={_PROJECT} ACTIVE_RC={_VERSION} && "
+        f"_CM_AUTO_SHIP_EVENTS=($'2026-01-01T00:00:00Z\\t2\\t{_KEY_T2}\\t') && "
+        f"cm_ship_posture_stamp_notes {_q(str(notes))} && echo continued"
+    )
+    result = run_bash(tmp_path, script, extra_env=_inbox_env(tmp_path, root))
+
+    assert result.returncode == 0, _diag(result)
+    assert result.stdout.strip().endswith("continued"), _diag(result)
+    assert "WARNING: the auto-ship line(s) could not be added" in result.stderr, _diag(result)
+    entries = _open_inbox_entries(root)
+    assert len(entries) == 1, _diag(result)
+    assert str(notes) in entries[0] and "auto_ship_notes.py" in entries[0], entries[0]
+    assert f"--stop 2 {_KEY_T2}" in entries[0], entries[0]
+    assert not notes.exists()
+
+
+def test_successful_notes_stamp_and_event_append_write_no_inbox_entry(tmp_path):
+    root = _inbox_root(tmp_path)
+    notes = tmp_path / "release-notes" / f"{_VERSION}.md"
+    notes.parent.mkdir()
+    notes.write_text("# Release\n\n## Known Issues\n\nNone.\n", encoding="utf-8")
+    state = tmp_path / "release-state.md"
+    state.write_text(_RELEASE_STATE, encoding="utf-8")
+    script = (
+        f"{_SOURCES} && set -euo pipefail && PROJECT_NAME={_PROJECT} ACTIVE_RC={_VERSION} "
+        f"RELEASE_STATE={_q(str(state))} _SHIP_POSTURE=always _TESTER_TASK_ID=none && "
+        f"_cm_record_auto_ship_event 2 {_KEY_T2} >/dev/null && "
+        f"cm_ship_posture_stamp_notes {_q(str(notes))} && cm_release_append_auto_ship_events"
+    )
+    result = run_bash(tmp_path, script, extra_env=_inbox_env(tmp_path, root))
+
+    assert result.returncode == 0, _diag(result)
+    assert "## Auto-Ship Event" in state.read_text(encoding="utf-8")
+    assert "Auto-shipped" in notes.read_text(encoding="utf-8")
+    assert not (root / "projects" / _PROJECT / "operator-inbox.md").exists(), _diag(result)

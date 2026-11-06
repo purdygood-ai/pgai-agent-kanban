@@ -55,7 +55,7 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 # Run by file path (``python3 .../release_notes_blocks.py``) this module has
 # no parent package and only its own directory is on sys.path, so the
@@ -124,7 +124,7 @@ def _table_cell(value: str) -> str:
     return " ".join(value.split()).replace("|", "\\|")
 
 
-def _read(path: str) -> "str | None":
+def _read(path: str) -> str | None:
     try:
         return pathlib.Path(path).read_text(encoding="utf-8")
     except OSError:
@@ -174,7 +174,7 @@ def _replace_or_append(text: str, heading: str, block: str) -> str:
     pattern = re.compile(rf"(^##\s+{re.escape(heading)}\s*$)([\s\S]*?)(?=^##\s+|\Z)", re.MULTILINE)
     match = pattern.search(text)
     if match:
-        return text[: match.start(2)] + "\n\n" + block + "\n\n" + text[match.end(2):]
+        return text[: match.start(2)] + "\n\n" + block + "\n\n" + text[match.end(2) :]
     if not text.endswith("\n"):
         text += "\n"
     return text + f"\n## {heading}\n\n{block}\n"
@@ -182,7 +182,7 @@ def _replace_or_append(text: str, heading: str, block: str) -> str:
 
 def stamp_release_notes(
     notes_file: str, target_status: str, known_issue_block: str = "", bugs_skipped_block: str = ""
-) -> "list[str] | None":
+) -> list[str] | None:
     """Stamp *notes_file* in one write; return the narration lines, or None when there is no placeholder.
 
     See the ``stamp-status`` command for what is replaced. Nothing is written
@@ -245,7 +245,7 @@ _USAGE = (
 )
 
 
-def main(argv: "Sequence[str] | None" = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point; see the module docstring. Returns the exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("-h", "--help"):
@@ -259,8 +259,9 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         try:
             print(bugs_skipped_rows(rest))
         except ValueError as exc:
-            print(f"ERROR: build_bugs_skipped_notes_block requires <bug_file> <rationale> pairs ({exc}).",
-                  file=sys.stderr)
+            print(
+                f"ERROR: build_bugs_skipped_notes_block requires <bug_file> <rationale> pairs ({exc}).", file=sys.stderr
+            )
             return 1
         return 0
     if command == "stamp-status" and 2 <= len(rest) <= 4:

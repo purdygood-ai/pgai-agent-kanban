@@ -48,7 +48,7 @@ from pgai_agent_kanban.deep_verify.freshness import (
     main,
 )
 
-_UTC = datetime.timezone.utc
+_UTC = datetime.UTC
 
 
 def _dt(iso: str) -> datetime.datetime:
@@ -95,9 +95,7 @@ def test_record_exactly_at_the_window_boundary_is_fresh() -> None:
     record = _built_record(timestamp="2026-08-27T00:00:00+00:00")
     now = _dt("2026-09-03T00:00:00+00:00")  # exactly 7 days later
 
-    decision = evaluate_freshness(
-        target_version="v2.9.12", record=record, now=now, window_days=7
-    )
+    decision = evaluate_freshness(target_version="v2.9.12", record=record, now=now, window_days=7)
 
     assert decision.result == RESULT_FRESH
 
@@ -195,9 +193,7 @@ def test_built_record_for_the_right_version_but_too_old_is_stale_naming_the_age(
     record = _built_record(version="v2.9.12", timestamp="2026-08-01T00:00:00+00:00")
     now = _dt("2026-09-03T00:00:00+00:00")  # 33 days later
 
-    decision = evaluate_freshness(
-        target_version="v2.9.12", record=record, now=now, window_days=7
-    )
+    decision = evaluate_freshness(target_version="v2.9.12", record=record, now=now, window_days=7)
 
     assert decision.result == RESULT_STALE
     assert len(decision.reasons) == 1
@@ -209,9 +205,7 @@ def test_stale_record_that_is_both_wrong_version_and_too_old_names_both_reasons(
     record = _built_record(version="v2.9.9", timestamp="2026-07-01T00:00:00+00:00")
     now = _dt("2026-09-03T00:00:00+00:00")
 
-    decision = evaluate_freshness(
-        target_version="v2.9.12", record=record, now=now, window_days=7
-    )
+    decision = evaluate_freshness(target_version="v2.9.12", record=record, now=now, window_days=7)
 
     assert decision.result == RESULT_STALE
     assert len(decision.reasons) == 2
@@ -243,9 +237,7 @@ def test_window_days_parameter_changes_the_verdict_for_a_fixed_record() -> None:
     assert with_default.result == RESULT_STALE
     assert DEFAULT_FRESHNESS_WINDOW_DAYS == 7
 
-    with_wider_window = evaluate_freshness(
-        target_version="v2.9.12", record=record, now=now, window_days=14
-    )
+    with_wider_window = evaluate_freshness(target_version="v2.9.12", record=record, now=now, window_days=14)
     assert with_wider_window.result == RESULT_FRESH
 
 
@@ -288,9 +280,7 @@ def test_cli_prints_result_age_for_a_fresh_record(capsys: pytest.CaptureFixture)
 
 
 def test_cli_prints_never_run_when_found_is_false(capsys: pytest.CaptureFixture) -> None:
-    rc = main(
-        ["v2.9.12", "false", "", "", "", "2026-09-03T08:00:00+00:00"]
-    )
+    rc = main(["v2.9.12", "false", "", "", "", "2026-09-03T08:00:00+00:00"])
     out = capsys.readouterr().out
 
     assert rc == 0
@@ -339,9 +329,7 @@ def test_cli_rejects_wrong_argument_count() -> None:
 
 
 def test_cli_rejects_unparseable_now(capsys: pytest.CaptureFixture) -> None:
-    rc = main(
-        ["v2.9.12", "false", "", "", "", "not-a-timestamp"]
-    )
+    rc = main(["v2.9.12", "false", "", "", "", "not-a-timestamp"])
     err = capsys.readouterr().err
 
     assert rc == 1

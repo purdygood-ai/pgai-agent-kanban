@@ -42,11 +42,7 @@ KI_ID_RE = re.compile(r"\bKI-(\d+\.\d+\.\d+\.\d+)\b")
 # optional whitespace and list marker, followed by a separator (em-dash,
 # hyphen, or whitespace).  An identifier mentioned mid-sentence does not
 # match, so prose that refers to an entry is never mistaken for the entry.
-_LEADING_KI_RE = re.compile(
-    r"^[\s\-\*]*"
-    r"(KI-\d+\.\d+\.\d+\.\d+)"
-    r"(?:\s*[—\-]+\s*|\s+)"
-)
+_LEADING_KI_RE = re.compile(r"^[\s\-\*]*" r"(KI-\d+\.\d+\.\d+\.\d+)" r"(?:\s*[—\-]+\s*|\s+)")
 
 # The clause the changelog writer appends to a rendered KI line.  The
 # title is everything before its LAST occurrence: a title may itself
@@ -94,7 +90,7 @@ def ki_line_title(line: str) -> str:
     match = _LEADING_KI_RE.match(stripped)
     if not match:
         return ""
-    rest = stripped[match.end():]
+    rest = stripped[match.end() :]
     clause_at = rest.rfind(_AFFECTS_CLAUSE)
     if clause_at != -1 and _STATUS_SEPARATOR in rest[clause_at:]:
         rest = rest[:clause_at]

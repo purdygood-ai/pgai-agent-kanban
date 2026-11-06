@@ -60,6 +60,7 @@ if _TEAM_DIR not in sys.path:
 # Parsers (importable by unit tests)
 # ---------------------------------------------------------------------------
 
+
 def parse_config(text, source="pseudocron.cfg"):
     """Parse pseudocron config text into a list of (minute, command) tuples.
 
@@ -88,15 +89,13 @@ def parse_config(text, source="pseudocron.cfg"):
             minute = int(minute_str)
         except ValueError:
             print(
-                f"ERROR {_ts()} parse error {source} line {lineno}:"
-                f' invalid minute "{minute_str}"',
+                f"ERROR {_ts()} parse error {source} line {lineno}:" f' invalid minute "{minute_str}"',
                 file=sys.stderr,
             )
             continue
         if not 0 <= minute <= 59:
             print(
-                f"ERROR {_ts()} parse error {source} line {lineno}:"
-                f" minute {minute} out of range 0-59",
+                f"ERROR {_ts()} parse error {source} line {lineno}:" f" minute {minute} out of range 0-59",
                 file=sys.stderr,
             )
             continue
@@ -134,9 +133,7 @@ def parse_env(text, source="pseudocron.env"):
     """
     env = {}
     # Pattern matches optional 'export ', NAME=VALUE with optional quoting.
-    pattern = re.compile(
-        r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$"
-    )
+    pattern = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -146,11 +143,7 @@ def parse_env(text, source="pseudocron.env"):
             continue
         name, value = m.group(1), m.group(2)
         # Strip matching outer quotes (single or double).
-        if (
-            len(value) >= 2
-            and value[0] == value[-1]
-            and value[0] in ('"', "'")
-        ):
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
         env[name] = value
     return env
@@ -197,6 +190,7 @@ def _parse_args(argv=None):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _ts():
     """Return current UTC time as an ISO 8601 string (seconds precision)."""
     t = time.gmtime()
@@ -237,6 +231,7 @@ def _shutdown(signum, frame):  # noqa: ARG001
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     """Run the pseudocron scheduler in the foreground until SIGINT or SIGTERM.
 
@@ -254,6 +249,7 @@ def main():
     # PGAI_AGENT_KANBAN_ROOT_PATH is unset or empty (source-then-fail-loud contract).
     try:
         from pgai_agent_kanban.env import resolve_kanban_root
+
         root = str(resolve_kanban_root())
     except RuntimeError as exc:
         print(f"ERROR pseudocron: {exc}", file=sys.stderr)
@@ -292,8 +288,7 @@ def main():
         )
     except FileNotFoundError:
         print(
-            f"pseudocron starting: env file not found ({env_path});"
-            " continuing with bare environment",
+            f"pseudocron starting: env file not found ({env_path});" " continuing with bare environment",
             file=sys.stderr,
         )
 
@@ -322,8 +317,7 @@ def main():
                 spawn_job(command, env=child_env, cwd=root)
             except Exception as exc:  # noqa: BLE001
                 print(
-                    f"ERROR {ts} spawn failed (minute={minute:02d}):"
-                    f" {command} ({type(exc).__name__}: {exc})",
+                    f"ERROR {ts} spawn failed (minute={minute:02d}):" f" {command} ({type(exc).__name__}: {exc})",
                     file=sys.stderr,
                 )
 

@@ -52,8 +52,6 @@ bug/task IDs (roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
 from __future__ import annotations
 
 import json
-import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -71,20 +69,22 @@ from tests.unit.shell_harness import run_bash
 # the adapter, but the tag makes that independent of that redirection).
 _LOG_TAG = "WAKE-LOG:"
 
-_LIB_SOURCE_PREAMBLE = """
+# An f-string that is later ``.format(kanban_root=...)``-ed: braces meant for
+# .format are doubled once, the shell braces of log() are doubled twice.
+_LIB_SOURCE_PREAMBLE = f"""
 set -euo pipefail
-export KANBAN_ROOT="{kanban_root}"
-export TEAM_ROOT="{kanban_root}"
+export KANBAN_ROOT="{{kanban_root}}"
+export TEAM_ROOT="{{kanban_root}}"
 source scripts/lib/project_paths.sh
 source scripts/lib/projects.sh
 source scripts/lib/discovery.sh
 source scripts/lib/pp_run_ops.sh
-log() {{ echo "%s $*"; }}
+log() {{{{ echo "{_LOG_TAG} $*"; }}}}
 source scripts/lib/wake_blocked_ledger.sh
-""" % _LOG_TAG
+"""
 
 
-def _write_release_state(project_dir: Path, active_rc: str = "none", last_released: "str | None" = None) -> None:
+def _write_release_state(project_dir: Path, active_rc: str = "none", last_released: str | None = None) -> None:
     project_dir.mkdir(parents=True, exist_ok=True)
     last = f"\n## Last Released\n{last_released}\n" if last_released is not None else ""
     (project_dir / "release-state.md").write_text(
@@ -131,8 +131,7 @@ def _make_root(tmp_path: Path, projects: dict[str, str]) -> Path:
 def test_start_then_end_round_trips_through_the_real_ledger(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"demo": "v1.2.3"})
     script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_halt_boundary demo "halt:project" start\n'
-        'pgai_stamp_halt_boundary demo "halt:project" end\n'
+        'pgai_stamp_halt_boundary demo "halt:project" start\n' 'pgai_stamp_halt_boundary demo "halt:project" end\n'
     )
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
@@ -166,8 +165,7 @@ def test_repeated_start_before_matching_end_is_a_silent_no_op(tmp_path: Path) ->
 def test_end_with_no_open_interval_is_a_silent_no_op(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"demo": "v1.2.3"})
     script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_halt_boundary demo "halt:project" end\n'
-        'pgai_stamp_halt_boundary demo "halt:project" end\n'
+        'pgai_stamp_halt_boundary demo "halt:project" end\n' 'pgai_stamp_halt_boundary demo "halt:project" end\n'
     )
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
@@ -180,11 +178,10 @@ def test_end_with_no_open_interval_is_a_silent_no_op(tmp_path: Path) -> None:
 
 def test_no_op_end_for_another_project_reaches_no_refusal_ledger(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"alpha": "v2.48.1", "beta": "v0.30.8"})
-    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_halt_boundary beta "halt:project" end\n'
-    )
+    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + ('pgai_stamp_halt_boundary beta "halt:project" end\n')
     result = run_bash(
-        tmp_path, script,
+        tmp_path,
+        script,
         extra_env={"PGAI_PROJECT_NAME": "alpha", "PGAI_AGENT_KANBAN_ROOT_PATH": str(root)},
     )
     assert result.returncode == 0, result.stderr
@@ -196,8 +193,7 @@ def test_no_op_end_for_another_project_reaches_no_refusal_ledger(tmp_path: Path)
 def test_active_rc_none_records_the_halt_under_the_no_rc_version(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"demo": "none"})
     script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_halt_boundary demo "halt:project" start\n'
-        'pgai_stamp_halt_boundary demo "halt:project" end\n'
+        'pgai_stamp_halt_boundary demo "halt:project" start\n' 'pgai_stamp_halt_boundary demo "halt:project" end\n'
     )
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
@@ -214,9 +210,7 @@ def test_active_rc_none_records_the_halt_under_the_no_rc_version(tmp_path: Path)
 
 def test_fleet_boundary_stamps_every_project_with_or_without_an_active_rc(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"has-rc": "v2.0.0", "between-rcs": "none"})
-    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_fleet_halt_boundary "halt:global" start\n'
-    )
+    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + ('pgai_stamp_fleet_halt_boundary "halt:global" start\n')
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
 
@@ -231,8 +225,7 @@ def test_fleet_boundary_stamps_every_project_with_or_without_an_active_rc(tmp_pa
 def test_fleet_boundary_pairs_start_and_end_across_two_calls(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"has-rc": "v2.0.0"})
     script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_fleet_halt_boundary "halt:global" start\n'
-        'pgai_stamp_fleet_halt_boundary "halt:global" end\n'
+        'pgai_stamp_fleet_halt_boundary "halt:global" start\n' 'pgai_stamp_fleet_halt_boundary "halt:global" end\n'
     )
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
@@ -252,8 +245,7 @@ def test_unwritable_metrics_directory_never_breaks_the_caller(tmp_path: Path) ->
     metrics_dir.chmod(0o000)
     try:
         script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-            'pgai_stamp_halt_boundary demo "halt:project" start\n'
-            'echo "CALLER_STILL_RUNNING"\n'
+            'pgai_stamp_halt_boundary demo "halt:project" start\n' 'echo "CALLER_STILL_RUNNING"\n'
         )
         result = run_bash(tmp_path, script)
         # The adapter itself never aborts the caller: the script's own
@@ -294,9 +286,17 @@ def _sentinel_record(halt: Path, op: str, epoch: int = 1791500000) -> str:
 
     digest = hashlib.sha256(halt.read_bytes()).hexdigest() if halt.exists() else "absent"
     values = {
-        "time": "2026-10-08T22:53:20+00:00", "epoch": str(epoch), "op": op, "path": str(halt),
-        "sha256": digest, "entry": "python3 -m pgai_agent_kanban.ops " + op,
-        "pid": "4242", "ppid": "4240", "parent": "bash halt-after.sh", "user": "op", "test": "-",
+        "time": "2026-10-08T22:53:20+00:00",
+        "epoch": str(epoch),
+        "op": op,
+        "path": str(halt),
+        "sha256": digest,
+        "entry": "python3 -m pgai_agent_kanban.ops " + op,
+        "pid": "4242",
+        "ppid": "4240",
+        "parent": "bash halt-after.sh",
+        "user": "op",
+        "test": "-",
     }
     return "\t".join(f"{name}={values[name]}" for name in FIELDS) + "\n"
 
@@ -368,9 +368,7 @@ def test_project_halt_without_an_error_key_records_the_source_label(tmp_path: Pa
 def test_global_halt_records_cause_operator_for_every_project(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"alpha": "v2.0.0", "beta": "none"})
     (root / "HALT").write_text("# operator stopping every project\n", encoding="utf-8")
-    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_fleet_halt_boundary "halt:global" start\n'
-    )
+    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + ('pgai_stamp_fleet_halt_boundary "halt:global" start\n')
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
 
@@ -384,8 +382,7 @@ def test_global_halt_records_cause_operator_for_every_project(tmp_path: Path) ->
 def test_end_records_class_any_and_halt_cleared(tmp_path: Path) -> None:
     root = _make_root(tmp_path, {"demo": "v1.2.3"})
     script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_halt_boundary demo "halt:project" start\n'
-        'pgai_stamp_halt_boundary demo "halt:project" end\n'
+        'pgai_stamp_halt_boundary demo "halt:project" start\n' 'pgai_stamp_halt_boundary demo "halt:project" end\n'
     )
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
@@ -402,16 +399,33 @@ def test_end_after_unhalt_closed_the_block_adds_nothing(tmp_path: Path) -> None:
     ledger.parent.mkdir(parents=True)
     # What unhalt leaves: the chain HALT's block closed, class human.
     ledger.write_text(
-        json.dumps({"cause": "chain", "kind": "block-start", "source": "halt:project",
-                    "timestamp": "2026-10-18T10:00:00+00:00", "version": "v1.2.3"}, sort_keys=True) + "\n"
-        + json.dumps({"class": "human", "kind": "block-end", "reason_code": "unhalt", "source": "halt:project",
-                      "timestamp": "2026-10-18T11:00:00+00:00", "version": "v1.2.3"}, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "cause": "chain",
+                "kind": "block-start",
+                "source": "halt:project",
+                "timestamp": "2026-10-18T10:00:00+00:00",
+                "version": "v1.2.3",
+            },
+            sort_keys=True,
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "class": "human",
+                "kind": "block-end",
+                "reason_code": "unhalt",
+                "source": "halt:project",
+                "timestamp": "2026-10-18T11:00:00+00:00",
+                "version": "v1.2.3",
+            },
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     before = ledger.read_text(encoding="utf-8")
-    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'pgai_stamp_halt_boundary demo "halt:project" end\n'
-    )
+    script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + ('pgai_stamp_halt_boundary demo "halt:project" end\n')
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stderr
     assert ledger.read_text(encoding="utf-8") == before
@@ -474,12 +488,20 @@ def test_end_for_a_project_with_no_halt_history_makes_no_ledger_call(tmp_path: P
     ledger.parent.mkdir(parents=True)
     # A ledger holding only a task block: it never names halt:project.
     ledger.write_text(
-        json.dumps({"kind": "block-start", "source": "task:EXAMPLE-1", "timestamp": "2026-10-18T10:00:00+00:00",
-                    "version": "v1.2.3"}, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "kind": "block-start",
+                "source": "task:EXAMPLE-1",
+                "timestamp": "2026-10-18T10:00:00+00:00",
+                "version": "v1.2.3",
+            },
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     script = _LIB_SOURCE_PREAMBLE.format(kanban_root=root) + (
-        'eval "$(declare -f pp_run_ops | sed \'1s/^pp_run_ops/_real_pp_run_ops/\')"\n'
+        "eval \"$(declare -f pp_run_ops | sed '1s/^pp_run_ops/_real_pp_run_ops/')\"\n"
         'pp_run_ops() { echo "PP_RUN_OPS_CALLED $*"; _real_pp_run_ops "$@"; }\n'
         'pgai_stamp_halt_boundary demo "halt:project" end\n'
         'pgai_stamp_halt_boundary idle "halt:project" end\n'

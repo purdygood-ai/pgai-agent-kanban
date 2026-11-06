@@ -36,6 +36,7 @@ _DASHBOARD_KEYS = {
     "session_name": "pgai-kanban-dashboard",
     "refresh_seconds": "5",
     "rows_per_column": "21",
+    "operator_board_agents": "merged",
     "color_done": "green",
     "color_working": "yellow",
     "color_blocked": "red",
@@ -84,9 +85,9 @@ def test_example_sets_key_to_its_in_script_default_and_names_it(key: str, defaul
         if not line.startswith("#"):
             break
         comment.append(line)
-    assert any(f"Default: {default}" in l for l in comment), (
-        f"the comment above [dashboard] {key} must name its default {default!r}: {comment}"
-    )
+    assert any(
+        f"Default: {default}" in l for l in comment
+    ), f"the comment above [dashboard] {key} must name its default {default!r}: {comment}"
 
 
 @pytest.mark.parametrize("key, default", sorted(_DASHBOARD_KEYS.items()))
@@ -95,3 +96,16 @@ def test_every_reader_uses_the_documented_default(key: str, default: str) -> Non
     assert readers, f"no script reads [dashboard] {key}; drop it from kanban.cfg_example"
     mismatched = {path: d for path, d in readers.items() if d != {default}}
     assert not mismatched, f"[dashboard] {key} is documented as {default!r} but read with {mismatched}"
+
+
+def test_operator_board_agents_comment_names_both_values() -> None:
+    """The comment above [dashboard] operator_board_agents names both values
+    create.sh accepts, merged and split."""
+    section = _dashboard_section()
+    (index,) = [i for i, l in enumerate(section) if re.match(r"^operator_board_agents\s*=", l)]
+    comment: list[str] = []
+    for line in reversed(section[:index]):
+        if not line.startswith("#"):
+            break
+        comment.append(line)
+    assert any(re.search(r"\bmerged\s*\|\s*split\b", l) for l in comment), comment

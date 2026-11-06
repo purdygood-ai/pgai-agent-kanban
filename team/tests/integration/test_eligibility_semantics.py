@@ -42,7 +42,6 @@ import pathlib
 import shutil
 import subprocess
 import textwrap
-from typing import Optional
 
 import pytest
 
@@ -147,8 +146,7 @@ def _build_testing_only_project_root(
     (queues_dir / "plans").mkdir(parents=True, exist_ok=True)
     for agent in ("coder", "pm", "writer", "tester", "cm", "bug", "priority"):
         (queues_dir / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n\n"
-            "<!-- Format: - [ ] TASK-ID -->\n",
+            f"# {agent.upper()} Backlog\n\n" "<!-- Format: - [ ] TASK-ID -->\n",
             encoding="utf-8",
         )
 
@@ -238,8 +236,7 @@ def _build_release_project_root(
     (queues_dir / "plans").mkdir(parents=True, exist_ok=True)
     for agent in ("coder", "pm", "writer", "tester", "cm", "bug", "priority"):
         (queues_dir / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n\n"
-            "<!-- Format: - [ ] TASK-ID -->\n",
+            f"# {agent.upper()} Backlog\n\n" "<!-- Format: - [ ] TASK-ID -->\n",
             encoding="utf-8",
         )
 
@@ -266,7 +263,7 @@ def _run_discovery(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -296,6 +293,7 @@ def _run_discovery(
     """)
 
     import os
+
     base_env = dict(os.environ)
     base_env["KANBAN_ROOT"] = str(kanban_root)
     base_env["TEAM_ROOT"] = str(kanban_root)
@@ -444,8 +442,7 @@ class TestTestingOnlyProjectFullPath:
         result = _run_discovery(root, project_name)
 
         assert result.returncode == 0, (
-            f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
-            f"stderr: {result.stderr}"
+            f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n" f"stderr: {result.stderr}"
         )
 
         # The bundle must have been picked up and marked 'running'.
@@ -475,8 +472,7 @@ class TestTestingOnlyProjectFullPath:
         result = _run_discovery(root, project_name)
 
         assert result.returncode == 0, (
-            f"discovery_run_pipeline exited non-zero.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"discovery_run_pipeline exited non-zero.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         task_dir = root / "projects" / project_name / "tasks" / task_id
@@ -509,8 +505,7 @@ class TestTestingOnlyProjectFullPath:
         pm_backlog = root / "projects" / project_name / "tasks" / "queues" / "pm_backlog.md"
         backlog_text = pm_backlog.read_text(encoding="utf-8") if pm_backlog.exists() else ""
         assert task_id in backlog_text, (
-            f"Expected task ID {task_id!r} to appear in pm_backlog.\n"
-            f"pm_backlog content:\n{backlog_text}"
+            f"Expected task ID {task_id!r} to appear in pm_backlog.\n" f"pm_backlog content:\n{backlog_text}"
         )
 
     def test_discovery_does_not_create_git_objects_during_testing_only_run(
@@ -536,8 +531,7 @@ class TestTestingOnlyProjectFullPath:
         # No .git directory should exist anywhere under the kanban root.
         git_dirs = list(root.rglob(".git"))
         assert not git_dirs, (
-            f"Expected no .git directories under {root} after a testing-only discovery run.\n"
-            f"Found: {git_dirs}"
+            f"Expected no .git directories under {root} after a testing-only discovery run.\n" f"Found: {git_dirs}"
         )
 
     def test_release_state_is_byte_identical_after_testing_only_discovery_run(
@@ -598,12 +592,11 @@ class TestTestingOnlyProjectFullPath:
             cwd=str(_TEAM_DIR),
             timeout=30,
         )
-        assert result.returncode == 0, (
-            f"wf_finalize invocation failed.\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"wf_finalize invocation failed.\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
         assert result.stdout.strip() == "report", (
-            f"Expected wf_finalize to return 'report' for testing-only plugin; "
-            f"got {result.stdout.strip()!r}"
+            f"Expected wf_finalize to return 'report' for testing-only plugin; " f"got {result.stdout.strip()!r}"
         )
 
     def test_discovery_status_reflects_work_produced_for_label_project(
@@ -627,8 +620,7 @@ class TestTestingOnlyProjectFullPath:
 
         assert result.returncode == 0
         assert "DISCOVERY_STATUS=produced_work" in result.stdout, (
-            f"Expected DISCOVERY_STATUS=produced_work in stdout.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected DISCOVERY_STATUS=produced_work in stdout.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
 
@@ -692,6 +684,7 @@ class TestSemverEligibilityRegression:
         """)
 
         import os
+
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
         env["TEAM_ROOT"] = str(root)
@@ -713,11 +706,7 @@ class TestSemverEligibilityRegression:
         )
 
         # Parse the output paths (strip absolute prefix to get just filenames).
-        output_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        ]
+        output_names = [pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()]
 
         expected_order = [
             "v0.0.1-bundle-20260712.md",
@@ -767,6 +756,7 @@ class TestSemverEligibilityRegression:
         """)
 
         import os
+
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
         env["TEAM_ROOT"] = str(root)
@@ -793,15 +783,9 @@ class TestSemverEligibilityRegression:
             if line.strip() and ":ceiling-blocked" not in line and ":auto" not in line
         ]
 
-        assert "v0.0.1-bundle-20260712.md" not in output_names, (
-            "v0.0.1 must be excluded (below last_released v0.0.2)"
-        )
-        assert "v0.0.2-bundle-20260712.md" not in output_names, (
-            "v0.0.2 must be excluded (at last_released v0.0.2)"
-        )
-        assert "v0.0.3-bundle-20260712.md" in output_names, (
-            "v0.0.3 must be included (above last_released v0.0.2)"
-        )
+        assert "v0.0.1-bundle-20260712.md" not in output_names, "v0.0.1 must be excluded (below last_released v0.0.2)"
+        assert "v0.0.2-bundle-20260712.md" not in output_names, "v0.0.2 must be excluded (at last_released v0.0.2)"
+        assert "v0.0.3-bundle-20260712.md" in output_names, "v0.0.3 must be included (above last_released v0.0.2)"
 
     def test_eligible_list_excludes_file_above_ceiling(
         self,
@@ -842,6 +826,7 @@ class TestSemverEligibilityRegression:
         """)
 
         import os
+
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
         env["TEAM_ROOT"] = str(root)
@@ -870,9 +855,9 @@ class TestSemverEligibilityRegression:
             for line in stdout_lines
             if line.strip() and ":" not in pathlib.Path(line.strip()).name
         ]
-        assert "v0.0.1-bundle-20260712.md" in plain_names, (
-            f"v0.0.1 must appear as a plain eligible entry.\nOutput lines: {stdout_lines}"
-        )
+        assert (
+            "v0.0.1-bundle-20260712.md" in plain_names
+        ), f"v0.0.1 must appear as a plain eligible entry.\nOutput lines: {stdout_lines}"
 
         # v0.0.2 must appear with the ceiling-blocked suffix.
         ceiling_blocked_lines = [line for line in stdout_lines if ":ceiling-blocked:" in line]
@@ -927,6 +912,7 @@ class TestSemverEligibilityRegression:
         """)
 
         import os
+
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
         env["TEAM_ROOT"] = str(root)
@@ -947,11 +933,7 @@ class TestSemverEligibilityRegression:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        output_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        ]
+        output_names = [pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()]
 
         # Both files must appear (no semver parse → no ValueError discard on label path).
         # Label path returns files in filename-lexical ascending order.
@@ -1045,6 +1027,7 @@ class TestSkipLogging:
         """)
 
         import os
+
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
         env["TEAM_ROOT"] = str(root)
@@ -1077,9 +1060,7 @@ class TestSkipLogging:
             for line in result.stdout.strip().splitlines()
             if line.strip() and ":" not in pathlib.Path(line.strip()).name
         ]
-        assert filename not in plain_names, (
-            f"Wont-do file must not appear as eligible; got {plain_names!r}"
-        )
+        assert filename not in plain_names, f"Wont-do file must not appear as eligible; got {plain_names!r}"
 
     def test_auto_sentinel_target_version_on_label_project_emits_skip_log(
         self,
@@ -1121,8 +1102,7 @@ class TestSkipLogging:
         result = _run_discovery(root, project_name)
 
         assert result.returncode == 0, (
-            f"discovery_run_pipeline exited non-zero.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"discovery_run_pipeline exited non-zero.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         combined = result.stderr + result.stdout
@@ -1131,8 +1111,7 @@ class TestSkipLogging:
             f"stderr: {result.stderr}\nstdout: {result.stdout}"
         )
         assert "auto" in combined.lower(), (
-            f"Expected 'auto' to appear in the skip log output.\n"
-            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+            f"Expected 'auto' to appear in the skip log output.\n" f"stderr: {result.stderr}\nstdout: {result.stdout}"
         )
 
     def test_terminal_state_bug_file_emits_skip_log_on_label_project(
@@ -1178,6 +1157,7 @@ class TestSkipLogging:
         """)
 
         import os
+
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
         env["TEAM_ROOT"] = str(root)
@@ -1201,15 +1181,10 @@ class TestSkipLogging:
             f"stderr: {result.stderr}\nstdout: {result.stdout}"
         )
         assert "wont-do" in combined.lower() or "terminal" in combined.lower(), (
-            f"Expected 'wont-do' or 'terminal' in skip log.\n"
-            f"stderr: {result.stderr}\nstdout: {result.stdout}"
+            f"Expected 'wont-do' or 'terminal' in skip log.\n" f"stderr: {result.stderr}\nstdout: {result.stdout}"
         )
         # The wont-do file must not appear as a plain eligible entry.
-        output_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        ]
-        assert "v1.0.0-closed-testing-run.md" not in output_names, (
-            f"Wont-do file must not appear in eligible list; got {output_names!r}"
-        )
+        output_names = [pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()]
+        assert (
+            "v1.0.0-closed-testing-run.md" not in output_names
+        ), f"Wont-do file must not appear in eligible list; got {output_names!r}"

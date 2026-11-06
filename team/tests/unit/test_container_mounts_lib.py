@@ -115,10 +115,14 @@ class _Sandbox:
         """The standard mount/env arguments, with both paths realpath'd."""
         home, root = str(self.home), str(self.root)
         return [
-            "-v", f"{home}:{home}",
-            "-v", f"{root}:{root}",
-            "-e", f"HOME={home}",
-            "-e", f"PGAI_AGENT_KANBAN_ROOT_PATH={root}",
+            "-v",
+            f"{home}:{home}",
+            "-v",
+            f"{root}:{root}",
+            "-e",
+            f"HOME={home}",
+            "-e",
+            f"PGAI_AGENT_KANBAN_ROOT_PATH={root}",
         ]
 
 
@@ -146,11 +150,11 @@ def _assemble(tmp_path: pathlib.Path, box: _Sandbox, root: str, home: str, *moun
 def _parsed(result: BashResult) -> dict[str, object]:
     lines = result.stdout.splitlines()
     return {
-        "root": next(line[len("root="):] for line in lines if line.startswith("root=")),
-        "home": next(line[len("home="):] for line in lines if line.startswith("home=")),
+        "root": next(line[len("root=") :] for line in lines if line.startswith("root=")),
+        "home": next(line[len("home=") :] for line in lines if line.startswith("home=")),
         # printf with an empty array still prints one bare "arg=" line.
-        "args": [line[len("arg="):] for line in lines if line.startswith("arg=") and line != "arg="],
-        "status": int(next(line[len("status="):] for line in lines if line.startswith("status="))),
+        "args": [line[len("arg=") :] for line in lines if line.startswith("arg=") and line != "arg="],
+        "status": int(next(line[len("status=") :] for line in lines if line.startswith("status="))),
     }
 
 
@@ -202,8 +206,7 @@ def test_assemble_refuses_a_missing_or_empty_kanban_root_with_status_one(tmp_pat
         got = _parsed(result)
         assert got["status"] == 1, (root, result.stdout + result.stderr)
         assert (
-            f"test-caller: PGAI_AGENT_KANBAN_ROOT_PATH is not set to an existing directory: '{root}'"
-            in result.stderr
+            f"test-caller: PGAI_AGENT_KANBAN_ROOT_PATH is not set to an existing directory: '{root}'" in result.stderr
         ), result.stderr
         assert got["args"] == [], got
 
@@ -240,7 +243,7 @@ def test_assemble_maps_the_operator_user_when_the_engine_is_podman(tmp_path: pat
 
 
 @pytest.mark.parametrize("cfg", [None, "[docker]\ndocker_exe = docker\n", "[docker]\ndocker_exe =\n"])
-def test_assemble_adds_no_user_mapping_when_the_engine_is_docker(tmp_path: pathlib.Path, cfg: "str | None") -> None:
+def test_assemble_adds_no_user_mapping_when_the_engine_is_docker(tmp_path: pathlib.Path, cfg: str | None) -> None:
     box = _Sandbox(tmp_path)
     if cfg is not None:
         (box.root / "kanban.cfg").write_text(cfg, encoding="utf-8")
@@ -261,23 +264,29 @@ def test_container_shell_issues_the_standard_run_argv_with_the_default_image(tmp
     result = _launch(tmp_path, box)
 
     assert result.returncode == 0, result.stderr
-    assert box.engine_calls() == [["run", "--rm", "-it", *box.standard_args(), _DEFAULT_IMAGE_TAG]]
+    assert box.engine_calls() == [["run", "--rm", "-it", "--init", *box.standard_args(), _DEFAULT_IMAGE_TAG]]
     assert (
-        f"container-shell.sh: engine=docker image={_DEFAULT_IMAGE_TAG} "
-        f"kanban_root={box.root} home={box.home}"
+        f"container-shell.sh: engine=docker image={_DEFAULT_IMAGE_TAG} " f"kanban_root={box.root} home={box.home}"
     ) in result.stderr, result.stderr
 
 
 def test_container_shell_appends_each_mount_flag_after_the_standard_arguments(tmp_path: pathlib.Path) -> None:
     box = _Sandbox(tmp_path)
     result = _launch(
-        tmp_path, box,
-        "--mount", "/srv/a:/a", "--mount=/srv/b:/b", "--kanban-root", str(box.root_link), "-t", "custom:v9",
+        tmp_path,
+        box,
+        "--mount",
+        "/srv/a:/a",
+        "--mount=/srv/b:/b",
+        "--kanban-root",
+        str(box.root_link),
+        "-t",
+        "custom:v9",
     )
 
     assert result.returncode == 0, result.stderr
     assert box.engine_calls() == [
-        ["run", "--rm", "-it", *box.standard_args(), "-v", "/srv/a:/a", "-v", "/srv/b:/b", "custom:v9"]
+        ["run", "--rm", "-it", "--init", *box.standard_args(), "-v", "/srv/a:/a", "-v", "/srv/b:/b", "custom:v9"]
     ]
 
 
@@ -314,5 +323,5 @@ def test_container_shell_under_podman_runs_with_the_user_mapping(tmp_path: pathl
 
     assert result.returncode == 0, result.stderr
     assert box.engine_calls() == [
-        ["run", "--rm", "-it", "--userns=keep-id", *box.standard_args(), _DEFAULT_IMAGE_TAG]
+        ["run", "--rm", "-it", "--init", "--userns=keep-id", *box.standard_args(), _DEFAULT_IMAGE_TAG]
     ]

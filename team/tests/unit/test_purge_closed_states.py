@@ -71,7 +71,9 @@ def _purge(tmp_path: pathlib.Path, proj: pathlib.Path, fn: str, apply: str, prel
 
 @pytest.mark.parametrize(("fn", "subdir"), _CATEGORIES, ids=_CATEGORY_IDS)
 def test_dry_run_lists_every_closed_state_and_reads_superseded_as_wont_do(
-    tmp_path: pathlib.Path, fn: str, subdir: str,
+    tmp_path: pathlib.Path,
+    fn: str,
+    subdir: str,
 ) -> None:
     proj = _project(tmp_path, subdir)
     item_dir = proj / subdir
@@ -90,7 +92,9 @@ def test_dry_run_lists_every_closed_state_and_reads_superseded_as_wont_do(
 
 @pytest.mark.parametrize(("fn", "subdir"), _CATEGORIES, ids=_CATEGORY_IDS)
 def test_apply_deletes_a_superseded_file_like_any_closed_one(
-    tmp_path: pathlib.Path, fn: str, subdir: str,
+    tmp_path: pathlib.Path,
+    fn: str,
+    subdir: str,
 ) -> None:
     proj = _project(tmp_path, subdir)
     item_dir = proj / subdir
@@ -103,7 +107,9 @@ def test_apply_deletes_a_superseded_file_like_any_closed_one(
 
 @pytest.mark.parametrize(("fn", "subdir"), _CATEGORIES, ids=_CATEGORY_IDS)
 def test_nothing_is_purged_when_the_closed_state_list_cannot_be_loaded(
-    tmp_path: pathlib.Path, fn: str, subdir: str,
+    tmp_path: pathlib.Path,
+    fn: str,
+    subdir: str,
 ) -> None:
     proj = _project(tmp_path, subdir)
     item_dir = proj / subdir
@@ -120,7 +126,11 @@ def test_nothing_is_purged_when_the_closed_state_list_cannot_be_loaded(
 def test_closed_map_command_prints_the_shared_closed_state_list() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.terminal_states", "closed-map"],
-        cwd=_TEAM_DIR, capture_output=True, text=True, timeout=30, check=False,
+        cwd=_TEAM_DIR,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

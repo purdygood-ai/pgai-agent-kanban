@@ -178,10 +178,10 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve script directory ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # --- Source optional config files (BEFORE strict mode) ---
 # The kanban bashrc/env may have unset vars, non-zero returns, or interactive
@@ -197,26 +197,28 @@ config_startup_prelude "$TEAM_ROOT"
 # Source ini_parser.sh for read_ini (needed before project_paths.sh is available).
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${SCRIPT_DIR}/../lib/ini_parser.sh" ]] && source "${SCRIPT_DIR}/../lib/ini_parser.sh"
-# Source kanban.cfg — INI format replaces legacy config.cfg
+# The global dev tree: PGAI_DEV_TREE_PATH, else kanban.cfg [paths] dev_tree_path.
+# shellcheck source=lib/dev_tree.sh
+declare -F resolve_global_dev_tree >/dev/null || source "${SCRIPT_DIR}/../lib/dev_tree.sh"
 if [[ -f "$TEAM_ROOT/kanban.cfg" ]]; then
-    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$TEAM_ROOT/kanban.cfg" paths dev_tree_path "")}"
+    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree "$TEAM_ROOT/kanban.cfg")}"
 fi
 
 # --- Source project path helpers ---
 # shellcheck source=lib/project_paths.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/project_paths.sh"
 
 # --- Source semver helpers ---
 # shellcheck source=lib/semver.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/semver.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/semver.sh"
 
 # --- Source the measured-pace block refresh (Step 8a) ---
 # shellcheck source=../lib/cm/measured_pace_refresh.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/measured_pace_refresh.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/measured_pace_refresh.sh"
 
 # --- Source pp_run_ops (JSON field reads of the per-RC state records) ---
 # shellcheck source=lib/pp_run_ops.sh
-declare -F pp_run_ops >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+declare -F pp_run_ops >/dev/null || source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/pp_run_ops.sh"
 
 # --- Enable strict mode for our own code ---
 set -euo pipefail
@@ -245,17 +247,8 @@ _CM_PUSH_TO_REMOTE="$PP_PUSH_TO_REMOTE"
 # --- Resolve REPO_ROOT from project.cfg dev_tree_path ---
 # REPO_ROOT may be overridden by the environment; otherwise derive from project.cfg.
 if [[ -z "${REPO_ROOT:-}" ]]; then
-  pp_load_config "$PROJECT_NAME" || {
-    echo "ERROR: could not load project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Expected: $(pp_project_root "$PROJECT_NAME" 2>/dev/null || echo "<unresolvable>")/project.cfg" >&2
-    exit 1
-  }
-  REPO_ROOT="${PP_dev_tree_path:-}"
-  if [[ -z "$REPO_ROOT" ]]; then
-    echo "ERROR: dev_tree_path is not set in project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Add 'dev_tree_path=<path>' to $(pp_project_root "$PROJECT_NAME")/project.cfg" >&2
-    exit 1
-  fi
+  pp_load_project_repo_root "$PROJECT_NAME" || exit 1
+  REPO_ROOT="$PP_REPO_ROOT"
 fi
 
 # --- Resolve base branch name via pp_prefix_branch ---
@@ -374,7 +367,7 @@ RELEASE_STATE_ORIGINAL="$(cat "$RELEASE_STATE")"
 # read_field <field_heading>: the value under "## <field_heading>" in
 # RELEASE_STATE, or "none" (lib/cm/common.sh).
 # shellcheck source=../lib/cm/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/common.sh"
 
 ACTIVE_RC="$(read_field "Active RC")"
 

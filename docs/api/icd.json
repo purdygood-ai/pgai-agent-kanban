@@ -769,7 +769,7 @@
       },
       "ResetBody": {
         "additionalProperties": true,
-        "description": "Body for POST /operations/reset.\n\nExactly one of the kind selectors (``key``, ``agent``, ``bug``, ``priority``,\n``requirement``) must be supplied.  Supplying two or more returns a 422 that\nnames all conflicting fields.  Supplying none also returns a 422.\n\nThe resolved selector value is the key the reset resolves, exactly as\nreset.sh's ``--key``; the item type follows from what it names (agent tasks\nare ``ROLE-YYYYMMDD-NNN`` prefixed; bug intake is ``BUG-*``; priority intake\nis ``PRIORITY-*``; requirement intake is a version string such as ``v1.2.3``).\n\nFields:\n    project:        Project name.\n    key:            Task key or intake identifier (kind-agnostic selector).\n    agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).\n    bug:            Bug intake key (e.g. ``BUG-0042``).\n    priority:       Priority intake key (e.g. ``PRIORITY-0007``).\n    requirement:    Requirement intake version (e.g. ``v1.2.3``).\n    keep_artifacts: When True, artifacts/ is kept (reset.sh's ``--keep-artifacts``).\n    force:          When True, stale-worktree cleanup (git worktree remove,\n                    prune, rm -rf) runs before the normal amnesia reset\n                    (reset.sh's ``--force``).  Without force, a detected\n                    stale worktree is refused with a non-zero exit and the\n                    removal recipe in stderr.  Agent-task resets only.\n    dry_run:        When True, short-circuits dispatch \u2014 nothing is reset.\n\nRequired fields are declared Optional so a body that omits one is refused\nby the route itself, dual-channel (``_missing_field_refusal``), rather than\nby the framework's ``{\"detail\": [...]}`` validation list.",
+        "description": "Body for POST /operations/reset.\n\nExactly one of the kind selectors (``key``, ``agent``, ``bug``, ``priority``,\n``requirement``) must be supplied.  Supplying two or more returns a 422 that\nnames all conflicting fields.  Supplying none also returns a 422.\n\nThe resolved selector value is the key the reset resolves, exactly as\nreset.sh's ``--key``; the item type follows from what it names (agent tasks\nare ``ROLE-YYYYMMDD-NNN`` prefixed; bug intake is ``BUG-*``; priority intake\nis ``PRIORITY-*``; requirement intake is a version string such as ``v1.2.3``).\n\nFields:\n    project:        Project name.\n    key:            Task key or intake identifier (kind-agnostic selector).\n    agent:          Agent task ID (e.g. ``CODER-20260101-001-slug``).\n    bug:            Bug intake key (e.g. ``BUG-0042``).\n    priority:       Priority intake key (e.g. ``PRIORITY-0007``).\n    requirement:    Requirement intake version (e.g. ``v1.2.3``).\n    keep_artifacts: When True, artifacts/ is kept (reset.sh's ``--keep-artifacts``).\n    force:          When True, stale-worktree cleanup (git worktree remove,\n                    prune, rm -rf) runs before the normal amnesia reset\n                    (reset.sh's ``--force``).  Without force, a detected\n                    stale worktree is refused with a non-zero exit and the\n                    removal recipe in stderr.  Agent-task resets only.\n    discard_branch: When True, a feature branch holding unmerged commits\n                    is deleted (\"discarding N commits at <hash>\") instead\n                    of kept for the next dispatch to resume from\n                    (reset.sh's ``--discard-branch``).  Agent-task resets\n                    only.\n    dry_run:        When True, short-circuits dispatch \u2014 nothing is reset.\n\nRequired fields are declared Optional so a body that omits one is refused\nby the route itself, dual-channel (``_missing_field_refusal``), rather than\nby the framework's ``{\"detail\": [...]}`` validation list.",
         "properties": {
           "agent": {
             "anyOf": [
@@ -792,6 +792,17 @@
               }
             ],
             "title": "Bug"
+          },
+          "discard_branch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discard Branch"
           },
           "dry_run": {
             "default": false,
@@ -993,6 +1004,147 @@
         "title": "ShipRcBody",
         "type": "object"
       },
+      "SkillListEntry": {
+        "description": "One staged skill compared with its provider home.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "state"
+        ],
+        "title": "SkillListEntry",
+        "type": "object"
+      },
+      "SkillProviderListing": {
+        "description": "One provider: its skill home and the staged skills for it.",
+        "properties": {
+          "home": {
+            "title": "Home",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillListEntry"
+            },
+            "title": "Skills",
+            "type": "array"
+          }
+        },
+        "required": [
+          "home",
+          "provider",
+          "skills"
+        ],
+        "title": "SkillProviderListing",
+        "type": "object"
+      },
+      "SkillsRefusal": {
+        "description": "GET /skills refusal: the skills module's own dual-channel triple.",
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "remedy": {
+            "title": "Remedy",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "error",
+          "message",
+          "remedy",
+          "warnings"
+        ],
+        "title": "SkillsRefusal",
+        "type": "object"
+      },
+      "SkillsResponse": {
+        "description": "GET /skills body: the skills module's list plus ``warnings``.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/SkillProviderListing"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers",
+          "source",
+          "warnings"
+        ],
+        "title": "SkillsResponse",
+        "type": "object"
+      },
       "SwitchProviderBody": {
         "additionalProperties": true,
         "description": "Body for POST /operations/switch-provider.\n\nFields:\n    provider: LLM provider name (e.g. ``claude``, ``codex``, ``gemini``).\n              Passed verbatim to ``ops.write.switch_provider``, the\n              function switch-provider.sh reaches, which validates it;\n              this layer only checks that it is present.\n    dry_run:  When True, short-circuits dispatch \u2014 nothing is written.\n\nRequired fields are declared Optional so a body that omits one is refused\nby the route itself, dual-channel (``_missing_field_refusal``), rather than\nby the framework's ``{\"detail\": [...]}`` validation list.",
@@ -1143,7 +1295,7 @@
       },
       "WakeNowBody": {
         "additionalProperties": true,
-        "description": "Body for POST /operations/wake-now.\n\nSee the module docstring's \"Long-running verbs\" note: ``bg``/``all`` are\nlaunched detached (like deep-verify), NOT via the blocking shell_out()\ndispatch every other endpoint uses -- wake-now.sh backgrounds the fired\nagent with a bare ``&`` that inherits shell_out()'s capture pipes rather\nthan closing them, so a naive shell_out() call would block for the fired\nagent's entire wake cycle despite wake-now.sh's own near-instant exit.\n\nFields:\n    agent:   Agent role to wake (``pm``, ``coder``, ``cm``, ``writer``,\n             ``tester``, ``overwatch``). Passed verbatim as ``--agent``.\n             Mutually exclusive with ``all`` -- wake-now.sh itself refuses\n             dual-channel when both are supplied; that refusal propagates\n             unchanged rather than being re-implemented here (foreground\n             mode only -- see ``all`` below for the detached modes).\n    all:     When True, passed as ``--all`` -- fires every pipeline agent\n             (pm, coder, cm, writer, tester). Dispatched detached; the\n             response confirms wake-now.sh started, not that any fired\n             agent finished.\n    bg:      When True, passed as ``--bg`` -- backgrounds the single named\n             agent's wake cycle. Dispatched detached, same as ``all``.\n    dry_run: When True, short-circuits dispatch \u2014 no subprocess spawned.\n             Checked before ``bg``/``all`` route to the detached path.",
+        "description": "Body for POST /operations/wake-now.\n\nSee the module docstring's \"Long-running verbs\" note: ``bg``/``all`` are\nlaunched detached (like deep-verify), NOT via the blocking shell_out()\ndispatch every other endpoint uses -- wake-now.sh detaches the fired\nagent into its own session with ``setsid`` (stdin from /dev/null) but\nleaves its stdout/stderr inherited, so it holds shell_out()'s capture\npipes open rather than closing them, and a naive shell_out() call would\nblock for the fired agent's entire wake cycle despite wake-now.sh's own\nnear-instant exit.\n\nFields:\n    agent:   Agent role to wake (``pm``, ``coder``, ``cm``, ``writer``,\n             ``tester``, ``overwatch``). Passed verbatim as ``--agent``.\n             Mutually exclusive with ``all`` -- wake-now.sh itself refuses\n             dual-channel when both are supplied; that refusal propagates\n             unchanged rather than being re-implemented here (foreground\n             mode only -- see ``all`` below for the detached modes).\n    all:     When True, passed as ``--all`` -- fires every pipeline agent\n             (pm, coder, cm, writer, tester). Dispatched detached; the\n             response confirms wake-now.sh started, not that any fired\n             agent finished.\n    bg:      When True, passed as ``--bg`` -- backgrounds the single named\n             agent's wake cycle. Dispatched detached, same as ``all``.\n    dry_run: When True, short-circuits dispatch \u2014 no subprocess spawned.\n             Checked before ``bg``/``all`` route to the detached path.",
         "properties": {
           "agent": {
             "anyOf": [
@@ -1215,7 +1367,7 @@
   "info": {
     "description": "Localhost-only REST API exposing the pgai-agent-kanban operator command surface.  A route calls the shared pgai_agent_kanban.ops function its operator script runs, in process, and returns the result in a JSON envelope.  Only four routes start a process: GET /dashboard/{pane} runs the pane's dashboard render script for the metrics, attention, header and status-window panes only (the input and queue panes render in process), POST /operations/wake-now runs wake-now.sh, POST /operations/deep-verify launches deep-verify.sh detached, and POST /operations/cold-build-now launches cold-build-now.sh detached.",
     "title": "pgai-agent-kanban operator API",
-    "version": "1.21.3"
+    "version": "1.23.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -2513,7 +2665,7 @@
     },
     "/operations/reset": {
       "post": {
-        "description": "Reset a task or intake item, returning it to a re-processable state.\n\nCalls ``pgai_agent_kanban.ops.write.reset_item`` -- the function\nreset.sh reaches through ``pp_run_ops`` -- after resolving ``project``\nexactly as reset.sh does; no subprocess is started. Its refusals\n(WORKING state, ambiguous or unknown key, a stale worktree without\n``force``) carry the same exit code and stderr text reset.sh produces,\nincluding the stale-worktree removal recipe. reset.sh's extra step for\na ``TESTER-`` key -- tearing down a retained TESTER worktree -- is not\nrepeated here: ``reset_item`` itself refuses (or, with ``force``,\nremoves) any registered or on-disk worktree for the task before it\nresets anything, so after a successful reset there is none left for\nthat step to find.\n\nBody fields (exactly one kind selector is required):\n\n- ``project``        (required) \u2014 project name.\n- ``key``            (optional) \u2014 kind-agnostic task or intake key.\n- ``agent``          (optional) \u2014 agent task ID (e.g. ``CODER-20260101-001-slug``).\n- ``bug``            (optional) \u2014 bug intake key (e.g. ``BUG-0042``).\n- ``priority``       (optional) \u2014 priority intake key (e.g. ``PRIORITY-0007``).\n- ``requirement``    (optional) \u2014 requirement intake version (e.g. ``v1.2.3``).\n- ``keep_artifacts`` (optional, bool) \u2014 when True, passes ``--keep-artifacts``.\n- ``force``          (optional, bool) \u2014 when True, passes ``--force`` to perform\n                                        stale-worktree cleanup before the reset.\n- ``dry_run``        (optional, bool) \u2014 when True, returns the planned action description\n                                        without resetting anything.\n\nExactly one of ``key``, ``agent``, ``bug``, ``priority``, or ``requirement`` must\nbe supplied.  Supplying two or more returns 422 naming the conflicting fields.\nSupplying none returns 422 naming the missing choice.  No silent precedence.\n\nThe resolved value is the key ``reset_item`` resolves; the item type follows\nfrom what it names (task folder, ``BUG-*``, ``PRIORITY-*``, requirement version).\n\nResponse envelope (exit_code 0):\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str, \"warnings\": list}``\n\nResponse on a refused call:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str, \"error\": str,\n  \"message\": str, \"remedy\": str, \"warnings\": list}`` at 404 / 409 / 422 (or 500 for an\n  unexpected failure; ``http_status_for``) when the\n  operation refused with a non-zero exit code -- a dual-channel triple\n  in ``stderr`` (``project_resolve.not_found``, for one) lifted to\n  top-level keys, or the plain stderr text as ``message`` under the\n  stable fallback key ``reset.refused`` with a runnable CLI remedy\n  (``_make_dual_channel_envelope``);\n  ``{\"error\": \"reset.<field>_required\", \"message\": str, \"remedy\": str,\n  \"warnings\": list}`` at 422 when this layer refused a body missing a\n  required field, before any subprocess runs -- never the framework's\n  ``{\"detail\": [...]}`` list.\n\nHTTP status: 200 on exit_code 0, the refusal's own status on non-zero\n(404 / 409 / 422, else 500), 422 on validation failure.",
+        "description": "Reset a task or intake item, returning it to a re-processable state.\n\nCalls ``pgai_agent_kanban.ops.write.reset_item`` -- the function\nreset.sh reaches through ``pp_run_ops`` -- after resolving ``project``\nexactly as reset.sh does; no subprocess is started. Its refusals\n(WORKING state, ambiguous or unknown key, a stale worktree without\n``force``) carry the same exit code and stderr text reset.sh produces,\nincluding the stale-worktree removal recipe. reset.sh's extra step for\na ``TESTER-`` key -- tearing down a retained TESTER worktree -- is not\nrepeated here: ``reset_item`` itself refuses (or, with ``force``,\nremoves) any registered or on-disk worktree for the task before it\nresets anything, so after a successful reset there is none left for\nthat step to find.\n\nBody fields (exactly one kind selector is required):\n\n- ``project``        (required) \u2014 project name.\n- ``key``            (optional) \u2014 kind-agnostic task or intake key.\n- ``agent``          (optional) \u2014 agent task ID (e.g. ``CODER-20260101-001-slug``).\n- ``bug``            (optional) \u2014 bug intake key (e.g. ``BUG-0042``).\n- ``priority``       (optional) \u2014 priority intake key (e.g. ``PRIORITY-0007``).\n- ``requirement``    (optional) \u2014 requirement intake version (e.g. ``v1.2.3``).\n- ``keep_artifacts`` (optional, bool) \u2014 when True, passes ``--keep-artifacts``.\n- ``force``          (optional, bool) \u2014 when True, passes ``--force`` to perform\n                                        stale-worktree cleanup before the reset.\n- ``discard_branch`` (optional, bool) \u2014 when True, passes ``--discard-branch``: a\n                                        feature branch holding unmerged commits is\n                                        deleted instead of kept for the task to\n                                        resume from.\n- ``dry_run``        (optional, bool) \u2014 when True, returns the planned action description\n                                        without resetting anything.\n\nExactly one of ``key``, ``agent``, ``bug``, ``priority``, or ``requirement`` must\nbe supplied.  Supplying two or more returns 422 naming the conflicting fields.\nSupplying none returns 422 naming the missing choice.  No silent precedence.\n\nThe resolved value is the key ``reset_item`` resolves; the item type follows\nfrom what it names (task folder, ``BUG-*``, ``PRIORITY-*``, requirement version).\n\nResponse envelope (exit_code 0):\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str, \"warnings\": list}``\n\nResponse on a refused call:\n  ``{\"exit_code\": int, \"stdout\": str, \"stderr\": str, \"error\": str,\n  \"message\": str, \"remedy\": str, \"warnings\": list}`` at 404 / 409 / 422 (or 500 for an\n  unexpected failure; ``http_status_for``) when the\n  operation refused with a non-zero exit code -- a dual-channel triple\n  in ``stderr`` (``project_resolve.not_found``, for one) lifted to\n  top-level keys, or the plain stderr text as ``message`` under the\n  stable fallback key ``reset.refused`` with a runnable CLI remedy\n  (``_make_dual_channel_envelope``);\n  ``{\"error\": \"reset.<field>_required\", \"message\": str, \"remedy\": str,\n  \"warnings\": list}`` at 422 when this layer refused a body missing a\n  required field, before any subprocess runs -- never the framework's\n  ``{\"detail\": [...]}`` list.\n\nHTTP status: 200 on exit_code 0, the refusal's own status on non-zero\n(404 / 409 / 422, else 500), 422 on validation failure.",
         "operationId": "post_reset_operations_reset_post",
         "requestBody": {
           "content": {
@@ -2835,7 +2987,7 @@
     },
     "/operations/wake-now": {
       "post": {
-        "description": "Fire one or all pipeline agents' wake cycle outside their cron cadence.\n\nDelegates to wake-now.sh -- the mutual-exclusivity refusal between\n``agent`` and ``all``, and the \"one of them is required\" refusal when\nneither is supplied, are the script's own guards and propagate unchanged\nin the envelope's foreground path rather than being re-implemented here.\n\nSee the module docstring's \"Long-running verbs\" note for WHY ``bg``/\n``all`` take a different dispatch path than every other endpoint in this\nrouter: wake-now.sh's own backgrounding (a bare ``&``) inherits\nshell_out()'s capture pipes instead of closing them, so a plain\nshell_out() call on ``bg``/``all`` would silently block for the fired\nagent's ENTIRE wake cycle -- exactly the many-minutes-blocking case this\nticket exists to avoid. ``bg``/``all`` therefore launch wake-now.sh\ndetached (like POST /operations/deep-verify) and return as soon as the\nfork completes; the response confirms wake-now.sh STARTED, not that any\nfired agent finished. Supplying neither ``bg`` nor ``all`` uses the\nnormal blocking shell_out() dispatch -- wake-now.sh execs wake-batch.sh\ndirectly in that mode (no background job, no pipe-inheritance hazard),\nso this is a faithful, non-gentler mirror of the bare CLI's own\nforeground contract.\n\nBody fields:\n\n- ``agent``   (required unless ``all`` is true) \u2014 agent role to wake\n              (``pm``, ``coder``, ``cm``, ``writer``, ``tester``,\n              ``overwatch``).\n- ``all``     (optional, bool) \u2014 fire every pipeline agent. Detached path.\n- ``bg``      (optional, bool) \u2014 background the single named agent's wake\n              cycle. Detached path. Recommended for HTTP callers over\n              foreground mode.\n- ``dry_run`` (optional, bool) \u2014 when True, returns the planned action\n              description without firing anything (checked before ``bg``/\n              ``all`` route to the detached path).\n\nResponse envelope:\n  - Detached path (``bg`` or ``all``): ``{\"exit_code\": 0, \"stdout\":\n    \"wake-now: started ...\", \"stderr\": \"\", \"warnings\": list}`` \u2014 always\n    200, confirming dispatch started, never that the fired agent(s)\n    finished.\n  - Foreground path (neither ``bg`` nor ``all``): the normal envelope\n    with wake-now.sh's own completed exit_code/stdout/stderr.\n\nHTTP status: 200 on the detached path or on foreground exit_code 0, 500\non a non-zero foreground exit_code (including wake-now.sh's own\nagent/all guards).",
+        "description": "Fire one or all pipeline agents' wake cycle outside their cron cadence.\n\nDelegates to wake-now.sh -- the mutual-exclusivity refusal between\n``agent`` and ``all``, and the \"one of them is required\" refusal when\nneither is supplied, are the script's own guards and propagate unchanged\nin the envelope's foreground path rather than being re-implemented here.\n\nSee the module docstring's \"Long-running verbs\" note for WHY ``bg``/\n``all`` take a different dispatch path than every other endpoint in this\nrouter: wake-now.sh's own backgrounding (``setsid``, stdin from\n/dev/null, stdout/stderr left inherited) keeps shell_out()'s capture\npipes open instead of closing them, so a plain\nshell_out() call on ``bg``/``all`` would silently block for the fired\nagent's ENTIRE wake cycle -- exactly the many-minutes-blocking case this\nticket exists to avoid. ``bg``/``all`` therefore launch wake-now.sh\ndetached (like POST /operations/deep-verify) and return as soon as the\nfork completes; the response confirms wake-now.sh STARTED, not that any\nfired agent finished. Supplying neither ``bg`` nor ``all`` uses the\nnormal blocking shell_out() dispatch -- wake-now.sh execs wake-batch.sh\ndirectly in that mode (no background job, no pipe-inheritance hazard),\nso this is a faithful, non-gentler mirror of the bare CLI's own\nforeground contract.\n\nBody fields:\n\n- ``agent``   (required unless ``all`` is true) \u2014 agent role to wake\n              (``pm``, ``coder``, ``cm``, ``writer``, ``tester``,\n              ``overwatch``).\n- ``all``     (optional, bool) \u2014 fire every pipeline agent. Detached path.\n- ``bg``      (optional, bool) \u2014 background the single named agent's wake\n              cycle. Detached path. Recommended for HTTP callers over\n              foreground mode.\n- ``dry_run`` (optional, bool) \u2014 when True, returns the planned action\n              description without firing anything (checked before ``bg``/\n              ``all`` route to the detached path).\n\nResponse envelope:\n  - Detached path (``bg`` or ``all``): ``{\"exit_code\": 0, \"stdout\":\n    \"wake-now: started ...\", \"stderr\": \"\", \"warnings\": list}`` \u2014 always\n    200, confirming dispatch started, never that the fired agent(s)\n    finished.\n  - Foreground path (neither ``bg`` nor ``all``): the normal envelope\n    with wake-now.sh's own completed exit_code/stdout/stderr.\n\nHTTP status: 200 on the detached path or on foreground exit_code 0, 500\non a non-zero foreground exit_code (including wake-now.sh's own\nagent/all guards).",
         "operationId": "post_wake_now_operations_wake_now_post",
         "requestBody": {
           "content": {
@@ -3366,6 +3518,38 @@
           }
         },
         "summary": "Queue-state pane for one or every registered project (read-only)"
+      }
+    },
+    "/skills": {
+      "get": {
+        "description": "List every skill in the kanban's staging directory, per provider.\n\nThe REST twin of ``install-skills.sh --list --json``. Both list through\n``pgai_agent_kanban.lib.skills_install.list_skills`` and the body carries\nthe same keys and values that verb prints, plus ``warnings``. Read-only:\nnothing is created or written in the staging directory or any provider\nhome.\n\nThe staging directory is ``<kanban_root>/skills``, laid out\n``<provider>/<skill-name>/SKILL.md``. A skill named in\n``<kanban_root>/.installed-skills`` is ``shipped``; every other skill is\n``operator-added``, as is every skill when that file is absent. Each\nprovider home is resolved from the server's environment. The route takes\nno query parameters.\n\nResponse body (200)::\n\n    {\"source\": str,                 # absolute staging directory path\n     \"providers\": [                 # claude, then codex\n       {\"provider\": str,\n        \"home\": str,                # absolute provider skill home\n        \"skills\": [                 # sorted by name\n          {\"name\": str,\n           \"state\": \"new\"|\"same\"|\"changed\"|\"invalid\",\n           \"origin\": \"shipped\"|\"operator-added\",\n           \"error\": str,        # invalid only: the rule broken\n           \"message\": str}]}],  # invalid only: what was found\n     \"warnings\": [str, ...]}\n\nWith no staging directory under the root, every provider is listed with\n``\"skills\": []`` and the status is 200.\n\nResponse body on refusal (422)::\n\n    {\"error\": str, \"message\": str, \"remedy\": str, \"warnings\": [str, ...]}\n\nThe skills module's own triple: ``skills_install.flat_needs_one_provider``\nwhen skills sit directly under ``skills/`` instead of under a provider\ndirectory, ``skills_install.source_missing`` when ``skills`` exists but\nis not a directory, and ``skills_install.shipped_manifest_unreadable``\nwhen ``.installed-skills`` exists but cannot be read.",
+        "operationId": "get_skills_skills_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillsResponse"
+                }
+              }
+            },
+            "description": "JSON body with source, providers (each with home, provider and skills) and warnings."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillsRefusal"
+                }
+              }
+            },
+            "description": "The skills module refused the staging directory's layout or shipped-skills record."
+          }
+        },
+        "summary": "Skills in the staging directory, with their state in each provider home",
+        "tags": [
+          "skills"
+        ]
       }
     },
     "/status": {

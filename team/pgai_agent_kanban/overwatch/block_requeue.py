@@ -87,8 +87,10 @@ import json
 import re
 import shlex
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
+from collections.abc import Callable, Mapping
 
+from pgai_agent_kanban.lib.dev_tree import kanban_root_of, resolve_dev_tree
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.atomic_write import atomic_write
 from pgai_agent_kanban.lib.branch_prefix import InvalidBranchPrefixError, ini_branch_prefix_for_project_root
@@ -173,9 +175,14 @@ def _project_cfg_value(project_root: Path, key: str) -> str:
     return ""
 
 
-def configured_dev_tree(project_root: Path) -> Optional[Path]:
-    """The project's dev tree (``[project] dev_tree_path``), or None when unset."""
-    value = _project_cfg_value(project_root, "dev_tree_path")
+def configured_dev_tree(project_root: Path) -> Path | None:
+    """The repository the wake makes the project's worktrees in, or None.
+
+    The documented dev_tree_path chain
+    (:func:`pgai_agent_kanban.lib.dev_tree.resolve_dev_tree`): the project's
+    own value, else ``PGAI_DEV_TREE_PATH``, else kanban.cfg ``[paths]``.
+    """
+    value = resolve_dev_tree(kanban_root_of(project_root), project_root)
     return Path(value) if value else None
 
 
@@ -198,7 +205,7 @@ def _tip(repo: Path, branch: str) -> str:
     return result.stdout.strip() if result is not None and result.ok else "unknown"
 
 
-def _resolve_source(repo: Path, source: str, prefix: str) -> Optional[str]:
+def _resolve_source(repo: Path, source: str, prefix: str) -> str | None:
     """*source* as it exists in *repo*: as written, else with the project's branch prefix."""
     candidates = [source]
     if prefix and not source.startswith(prefix):
@@ -226,8 +233,8 @@ class GitTarget:
     branch: str
     branch_present: bool
     source_written: str
-    source: Optional[str]
-    worktree: Optional[Path]
+    source: str | None
+    worktree: Path | None
 
     @property
     def git_dir(self) -> Path:
@@ -251,7 +258,9 @@ def resolve_git_target(task_dir: Path, record: BlockRecord, *, require_source: b
     project_root = project_root_of(task_dir)
     repo = configured_dev_tree(project_root)
     if repo is None:
-        raise GitTargetError(f"no [project] dev_tree_path in {project_root / 'project.cfg'}")
+        raise GitTargetError(
+            f"no dev_tree_path in {project_root / 'project.cfg'}, PGAI_DEV_TREE_PATH or kanban.cfg [paths]"
+        )
     probe = run_readonly_git(repo, "rev-parse", "--git-dir")
     if probe is None or not probe.ok:
         raise GitTargetError(f"the dev tree {repo} is not a readable git repository")
@@ -274,8 +283,12 @@ def resolve_git_target(task_dir: Path, record: BlockRecord, *, require_source: b
     worktree_value = evidence.get("worktree", "")
     worktree = Path(worktree_value) if worktree_value and Path(worktree_value).is_dir() else None
     return GitTarget(
-        repo=repo, branch=branch, branch_present=_branch_exists(repo, branch),
-        source_written=source_written, source=source, worktree=worktree,
+        repo=repo,
+        branch=branch,
+        branch_present=_branch_exists(repo, branch),
+        source_written=source_written,
+        source=source,
+        worktree=worktree,
     )
 
 
@@ -368,8 +381,13 @@ def snapshot_commits_ahead(
     target = _unique_path(evidence_dir, f"commits-ahead-{compact_utc_stamp(now)}", ".txt")
     atomic_write(target, "\n".join(lines) + "\n", prefix=_ATOMIC_PREFIX)
     return CommitSnapshot(
-        path=target, repo=str(repo), branch=branch, source=source, ahead=ahead,
-        branch_present=present, tip=_tip(repo, branch) if present else "absent",
+        path=target,
+        repo=str(repo),
+        branch=branch,
+        source=source,
+        ahead=ahead,
+        branch_present=present,
+        tip=_tip(repo, branch) if present else "absent",
     )
 
 
@@ -378,7 +396,7 @@ def snapshot_commits_ahead(
 # ---------------------------------------------------------------------------
 
 
-def timeout_seconds(status_text: str, record: Optional[BlockRecord], task_dir: Path) -> Optional[int]:
+def timeout_seconds(status_text: str, record: BlockRecord | None, task_dir: Path) -> int | None:
     """The per-task limit a timed-out attempt was killed at, in seconds.
 
     Read, first hit wins, from the record's ``timeout_s=`` evidence, the
@@ -400,7 +418,7 @@ def timeout_seconds(status_text: str, record: Optional[BlockRecord], task_dir: P
     return None
 
 
-def _whole(value: str) -> Optional[int]:
+def _whole(value: str) -> int | None:
     text = value.strip()
     return int(text) if text.isdigit() else None
 
@@ -424,7 +442,7 @@ def zero_progress_reset_text(status_text: str, detail: str) -> str:
     return set_or_append_section(status_text, ZERO_PROGRESS_HEADING, body)
 
 
-def transient_retry_state(status_text: str) -> tuple[int, Optional[int]]:
+def transient_retry_state(status_text: str) -> tuple[int, int | None]:
     """``(retry_count, retry_limit)`` from the ``## Transient Retry`` record.
 
     ``retry_count`` is 0 and ``retry_limit`` None when the record or the
@@ -440,7 +458,7 @@ def transient_retry_state(status_text: str) -> tuple[int, Optional[int]]:
 # ---------------------------------------------------------------------------
 
 
-def resolve_requeue_budget(kanban_root: "Path | str", project: str) -> int:
+def resolve_requeue_budget(kanban_root: Path | str, project: str) -> int:
     """``[overwatch] requeue_budget`` for *project*: how many times block
     triage may requeue one task over the life of its Block Record.
 
@@ -515,7 +533,7 @@ class PendingCheck:
     action: str
     attempt: int
     max_attempts: Any
-    verification: Optional[str]
+    verification: str | None
     acted_at: str
     blocked_at: str
     zero_progress_count: int = 0
@@ -528,7 +546,7 @@ class PendingCheck:
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> Optional["PendingCheck"]:
+    def from_dict(cls, raw: Mapping[str, Any]) -> PendingCheck | None:
         """The entry, or None when *raw* lacks a field or a field has the wrong type."""
         try:
             return cls(
@@ -554,7 +572,7 @@ def ledger_path(evidence_dir: Path) -> Path:
     return evidence_dir / LEDGER_NAME
 
 
-def read_ledger(evidence_dir: Path) -> list[Optional[PendingCheck]]:
+def read_ledger(evidence_dir: Path) -> list[PendingCheck | None]:
     """Every ledger entry in written order; an unreadable entry reads as None.
 
     A missing or unreadable ledger reads as empty: the Block Record's
@@ -570,7 +588,7 @@ def read_ledger(evidence_dir: Path) -> list[Optional[PendingCheck]]:
     return [PendingCheck.from_dict(e) if isinstance(e, dict) else None for e in entries]
 
 
-def _write_ledger(evidence_dir: Path, entries: list[Optional[PendingCheck]]) -> None:
+def _write_ledger(evidence_dir: Path, entries: list[PendingCheck | None]) -> None:
     evidence_dir.mkdir(parents=True, exist_ok=True)
     payload = {"entries": [e.as_dict() for e in entries if e is not None]}
     atomic_write(ledger_path(evidence_dir), json.dumps(payload, indent=2, sort_keys=True) + "\n", prefix=_ATOMIC_PREFIX)
@@ -581,7 +599,7 @@ def append_pending(evidence_dir: Path, entry: PendingCheck) -> None:
     _write_ledger(evidence_dir, [*read_ledger(evidence_dir), entry])
 
 
-def latest_pending(entries: list[Optional[PendingCheck]], epoch: str) -> Optional[tuple[int, PendingCheck]]:
+def latest_pending(entries: list[PendingCheck | None], epoch: str) -> tuple[int, PendingCheck] | None:
     """``(index, entry)`` of the newest ``pending`` entry for *epoch*, or None."""
     for index in range(len(entries) - 1, -1, -1):
         entry = entries[index]
@@ -608,7 +626,7 @@ def settle_entry(evidence_dir: Path, index: int, status: str, detail: str, *, no
 class Verdict:
     """What a verification found about the block that followed a requeue."""
 
-    name: Optional[str]
+    name: str | None
     status: str
     detail: str
 
@@ -633,7 +651,9 @@ Verifier = Callable[[PendingCheck, str, BlockRecord], Verdict]
 def _next_outcome_not_timeout(entry: PendingCheck, status_text: str, record: BlockRecord) -> Verdict:
     name = "next_outcome_not_timeout"
     if record.reason_code == PER_TASK_TIMEOUT:
-        return Verdict(name, STATUS_FAILED, "the next attempt was killed at the per-task timeout again (a second timeout)")
+        return Verdict(
+            name, STATUS_FAILED, "the next attempt was killed at the per-task timeout again (a second timeout)"
+        )
     return Verdict(name, STATUS_PASSED, f"the next attempt ended in {record.reason_code or 'a block'}, not a timeout")
 
 
@@ -642,12 +662,14 @@ def _zero_progress_not_readvanced(entry: PendingCheck, status_text: str, record:
     now_count = zero_progress_count(status_text)
     if now_count > entry.zero_progress_count:
         return Verdict(
-            name, STATUS_FAILED,
+            name,
+            STATUS_FAILED,
             f"the Zero Progress count re-advanced from {entry.zero_progress_count} to {now_count}; "
             f"the next attempt blocked as {record.reason_code}",
         )
     return Verdict(
-        name, STATUS_PASSED,
+        name,
+        STATUS_PASSED,
         f"the Zero Progress count did not re-advance ({now_count}, recorded {entry.zero_progress_count}); "
         f"the next attempt blocked as {record.reason_code}",
     )
@@ -669,11 +691,13 @@ def _gate_passes(entry: PendingCheck, status_text: str, record: BlockRecord) -> 
     name = "gate_passes"
     if record.reason_code in GATE_REFUSAL_CODES:
         return Verdict(
-            name, STATUS_FAILED,
+            name,
+            STATUS_FAILED,
             f"the completion gate refused the next done-claim again ({record.reason_code}; a second refusal)",
         )
     return Verdict(
-        name, STATUS_PASSED,
+        name,
+        STATUS_PASSED,
         f"the next attempt did not end in a completion-gate refusal (it blocked as {record.reason_code or 'a block'})",
     )
 
@@ -682,11 +706,13 @@ def _next_create_succeeds(entry: PendingCheck, status_text: str, record: BlockRe
     name = "next_create_succeeds"
     if record.reason_code in WORKTREE_CREATE_CODES:
         return Verdict(
-            name, STATUS_FAILED,
+            name,
+            STATUS_FAILED,
             f"the next attempt's worktree create failed again ({record.reason_code})",
         )
     return Verdict(
-        name, STATUS_PASSED,
+        name,
+        STATUS_PASSED,
         f"the next attempt got past the worktree create (it blocked as {record.reason_code or 'a block'})",
     )
 
@@ -699,12 +725,14 @@ def _rerun_reports_no_changes(entry: PendingCheck, status_text: str, record: Blo
     name = "rerun_reports_no_changes"
     if record.reason_code == OPERATOR_DATA_ACTION:
         return Verdict(
-            name, STATUS_FAILED,
+            name,
+            STATUS_FAILED,
             "the next attempt blocked on an operator data action again, so the action that ran did not "
             "unblock the task",
         )
     return Verdict(
-        name, STATUS_PASSED,
+        name,
+        STATUS_PASSED,
         f"the next attempt did not ask for an operator data action again (it blocked as "
         f"{record.reason_code or 'a block'})",
     )
@@ -722,7 +750,7 @@ VERIFIERS: dict[str, Verifier] = {
 
 
 def verify(
-    entry: PendingCheck, status_text: str, record: BlockRecord, verifiers: Optional[Mapping[str, Verifier]] = None
+    entry: PendingCheck, status_text: str, record: BlockRecord, verifiers: Mapping[str, Verifier] | None = None
 ) -> Verdict:
     """Run *entry*'s verification against the block that followed it."""
     verifiers = VERIFIERS if verifiers is None else verifiers

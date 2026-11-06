@@ -65,13 +65,17 @@ def _batch_log(root: pathlib.Path) -> pathlib.Path:
 def _env(root: pathlib.Path) -> dict[str, str]:
     return build_scrubbed_env(
         home_dir=root / "home",
-        extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
-                   "PGAI_AGENT_KANBAN_ROOT_PATH": str(root), "KANBAN_ROOT": str(root)},
+        extra_env={
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "KANBAN_ROOT": str(root),
+        },
     )
 
 
-def _agent_blocked_task(tmp_path: pathlib.Path, reason_args: list[str], tail_line: str,
-                        status_extra: str = "") -> pathlib.Path:
+def _agent_blocked_task(
+    tmp_path: pathlib.Path, reason_args: list[str], tail_line: str, status_extra: str = ""
+) -> pathlib.Path:
     """A sandbox root holding one task its agent blocked, and that agent's output.
 
     The block is written by the real status-writer tool, exactly as an agent
@@ -84,9 +88,10 @@ def _agent_blocked_task(tmp_path: pathlib.Path, reason_args: list[str], tail_lin
     (root / "tmp").mkdir()
     (root / "home").mkdir()
     (task / "README.md").write_text(
-        f"# Task\n\n## Task ID\n{_TASK_ID}\n\n## Role\nCODER\n\n## Workflow Type\nrelease\n",
-        encoding="utf-8")
-    (task / "status.md").write_text(textwrap.dedent(f"""\
+        f"# Task\n\n## Task ID\n{_TASK_ID}\n\n## Role\nCODER\n\n## Workflow Type\nrelease\n", encoding="utf-8"
+    )
+    (task / "status.md").write_text(
+        textwrap.dedent(f"""\
         # Status
 
         ## Task
@@ -106,7 +111,9 @@ def _agent_blocked_task(tmp_path: pathlib.Path, reason_args: list[str], tail_lin
 
         ## Needs Human
         no
-        """) + status_extra, encoding="utf-8")
+        """) + status_extra,
+        encoding="utf-8",
+    )
 
     batch = _batch_log(root)
     batch.parent.mkdir(parents=True)
@@ -116,18 +123,45 @@ def _agent_blocked_task(tmp_path: pathlib.Path, reason_args: list[str], tail_lin
         fh.write(f"agent starting\nsubagent dispatched\n{tail_line}\nagent exiting\n")
     end = batch.stat().st_size
     rows = [
-        {"event": "dispatched", "batch_log": str(batch), "offset_start": start, "offset_end": None,
-         "exit_code": None, "recorded_at": "2026-01-01T10:00:00Z"},
-        {"event": "returned", "batch_log": str(batch), "offset_start": start, "offset_end": end,
-         "exit_code": 0, "recorded_at": "2026-01-01T10:15:00Z"},
+        {
+            "event": "dispatched",
+            "batch_log": str(batch),
+            "offset_start": start,
+            "offset_end": None,
+            "exit_code": None,
+            "recorded_at": "2026-01-01T10:00:00Z",
+        },
+        {
+            "event": "returned",
+            "batch_log": str(batch),
+            "offset_start": start,
+            "offset_end": end,
+            "exit_code": 0,
+            "recorded_at": "2026-01-01T10:15:00Z",
+        },
     ]
-    (task / "logs" / "dispatch.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    (task / "logs" / "dispatch.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
 
     result = subprocess.run(
-        ["bash", str(_TEAM_DIR / "scripts" / "task-status.sh"), "--project", _PROJECT, "--key", _TASK_ID,
-         "--state", "BLOCKED", "--needs-human", "yes", "--blockers", _AGENT_BLOCKERS, *reason_args],
-        capture_output=True, text=True, timeout=60, env=_env(root),
+        [
+            "bash",
+            str(_TEAM_DIR / "scripts" / "task-status.sh"),
+            "--project",
+            _PROJECT,
+            "--key",
+            _TASK_ID,
+            "--state",
+            "BLOCKED",
+            "--needs-human",
+            "yes",
+            "--blockers",
+            _AGENT_BLOCKERS,
+            *reason_args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_env(root),
     )
     assert result.returncode == 0, f"status-writer refused the agent's block:\n{result.stderr}"
     return root
@@ -172,8 +206,7 @@ def _finalize(root: pathlib.Path) -> subprocess.CompletedProcess:
         wd_finalize_task
         echo "final_state=$LAST_TASK_FINAL_STATE"
         """)
-    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=120,
-                            env=_env(root))
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=120, env=_env(root))
     assert result.returncode == 0, f"wd_finalize_task failed (exit {result.returncode}):\n{result.stderr}"
     assert "final_state=BLOCKED" in result.stdout, result.stdout + result.stderr
     return result
@@ -193,8 +226,11 @@ def _retry_record(text: str) -> dict[str, str] | None:
 
 def _outcome(root: pathlib.Path) -> tuple[str, dict[str, str] | None, object]:
     status = _task_dir(root) / "status.md"
-    return status.read_text(encoding="utf-8"), _retry_record(status.read_text(encoding="utf-8")), \
-        load_block_record(status)
+    return (
+        status.read_text(encoding="utf-8"),
+        _retry_record(status.read_text(encoding="utf-8")),
+        load_block_record(status),
+    )
 
 
 def test_catch_all_block_with_transient_tail_becomes_a_transient_retry(tmp_path: pathlib.Path) -> None:
@@ -217,8 +253,10 @@ def test_catch_all_block_with_transient_tail_becomes_a_transient_retry(tmp_path:
 
 
 def test_catch_all_block_at_the_retry_ceiling_escalates_by_the_transient_rule(tmp_path: pathlib.Path) -> None:
-    earlier = ("\n## Transient Retry\nreason_code: transient_api_error\nretry_count: 2\n"
-               "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n")
+    earlier = (
+        "\n## Transient Retry\nreason_code: transient_api_error\nretry_count: 2\n"
+        "retry_limit: 3\nprovider: claude\nlast_error: overloaded\n"
+    )
     root = _agent_blocked_task(tmp_path, ["--reason-code", "agent_unclassified"], _TRANSIENT, earlier)
     _finalize(root)
     text, retry, record = _outcome(root)
@@ -243,7 +281,8 @@ def test_catch_all_block_without_a_signature_keeps_the_agents_record(tmp_path: p
 
 @pytest.mark.parametrize("tail_line", [_BILLING, _REFUSAL], ids=["billing", "refusal"])
 def test_catch_all_block_with_a_non_transient_signature_is_not_reclassified(
-    tmp_path: pathlib.Path, tail_line: str,
+    tmp_path: pathlib.Path,
+    tail_line: str,
 ) -> None:
     root = _agent_blocked_task(tmp_path, ["--reason-code", "agent_unclassified"], tail_line)
     _finalize(root)
@@ -255,13 +294,29 @@ def test_catch_all_block_with_a_non_transient_signature_is_not_reclassified(
     assert _section(text, "Blockers") == _AGENT_BLOCKERS
 
 
-@pytest.mark.parametrize("reason_args, code", [
-    (["--reason-code", "agent_transient_provider_error"], "agent_transient_provider_error"),
-    (["--reason-code", "agent_operator_data_action", "--action-args", "verb=restamp-fixed-in",
-      f"project={_PROJECT}", "version=v1.2.3", "bugs=BUG-0001"], "agent_operator_data_action"),
-], ids=["agent_transient_provider_error", "agent_operator_data_action"])
+@pytest.mark.parametrize(
+    "reason_args, code",
+    [
+        (["--reason-code", "agent_transient_provider_error"], "agent_transient_provider_error"),
+        (
+            [
+                "--reason-code",
+                "agent_operator_data_action",
+                "--action-args",
+                "verb=restamp-fixed-in",
+                f"project={_PROJECT}",
+                "version=v1.2.3",
+                "bugs=BUG-0001",
+            ],
+            "agent_operator_data_action",
+        ),
+    ],
+    ids=["agent_transient_provider_error", "agent_operator_data_action"],
+)
 def test_block_with_an_agent_named_code_skips_the_scan(
-    tmp_path: pathlib.Path, reason_args: list[str], code: str,
+    tmp_path: pathlib.Path,
+    reason_args: list[str],
+    code: str,
 ) -> None:
     root = _agent_blocked_task(tmp_path, reason_args, _TRANSIENT)
     before = (_task_dir(root) / "status.md").read_text(encoding="utf-8")
@@ -278,10 +333,13 @@ def test_block_with_an_agent_named_code_skips_the_scan(
 # The agent's own final reply, ending the log tail: prose that carries
 # transient signature words but reports no provider failure.
 _PROSE_TAILS = {
-    "rate_limit_path": ("BLOCKED: git merge reported a conflict in team/scripts/lib/rate_limit.sh; "
-                        "left the feature branch in place for inspection."),
-    "500_chars": ("BLOCKED: requirements doc missing; the summary was cut at 500 chars and the "
-                  "PM ticket is unparseable."),
+    "rate_limit_path": (
+        "BLOCKED: git merge reported a conflict in team/scripts/lib/rate_limit.sh; "
+        "left the feature branch in place for inspection."
+    ),
+    "500_chars": (
+        "BLOCKED: requirements doc missing; the summary was cut at 500 chars and the " "PM ticket is unparseable."
+    ),
     "http_503_section": "BLOCKED: merge conflict in docs/api.md (both sides edited the HTTP 503 section).",
     "overloaded_word": "BLOCKED: the 429 handler in overloaded_queue.py conflicts with the 529 retry path.",
 }
@@ -289,7 +347,8 @@ _PROSE_TAILS = {
 
 @pytest.mark.parametrize("tail_line", list(_PROSE_TAILS.values()), ids=list(_PROSE_TAILS))
 def test_catch_all_block_whose_prose_names_signature_words_keeps_the_agents_question(
-    tmp_path: pathlib.Path, tail_line: str,
+    tmp_path: pathlib.Path,
+    tail_line: str,
 ) -> None:
     root = _agent_blocked_task(tmp_path, ["--reason-code", "agent_unclassified"], tail_line)
     before = (_task_dir(root) / "status.md").read_text(encoding="utf-8")
@@ -315,12 +374,17 @@ def test_provider_error_line_beside_signature_prose_is_the_one_quoted(tmp_path: 
     assert "rate_limit.sh" not in _section(text, "Blockers"), "the quoted signature comes from the provider's line"
 
 
-@pytest.mark.parametrize("tail_line", [
-    '{"type":"error","message":"stream error: exceeded retry limit, last status: 429 Too Many Requests"}',
-    '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 Service Unavailable"}',
-], ids=["codex_error_event", "claude_error_result"])
+@pytest.mark.parametrize(
+    "tail_line",
+    [
+        '{"type":"error","message":"stream error: exceeded retry limit, last status: 429 Too Many Requests"}',
+        '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 503 Service Unavailable"}',
+    ],
+    ids=["codex_error_event", "claude_error_result"],
+)
 def test_catch_all_block_with_a_json_provider_error_event_becomes_a_transient_retry(
-    tmp_path: pathlib.Path, tail_line: str,
+    tmp_path: pathlib.Path,
+    tail_line: str,
 ) -> None:
     root = _agent_blocked_task(tmp_path, ["--reason-code", "agent_unclassified"], tail_line)
     _finalize(root)
@@ -343,8 +407,9 @@ def test_billing_prose_still_outranks_a_provider_5xx_line(tmp_path: pathlib.Path
 
 def _provider_lines(text: str) -> subprocess.CompletedProcess:
     script = f"source '{_LIB}/wake_agent_block_scan.sh'; agent_block_provider_lines \"$1\""
-    return subprocess.run(["bash", "-c", script, "agent_block_provider_lines", text],
-                          capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        ["bash", "-c", script, "agent_block_provider_lines", text], capture_output=True, text=True, timeout=30
+    )
 
 
 def test_provider_line_selector_keeps_only_the_providers_own_error_lines() -> None:

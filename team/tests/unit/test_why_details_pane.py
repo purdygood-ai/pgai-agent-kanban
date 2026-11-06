@@ -462,19 +462,13 @@ def test_details_skips_a_test_context_refusal_and_reports_no_refusal_at_all(
     # PGAI_AGENT_KANBAN_TEMP_DIR) rather than a hand-spelled literal so this
     # fixture data never doubles as an anti-pattern the hygiene lint has to
     # flag on every run.
-    _lock_path = (
-        pgai_tests_temp_dir
-        / "pytest-of-rocky" / "pytest-0" / "test_x0" / "repo-wake-demo-project.lock"
-    )
+    _lock_path = pgai_tests_temp_dir / "pytest-of-rocky" / "pytest-0" / "test_x0" / "repo-wake-demo-project.lock"
     _write_refusal_ledger(
         project_dir,
         timestamp="2026-09-19T19:23:10+00:00",
         surface="lock_provenance.sh:pgai_lock_acquire",
         error="lock.provenance.contended",
-        message=(
-            f"pgai_lock_acquire could not take "
-            f"{_lock_path}: it is already held by pytest (pid 1)"
-        ),
+        message=(f"pgai_lock_acquire could not take " f"{_lock_path}: it is already held by pytest (pid 1)"),
         remedy="team/scripts/release-locks.sh --release repo-wake-demo-project",
         context="test",
     )
@@ -498,19 +492,13 @@ def test_details_skips_a_refusal_whose_subject_path_lies_outside_kanban_root_eve
     # root (pgai_tests_temp_dir) rather than a hand-spelled literal; the
     # only property this test actually depends on is that the path lies
     # outside the fixture's own kanban_root (tmp_path).
-    _lock_path = (
-        pgai_tests_temp_dir
-        / "pytest-of-rocky" / "pytest-0" / "test_x0" / "repo-wake-demo-project.lock"
-    )
+    _lock_path = pgai_tests_temp_dir / "pytest-of-rocky" / "pytest-0" / "test_x0" / "repo-wake-demo-project.lock"
     _write_refusal_ledger(
         project_dir,
         timestamp="2026-09-19T19:23:10+00:00",
         surface="lock_provenance.sh:pgai_lock_acquire",
         error="lock.provenance.contended",
-        message=(
-            f"pgai_lock_acquire could not take "
-            f"{_lock_path}: it is already held by pytest (pid 1)"
-        ),
+        message=(f"pgai_lock_acquire could not take " f"{_lock_path}: it is already held by pytest (pid 1)"),
         remedy="team/scripts/release-locks.sh --release repo-wake-demo-project",
         # context intentionally omitted -- reproduces a record written
         # before that field existed (read_latest() reports context=unknown
@@ -548,8 +536,7 @@ def test_details_verdict_line_appears_unchanged_above_the_detail_sections(tmp_pa
         f"invocation exited {plain_result.returncode} for the same project state"
     )
     assert details_result.stdout.splitlines()[0] == plain_line, (
-        "the verdict line must be the first line of --details' output, "
-        "unchanged from the plain --project invocation"
+        "the verdict line must be the first line of --details' output, " "unchanged from the plain --project invocation"
     )
 
 

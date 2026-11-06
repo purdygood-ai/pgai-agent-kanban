@@ -64,7 +64,7 @@ import dataclasses
 import os
 import pathlib
 import re
-from typing import Optional, Union
+from typing import Union
 
 from pgai_agent_kanban.lib import ini
 
@@ -88,7 +88,7 @@ TIER_KANBAN_CFG = "kanban.cfg"
 TIER_DEFAULT = "default"
 
 
-def project_cfg_file(project_root: pathlib.Path) -> Optional[pathlib.Path]:
+def project_cfg_file(project_root: pathlib.Path) -> pathlib.Path | None:
     """``project.cfg`` when present, else a legacy ``PROJECT.cfg``, else None."""
     for name in ("project.cfg", "PROJECT.cfg"):
         candidate = project_root / name
@@ -106,7 +106,7 @@ def strip_one_quote_each_side(value: str, quotes: str) -> str:
     return value
 
 
-def read_first_assignment(cfg_file: Optional[PathLike], key: str) -> str:
+def read_first_assignment(cfg_file: PathLike | None, key: str) -> str:
     """The first ``key = value`` line in *cfg_file* naming *key*, in any section.
 
     Section headers are ignored, so a sectionless file reads the same as an
@@ -185,7 +185,7 @@ class TieredValue:
 
 def resolve_tiered_cfg_value(
     kanban_root: PathLike,
-    project_root: "Optional[PathLike]",
+    project_root: PathLike | None,
     section: str,
     key: str,
     default: str = "",

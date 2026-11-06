@@ -6,6 +6,7 @@ caller:
   parse_token(content)                          -> str | None
   check_drain(event, project_root)               -> bool
   promote(project_root, event)                   -> None
+  write_halt_after(project_root, token)          -> bool
   rc_gate.evaluate(project_root, release_state_root, event) -> RcGateResult
   rc_gate.rc_is_open(release_state_root)          -> bool
 
@@ -18,7 +19,7 @@ rc_gate.py itself, but a new call site outside this package should prefer
 rc_gate.evaluate over composing check_drain + promote by hand -- that
 composition is exactly what rc_gate.py exists to own in one place.
 
-See module docstrings in token.py, drain.py, promote.py, and rc_gate.py
+See module docstrings in token.py, drain.py, promote.py, sentinel.py and rc_gate.py
 for full API docs. The CLI entry point lives in __main__.py
 (python -m halt_after <project_root>).
 """
@@ -26,6 +27,7 @@ for full API docs. The CLI entry point lives in __main__.py
 from .token import parse_token
 from .drain import check_drain
 from .promote import promote
+from .sentinel import write_halt_after
 from . import rc_gate
 
-__all__ = ["parse_token", "check_drain", "promote", "rc_gate"]
+__all__ = ["parse_token", "check_drain", "promote", "write_halt_after", "rc_gate"]

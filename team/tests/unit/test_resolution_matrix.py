@@ -89,6 +89,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="resolution-matrix")
 
+
 # ---------------------------------------------------------------------------
 # Golden facts (mirrors the 2026-07-18 golden fixture: ship-policy HALT, all
 # findings filed, nothing shipped, no approval gate, clean lineage, attempts
@@ -132,7 +133,10 @@ def test_shipped_default_matrix_has_the_ship_policy_row_then_the_squash_conflict
     squash_rows = matrix[1:]
     assert {row.trigger_class for row in squash_rows} == {TRIGGER_CLASS_SQUASH_CONFLICT}
     assert {(row.findings_all_filed, row.operator_commits_in_lineage) for row in squash_rows} == {
-        (True, False), (True, True), (False, False), (False, True),
+        (True, False),
+        (True, True),
+        (False, False),
+        (False, True),
     }
     for row in squash_rows:
         assert row.shipped_or_tagged is False
@@ -171,9 +175,7 @@ def test_kanban_root_operator_override_replaces_shipped_default(tmp_path: pathli
 
 def test_explicit_matrix_path_wins_over_kanban_root_override(tmp_path: pathlib.Path) -> None:
     """An explicit matrix_path argument takes precedence over kanban_root."""
-    (tmp_path / "resolution-matrix.yaml").write_text(
-        "rows: []\n", encoding="utf-8"
-    )
+    (tmp_path / "resolution-matrix.yaml").write_text("rows: []\n", encoding="utf-8")
     explicit = tmp_path / "explicit-matrix.yaml"
     explicit.write_text(
         "rows:\n"
@@ -228,10 +230,7 @@ def test_missing_rows_key_raises_matrix_error(tmp_path: pathlib.Path) -> None:
 def test_row_missing_required_key_raises_matrix_error(tmp_path: pathlib.Path) -> None:
     matrix_file = tmp_path / "matrix.yaml"
     matrix_file.write_text(
-        "rows:\n"
-        "  - trigger_class: ship-policy-halt\n"
-        "    findings_all_filed: true\n"
-        "    resolution: X\n",
+        "rows:\n" "  - trigger_class: ship-policy-halt\n" "    findings_all_filed: true\n" "    resolution: X\n",
         encoding="utf-8",
     )
     with pytest.raises(MatrixError, match="missing required key"):
@@ -261,7 +260,7 @@ def test_row_with_non_boolean_fact_raises_matrix_error(tmp_path: pathlib.Path) -
     matrix_file.write_text(
         "rows:\n"
         "  - trigger_class: ship-policy-halt\n"
-        "    findings_all_filed: \"yes\"\n"
+        '    findings_all_filed: "yes"\n'
         "    shipped_or_tagged: false\n"
         "    approval_gate_present: false\n"
         "    operator_commits_in_lineage: false\n"
@@ -474,12 +473,8 @@ def _cm_reader_findings(tmp_path: pathlib.Path, report_text: str) -> dict:
         ]
 
     return {
-        "stop list / Bugs Skipped (stop_bug_files.report_findings)": project(
-            report_findings(str(report))
-        ),
-        "ship-policy inputs (ship_policy_report_inputs.all_findings)": project(
-            all_findings(parse_report(report))
-        ),
+        "stop list / Bugs Skipped (stop_bug_files.report_findings)": project(report_findings(str(report))),
+        "ship-policy inputs (ship_policy_report_inputs.all_findings)": project(all_findings(parse_report(report))),
     }
 
 
@@ -580,8 +575,7 @@ _NESTED_FILED_FINDING = "#### Finding 2: inner detail\n**Filed As:** BUG-0002\n\
     "heading, nested, opens",
     [(heading, "", opens) for heading, opens in _PARSER_HEADING_SHAPES]
     + [("### Finding 1:", _NESTED_FILED_FINDING, True)],
-    ids=[heading for heading, _ in _PARSER_HEADING_SHAPES]
-    + ["### Finding 1: with a nested #### Finding 2:"],
+    ids=[heading for heading, _ in _PARSER_HEADING_SHAPES] + ["### Finding 1: with a nested #### Finding 2:"],
 )
 def test_matrix_findings_match_the_cm_readers_on_every_heading_shape(
     tmp_path: pathlib.Path, heading: str, nested: str, opens: bool
@@ -739,18 +733,14 @@ def test_findings_all_filed_counts_an_unfiled_finding_with_no_category_line() ->
 
 
 def test_findings_all_filed_counts_an_unfiled_finding_with_an_unrecognised_category() -> None:
-    report = _REPORT_PASSES_AND_ONE_FILED_BUG + (
-        "\n### Finding 4: odd category\n\n**Category:** passing\n"
-    )
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG + ("\n### Finding 4: odd category\n\n**Category:** passing\n")
     findings = _matrix_findings(report)
     assert findings[3]["category"] is None
     assert findings_all_filed(findings) is False
 
 
 def test_findings_all_filed_counts_an_unfiled_pre_existing_bug() -> None:
-    report = _REPORT_PASSES_AND_ONE_FILED_BUG + (
-        "\n### Finding 4: old defect\n\n**Category:** pre-existing-bug\n"
-    )
+    report = _REPORT_PASSES_AND_ONE_FILED_BUG + ("\n### Finding 4: old defect\n\n**Category:** pre-existing-bug\n")
     findings = _matrix_findings(report)
     assert findings[3]["category"] == "pre-existing-bug"
     assert findings_all_filed(findings) is False
@@ -1044,9 +1034,9 @@ def test_resolve_block_triage_agrees_with_bash_accessor(
     else:
         assert "block_triage.invalid_value" in result.stderr, result.stderr
         bash_answer = "refused"
-    assert bash_answer == python_answer, (
-        f"bash said {bash_answer!r}, python said {python_answer!r}; bash stderr: {result.stderr!r}"
-    )
+    assert (
+        bash_answer == python_answer
+    ), f"bash said {bash_answer!r}, python said {python_answer!r}; bash stderr: {result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -1071,9 +1061,7 @@ _LINE_RULE_SYNTAX_CASES = [
 
 
 @pytest.mark.parametrize("project_cfg_text", _LINE_RULE_SYNTAX_CASES)
-def test_cfg_resolvers_read_values_by_the_bash_line_rules(
-    tmp_path: pathlib.Path, project_cfg_text: str
-) -> None:
+def test_cfg_resolvers_read_values_by_the_bash_line_rules(tmp_path: pathlib.Path, project_cfg_text: str) -> None:
     """max_rc_retries, overwatch_resolve and block_triage read project.cfg by
     the bash read_ini line rules, so each answers what its pp_* twin answers
     for the same file."""
@@ -1107,8 +1095,7 @@ def test_cfg_resolvers_read_values_by_the_bash_line_rules(
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == python_answer, (
-        f"bash said {result.stdout.strip()!r}, python said {python_answer!r}; "
-        f"bash stderr: {result.stderr!r}"
+        f"bash said {result.stdout.strip()!r}, python said {python_answer!r}; " f"bash stderr: {result.stderr!r}"
     )
 
 
@@ -1239,8 +1226,7 @@ def _write_halt_file(path: pathlib.Path, *, from_cm: bool) -> None:
         )
     else:
         path.write_text(
-            "# HALT created by operator at 2026-07-18T09:00:00Z\n"
-            "# Reason: governance review\n",
+            "# HALT created by operator at 2026-07-18T09:00:00Z\n" "# Reason: governance review\n",
             encoding="utf-8",
         )
 
@@ -1259,9 +1245,7 @@ def _golden_evidence(tmp_path: pathlib.Path, **overrides) -> BlockEvidence:
 
     release_state = tmp_path / "release-state" / "v2.0.1.json"
     release_state.parent.mkdir(parents=True, exist_ok=True)
-    release_state.write_text(
-        json.dumps({"rc": "v2.0.1", "outcome": "in_progress", "attempt": 1}), encoding="utf-8"
-    )
+    release_state.write_text(json.dumps({"rc": "v2.0.1", "outcome": "in_progress", "attempt": 1}), encoding="utf-8")
 
     tasks_dir = tmp_path / "tasks"
     tasks_dir.mkdir(parents=True, exist_ok=True)

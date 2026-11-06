@@ -22,6 +22,14 @@ Behaviors locked in:
   4. Docs with an operator's uncommitted edit are left untouched.
   5. Blocks that are already current produce no commit.
   6. open-rc.sh runs the step after the RC branch is cut and before the push.
+  7. A generator that exits non-zero, or a commit of the regenerated blocks
+     that fails, leaves exactly one operator inbox entry naming both docs and
+     the re-render command, and the caller keeps running; a step that
+     commits leaves no entry.
+  8. A missing generator leaves exactly one operator inbox entry naming the
+     missing path, both docs and the re-render command, the caller keeps
+     running, and a second run meeting the same missing generator adds no
+     second entry.
 
 Every test builds its own throwaway kanban root and scratch git repository
 under pytest's tmp_path, and runs the step in a subprocess whose
@@ -87,7 +95,10 @@ def _write_rollup(rc_dir: pathlib.Path, rollup: dict) -> None:
 def _git(repo: pathlib.Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True, timeout=60,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
     )
     return result.stdout.strip()
 
@@ -150,9 +161,20 @@ class _Sandbox:
         for rollup in rollups:
             _write_rollup(rc_dir, rollup)
         subprocess.run(
-            [sys.executable, str(_GENERATOR), "--rc-dir", str(rc_dir),
-             "--readme", str(self.readme), "--how-to", str(self.how_to)],
-            capture_output=True, text=True, check=True, timeout=60,
+            [
+                sys.executable,
+                str(_GENERATOR),
+                "--rc-dir",
+                str(rc_dir),
+                "--readme",
+                str(self.readme),
+                "--how-to",
+                str(self.how_to),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
         )
         _git(self.repo, "commit", "-q", "-am", "Render blocks")
 
@@ -171,17 +193,34 @@ class _Sandbox:
         )
         return subprocess.run(
             ["bash", "-c", script],
-            capture_output=True, text=True, env=self.env(), timeout=120,
+            capture_output=True,
+            text=True,
+            env=self.env(),
+            timeout=120,
         )
 
     def freshness(self) -> tuple[subprocess.CompletedProcess, list]:
         findings = self.scratch / "findings.json"
         result = subprocess.run(
-            [sys.executable, str(_GENERATOR), "--freshness",
-             "--project", _PROJECT, "--kanban-root", str(self.root),
-             "--readme", str(self.readme), "--how-to", str(self.how_to),
-             "--findings-file", str(findings)],
-            capture_output=True, text=True, env=self.env(), timeout=60,
+            [
+                sys.executable,
+                str(_GENERATOR),
+                "--freshness",
+                "--project",
+                _PROJECT,
+                "--kanban-root",
+                str(self.root),
+                "--readme",
+                str(self.readme),
+                "--how-to",
+                str(self.how_to),
+                "--findings-file",
+                str(findings),
+            ],
+            capture_output=True,
+            text=True,
+            env=self.env(),
+            timeout=60,
         )
         return result, json.loads(findings.read_text(encoding="utf-8"))
 
@@ -207,9 +246,9 @@ def test_step_regenerates_stale_blocks_and_commits_them_on_the_rc_branch(stale_s
     sb = stale_sandbox
     before, before_findings = sb.freshness()
     assert before.returncode == 0
-    assert len(before_findings) == 2 and {f["kind"] for f in before_findings} == {"stale_block"}, (
-        f"fixture precondition: both blocks should start stale.\n{before.stdout}"
-    )
+    assert len(before_findings) == 2 and {f["kind"] for f in before_findings} == {
+        "stale_block"
+    }, f"fixture precondition: both blocks should start stale.\n{before.stdout}"
     main_head = _git(sb.repo, "rev-parse", "main")
     rc_head_before = _git(sb.repo, "rev-parse", _RC_BRANCH)
 
@@ -336,7 +375,11 @@ def test_unresolvable_project_rollups_narrate_and_change_no_file(stale_sandbox):
     )
 
     result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=sb.env(), timeout=120,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=sb.env(),
+        timeout=120,
     )
 
     assert result.returncode == 0, result.stderr
@@ -393,6 +436,95 @@ def test_open_rc_runs_the_step_after_cutting_the_branch_and_before_the_push():
     step = first_index(lambda ln: ln.startswith("cm_refresh_measured_pace_docs "))
     push = first_index(lambda ln: "push -u" in ln and "$RC_BRANCH" in ln)
     assert sourced < cut < step < push, (
-        "open-rc.sh must source the measured-pace step, cut the RC branch, run "
-        "the step, then push -- in that order"
+        "open-rc.sh must source the measured-pace step, cut the RC branch, run " "the step, then push -- in that order"
     )
+
+
+# ---------------------------------------------------------------------------
+# 7 -- a failed regenerate or commit leaves one operator inbox entry
+# ---------------------------------------------------------------------------
+
+
+def _open_inbox_entries(sb: _Sandbox) -> list:
+    inbox = sb.root / "projects" / _PROJECT / "operator-inbox.md"
+    if not inbox.exists():
+        return []
+    open_body = inbox.read_text(encoding="utf-8").split("## Open", 1)[1].split("\n## ", 1)[0]
+    return open_body.split("### INBOX-")[1:]
+
+
+def _failing_generator(sb: _Sandbox) -> pathlib.Path:
+    failing = sb.scratch / "failing_generator.py"
+    failing.write_text("import sys\nprint('render failed', file=sys.stderr)\nsys.exit(3)\n", encoding="utf-8")
+    return failing
+
+
+def _refuse_commits(sb: _Sandbox) -> None:
+    hook = sb.repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'commit refused by the test hook' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    ("failure", "cause"),
+    [("generator", "the generator exited 3"), ("commit", "committing the regenerated blocks failed")],
+)
+def test_failed_refresh_leaves_one_inbox_entry_naming_the_docs_and_the_rerun(stale_sandbox, failure, cause):
+    sb = stale_sandbox
+    generator = None
+    if failure == "generator":
+        generator = _failing_generator(sb)
+    else:
+        _refuse_commits(sb)
+    head = _git(sb.repo, "rev-parse", "HEAD")
+
+    result = sb.run_step(generator=generator)
+
+    assert result.returncode == 0, result.stderr
+    assert "CALLER-CONTINUED" in result.stdout
+    assert "WARNING" in result.stderr, result.stderr
+    assert "Operator inbox: INBOX-0001" in result.stdout, result.stdout + result.stderr
+    entries = _open_inbox_entries(sb)
+    assert len(entries) == 1, entries
+    entry = entries[0]
+    assert f"**Source:** rc:{_RC_BRANCH.split('/', 1)[1]}" in entry, entry
+    assert cause in entry, entry
+    assert str(sb.readme) in entry and str(sb.how_to) in entry, entry
+    assert f"--project {_PROJECT} --kanban-root {sb.root}" in entry, entry
+    assert _git(sb.repo, "rev-parse", "HEAD") == head
+    assert _git(sb.repo, "status", "--porcelain") == ""
+
+
+def test_refresh_that_commits_leaves_no_inbox_entry(stale_sandbox):
+    sb = stale_sandbox
+
+    result = sb.run_step()
+
+    assert result.returncode == 0, result.stderr
+    assert f"on {_RC_BRANCH}" in result.stdout, result.stdout
+    assert not (sb.root / "projects" / _PROJECT / "operator-inbox.md").exists()
+
+
+def test_missing_generator_leaves_one_inbox_entry_naming_its_path_across_reruns(stale_sandbox):
+    sb = stale_sandbox
+    missing = sb.scratch / "absent" / "generate_measured_pace_docs.py"
+    head = _git(sb.repo, "rev-parse", "HEAD")
+
+    first = sb.run_step(generator=missing)
+    second = sb.run_step(generator=missing)
+
+    for result in (first, second):
+        assert result.returncode == 0, result.stderr
+        assert "CALLER-CONTINUED" in result.stdout
+        assert f"generator not found at {missing}" in result.stderr, result.stderr
+        assert "Operator inbox: INBOX-0001" in result.stdout, result.stdout + result.stderr
+    entries = _open_inbox_entries(sb)
+    assert len(entries) == 1, entries
+    entry = entries[0]
+    assert f"**Source:** rc:{_RC_BRANCH.split('/', 1)[1]}" in entry, entry
+    assert f"the generator {missing} is missing" in entry, entry
+    assert str(sb.readme) in entry and str(sb.how_to) in entry, entry
+    assert f"python3 {missing} --project {_PROJECT} --kanban-root {sb.root}" in entry, entry
+    assert "<" not in entry.split("**How to answer:**", 1)[-1], "the by-hand command carries no placeholder"
+    assert _git(sb.repo, "rev-parse", "HEAD") == head
+    assert _git(sb.repo, "status", "--porcelain") == ""

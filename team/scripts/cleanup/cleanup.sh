@@ -91,6 +91,7 @@
 #   PGAI_CLEANUP_TASK_RETENTION_DAYS   Age in days past which Step 2 counts a terminal task
 #                                      folder in its report (default: 7). No folder is
 #                                      deleted at any age. Independent of log retention.
+#                                      kanban.cfg [cleanup] task_retention_days.
 #   PGAI_CLEANUP_TRIVIAL_LOG_BYTES     Byte threshold for "trivial" logs (default: 1700).
 #                                      kanban.cfg [cleanup] trivial_log_bytes.
 #                                      Logs SMALLER than this value are eligible for
@@ -135,7 +136,7 @@
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
 
 # Source project_paths lib for pp_* helpers and temp lib for pgai_temp_* helpers
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${_SCRIPT_DIR}/../lib/project_paths.sh"
 # shellcheck source=lib/temp.sh
@@ -373,7 +374,7 @@ if [[ -z "$_CLEANUP_PROJECT" ]]; then
   [[ "$DRY_RUN" == "true" ]] && _each_flags+=(--dry-run)
   [[ "$TRIVIAL_ONLY" == "true" ]] && _each_flags+=(--trivial-only)
   [[ "$TEMP_ONLY" == "true" ]] && _each_flags+=(--temp-only)
-  _each_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  _each_self="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
   # projects_cfg_list fails when projects.cfg is missing or registers no
   # project. With nothing registered there is nothing to clean, so that is
@@ -413,13 +414,12 @@ if [[ -z "$_CLEANUP_PROJECT" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Paths and tunables. PGAI_CLEANUP_RETENTION_DAYS, _TRIVIAL_LOG_BYTES and
-# _TRIVIAL_LOG_HOURS were resolved from kanban.cfg [cleanup] above.
+# Paths and tunables. PGAI_CLEANUP_RETENTION_DAYS, _TRIVIAL_LOG_BYTES,
+# _TRIVIAL_LOG_HOURS and _TASK_RETENTION_DAYS were resolved from kanban.cfg
+# [cleanup] above. PGAI_CLEANUP_TASK_RETENTION_DAYS is the age past which
+# Step 2 counts a terminal task folder in its report; task folders are
+# never deleted at any age.
 # ---------------------------------------------------------------------------
-# Age (default: 7 days) past which Step 2 counts a terminal task folder in
-# its report. Task folders are never deleted at any age. Independent of the
-# log-retention threshold. Override via PGAI_CLEANUP_TASK_RETENTION_DAYS.
-PGAI_CLEANUP_TASK_RETENTION_DAYS="${PGAI_CLEANUP_TASK_RETENTION_DAYS:-7}"
 # Trivial-log purge thresholds (two-tier retention model).
 # A log is "trivial" if it is SMALLER than PGAI_CLEANUP_TRIVIAL_LOG_BYTES bytes
 # AND OLDER than PGAI_CLEANUP_TRIVIAL_LOG_HOURS hours. These logs are purged
@@ -511,7 +511,7 @@ CLEANUP_LOG="$PGAI_LOGS_DIR/cleanup-${RUN_TIMESTAMP}.log"
 # Cleanup trap
 # ---------------------------------------------------------------------------
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # ---------------------------------------------------------------------------
@@ -551,7 +551,7 @@ TEMP_ITEMS_PURGED=0
 # Semver helpers (sourced from shared lib)
 # ---------------------------------------------------------------------------
 # shellcheck source=lib/semver.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/semver.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/semver.sh"
 
 # ---------------------------------------------------------------------------
 # Preflight checks
@@ -568,10 +568,11 @@ if [[ "$TRIVIAL_ONLY" == "false" && "$TEMP_ONLY" == "false" ]]; then
   fi
 
   # Resolve last released version via canonical helper (pp_last_released_version).
-  # The helper reads git tags merged into origin/main on the project's dev tree,
-  # so it works correctly after install.sh --upgrade removes the deprecated
-  # "Last Released:" field from release-state.md.  It returns the v0.0.0
-  # sentinel when no releases exist yet; treat that the same as "none".
+  # The helper answers from a matching branch-prefixed release tag in the
+  # project's dev tree first, then release-state.md's ## Last Released when no
+  # tag matches or there is no git dev tree (full order: its header comment in
+  # team/scripts/lib/project_paths.sh). It returns the v0.0.0 sentinel when
+  # neither exists; treat that the same as "none".
   LAST_RELEASED="$(pp_last_released_version "$_CLEANUP_PROJECT")"
 
   if [[ -z "$LAST_RELEASED" ]] || [[ "$LAST_RELEASED" == "none" ]] || [[ "$LAST_RELEASED" == "v0.0.0" ]]; then

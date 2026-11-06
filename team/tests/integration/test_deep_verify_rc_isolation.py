@@ -54,6 +54,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="deep-verify-rc-isolation")
 
+
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _DEEP_VERIFY_SCRIPT = _TEAM_DIR / "scripts" / "deep-verify.sh"
 
@@ -90,9 +91,7 @@ def _add_working_task(project_dir: pathlib.Path) -> pathlib.Path:
     entry naming it, mirroring the shape a real mid-RC task carries."""
     task_dir = project_dir / "tasks" / _TASK_ID
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "README.md").write_text(
-        f"# Task: {_TASK_ID}\n\n## Working Directory\nnone\n", encoding="utf-8"
-    )
+    (task_dir / "README.md").write_text(f"# Task: {_TASK_ID}\n\n## Working Directory\nnone\n", encoding="utf-8")
     (task_dir / "status.md").write_text(
         "# Status\n\n"
         f"## Task\n{_TASK_ID}\n\n"

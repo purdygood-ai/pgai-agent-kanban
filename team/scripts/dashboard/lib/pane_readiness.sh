@@ -4,7 +4,7 @@
 #
 # THE BUG THIS CLOSES
 # --------------------
-# Every pane loop under team/scripts/dashboard/ (watch invocations, the
+# Every pane loop under team/scripts/dashboard/ (cadence-loop.sh panes, the
 # hand-rolled "clear; while true; do ...; sleep; done" visibility loops,
 # and the interactive shells) is, from tmux's point of view, one long-lived
 # foreground process (the pane's own top-level shell, tmux's "pane_pid").
@@ -76,6 +76,12 @@ _PGAI_PANE_READINESS_SH_LOADED=1
 _pgai_pane_readiness_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../../lib/temp.sh
 source "${_pgai_pane_readiness_self_dir}/../../lib/temp.sh"
+# The wrap functions below end their line through dashboard_typed_line, which
+# appends the typed-line source tag; both live in dashboard_constants.sh.
+# Re-sourcing it from a caller that already loaded it only reassigns the same
+# constants.
+# shellcheck source=../../lib/dashboard_constants.sh
+source "${_pgai_pane_readiness_self_dir}/../../lib/dashboard_constants.sh"
 unset _pgai_pane_readiness_self_dir
 
 # The signal every pane's top-level shell ignores as its first act.
@@ -103,7 +109,10 @@ dashboard_pane_armed_dir() {
 # Echo a command string suitable for `tmux send-keys ... Enter`:
 #   1. `trap '' <signal>` -- the pane's first executed statement, always.
 #   2. Touch <armed_dir>/<pane_label> -- the armed report.
-#   3. Run <inner_cmd> -- unchanged, verbatim, last.
+#   3. Run <inner_cmd> -- unchanged, verbatim, last to run.
+#   4. The typed-line source tag (dashboard_typed_line), a trailing comment
+#      that marks the line as the dashboard's in shell history and runs
+#      nothing.
 #
 # Test-only delay hook: when PGAI_DASHBOARD_PANE_ARM_DELAY_LABEL is set and
 # equals <pane_label>, a `sleep PGAI_DASHBOARD_PANE_ARM_DELAY_SECONDS`
@@ -126,18 +135,20 @@ dashboard_pane_wrap_cmd() {
         delay_clause="sleep ${delay_seconds}; "
     fi
 
-    printf 'trap %s %s; %s: > %q; %s' \
+    local arming_line
+    arming_line="$(printf 'trap %s %s; %s: > %q; %s' \
         "''" \
         "${PGAI_DASHBOARD_PANE_SIGNAL}" \
         "${delay_clause}" \
         "${armed_dir}/${pane_label}" \
-        "${inner_cmd}"
+        "${inner_cmd}")"
+    dashboard_typed_line "$arming_line"
 }
 
 # ---------------------------------------------------------------------------
 # dashboard_pane_wrap_cmd_no_marker <inner_cmd>
-# Same trap-install half as dashboard_pane_wrap_cmd, WITHOUT touching the
-# armed marker -- for the small set of panes whose first command's LAST
+# Same trap-install half as dashboard_pane_wrap_cmd (and the same trailing
+# typed-line source tag), WITHOUT touching the armed marker -- for the small set of panes whose first command's LAST
 # statement is a bare `exec bash` / `exec bash -l` (no further exec, no
 # script argument): verified empirically against tmux 3.2a / bash 5.x
 # (via /proc/<pid>/status SigIgn straddling the exec) that a freshly
@@ -155,18 +166,20 @@ dashboard_pane_wrap_cmd() {
 # kills the pane outright, intermittently, under a rapid-switch storm.
 # The caller is responsible for re-installing the trap AND touching the
 # marker together, as one `tmux send-keys` call typed into the shell that
-# actually stays resident (see create.sh's own re-arm call sites for the
-# operator shell pane and the terminal window's interactive shell) --
+# actually stays resident (see the re-arm in lib/operator_shell.sh's
+# dashboard_init_operator_shell and create.sh's terminal.1 re-arm) --
 # never as two separate calls, so the marker's existence is always proof
 # of the CURRENTLY-running shell's own trap, never a since-superseded one.
 # ---------------------------------------------------------------------------
 dashboard_pane_wrap_cmd_no_marker() {
     local inner_cmd="${1:?dashboard_pane_wrap_cmd_no_marker: inner_cmd required}"
 
-    printf 'trap %s %s; %s' \
+    local arming_line
+    arming_line="$(printf 'trap %s %s; %s' \
         "''" \
         "${PGAI_DASHBOARD_PANE_SIGNAL}" \
-        "${inner_cmd}"
+        "${inner_cmd}")"
+    dashboard_typed_line "$arming_line"
 }
 
 # ---------------------------------------------------------------------------

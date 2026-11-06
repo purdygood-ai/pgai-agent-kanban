@@ -87,9 +87,7 @@ def test_a_leaked_root_halt_and_a_campaign_file_are_both_reported(tmp_path: path
     root = _root_with_project(tmp_path)
     halt = root / "HALT"
     campaign = root / "projects" / "beta" / "DEFER-LOW-BUGS"
-    result = _snapshot_then_check(
-        tmp_path, root, f": > '{halt}' && printf 'until=v9.0.0\\n' > '{campaign}'"
-    )
+    result = _snapshot_then_check(tmp_path, root, f": > '{halt}' && printf 'until=v9.0.0\\n' > '{campaign}'")
     assert result.returncode == 1
     assert f"ADDED:   {halt}" in result.stderr
     assert f"ADDED:   {campaign}" in result.stderr
@@ -177,7 +175,7 @@ def test_each_unattributed_difference_is_one_element_of_the_found_array(
         f"unset PGAI_AGENT_KANBAN_ROOT_PATH KANBAN_ROOT; source {_LIB} && "
         f"pgai_sentinel_snapshot '{root}' > '{snap}' && rm -f '{removed}' && : > '{added}'; "
         f"pgai_sentinel_leak_check '{root}' '{snap}' 2>/dev/null; echo \"RC=$?\"; "
-        "for e in \"${PGAI_SENTINEL_LEAKS_FOUND[@]}\"; do printf 'FOUND=%s\\n' \"$e\"; done",
+        'for e in "${PGAI_SENTINEL_LEAKS_FOUND[@]}"; do printf \'FOUND=%s\\n\' "$e"; done',
     )
     found = sorted(
         tuple(line.removeprefix("FOUND=").split("\t"))

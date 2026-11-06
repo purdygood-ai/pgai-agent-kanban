@@ -488,9 +488,9 @@ project's own history rather than from the configured ceiling:
      generate_measured_pace_docs.py' (from the repo root) and
      commit the result instead. -->
 
-**Per-task wall time (measured):** 5.4–272.3 min, median 16.7 min. Sample: 296 RC(s), 2498 task(s), window = every rollup available at render time (v1.27.1 .. v2.53.10). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
+**Per-task wall time (measured):** 5.4–272.3 min, median 16.2 min. Sample: 334 RC(s), 2768 task(s), window = every rollup available at render time (v1.27.1 .. v3.4.23). This is an RC's own wall-clock duration spread evenly across its tasks (clock-to-clock, including wake-cadence idle time), not an isolated per-task stopwatch reading -- see this generator's module docstring for why.
 
-**Composed RC cost (measured):** ~166 min = 1.0×pm bookend + 4.1×coder + 1.3×writer + 1.0×tester + 1.5×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
+**Composed RC cost (measured):** ~159 min = 1.0×pm bookend + 3.9×coder + 1.3×writer + 1.0×tester + 1.6×cm bookend, each term the average tasks per RC for that role times the median per-task minutes above.
 
 <!-- MEASURED-PACE-GENERATED:END -->
 
@@ -903,9 +903,17 @@ directory by default (override with `--out <path>`) and carries
 everything: project.cfg (ceilings included), queues, intake files,
 release-state, logs. Import is the sanctioned restore path — an imported
 project resumes exactly where it left off; `--register` adds it to
-`projects.cfg` in the same step (without the flag, import extracts and
-prints the registration line for you to add manually). This pair is
-also the migration path between installs.
+`projects.cfg` in the same step. Without the flag, import extracts the
+project and prints a `NOTICE:` naming `projects.cfg` and the entry to add
+by hand, built exactly as `--register` would append it: a
+`[project:<name>]` section under the imported name, or a `NAME:PRIORITY`
+line under that name when the archive carries only a legacy line and
+`projects.cfg` is still in the legacy format. Anything else in the
+archive's registration block is left out with a warning naming it
+(comment lines are dropped silently); when the block holds no entry the
+registry accepts, a warning says so and nothing is offered to paste. The
+import exits 0 either way. This pair is also the migration path between
+installs.
 
 ### 2.6 release-state.md
 
@@ -1140,8 +1148,8 @@ orientation — read those two for detail.
 | # | Window | Use |
 |---|---|---|
 | 0 | main | The operator surface: header (framework version, clock, global HALT), live agent logs, per-project progress — and a right-hand column with per-project status (active provider, per-agent task counts, currently-working task, RC / Last Released, HALT scope). The right column is a fixed 25% of the window width (not operator-tunable). |
-| 1 | operator | The kanban board as eight columns across every project — BUGS / PRIORITIES / REQUIREMENTS on the left, PM / CODER / WRITER / TESTER / CM on the right — then a full-width interactive command-line shell below it, then the legend bar at the bottom. Run `scripts/dashboard/suggested-commands.sh` from the shell for a reminder of the common commands. |
-| 2 | visibility | The same eight board columns, read-only, with a legend row. Colored per projects.cfg. Item colors: white = pending, amber = active, green = done. |
+| 1 | operator | The kanban board across every project — by default BUGS / PRIORITIES / REQUIREMENTS, then one AGENTS column listing every PM, CODER, WRITER, TESTER and CM task; `[dashboard] operator_board_agents = split` restores the five role columns. Under the board, at board width, an interactive command-line shell; on the far right a workbench pane, a second tall shell `operator_workbench_pct` of the window width (default 40), absent when that key is `0`, when the window is narrower than `operator_workbench_min_cols` (default 160), or when a board column would get fewer than 15 columns beside it. The legend bar runs full width at the bottom. Run `scripts/dashboard/suggested-commands.sh` from the shell for a reminder of the common commands. |
+| 2 | visibility | The eight-column board — BUGS / PRIORITIES / REQUIREMENTS, then PM / CODER / WRITER / TESTER / CM — read-only, with a legend row. Colored per projects.cfg. Item colors: white = pending, amber = active, green = done. |
 | 3 | attention | Items needing the operator: BLOCKED tasks with reasons. |
 | 4 | schedule | Next agent wake across the top, and a live tail of each agent's cron log (PM / CODER / WRITER / TESTER / CM) below it. |
 | 5 | git | Per-project repo status and recent tags — for every registered project's repo. |
@@ -1443,6 +1451,15 @@ $KANBAN_ROOT/scripts/upgrade.sh  # refuses an older checkout, backs up, installs
 scripts/unhalt-global.sh
 scripts/dashboard/create.sh
 ```
+
+**The pre-upgrade backup.** Before it deposits anything, `upgrade.sh` writes
+a tarball of the whole kanban root to
+`$HOME/pgai-kanban-backup-YYYYMMDD-HHMMSS.tar.gz`. It leaves out `logs/`,
+`locks/`, `__pycache__` and `*.lock` files, includes `secrets`, and is
+created mode 600. A failed upgrade prints its path and the restore command,
+`tar -xzf <tarball> -C "$(dirname "$KANBAN_ROOT")"`. Pass `--no-backup` to
+skip it (not recommended): the upgrade then warns that no recovery tarball
+will be available.
 
 **Targeting a specific version (forward-only).** Like `install.sh`,
 `upgrade.sh` takes an optional positional version argument to upgrade *to* a

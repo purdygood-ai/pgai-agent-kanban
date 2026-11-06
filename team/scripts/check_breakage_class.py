@@ -92,11 +92,13 @@ from pathlib import Path
 # agree on what counts as scannable source under team/.
 # ---------------------------------------------------------------------------
 
-_EXCLUDED_DIRS: frozenset[str] = frozenset({
-    "__pycache__",
-    ".venv",
-    "fixtures",
-})
+_EXCLUDED_DIRS: frozenset[str] = frozenset(
+    {
+        "__pycache__",
+        ".venv",
+        "fixtures",
+    }
+)
 
 _FIRST_PARTY_PACKAGE = "pgai_agent_kanban"
 
@@ -144,14 +146,10 @@ def _check_python_compile(py_files: list[Path], verbose: bool) -> list[_Finding]
             inner = exc.exc_value
             line = getattr(inner, "lineno", None)
             msg = getattr(inner, "msg", None) or str(inner)
-            findings.append(
-                _Finding(kind="python-compile", path=path, line=line, cause=msg)
-            )
+            findings.append(_Finding(kind="python-compile", path=path, line=line, cause=msg))
         except (SyntaxError, ValueError) as exc:  # ValueError: null bytes etc.
             line = getattr(exc, "lineno", None)
-            findings.append(
-                _Finding(kind="python-compile", path=path, line=line, cause=str(exc))
-            )
+            findings.append(_Finding(kind="python-compile", path=path, line=line, cause=str(exc)))
     return findings
 
 
@@ -171,7 +169,7 @@ def _bash_error_line(stderr: str) -> int | None:
     idx = stderr.find(marker)
     if idx == -1:
         return None
-    rest = stderr[idx + len(marker):]
+    rest = stderr[idx + len(marker) :]
     digits = ""
     for ch in rest:
         if ch.isdigit():
@@ -272,12 +270,14 @@ def _check_import_resolution(py_files: list[Path], team_dir: Path, verbose: bool
                     if not alias.name.startswith(f"{_FIRST_PARTY_PACKAGE}."):
                         continue
                     if _module_to_path(team_dir, alias.name) is None:
-                        findings.append(_Finding(
-                            kind="import-resolution",
-                            path=path,
-                            line=node.lineno,
-                            cause=f"import {alias.name} -- no module or package at that dotted path",
-                        ))
+                        findings.append(
+                            _Finding(
+                                kind="import-resolution",
+                                path=path,
+                                line=node.lineno,
+                                cause=f"import {alias.name} -- no module or package at that dotted path",
+                            )
+                        )
             elif isinstance(node, ast.ImportFrom):
                 if node.level and node.level > 0:
                     if not in_package:
@@ -294,12 +294,14 @@ def _check_import_resolution(py_files: list[Path], team_dir: Path, verbose: bool
                 if _module_to_path(team_dir, dotted) is None:
                     prefix = "." * (node.level or 0)
                     shown = f"{prefix}{node.module or ''}"
-                    findings.append(_Finding(
-                        kind="import-resolution",
-                        path=path,
-                        line=node.lineno,
-                        cause=f"from {shown} import ... -- no module or package resolves to '{dotted}'",
-                    ))
+                    findings.append(
+                        _Finding(
+                            kind="import-resolution",
+                            path=path,
+                            line=node.lineno,
+                            cause=f"from {shown} import ... -- no module or package resolves to '{dotted}'",
+                        )
+                    )
     return findings
 
 
@@ -387,12 +389,11 @@ def main(argv: list[str] | None = None) -> int:
         team_dir = Path(args.team_dir).resolve()
     else:
         script_dir = Path(__file__).resolve().parent  # team/scripts/
-        team_dir = script_dir.parent                  # team/
+        team_dir = script_dir.parent  # team/
 
     if not team_dir.is_dir():
         print(
-            f"ERROR: team directory not found: {team_dir}\n"
-            "Use --team-dir to specify an alternative path.",
+            f"ERROR: team directory not found: {team_dir}\n" "Use --team-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2

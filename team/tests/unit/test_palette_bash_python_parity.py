@@ -101,16 +101,14 @@ def _load_bash_palette(script_path: pathlib.Path) -> list[str]:
         [
             "bash",
             "-c",
-            f"source {shlex.quote(str(script_path))} && "
-            'printf \'%s\\n\' "${PGAI_DEFAULT_PALETTE[@]}"',
+            f"source {shlex.quote(str(script_path))} && " "printf '%s\\n' \"${PGAI_DEFAULT_PALETTE[@]}\"",
         ],
         capture_output=True,
         text=True,
         timeout=15,
     )
     assert result.returncode == 0, (
-        f"Sourcing {script_path} failed (exit {result.returncode}); "
-        f"stderr: {result.stderr!r}"
+        f"Sourcing {script_path} failed (exit {result.returncode}); " f"stderr: {result.stderr!r}"
     )
     return [line for line in result.stdout.splitlines() if line]
 
@@ -149,11 +147,7 @@ def _build_perturbed_definition_text(diverging_index: int) -> tuple[str, str, st
     only the hex token on the data line at *diverging_index* is replaced.
     """
     real_lines = _PALETTE_DEFINITION_FILE.read_text(encoding="utf-8").splitlines()
-    data_line_positions = [
-        i
-        for i, line in enumerate(real_lines)
-        if line.split() and _HEX_RE.match(line.split()[0])
-    ]
+    data_line_positions = [i for i, line in enumerate(real_lines) if line.split() and _HEX_RE.match(line.split()[0])]
     assert len(data_line_positions) > diverging_index, (
         f"Definition file at {_PALETTE_DEFINITION_FILE} has "
         f"{len(data_line_positions)} data lines; expected more than "
@@ -168,7 +162,7 @@ def _build_perturbed_definition_text(diverging_index: int) -> tuple[str, str, st
     # Pick a replacement guaranteed to differ from the original.
     replacement_hex = "#000000" if original_hex.lower() != "#000000" else "#ffffff"
 
-    perturbed_line = replacement_hex + original_line[len(original_hex):]
+    perturbed_line = replacement_hex + original_line[len(original_hex) :]
     perturbed_lines = list(real_lines)
     perturbed_lines[target_line_index] = perturbed_line
 
@@ -225,9 +219,7 @@ def test_perturbed_temp_copy_fails_parity_naming_diverging_index(
     load_default_palette = _import_load_default_palette()
 
     diverging_index = 3
-    perturbed_text, original_hex, replacement_hex = _build_perturbed_definition_text(
-        diverging_index
-    )
+    perturbed_text, original_hex, replacement_hex = _build_perturbed_definition_text(diverging_index)
     assert replacement_hex != original_hex  # sanity: the perturbation changes something
 
     perturbed_root = tmp_path / "perturbed-tree"
@@ -247,16 +239,13 @@ def test_perturbed_temp_copy_fails_parity_naming_diverging_index(
 
     message = str(excinfo.value)
     assert f"index {diverging_index}" in message, (
-        f"Failure message must name the diverging index ({diverging_index}); "
-        f"got: {message!r}"
+        f"Failure message must name the diverging index ({diverging_index}); " f"got: {message!r}"
     )
     assert replacement_hex in message, (
-        f"Failure message must include the perturbed value ({replacement_hex}); "
-        f"got: {message!r}"
+        f"Failure message must include the perturbed value ({replacement_hex}); " f"got: {message!r}"
     )
     assert original_hex in message, (
-        f"Failure message must include the canonical value ({original_hex}); "
-        f"got: {message!r}"
+        f"Failure message must include the canonical value ({original_hex}); " f"got: {message!r}"
     )
 
 
@@ -288,8 +277,7 @@ def _load_bash_semantic_palette(script_path: pathlib.Path) -> dict[str, str]:
         timeout=15,
     )
     assert result.returncode == 0, (
-        f"Sourcing {script_path} failed (exit {result.returncode}); "
-        f"stderr: {result.stderr!r}"
+        f"Sourcing {script_path} failed (exit {result.returncode}); " f"stderr: {result.stderr!r}"
     )
     entries: dict[str, str] = {}
     for line in result.stdout.splitlines():
@@ -300,9 +288,7 @@ def _load_bash_semantic_palette(script_path: pathlib.Path) -> dict[str, str]:
     return entries
 
 
-def _assert_semantic_palette_parity(
-    bash_map: dict[str, str], python_map: dict[str, str]
-) -> None:
+def _assert_semantic_palette_parity(bash_map: dict[str, str], python_map: dict[str, str]) -> None:
     """Assert two semantic key->color-name maps are identical.
 
     Mirrors _assert_palette_parity's role for the ordered list, adapted to
@@ -384,12 +370,10 @@ def test_semantic_palette_missing_key_refuses_dual_channel_in_both_readers() -> 
         f"got exit {result.returncode}, stdout={result.stdout!r}"
     )
     assert missing_key in result.stderr, (
-        f"Bash refusal must name the missing key ({missing_key!r}); "
-        f"got stderr={result.stderr!r}"
+        f"Bash refusal must name the missing key ({missing_key!r}); " f"got stderr={result.stderr!r}"
     )
     assert str(_PALETTE_DEFINITION_FILE) in result.stderr, (
-        f"Bash refusal must name the palette file ({_PALETTE_DEFINITION_FILE}); "
-        f"got stderr={result.stderr!r}"
+        f"Bash refusal must name the palette file ({_PALETTE_DEFINITION_FILE}); " f"got stderr={result.stderr!r}"
     )
     assert "error:" in result.stderr and "message:" in result.stderr and "remedy:" in result.stderr
 
@@ -412,9 +396,7 @@ def test_perturbed_temp_copy_of_semantic_palette_fails_parity_naming_diverging_k
 
     real_text = _PALETTE_DEFINITION_FILE.read_text(encoding="utf-8")
     real_lines = real_text.splitlines()
-    semantic_line_positions = [
-        i for i, line in enumerate(real_lines) if line.startswith("%")
-    ]
+    semantic_line_positions = [i for i, line in enumerate(real_lines) if line.startswith("%")]
     assert semantic_line_positions, "Definition file has no semantic-key lines to perturb."
 
     target_line_index = semantic_line_positions[0]
@@ -431,9 +413,7 @@ def test_perturbed_temp_copy_of_semantic_palette_fails_parity_naming_diverging_k
     # rather than a literal substring replace (which would need to guess
     # the padding width).
     color_start, color_end = match.span(2)
-    perturbed_line = (
-        original_line[:color_start] + replacement_color + original_line[color_end:]
-    )
+    perturbed_line = original_line[:color_start] + replacement_color + original_line[color_end:]
     perturbed_lines = list(real_lines)
     perturbed_lines[target_line_index] = perturbed_line
     perturbed_text = "\n".join(perturbed_lines) + "\n"
@@ -457,14 +437,11 @@ def test_perturbed_temp_copy_of_semantic_palette_fails_parity_naming_diverging_k
 
     message = str(excinfo.value)
     assert diverging_key in message, (
-        f"Failure message must name the diverging key ({diverging_key!r}); "
-        f"got: {message!r}"
+        f"Failure message must name the diverging key ({diverging_key!r}); " f"got: {message!r}"
     )
     assert replacement_color in message, (
-        f"Failure message must include the perturbed value ({replacement_color!r}); "
-        f"got: {message!r}"
+        f"Failure message must include the perturbed value ({replacement_color!r}); " f"got: {message!r}"
     )
     assert original_color in message, (
-        f"Failure message must include the canonical value ({original_color!r}); "
-        f"got: {message!r}"
+        f"Failure message must include the canonical value ({original_color!r}); " f"got: {message!r}"
     )

@@ -27,11 +27,7 @@ def _shim(tmp_path: pathlib.Path, listing: str) -> pathlib.Path:
     """A fake crontab: ``-l`` prints *listing*; an install records nothing."""
     shim = tmp_path / "fake-crontab"
     shim.write_text(
-        "#!/bin/bash\n"
-        'if [[ "${1:-}" == "-l" ]]; then\n'
-        f"  printf '%s' {listing!r}\n"
-        "fi\n"
-        "exit 0\n",
+        "#!/bin/bash\n" 'if [[ "${1:-}" == "-l" ]]; then\n' f"  printf '%s' {listing!r}\n" "fi\n" "exit 0\n",
         encoding="utf-8",
     )
     shim.chmod(0o755)
@@ -61,14 +57,14 @@ def test_empty_crontab_recovery_names_install_crontab_not_the_raw_template(tmp_p
 
     assert result.returncode == 1, result
     assert "crontab is empty after install" in result.stdout
-    assert "crontab.example" not in result.stdout, (
-        f"the raw template still carries placeholders and must not be offered\n{result.stdout}"
-    )
+    assert (
+        "crontab.example" not in result.stdout
+    ), f"the raw template still carries placeholders and must not be offered\n{result.stdout}"
     root = tmp_path / "kanban root"
     recovery = [line.strip() for line in result.stdout.splitlines() if "install-crontab.sh" in line]
-    assert recovery == [f"{root}/scripts/install-crontab.sh --wake-tier=small --yes".replace(" root", "\\ root", 1)], (
-        f"the recovery command must be the install's own install-crontab.sh, shell-quoted\n{result.stdout}"
-    )
+    assert recovery == [
+        f"{root}/scripts/install-crontab.sh --wake-tier=small --yes".replace(" root", "\\ root", 1)
+    ], f"the recovery command must be the install's own install-crontab.sh, shell-quoted\n{result.stdout}"
 
 
 def test_recovery_command_names_the_tier_and_root_it_is_given(tmp_path: pathlib.Path) -> None:

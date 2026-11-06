@@ -64,9 +64,12 @@
 #   5. Log action via overwatch_log_action.
 #
 # Ceiling path (retry_count already >= transient_retry_limit):
-#   1. Write a bug report file under $KANBAN_ROOT/projects/$OVERWATCH_PROJECT/bugs/.
+#   1. File a bug report through intake (overwatch_deposit_bug). Intake
+#      claims its number; a report for a task whose ceiling bug is still
+#      live is refused as the same defect and filed no second time.
 #   2. Log action via overwatch_log_action.
-#   (Task is NOT modified — a human or future iteration acts on the bug.)
+#   3. Escalate the task's Needs Human to yes (also when the bug was
+#      already filed); its state is left BLOCKED.
 #
 # Worktree cleanup (requeue path only, inside the locked fix):
 #   The requeue runs under overwatch_halt_first_fix, holding the project's
@@ -80,7 +83,8 @@
 #       saved for a checkout git can recreate).
 #     - A worktree reaching commits no other branch, tag or remote-tracking
 #       ref holds (checked against every ref, never a bare "main") is kept
-#       and bug-filed ("worktree-carries-commits-bug-filed").
+#       and bug-filed through intake ("worktree-carries-commits-bug-filed");
+#       a worktree whose earlier report is still live is not filed again.
 #     - Any other worktree that must be kept — uncommitted or untracked
 #       changes, locked, unreadable — is kept and logged "worktree-kept".
 #   A wake cannot take the lock between the cleanup and the requeue, so it
@@ -116,8 +120,15 @@
 #
 # --dry-run: scans and logs findings but does NOT modify any task files.
 
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CTAE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CTAE_SELF_DIR=""
+_CTAE_LIB_DIR="${_CTAE_SELF_DIR%/*}"
+
 # overwatch_registered_projects and overwatch_branch_prefix: the shared
-# projects.cfg and branch_prefix readers.
+# projects.cfg and branch_prefix readers; overwatch_deposit_bug: filing
+# through intake.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # provider_signature_is: the provider-error signature table's bash reader.
@@ -136,32 +147,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../wake_agent_block_scan.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _ctae_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-transient-api-error: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-transient-api-error: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-transient-api-error: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-transient-api-error || return 1
 
     # Resolve dev tree path from project.cfg (or PROJECT.cfg legacy)
     local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
@@ -172,14 +158,9 @@ _ctae_resolve_env() {
         _cfg_file="${_proj_root}/PROJECT.cfg"
     fi
     _CTAE_DEV_TREE=""
-    if [[ -n "${_cfg_file}" ]]; then
-        _CTAE_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-    fi
-    if [[ -z "${_CTAE_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        _CTAE_DEV_TREE="${PGAI_DEV_TREE_PATH}"
-    fi
+    # The documented dev_tree_path chain (overwatch_dev_tree, overwatch_config.sh):
+    # project.cfg, then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    _CTAE_DEV_TREE="$(overwatch_dev_tree "${OVERWATCH_PROJECT}")" || _CTAE_DEV_TREE=""
 
     # branch_prefix — optional; default empty
     _CTAE_BRANCH_PREFIX=""
@@ -204,7 +185,7 @@ _ctae_load_md_field() {
     local runner=""
     runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
     # shellcheck source=../md_field.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    source "${_CTAE_LIB_DIR}/md_field.sh" || return 1
     [[ -n "${runner}" ]] && eval "${runner}"
     declare -F read_md_field >/dev/null 2>&1
 }
@@ -335,29 +316,52 @@ _ctae_read_requeue_count() {
 }
 
 # ---------------------------------------------------------------------------
-# _ctae_bug_file <task_id> <reason> <bugs_dir>
-# Write a bug report for the task under bugs_dir.
-# Echoes the path to the created bug file.
-# Returns 0 on success, 1 on failure.
+# _ctae_bug_slug <kind> <task_id>
+# Echo the slug a report of <kind> for <task_id> is filed under, in
+# lower-case kebab and ending in a word, so reports for two tasks never read
+# to intake as one defect filed again with a trailing counter:
+#   ceiling  -> transient-retry-ceiling-<task>-reached
+#   worktree -> transient-requeue-worktree-<task>-carries-commits
 # ---------------------------------------------------------------------------
-_ctae_bug_file() {
-    local task_id="$1"
-    local reason="$2"
-    local bugs_dir="$3"
+_ctae_bug_slug() {
+    local kind="$1" id="${2:-unknown}"
+    local slug
+    case "${kind}" in
+        worktree) slug="transient-requeue-worktree-${id//[^A-Za-z0-9]/-}-carries-commits" ;;
+        *)        slug="transient-retry-ceiling-${id//[^A-Za-z0-9]/-}-reached" ;;
+    esac
+    slug="${slug,,}"
+    while [[ "${slug}" == *--* ]]; do
+        slug="${slug//--/-}"
+    done
+    printf '%s\n' "${slug}"
+}
+
+# ---------------------------------------------------------------------------
+# _ctae_file_bug <project_name> <kind> <task_id> <reason>
+# File a bug report of <kind> (ceiling or worktree, see _ctae_bug_slug) for
+# the task through intake (overwatch_deposit_bug): intake claims its number,
+# and a report whose earlier one for the same task and kind is still live is
+# refused as the same defect and filed no second time.
+# Echoes one line and returns overwatch_deposit_bug's code:
+#   0 -- filed: the deposited bug's path
+#   2 -- already filed: the live bug's path (or ID)
+#   1 -- not filed (intake's message is on stderr; nothing echoed)
+# ---------------------------------------------------------------------------
+_ctae_file_bug() {
+    local project_name="$1"
+    local kind="$2"
+    local task_id="$3"
+    local reason="$4"
     local timestamp
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    local bug_file="${bugs_dir}/BUG-overwatch-transient-${task_id}-${timestamp}.md"
     local _cap
     _cap="$(transient_retry_limit)"
+    local title="Transient API error retry ceiling reached for ${task_id}"
+    [[ "${kind}" == "worktree" ]] && title="Worktree of transient-blocked task ${task_id} carries commits"
 
-    mkdir -p "${bugs_dir}" 2>/dev/null || {
-        echo "check-transient-api-error: cannot create bugs dir: ${bugs_dir}" >&2
-        return 1
-    }
-
-    cat > "${bug_file}" <<EOF
-# Bug: Transient API Error — ${task_id}
-
+    overwatch_deposit_bug check-transient-api-error "${project_name}" \
+        "$(_ctae_bug_slug "${kind}" "${task_id}")" "${title}" <<EOF
 ## Status
 open
 
@@ -380,9 +384,6 @@ auto-requeue ceiling (${_cap}, from the durable ## Transient Retry record)
 has been reached, or the task has a worktree carrying commits
 that must not be auto-pruned. Manual intervention required.
 EOF
-
-    echo "${bug_file}"
-    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -582,7 +583,7 @@ _ctae_find_task_worktrees() {
 }
 
 # ---------------------------------------------------------------------------
-# _ctae_clear_task_worktrees <task_id> <dev_tree> <bugs_dir> <dry_run>
+# _ctae_clear_task_worktrees <task_id> <dev_tree> <project_name> <dry_run>
 # The requeue path's worktree cleanup (see the module header). Live runs
 # happen inside the locked fix, before the status edit; a dry run narrates
 # what a live run would do and changes nothing.
@@ -590,7 +591,7 @@ _ctae_find_task_worktrees() {
 # removal failed partway (narrated on stderr).
 # ---------------------------------------------------------------------------
 _ctae_clear_task_worktrees() {
-    local task_id="$1" dev_tree="$2" bugs_dir="$3" dry_run="$4"
+    local task_id="$1" dev_tree="$2" project_name="$3" dry_run="$4"
 
     if [[ -z "${dev_tree}" ]]; then
         # Dev tree not configured — nothing to clean up
@@ -646,12 +647,17 @@ _ctae_clear_task_worktrees() {
                     "Worktree for ${task_id} at ${wt_path} has local commits; dry-run, no action" 2>/dev/null || true
                 continue
             fi
-            local bug_path
-            bug_path="$(_ctae_bug_file "${task_id}" \
-                "Worktree ${wt_path} carries commits; cannot auto-prune" \
-                "${bugs_dir}")" || true
+            local bug_path="" deposit_rc=0 outcome
+            bug_path="$(_ctae_file_bug "${project_name}" worktree "${task_id}" \
+                "Worktree ${wt_path} carries commits; cannot auto-prune")" || deposit_rc=$?
+            case "${deposit_rc}" in
+                0) outcome="bug filed at ${bug_path}" ;;
+                2) outcome="already filed as ${bug_path}, not filed again" ;;
+                *) outcome="no bug filed (intake refused or failed; see its message above)" ;;
+            esac
+            echo "check-transient-api-error: ${task_id}: worktree ${wt_path}: ${outcome}" >&2
             overwatch_log_action "check-transient-api-error" "${wt_path}" "worktree-carries-commits-bug-filed" "none" \
-                "Worktree for ${task_id} at ${wt_path} kept: ${why}; bug filed at ${bug_path:-unknown}" || true
+                "Worktree for ${task_id} at ${wt_path} kept: ${why}; ${outcome}" || true
         else
             echo "check-transient-api-error: ${task_id}: worktree ${wt_path} kept: ${why}" >&2
             overwatch_log_action "check-transient-api-error" "${wt_path}" \
@@ -667,12 +673,12 @@ _ctae_clear_task_worktrees() {
 # _ctae_do_requeue_clearing_worktrees
 # The requeue fix run by overwatch_halt_first_fix: the task's worktrees are
 # cleared first (lock held, task still BLOCKED), then _ctae_do_requeue
-# flips it to BACKLOG. Reads _CTAE_FIX_DEV_TREE and _CTAE_FIX_BUGS_DIR besides
+# flips it to BACKLOG. Reads _CTAE_FIX_DEV_TREE and _CTAE_FIX_PROJECT besides
 # _ctae_do_requeue's own inputs. A failed removal leaves the task BLOCKED
 # for a later sweep.
 # ---------------------------------------------------------------------------
 _ctae_do_requeue_clearing_worktrees() {
-    _ctae_clear_task_worktrees "${_CTAE_TASK_ID}" "${_CTAE_FIX_DEV_TREE:-}" "${_CTAE_FIX_BUGS_DIR:-}" 0 || {
+    _ctae_clear_task_worktrees "${_CTAE_TASK_ID}" "${_CTAE_FIX_DEV_TREE:-}" "${_CTAE_FIX_PROJECT:-${OVERWATCH_PROJECT:-}}" 0 || {
         echo "check-transient-api-error: ${_CTAE_TASK_ID}: worktree cleanup failed; task left BLOCKED for a later sweep" >&2
         return 1
     }
@@ -749,7 +755,6 @@ overwatch_check_transient_api_error() {
     local project_root="${KANBAN_ROOT}/projects/${project_name}"
     local tasks_root="${project_root}/tasks"
     local queues_dir="${tasks_root}/queues"
-    local bugs_dir="${project_root}/bugs"
     local dev_tree="${_CTAE_DEV_TREE:-}"
 
     if [[ ! -d "${project_root}" ]]; then
@@ -760,7 +765,8 @@ overwatch_check_transient_api_error() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CTAE_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-transient-api-error: cannot resolve lib dir" >&2
             return 1
         }
@@ -873,7 +879,7 @@ overwatch_check_transient_api_error() {
             fi
             # A requeue would clear the task's worktrees; narrate what it would do.
             if (( current_count < transient_cap )); then
-                _ctae_clear_task_worktrees "${task_id}" "${dev_tree}" "${bugs_dir}" 1 || true
+                _ctae_clear_task_worktrees "${task_id}" "${dev_tree}" "${project_name}" 1 || true
             fi
             continue
         fi
@@ -884,23 +890,28 @@ overwatch_check_transient_api_error() {
         # handle_working_after_exit's Needs Human=yes branch).
         if (( current_count >= transient_cap )); then
             echo "check-transient-api-error: ${task_id}: ceiling reached (count=${current_count}); bug-filing" >&2
-            local bug_path
-            bug_path="$(_ctae_bug_file "${task_id}" \
-                "Transient API error ceiling reached (${current_count} requeues already performed)" \
-                "${bugs_dir}")" || {
-                echo "check-transient-api-error: ${task_id}: bug-file write failed" >&2
-                continue
-            }
+            local bug_path="" deposit_rc=0 outcome
+            bug_path="$(_ctae_file_bug "${project_name}" ceiling "${task_id}" \
+                "Transient API error ceiling reached (${current_count} requeues already performed)")" \
+                || deposit_rc=$?
+            case "${deposit_rc}" in
+                0) outcome="bug filed at ${bug_path}" ;;
+                2) outcome="already filed as ${bug_path}, not filed again" ;;
+                *)
+                    echo "check-transient-api-error: ${task_id}: ceiling bug report not filed (see the intake message above); a later sweep tries again" >&2
+                    continue
+                    ;;
+            esac
 
             overwatch_log_action \
                 "check-transient-api-error" \
                 "${task_id}" \
                 "transient-ceiling-bug-filed" \
                 "none" \
-                "Transient ceiling=${current_count}; bug filed at ${bug_path}" \
+                "Transient ceiling=${current_count}; ${outcome}" \
             || true
 
-            echo "check-transient-api-error: ${task_id}: bug filed at ${bug_path}" >&2
+            echo "check-transient-api-error: ${task_id}: ${outcome}" >&2
 
             # Escalate Needs Human=yes so exactly-at-cap is never
             # left in limbo — consistent with wake_common.sh's
@@ -955,12 +966,12 @@ overwatch_check_transient_api_error() {
             export _CTAE_STATUS_FILE="${task_status}"
             export _CTAE_NEW_COUNT="${new_count}"
             export _CTAE_FIX_DEV_TREE="${dev_tree}"
-            export _CTAE_FIX_BUGS_DIR="${bugs_dir}"
+            export _CTAE_FIX_PROJECT="${project_name}"
 
             local fix_exit=0
             overwatch_halt_first_fix _ctae_do_requeue_clearing_worktrees || fix_exit=$?
 
-            unset _CTAE_TASK_ID _CTAE_STATUS_FILE _CTAE_NEW_COUNT _CTAE_FIX_DEV_TREE _CTAE_FIX_BUGS_DIR
+            unset _CTAE_TASK_ID _CTAE_STATUS_FILE _CTAE_NEW_COUNT _CTAE_FIX_DEV_TREE _CTAE_FIX_PROJECT
 
             if (( fix_exit == 3 )); then
                 echo "check-transient-api-error: HALT_OVERWATCH guard tripped; aborting" >&2

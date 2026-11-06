@@ -40,12 +40,22 @@ from tests.unit.shell_harness import run_bash
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _STAGE = "scripts/lib/cm/release_known_issue.sh"
 
-_FIXTURES = {'BUG-0001-a.md': '# BUG-0001-a\n\n## Status\nopen\n\n## Severity\nmedium\nexplained further. ---\n\n## Public ID\n`KI-0042`\n\n## Symptom\n<!-- note -->\nThe widget | breaks when CODER-20260101-001-x runs.  Second sentence here.\n', 'BUG-0002-b.md': '# BUG-0002-b\n\n## Symptom\nNothing about BUG-0099 here\nover two lines\n\n## Known Issue Carry Forward\n<!-- set by CM -->\n', 'BUG-0003-c.md': '# BUG-0003-c\n\n## Known Issue Carry Forward\nv1.0.0\n', 'notes.md': '# Release v1.2.3\n\n## Status\n<!-- guidance -->\n\nPENDING-RELEASE\n\n## Known Issues\n\nNone.\n\n## Bugs Skipped\n\nNone.\n'}
+_FIXTURES = {
+    "BUG-0001-a.md": "# BUG-0001-a\n\n## Status\nopen\n\n## Severity\nmedium\nexplained further. ---\n\n## Public ID\n`KI-0042`\n\n## Symptom\n<!-- note -->\nThe widget | breaks when CODER-20260101-001-x runs.  Second sentence here.\n",
+    "BUG-0002-b.md": "# BUG-0002-b\n\n## Symptom\nNothing about BUG-0099 here\nover two lines\n\n## Known Issue Carry Forward\n<!-- set by CM -->\n",
+    "BUG-0003-c.md": "# BUG-0003-c\n\n## Known Issue Carry Forward\nv1.0.0\n",
+    "notes.md": "# Release v1.2.3\n\n## Status\n<!-- guidance -->\n\nPENDING-RELEASE\n\n## Known Issues\n\nNone.\n\n## Bugs Skipped\n\nNone.\n",
+}
 
 # Recorded from the stage while its four helpers were inline Python.
-_EXPECTED_STDOUT = '--KI\n- **KI-0042** — The widget | breaks when another item runs. — No workaround available.\n- Nothing about another item here over two lines (internal-only, not yet disclosed) — No workaround available.\nrc=0\n--BS\n| The widget \\| breaks when another item runs. | KI-0042 | MEDIUM | rationale \\| with another item |\n| Nothing about another item here over two lines | internal-only | UNSPECIFIED | r2 |\nrc=0\n--BSodd\nERROR: build_bugs_skipped_notes_block requires <bug_file> <rationale> pairs (got an odd number of arguments).\nrc=1\n--STAMP\n  Stamped ## Status: KNOWN-ISSUE in release-notes/notes.md\n  Stamped ## Known Issues in release-notes/notes.md\n  Stamped ## Bugs Skipped in release-notes/notes.md\nrc=0\n--STAMP2\nWARNING: PENDING-RELEASE placeholder not found under ## Status heading.\nrc=1\n--MARK\n[Step 4e] Known-issue carry-forward marker: 2 stamped, 1 already set.\nrc=0\n--MARK2\n[Step 4e] step 4e: already complete, continuing — known-issue carry-forward marker already set on 1 bug(s).\nrc=0\n'
+_EXPECTED_STDOUT = "--KI\n- **KI-0042** — The widget | breaks when another item runs. — No workaround available.\n- Nothing about another item here over two lines (internal-only, not yet disclosed) — No workaround available.\nrc=0\n--BS\n| The widget \\| breaks when another item runs. | KI-0042 | MEDIUM | rationale \\| with another item |\n| Nothing about another item here over two lines | internal-only | UNSPECIFIED | r2 |\nrc=0\n--BSodd\nERROR: build_bugs_skipped_notes_block requires <bug_file> <rationale> pairs (got an odd number of arguments).\nrc=1\n--STAMP\n  Stamped ## Status: KNOWN-ISSUE in release-notes/notes.md\n  Stamped ## Known Issues in release-notes/notes.md\n  Stamped ## Bugs Skipped in release-notes/notes.md\nrc=0\n--STAMP2\nWARNING: PENDING-RELEASE placeholder not found under ## Status heading.\nrc=1\n--MARK\n[Step 4e] Known-issue carry-forward marker: 2 stamped, 1 already set.\nrc=0\n--MARK2\n[Step 4e] step 4e: already complete, continuing — known-issue carry-forward marker already set on 1 bug(s).\nrc=0\n"
 
-_EXPECTED_FILES = {'BUG-0001-a.md': '# BUG-0001-a\n\n## Status\nopen\n\n## Severity\nmedium\nexplained further. ---\n\n## Public ID\n`KI-0042`\n\n## Symptom\n<!-- note -->\nThe widget | breaks when CODER-20260101-001-x runs.  Second sentence here.\n\n## Known Issue Carry Forward\nv1.2.3\n', 'BUG-0002-b.md': '# BUG-0002-b\n\n## Symptom\nNothing about BUG-0099 here\nover two lines\n\n## Known Issue Carry Forward\n<!-- set by CM -->\nv1.2.3\n\n', 'BUG-0003-c.md': '# BUG-0003-c\n\n## Known Issue Carry Forward\nv1.0.0\n', 'notes.md': '# Release v1.2.3\n\n## Status\n<!-- guidance -->\n\nKNOWN-ISSUE\n\n## Known Issues\n\n\n- ki line\n\n## Bugs Skipped\n\n\n| a | b |\n\n'}
+_EXPECTED_FILES = {
+    "BUG-0001-a.md": "# BUG-0001-a\n\n## Status\nopen\n\n## Severity\nmedium\nexplained further. ---\n\n## Public ID\n`KI-0042`\n\n## Symptom\n<!-- note -->\nThe widget | breaks when CODER-20260101-001-x runs.  Second sentence here.\n\n## Known Issue Carry Forward\nv1.2.3\n",
+    "BUG-0002-b.md": "# BUG-0002-b\n\n## Symptom\nNothing about BUG-0099 here\nover two lines\n\n## Known Issue Carry Forward\n<!-- set by CM -->\nv1.2.3\n\n",
+    "BUG-0003-c.md": "# BUG-0003-c\n\n## Known Issue Carry Forward\nv1.0.0\n",
+    "notes.md": "# Release v1.2.3\n\n## Status\n<!-- guidance -->\n\nKNOWN-ISSUE\n\n## Known Issues\n\n\n- ki line\n\n## Bugs Skipped\n\n\n| a | b |\n\n",
+}
 
 _DRIVER = """\
 set -uo pipefail
@@ -78,7 +88,10 @@ def test_stage_output_and_written_files_are_unchanged(tmp_path: pathlib.Path) ->
 def test_inline_python_lint_finds_no_python_in_the_stage() -> None:
     result = subprocess.run(
         [sys.executable, "scripts/lint_inline_python.py", "--emit-allowlist"],
-        cwd=_TEAM_DIR, capture_output=True, text=True, timeout=120,
+        cwd=_TEAM_DIR,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert result.returncode == 0, result.stderr
@@ -95,7 +108,7 @@ def _bug_file(tmp_path: pathlib.Path, header: str = "", sections: str = "", symp
     return str(path)
 
 
-def _row_cells(row: str) -> "list[str]":
+def _row_cells(row: str) -> list[str]:
     """The four cells of one rendered Bugs Skipped row."""
     return [cell.strip() for cell in row.strip().strip("|").split(" | ")]
 
@@ -118,8 +131,8 @@ def test_bugs_skipped_severity_reads_section_then_header_field(
     assert _row_cells(row)[2] == expected
 
 
-_CODE_SPAN_SYMPTOM = "Running `pvg build . --scene 2` fails. More text."
-_CODE_SPAN_SENTENCE = "Running `pvg build . --scene 2` fails."
+_CODE_SPAN_SYMPTOM = "Running `my-app build . --target 2` fails. More text."
+_CODE_SPAN_SENTENCE = "Running `my-app build . --target 2` fails."
 
 
 def test_bugs_skipped_substance_does_not_end_inside_a_code_span(tmp_path: pathlib.Path) -> None:

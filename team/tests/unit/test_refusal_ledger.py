@@ -126,10 +126,7 @@ def test_write_latest_creates_ledger_with_header_and_all_fields(tmp_path: Path) 
     assert record["project"] == "pgai-agent-kanban"
     assert record["surface"] == "release.sh:git_step"
     assert record["error"] == "gate.rc-branch-mismatch"
-    assert (
-        record["message"]
-        == "the release stopped because the checkout was not on the release branch"
-    )
+    assert record["message"] == "the release stopped because the checkout was not on the release branch"
     assert record["remedy"] == "git checkout rc/v1.2.3 && re-run the release script"
     assert record["context"] == "install"
 
@@ -192,9 +189,7 @@ def test_many_writes_never_grow_the_file_beyond_one_record(tmp_path: Path) -> No
         ("context", ""),
     ],
 )
-def test_write_latest_refuses_blank_field_and_writes_nothing(
-    tmp_path: Path, field: str, value: str
-) -> None:
+def test_write_latest_refuses_blank_field_and_writes_nothing(tmp_path: Path, field: str, value: str) -> None:
     ledger_path = tmp_path / "refusal-ledger.md"
     kwargs = {field: value}
     with pytest.raises(RefusalLedgerError):
@@ -289,9 +284,7 @@ def test_record_refusal_no_project_case_writes_nothing_anywhere(
     kanban_root = tmp_path / "isolated_kanban_root"
     kanban_root.mkdir()
 
-    written = record_refusal(
-        "gate.x", "message text", "remedy text", kanban_root=str(kanban_root)
-    )
+    written = record_refusal("gate.x", "message text", "remedy text", kanban_root=str(kanban_root))
 
     assert written is False
     assert list(kanban_root.rglob("*")) == [], "no file should have been created anywhere"
@@ -303,9 +296,7 @@ def test_record_refusal_falls_back_to_ambient_project_name_env_var(
     monkeypatch.setenv("PGAI_PROJECT_NAME", "env-project")
     kanban_root = str(tmp_path)
 
-    written = record_refusal(
-        "gate.env", "env message", "env remedy", kanban_root=kanban_root
-    )
+    written = record_refusal("gate.env", "env message", "env remedy", kanban_root=kanban_root)
 
     assert written is True
     record = read_latest(ledger_path_for_project(kanban_root, "env-project"))
@@ -365,9 +356,7 @@ def test_record_refusal_never_raises_on_bogus_kanban_root_type(tmp_path: Path) -
     record_refusal (simulated here by a kanban_root that cannot be joined
     into a usable path) is swallowed, never propagated to the caller —
     recording is diagnostics, never a gate."""
-    written = record_refusal(
-        "gate.x", "msg", "remedy", project="p", kanban_root="\0invalid\0path"
-    )
+    written = record_refusal("gate.x", "msg", "remedy", project="p", kanban_root="\0invalid\0path")
     assert written is False
 
 
@@ -390,9 +379,7 @@ def test_record_refusal_stamps_context_test_while_pytest_current_test_is_set(
         "proven"
     )
     kanban_root = str(tmp_path)
-    written = record_refusal(
-        "gate.x", "message text", "remedy text", project="demo-project", kanban_root=kanban_root
-    )
+    written = record_refusal("gate.x", "message text", "remedy text", project="demo-project", kanban_root=kanban_root)
     assert written is True
 
     record = read_latest(ledger_path_for_project(kanban_root, "demo-project"))
@@ -408,9 +395,7 @@ def test_record_refusal_stamps_context_install_when_pytest_current_test_is_absen
     must stamp context "install"."""
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     kanban_root = str(tmp_path)
-    written = record_refusal(
-        "gate.x", "message text", "remedy text", project="demo-project", kanban_root=kanban_root
-    )
+    written = record_refusal("gate.x", "message text", "remedy text", project="demo-project", kanban_root=kanban_root)
     assert written is True
 
     record = read_latest(ledger_path_for_project(kanban_root, "demo-project"))
@@ -492,9 +477,7 @@ def test_record_refusal_unregistered_project_writes_nothing_and_narrates(
 ) -> None:
     root = _sandbox_root(tmp_path, "[project:real-project]\npriority=1\n")
 
-    written = record_refusal(
-        "gate.x", "message text", "remedy text", project="a", kanban_root=str(root)
-    )
+    written = record_refusal("gate.x", "message text", "remedy text", project="a", kanban_root=str(root))
 
     assert written is False
     assert not (root / "projects").exists(), "no projects/ entry may be created"
@@ -587,9 +570,7 @@ def test_cli_record_with_kanban_root_records_registered_project(tmp_path: Path) 
     root = _sandbox_root(tmp_path, "[project:real-project]\npriority=1\n")
     ledger = ledger_path_for_project(str(root), "real-project")
 
-    result = _run_ledger_cli(
-        "record", "--kanban-root", str(root), ledger, "real-project", "k", "m", "r", "s"
-    )
+    result = _run_ledger_cli("record", "--kanban-root", str(root), ledger, "real-project", "k", "m", "r", "s")
 
     assert result.returncode == 0, result.stderr
     assert read_latest(ledger)["error"] == "k"

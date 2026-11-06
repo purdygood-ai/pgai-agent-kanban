@@ -121,7 +121,9 @@ _SCENARIOS: dict[str, tuple[dict, list[str], dict]] = {
     ),
     "list-long-held-env-budget": ({"locks/repo-wake-delta.lock": _REC_LIVE_AGO}, [], _SMALL_BUDGET),
     "list-long-held-cfg-budget": (
-        {"locks/repo-wake-delta.lock": _REC_LIVE_AGO, "kanban.cfg": _SMALL_BUDGET_CFG}, [], {},
+        {"locks/repo-wake-delta.lock": _REC_LIVE_AGO, "kanban.cfg": _SMALL_BUDGET_CFG},
+        [],
+        {},
     ),
     "list-default-budget": ({"locks/repo-wake-delta.lock": _REC_LIVE_AGO}, [], {}),
     "list-positional-ignored": ({"locks/repo-wake-alpha.lock": _REC_DEAD}, ["stray"], {}),
@@ -169,7 +171,7 @@ _RERUN = {"release-dead-exact"}
 
 
 def _ago_stamp(seconds: int = 1000) -> str:
-    stamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=seconds)
+    stamp = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=seconds)
     return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -204,8 +206,11 @@ def _run(tmp_path, root, args, extra=None, script=_SCRIPT) -> subprocess.Complet
     """Run the script; stdout and stderr are decoded with no newline translation (a CR survives)."""
     run = subprocess.run(
         ["bash", str(script), *args],
-        capture_output=True, env=_env(tmp_path, root, extra),
-        cwd=str(root), stdin=subprocess.DEVNULL, timeout=120,
+        capture_output=True,
+        env=_env(tmp_path, root, extra),
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        timeout=120,
     )
     run.stdout = run.stdout.decode("utf-8", errors="replace")
     run.stderr = run.stderr.decode("utf-8", errors="replace")
@@ -324,7 +329,11 @@ def test_release_route_and_cli_reach_ops_locks_release_lock(tmp_path):
 
 
 def test_list_route_and_cli_reach_ops_locks_list_locks(tmp_path):
-    locks = {"repo-wake-alpha": _REC_DEAD, "overwatch-alpha": _REC_DEAD_PRE, "repo-wake-beta": _fill(_REC_LIVE, {"LIVE": str(os.getpid())})}
+    locks = {
+        "repo-wake-alpha": _REC_DEAD,
+        "overwatch-alpha": _REC_DEAD_PRE,
+        "repo-wake-beta": _fill(_REC_LIVE, {"LIVE": str(os.getpid())}),
+    }
     rest_board = _board(tmp_path, "rest-board", locks)
     cli_board = _board(tmp_path, "cli-board", locks)
 
@@ -343,9 +352,9 @@ def test_list_route_and_cli_reach_ops_locks_list_locks(tmp_path):
     assert rest_out.count("lock: <B>/locks/") == 3
     assert "  verdict: held\n" in rest_out and "  verdict: stale\n" in rest_out
     for board in (rest_board, cli_board):
-        assert (board / "locks" / "repo-wake-alpha.lock").read_text(encoding="utf-8") == _REC_DEAD, (
-            "listing is read-only"
-        )
+        assert (board / "locks" / "repo-wake-alpha.lock").read_text(
+            encoding="utf-8"
+        ) == _REC_DEAD, "listing is read-only"
 
 
 def test_get_release_locks_still_refuses_release_and_force(tmp_path):
@@ -503,7 +512,10 @@ def test_force_holder_lets_go(monkeypatch, fake_board):
     assert outcome.outcome == "holder_let_go" and outcome.waited_seconds == 0
     assert signal.SIGTERM in holder.signals
     assert lines[0].startswith(f"release-locks: sent SIGTERM to live holder pid {_FAKE_PID} of lock repo-wake-pm")
-    assert lines[-1] == f"release-locks: released lock repo-wake-pm ({lock}): holder pid {_FAKE_PID} let go of it 0s after SIGTERM"
+    assert (
+        lines[-1]
+        == f"release-locks: released lock repo-wake-pm ({lock}): holder pid {_FAKE_PID} let go of it 0s after SIGTERM"
+    )
 
 
 def test_force_holder_exits_leaving_its_record(monkeypatch, fake_board):
@@ -702,8 +714,15 @@ def test_describe_provenance():
 # different test IDs and xdist refuses to run a suite that collects differently.
 @pytest.mark.parametrize(
     "pid, verdict",
-    [("{LIVE}", "held"), (_DEAD, "stale"), ("0", "stale"), ("-1", "stale"), ("abc", "stale"),
-     ("{LIVE}\r", "stale"), ("99999999999999999999999", "stale")],
+    [
+        ("{LIVE}", "held"),
+        (_DEAD, "stale"),
+        ("0", "stale"),
+        ("-1", "stale"),
+        ("abc", "stale"),
+        ("{LIVE}\r", "stale"),
+        ("99999999999999999999999", "stale"),
+    ],
 )
 def test_pid_liveness_verdict(pid, verdict):
     pid = _fill(pid, {"LIVE": str(os.getpid())})
@@ -748,7 +767,12 @@ def test_held_seconds_and_format():
     assert ops_locks.held_seconds(record, 1767225600 - 5) == 0
     assert ops_locks.held_seconds("pid=1") is None
     assert [ops_locks.format_held_seconds(s) for s in (0, 59, 60, 3599, 3600, 7322)] == [
-        "0s", "59s", "1m", "59m", "1h 0m", "2h 2m",
+        "0s",
+        "59s",
+        "1m",
+        "59m",
+        "1h 0m",
+        "2h 2m",
     ]
 
 
@@ -808,11 +832,17 @@ _LOCKS_PARITY_ROWS = {
         10,
     ),
     "kanban_cfg_answers_when_project_cfg_is_silent": (
-        {"projects/demo/project.cfg": "[project]\nproject_name = demo\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 250\n"},
+        {
+            "projects/demo/project.cfg": "[project]\nproject_name = demo\n",
+            "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 250\n",
+        },
         250,
     ),
     "blank_project_value_falls_through": (
-        {"projects/demo/project.cfg": f"[locks]\n{_LOCKS_KEY} =\n", "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 300 ; note\n"},
+        {
+            "projects/demo/project.cfg": f"[locks]\n{_LOCKS_KEY} =\n",
+            "kanban.cfg": f"[locks]\n{_LOCKS_KEY} = 300 ; note\n",
+        },
         300,
     ),
     "legacy_project_cfg_outranks_kanban_cfg": (
@@ -852,8 +882,12 @@ def test_locks_key_resolves_the_same_in_ops_locks_and_lock_provenance(monkeypatc
     )
     proc = subprocess.run(
         ["bash", "-c", script, "parity", str(_TEAM_DIR / "scripts" / "lib")],
-        capture_output=True, text=True, env=_env(tmp_path, root), cwd=str(root),
-        stdin=subprocess.DEVNULL, timeout=60,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root),
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        timeout=60,
     )
     assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr}"
     assert proc.stdout.splitlines() == [str(expected.seconds), expected.derivation]
@@ -864,7 +898,11 @@ def test_resolve_lock_name():
     assert ops_locks.resolve_lock_name(names, "a") == ["a"]
     assert ops_locks.resolve_lock_name(names, "a.lock") == ["a"]
     assert ops_locks.resolve_lock_name(names, "repo-wake-alpha") == ["repo-wake-alpha"]
-    assert ops_locks.resolve_lock_name(names, "repo-wake") == ["repo-wake-alpha", "repo-wake-alphabet", "repo-wake-beta"]
+    assert ops_locks.resolve_lock_name(names, "repo-wake") == [
+        "repo-wake-alpha",
+        "repo-wake-alphabet",
+        "repo-wake-beta",
+    ]
     assert ops_locks.resolve_lock_name(["repo-wake-alphabet"], "repo-wake-alpha") == []
 
 
@@ -878,7 +916,11 @@ def test_list_locks_entry_fields(tmp_path):
     board = _board(tmp_path, "board", {"repo-wake-alpha": _REC_DEAD})
     (entry,) = ops_locks.list_locks(_ctx(board), now=0).locks
     assert (entry.name, entry.holder, entry.pid, entry.op, entry.task) == (
-        "repo-wake-alpha", "wake-coder", _DEAD, "wake", "CODER-1",
+        "repo-wake-alpha",
+        "wake-coder",
+        _DEAD,
+        "wake",
+        "CODER-1",
     )
     assert entry.verdict == "stale" and entry.held_verdict == f"dead (pid {_DEAD} not running)"
 
@@ -919,7 +961,9 @@ def _hyphenated_board(tmp_path: pathlib.Path, locks: dict) -> pathlib.Path:
     root = tmp_path / "root"
     for name in ("beta", "alpha-beta"):
         (root / "projects" / name).mkdir(parents=True)
-    (root / "projects.cfg").write_text("[project:beta]\npriority=1\n\n[project:alpha-beta]\npriority=2\n", encoding="utf-8")
+    (root / "projects.cfg").write_text(
+        "[project:beta]\npriority=1\n\n[project:alpha-beta]\npriority=2\n", encoding="utf-8"
+    )
     (root / "locks").mkdir()
     for name, text in locks.items():
         (root / "locks" / name).write_text(text, encoding="utf-8")
@@ -937,8 +981,14 @@ def test_a_wake_batch_lock_of_alpha_beta_is_not_attributed_to_beta(tmp_path):
 
 
 def test_every_lock_family_of_a_hyphenated_project_stays_with_it(tmp_path):
-    names = ("repo-wake-{p}.lock", "overwatch-{p}.lock", "overwatch-runaway-{p}.lock",
-             "operator-inbox-{p}.lock", "wake-batch-coder-{p}.lock", "wake-batch-pm-{p}.lock")
+    names = (
+        "repo-wake-{p}.lock",
+        "overwatch-{p}.lock",
+        "overwatch-runaway-{p}.lock",
+        "operator-inbox-{p}.lock",
+        "wake-batch-coder-{p}.lock",
+        "wake-batch-pm-{p}.lock",
+    )
     locks = {n.format(p=p): "" for n in names for p in ("beta", "alpha-beta")}
     root = _hyphenated_board(tmp_path, locks)
     assert _attributed(root, "alpha-beta") == sorted(n.format(p="alpha-beta") for n in names)
@@ -962,17 +1012,23 @@ def test_a_wake_batch_record_names_the_project_where_the_file_name_cannot(tmp_pa
 
 
 def test_the_step_lock_record_names_the_project_when_the_record_file_is_absent(tmp_path):
-    root = _hyphenated_board(tmp_path, {
-        "wake-batch-coder-alpha-beta.lock": f"holder=wake-batch\npid={_DEAD}\nop=wake-batch-guard:coder:alpha-beta\ntask=none\n",
-    })
+    root = _hyphenated_board(
+        tmp_path,
+        {
+            "wake-batch-coder-alpha-beta.lock": f"holder=wake-batch\npid={_DEAD}\nop=wake-batch-guard:coder:alpha-beta\ntask=none\n",
+        },
+    )
     (root / "projects" / "alpha-beta").rmdir()
     assert _attributed(root, "beta") == []
     assert _attributed(root, "alpha-beta") == ["wake-batch-coder-alpha-beta.lock"]
 
 
 def test_a_record_that_does_not_spell_the_lock_name_is_not_believed(tmp_path):
-    root = _hyphenated_board(tmp_path, {
-        "wake-batch-coder-alpha-beta.lock": f"holder=wake-batch\npid={_DEAD}\nop=wake-batch-guard:pm:beta\ntask=none\n",
-    })
+    root = _hyphenated_board(
+        tmp_path,
+        {
+            "wake-batch-coder-alpha-beta.lock": f"holder=wake-batch\npid={_DEAD}\nop=wake-batch-guard:pm:beta\ntask=none\n",
+        },
+    )
     assert _attributed(root, "beta") == []
     assert _attributed(root, "alpha-beta") == ["wake-batch-coder-alpha-beta.lock"]

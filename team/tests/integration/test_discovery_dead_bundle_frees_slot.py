@@ -25,7 +25,6 @@ import os
 import pathlib
 import subprocess
 import textwrap
-from typing import Optional
 
 from pgai_agent_kanban.lib.error_contract import parse_error_contract
 
@@ -55,14 +54,21 @@ def _run_discovery(root: pathlib.Path) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_DEV_TREE_PATH"):
         env.pop(name, None)
-    env.update({
-        "KANBAN_ROOT": str(root),
-        "TEAM_ROOT": str(root),
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "PGAI_PROJECT_NAME": _PROJECT,
-    })
+    env.update(
+        {
+            "KANBAN_ROOT": str(root),
+            "TEAM_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_PROJECT_NAME": _PROJECT,
+        }
+    )
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env, cwd=str(root), timeout=120,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(root),
+        timeout=120,
     )
 
 
@@ -107,11 +113,11 @@ def _new_bundles(root: pathlib.Path, *known: pathlib.Path) -> list[pathlib.Path]
     return [path for path in found if path not in known]
 
 
-def _status(path: pathlib.Path) -> Optional[str]:
+def _status(path: pathlib.Path) -> str | None:
     lines = path.read_text(encoding="utf-8").splitlines()
     for index, line in enumerate(lines):
         if line.strip() == "## Status":
-            return next((value.strip() for value in lines[index + 1:] if value.strip()), None)
+            return next((value.strip() for value in lines[index + 1 :] if value.strip()), None)
     return None
 
 

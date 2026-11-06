@@ -61,9 +61,7 @@ _FIXTURE_ROOT = _TEAM_DIR / "tests" / "fixtures" / "dockerfile_static"
 
 def _import_lint_module():
     """Import lint_dockerfile_static as a module."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_dockerfile_static", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_dockerfile_static", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -89,8 +87,7 @@ def test_real_docker_tree_passes_with_no_engine_on_path() -> None:
     """
     real_docker_dir = _REPO_ROOT / "docker"
     assert real_docker_dir.is_dir(), (
-        f"Expected the real docker/ directory at {real_docker_dir}; "
-        "test tree layout may have changed."
+        f"Expected the real docker/ directory at {real_docker_dir}; " "test tree layout may have changed."
     )
 
     # Build a PATH containing only a directory with `python3` (so the
@@ -116,8 +113,7 @@ def test_real_docker_tree_passes_with_no_engine_on_path() -> None:
     )
     for binary in ("docker", "podman"):
         assert (
-            f"which {binary}" not in result.stdout
-            and f"which {binary}" not in result.stderr
+            f"which {binary}" not in result.stdout and f"which {binary}" not in result.stderr
         ), "The lint must never probe for a container engine binary."
 
 
@@ -141,12 +137,8 @@ def test_duplicated_from_fixture_is_flagged(capsys: pytest.CaptureFixture[str]) 
     out = capsys.readouterr().out
     dockerfile_path = fixture_dir / "app" / "Dockerfile"
 
-    assert str(dockerfile_path) in out, (
-        f"Output does not name the offending file.\nstdout: {out}"
-    )
-    assert ":6" in out, (
-        f"Output does not name line 6 (the FROM FROM line).\nstdout: {out}"
-    )
+    assert str(dockerfile_path) in out, f"Output does not name the offending file.\nstdout: {out}"
+    assert ":6" in out, f"Output does not name line 6 (the FROM FROM line).\nstdout: {out}"
     assert "To fix:" in out, f"Output missing a 'To fix:' remedy section.\nstdout: {out}"
     assert "FROM" in out
 
@@ -171,16 +163,10 @@ def test_symbolic_chmod_fixture_is_flagged(capsys: pytest.CaptureFixture[str]) -
     out = capsys.readouterr().out
     dockerfile_path = fixture_dir / "app" / "Dockerfile"
 
-    assert str(dockerfile_path) in out, (
-        f"Output does not name the offending file.\nstdout: {out}"
-    )
-    assert ":8" in out, (
-        f"Output does not name line 8 (the COPY --chmod=+x line).\nstdout: {out}"
-    )
+    assert str(dockerfile_path) in out, f"Output does not name the offending file.\nstdout: {out}"
+    assert ":8" in out, f"Output does not name line 8 (the COPY --chmod=+x line).\nstdout: {out}"
     assert "To fix:" in out, f"Output missing a 'To fix:' remedy section.\nstdout: {out}"
-    assert "--chmod=755" in out, (
-        f"Remedy must suggest a concrete octal replacement.\nstdout: {out}"
-    )
+    assert "--chmod=755" in out, f"Remedy must suggest a concrete octal replacement.\nstdout: {out}"
 
 
 # ---------------------------------------------------------------------------
@@ -229,8 +215,7 @@ def test_missing_docker_dir_returns_exit_2(tmp_path: Path) -> None:
     result = _lint.main(["--docker-dir", str(nonexistent)])
 
     assert result == 2, (
-        f"lint_dockerfile_static.main() must return 2 when --docker-dir "
-        f"does not exist. Got {result!r}."
+        f"lint_dockerfile_static.main() must return 2 when --docker-dir " f"does not exist. Got {result!r}."
     )
 
 
@@ -244,15 +229,11 @@ class TestFromArityBoundaries:
     boundary -- independent of file I/O."""
 
     def test_single_argument_is_valid(self) -> None:
-        findings = _lint.check_from_arity(
-            Path("Dockerfile"), ["FROM rockylinux:9"]
-        )
+        findings = _lint.check_from_arity(Path("Dockerfile"), ["FROM rockylinux:9"])
         assert findings == []
 
     def test_three_argument_as_form_is_valid(self) -> None:
-        findings = _lint.check_from_arity(
-            Path("Dockerfile"), ["FROM node:20-bookworm AS nodejs"]
-        )
+        findings = _lint.check_from_arity(Path("Dockerfile"), ["FROM node:20-bookworm AS nodejs"])
         assert findings == []
 
     def test_duplicated_keyword_two_args_is_invalid(self) -> None:
@@ -269,21 +250,15 @@ class TestFromArityBoundaries:
         assert len(findings) == 1
 
     def test_three_args_without_as_is_invalid(self) -> None:
-        findings = _lint.check_from_arity(
-            Path("Dockerfile"), ["FROM image extra garbage"]
-        )
+        findings = _lint.check_from_arity(Path("Dockerfile"), ["FROM image extra garbage"])
         assert len(findings) == 1
 
     def test_comment_line_is_ignored(self) -> None:
-        findings = _lint.check_from_arity(
-            Path("Dockerfile"), ["# FROM FROM broken:example"]
-        )
+        findings = _lint.check_from_arity(Path("Dockerfile"), ["# FROM FROM broken:example"])
         assert findings == []
 
     def test_case_insensitive_keyword(self) -> None:
-        findings = _lint.check_from_arity(
-            Path("Dockerfile"), ["from rockylinux:9"]
-        )
+        findings = _lint.check_from_arity(Path("Dockerfile"), ["from rockylinux:9"])
         assert findings == []
 
 
@@ -293,33 +268,23 @@ class TestChmodOctalBoundaries:
 
     @pytest.mark.parametrize("mode", ["755", "0755", "777", "0", "07"])
     def test_octal_modes_are_valid(self, mode: str) -> None:
-        findings = _lint.check_chmod_octal(
-            Path("Dockerfile"), [f"COPY --chmod={mode} src dest"]
-        )
+        findings = _lint.check_chmod_octal(Path("Dockerfile"), [f"COPY --chmod={mode} src dest"])
         assert findings == [], f"mode {mode!r} should be accepted as octal"
 
     @pytest.mark.parametrize("mode", ["+x", "u+x", "755x", "rwx", ""])
     def test_symbolic_modes_are_invalid(self, mode: str) -> None:
-        findings = _lint.check_chmod_octal(
-            Path("Dockerfile"), [f"COPY --chmod={mode} src dest"]
-        )
+        findings = _lint.check_chmod_octal(Path("Dockerfile"), [f"COPY --chmod={mode} src dest"])
         assert len(findings) == 1, f"mode {mode!r} should be rejected"
         assert findings[0].kind == "chmod-mode"
 
     def test_add_instruction_is_also_checked(self) -> None:
-        findings = _lint.check_chmod_octal(
-            Path("Dockerfile"), ["ADD --chmod=+x src dest"]
-        )
+        findings = _lint.check_chmod_octal(Path("Dockerfile"), ["ADD --chmod=+x src dest"])
         assert len(findings) == 1
 
     def test_unrelated_from_flag_is_ignored(self) -> None:
-        findings = _lint.check_chmod_octal(
-            Path("Dockerfile"), ["COPY --from=nodejs /a /b"]
-        )
+        findings = _lint.check_chmod_octal(Path("Dockerfile"), ["COPY --from=nodejs /a /b"])
         assert findings == []
 
     def test_comment_line_is_ignored(self) -> None:
-        findings = _lint.check_chmod_octal(
-            Path("Dockerfile"), ["# COPY --chmod=+x src dest"]
-        )
+        findings = _lint.check_chmod_octal(Path("Dockerfile"), ["# COPY --chmod=+x src dest"])
         assert findings == []

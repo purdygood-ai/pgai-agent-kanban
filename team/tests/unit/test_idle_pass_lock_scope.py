@@ -50,7 +50,6 @@ import signal
 import subprocess
 import sys
 
-import pytest
 
 from tests.fixtures.claude_provider_stub import install_claude_provider_stub
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
@@ -147,11 +146,14 @@ exec sleep 120
 
 def _smallest_large_tier_stagger() -> int:
     text = (_TEAM_DIR / "templates" / "install" / "crontab-large.example").read_text(encoding="utf-8")
-    sleeps = sorted({
-        int(m.group(1))
-        for line in text.splitlines() if not line.lstrip().startswith("#")
-        for m in re.finditer(r"--sleep=(\d+)", line)
-    })
+    sleeps = sorted(
+        {
+            int(m.group(1))
+            for line in text.splitlines()
+            if not line.lstrip().startswith("#")
+            for m in re.finditer(r"--sleep=(\d+)", line)
+        }
+    )
     gaps = [b - a for a, b in zip(sleeps, sleeps[1:]) if b > a]
     assert gaps, f"no stagger found in crontab-large.example: {sleeps}"
     return min(gaps)
@@ -186,9 +188,7 @@ class _Sandbox:
             "[wake]\nmax_tasks_per_wake = 3\n",
             encoding="utf-8",
         )
-        (self.root / "projects.cfg").write_text(
-            f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
         (self.project / "project.cfg").write_text(
             f"[project]\nproject_name = {_PROJECT}\nworkflow_type = document\n", encoding="utf-8"
         )
@@ -232,8 +232,9 @@ class _Sandbox:
         )
         return path
 
-    def wake(self, agent: str = "coder", *, hold_lock: bool = False,
-             census_sleep: float = _CENSUS_SLEEP_S) -> subprocess.CompletedProcess:
+    def wake(
+        self, agent: str = "coder", *, hold_lock: bool = False, census_sleep: float = _CENSUS_SLEEP_S
+    ) -> subprocess.CompletedProcess:
         (self.tmp_path / "home").mkdir(exist_ok=True)
         extra_env = {
             "KANBAN_ROOT": str(self.root),
@@ -247,11 +248,13 @@ class _Sandbox:
         if hold_lock:
             holder = self.tmp_path / "holder.sh"
             holder.write_text(_HOLDER_SCRIPT, encoding="utf-8")
-            extra_env.update({
-                "T_HOLD_SCRIPT": str(holder),
-                "T_HOLD_LIB": str(self.root / "scripts" / "lib"),
-                "T_HOLD_READY": str(self.hold_ready),
-            })
+            extra_env.update(
+                {
+                    "T_HOLD_SCRIPT": str(holder),
+                    "T_HOLD_LIB": str(self.root / "scripts" / "lib"),
+                    "T_HOLD_READY": str(self.hold_ready),
+                }
+            )
         env = build_scrubbed_env(
             home_dir=self.tmp_path / "home",
             extra_path_dirs=[self.bin_dir, pathlib.Path(sys.executable).parent],
@@ -261,7 +264,11 @@ class _Sandbox:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(self.root / "scripts" / "wake" / "claude.sh"), f"--agent={agent}"],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=_WAKE_TIMEOUT_S,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_WAKE_TIMEOUT_S,
         )
 
     def census_states(self) -> list[str]:
@@ -312,7 +319,9 @@ def test_an_idle_pass_releases_the_lock_before_the_census_and_rechecks(tmp_path,
     assert out.count("re-checking BLOCKED tasks for cleared blockers...") == 2, out
     assert out.count(f"sweep-census: project {_PROJECT}:") == 2, out
     assert "no pending Claude task found in coder queue" in out
-    assert re.search(rf"project {re.escape(_PROJECT)}: done: completed=0 .*reason=\"no more BACKLOG tasks in coder queue\"", out), out
+    assert re.search(
+        rf"project {re.escape(_PROJECT)}: done: completed=0 .*reason=\"no more BACKLOG tasks in coder queue\"", out
+    ), out
     assert out.index("repo lock released") < out.index("re-checking WAITING tasks"), out
 
 
@@ -355,8 +364,7 @@ def test_each_idle_pass_queue_write_holds_the_repo_lock(tmp_path, record_propert
     blocked = "CODER-20260101-006-blocked-on-closed-rc"
     box.add_task(prereq, state="DONE")
     box.add_task(waiting, state="WAITING", prerequisites=prereq)
-    box.add_task(blocked, state="BLOCKED",
-                 status_extra="\n## Blocked Reason\nwaiting for the Active RC to close\n")
+    box.add_task(blocked, state="BLOCKED", status_extra="\n## Blocked Reason\nwaiting for the Active RC to close\n")
     (box.project / "release-state.md").write_text(
         "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
         encoding="utf-8",
@@ -377,7 +385,9 @@ def test_each_idle_pass_queue_write_holds_the_repo_lock(tmp_path, record_propert
 
     write_holds = {m.group(1): float(m.group(2)) for m in _WRITE_HELD_RE.finditer(out)}
     assert set(write_holds) == {
-        f"WAITING promotion of {waiting}", f"BLOCKED promotion of {blocked}", f"intake item '{_REQUIREMENT}' closure",
+        f"WAITING promotion of {waiting}",
+        f"BLOCKED promotion of {blocked}",
+        f"intake item '{_REQUIREMENT}' closure",
     }, out
     longest = max(write_holds.values())
     print(f"idle pass write lock holds: {write_holds}")

@@ -64,7 +64,8 @@ import datetime
 import io
 import pathlib
 import re
-from typing import Any, Callable, Optional, Sequence
+from typing import Any
+from collections.abc import Callable, Sequence
 
 from ..token_pricing import PRICING_REL_PATH, find_aggregator, find_pricing_table
 from .common import TextOutput, TextResult, load_json_object
@@ -102,15 +103,27 @@ _LEGACY_WARNING = (
 )
 
 _CSV_HEADER = (
-    "scope_type", "scope_value", "project",
-    "total_input_tokens", "total_output_tokens",
-    "total_cache_create_tokens", "total_cache_read_tokens",
-    "total_cost_usd", "total_invocations",
-    "days_with_activity", "rcs_shipped",
-    "agent", "agent_input_tokens", "agent_output_tokens",
-    "agent_cost_usd", "agent_invocations",
-    "model", "model_input_tokens", "model_output_tokens",
-    "model_cost_usd", "model_invocations",
+    "scope_type",
+    "scope_value",
+    "project",
+    "total_input_tokens",
+    "total_output_tokens",
+    "total_cache_create_tokens",
+    "total_cache_read_tokens",
+    "total_cost_usd",
+    "total_invocations",
+    "days_with_activity",
+    "rcs_shipped",
+    "agent",
+    "agent_input_tokens",
+    "agent_output_tokens",
+    "agent_cost_usd",
+    "agent_invocations",
+    "model",
+    "model_input_tokens",
+    "model_output_tokens",
+    "model_cost_usd",
+    "model_invocations",
 )
 
 
@@ -125,11 +138,11 @@ class _Stop(Exception):
 class _Run(TextOutput):
     """The stdout and stderr lines one report run produces, and its two early exits."""
 
-    def fail(self, *lines: str) -> "_Stop":
+    def fail(self, *lines: str) -> _Stop:
         self.err.extend(lines)
         return _Stop(1)
 
-    def no_data(self, scope_label: str) -> "_Stop":
+    def no_data(self, scope_label: str) -> _Stop:
         self.out.append(f"no data for {scope_label}")
         return _Stop(0)
 
@@ -151,9 +164,9 @@ class CostReportArgs:
     scope_flag: str = ""
     since: str = ""
     until: str = ""
-    week: Optional[str] = None
-    year: Optional[str] = None
-    last: Optional[str] = None
+    week: str | None = None
+    year: str | None = None
+    last: str | None = None
     help: bool = False
 
 
@@ -183,7 +196,7 @@ def parse_cost_report_args(argv: Sequence[str], run: _Run, default_project: str 
             raise run.fail(message)
         return value
 
-    def _optional_value(i: int) -> Optional[str]:
+    def _optional_value(i: int) -> str | None:
         value = argv[i + 1] if i + 1 < len(argv) else ""
         return value if value and not value.startswith("--") else None
 
@@ -386,15 +399,21 @@ class RollupRecord:
             self.daily_costs.append(cost)
         for agent, entry in data.get("by_agent", {}).items():
             self._add(
-                self.by_agent, agent.lower(),
-                int(entry.get("input", 0) or 0), int(entry.get("output", 0) or 0),
-                float(entry.get("cost_usd", 0) or 0), int(entry.get("invocations", 0) or 0),
+                self.by_agent,
+                agent.lower(),
+                int(entry.get("input", 0) or 0),
+                int(entry.get("output", 0) or 0),
+                float(entry.get("cost_usd", 0) or 0),
+                int(entry.get("invocations", 0) or 0),
             )
         for model, entry in data.get("by_model", {}).items():
             self._add(
-                self.by_model, model,
-                int(entry.get("input", 0) or 0), int(entry.get("output", 0) or 0),
-                float(entry.get("cost_usd", 0) or 0), int(entry.get("invocations", 0) or 0),
+                self.by_model,
+                model,
+                int(entry.get("input", 0) or 0),
+                int(entry.get("output", 0) or 0),
+                float(entry.get("cost_usd", 0) or 0),
+                int(entry.get("invocations", 0) or 0),
             )
         for rc in data.get("rcs_shipped", []):
             if rc:
@@ -411,7 +430,7 @@ def _category_costs(entry: dict[str, Any]) -> tuple[float, float, float, float]:
     )
 
 
-def _load(path: pathlib.Path, run: _Run) -> Optional[dict[str, Any]]:
+def _load(path: pathlib.Path, run: _Run) -> dict[str, Any] | None:
     """A roll-up file's object; None when absent, a warning on stderr when unreadable."""
     if not path.is_file():
         return None
@@ -564,11 +583,17 @@ def _render_csv(args: CostReportArgs, project: str, rec: RollupRecord) -> str:
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(_CSV_HEADER)
     totals = [
-        args.scope_type, args.scope_value, project,
-        rec.total_input, rec.total_output,
-        rec.total_cache_create, rec.total_cache_read,
-        round(rec.total_cost, 6), rec.total_invocations,
-        rec.days_with_activity, rec.rcs_shipped,
+        args.scope_type,
+        args.scope_value,
+        project,
+        rec.total_input,
+        rec.total_output,
+        rec.total_cache_create,
+        rec.total_cache_read,
+        round(rec.total_cost, 6),
+        rec.total_invocations,
+        rec.days_with_activity,
+        rec.rcs_shipped,
     ]
     everything = [rec.total_input, rec.total_output, round(rec.total_cost, 6), rec.total_invocations]
     writer.writerow(totals + ["ALL", *everything, "ALL", *everything])
@@ -606,12 +631,12 @@ def _render_text(args: CostReportArgs, project: str, rec: RollupRecord, pricing:
         or rec.total_output_cost != 0
     )
     display_total = rec.total_cost
-    proj_monthly: Optional[float] = None
+    proj_monthly: float | None = None
     if scope_type == "month" and rec.days_with_activity:
         proj_monthly = display_total / rec.days_with_activity * 30
     daily_avg = display_total / max(rec.days_with_activity, 1) if scope_type == "month" else None
     if scope_type in ("month", "range") and rec.days_with_activity > 0:
-        days_denom: Optional[int] = rec.days_with_activity
+        days_denom: int | None = rec.days_with_activity
     elif scope_type == "day":
         days_denom = 1
     else:
@@ -675,11 +700,19 @@ def _render_text(args: CostReportArgs, project: str, rec: RollupRecord, pricing:
         # The projection when there is one, else the scope's own total.
         compare_cost = proj_monthly if proj_monthly is not None else display_total
         lines.append("Subscription comparison:")
-        lines.append(f"  Anthropic Pro programmatic credit ({_fmt_usd(pro_credit)}):   {_shortfall(pro_credit, compare_cost)}")
-        lines.append(f"  Anthropic Max programmatic credit ({_fmt_usd(max_credit)}):  {_shortfall(max_credit, compare_cost)}")
+        lines.append(
+            f"  Anthropic Pro programmatic credit ({_fmt_usd(pro_credit)}):   {_shortfall(pro_credit, compare_cost)}"
+        )
+        lines.append(
+            f"  Anthropic Max programmatic credit ({_fmt_usd(max_credit)}):  {_shortfall(max_credit, compare_cost)}"
+        )
         lines.append(f"  Anthropic API direct (pay-as-you-go):           {_fmt_usd(compare_cost)}")
-        lines.append(f"  Codex via ChatGPT Plus ({_fmt_usd(plus_credit)}):              {_shortfall(plus_credit, compare_cost)}")
-        lines.append(f"  Codex via ChatGPT Pro ({_fmt_usd(pro2_credit)}):               {_shortfall(pro2_credit, compare_cost)}")
+        lines.append(
+            f"  Codex via ChatGPT Plus ({_fmt_usd(plus_credit)}):              {_shortfall(plus_credit, compare_cost)}"
+        )
+        lines.append(
+            f"  Codex via ChatGPT Pro ({_fmt_usd(pro2_credit)}):               {_shortfall(pro2_credit, compare_cost)}"
+        )
         lines.append("")
         # The Max subscription is prepaid and its credit covers usage up to
         # its own value; usage above it is paid at API rates.
@@ -715,9 +748,9 @@ def cost_report(
     default_kanban_root: str,
     default_project: str = "",
     aggregator: str = "",
-    aggregate: Optional[Aggregate] = None,
+    aggregate: Aggregate | None = None,
     help_source: str = "",
-    today: Optional[datetime.date] = None,
+    today: datetime.date | None = None,
 ) -> TextResult:
     """Run cost-report.sh's report for *argv*; return its exit code, stdout and stderr.
 
@@ -744,7 +777,13 @@ def cost_report(
     run = _Run()
     try:
         return _report(
-            argv, run, default_kanban_root, default_project, aggregator, aggregate, help_source,
+            argv,
+            run,
+            default_kanban_root,
+            default_project,
+            aggregator,
+            aggregate,
+            help_source,
             today or datetime.date.today(),
         )
     except _Stop as stop:
@@ -757,7 +796,7 @@ def _report(
     default_kanban_root: str,
     default_project: str,
     aggregator: str,
-    aggregate: Optional[Aggregate],
+    aggregate: Aggregate | None,
     help_source: str,
     today: datetime.date,
 ) -> TextResult:
@@ -769,9 +808,7 @@ def _report(
     if not kanban_root or not pathlib.Path(kanban_root).is_dir():
         raise run.fail(f"ERROR: kanban root not found: {kanban_root}")
     if not args.project:
-        raise run.fail(
-            "ERROR: no project specified. Pass --project <name> or set PGAI_PROJECT_NAME.", _USAGE_HINT
-        )
+        raise run.fail("ERROR: no project specified. Pass --project <name> or set PGAI_PROJECT_NAME.", _USAGE_HINT)
     project_dir = pathlib.Path(f"{kanban_root}/projects/{args.project}")
     if not project_dir.is_dir():
         raise run.fail(f"ERROR: project directory not found: {kanban_root}/projects/{args.project}")

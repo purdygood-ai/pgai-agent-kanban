@@ -130,7 +130,8 @@ import re
 import shlex
 import sys
 import time
-from typing import Callable, NoReturn, Optional, TypeVar
+from typing import NoReturn
+from collections.abc import Callable
 
 # Started by file path (python3 .../overwatch/inbox.py) the module has no
 # parent package and only its own directory on sys.path: put this tree's
@@ -287,10 +288,7 @@ class InboxIoError(InboxError, IoError):
     """The inbox file or its lock could not be read or written (ops exit code 4)."""
 
 
-_E = TypeVar("_E", bound=InboxError)
-
-
-def _refuse(kind: type[_E], error: str, message: str, remedy: str) -> NoReturn:
+def _refuse[E: InboxError](kind: type[E], error: str, message: str, remedy: str) -> NoReturn:
     """Raise *kind* -- the one refusal site every input and lookup check shares.
 
     Nothing has been written when this runs: every check happens before the
@@ -380,7 +378,7 @@ class InboxSummary:
     """
 
     open_count: int
-    newest_open: Optional[InboxEntry]
+    newest_open: InboxEntry | None
 
     def to_dict(self) -> dict[str, object]:
         """Return the summary as a JSON-ready dict."""
@@ -448,7 +446,7 @@ def _checked_project_dir(ctx: OpsContext, project: str) -> pathlib.Path:
     return project_dir
 
 
-def normalize_entry_id(text: object) -> Optional[str]:
+def normalize_entry_id(text: object) -> str | None:
     """Return the canonical ``INBOX-NNNN`` form of *text*, or ``None``.
 
     Liberal: any letter case, ``-``/``_``/``.``/space after ``INBOX``, the
@@ -528,7 +526,7 @@ def _read_text(path: pathlib.Path) -> str:
     return raw.replace("\r\n", "\n")
 
 
-def _label_key(label: str) -> Optional[str]:
+def _label_key(label: str) -> str | None:
     """Return the field a label names, or ``None`` for a label the reader does not know."""
     return _LABEL_ALIASES.get(re.sub(r"[\s_-]+", " ", label.strip().lower()))
 
@@ -540,17 +538,17 @@ def _continuation(line: str) -> str:
     return line[2:] if line.startswith("  ") else line.lstrip()
 
 
-def _parse_section(body: Optional[str], status: str) -> tuple[list[str], list[InboxEntry]]:
+def _parse_section(body: str | None, status: str) -> tuple[list[str], list[InboxEntry]]:
     """Split one section body into its preamble lines and its entries."""
     preamble: list[str] = []
     entries: list[InboxEntry] = []
     if not body:
         return preamble, entries
 
-    current_id: Optional[str] = None
+    current_id: str | None = None
     fields: dict[str, str] = {}
     extra: list[str] = []
-    last_field: Optional[str] = None
+    last_field: str | None = None
 
     def finish() -> None:
         if current_id is not None:
@@ -710,8 +708,7 @@ def _write_text(path: pathlib.Path, text: str) -> None:
     except OSError as exc:
         raise InboxIoError(
             "inbox.write_failed",
-            f"cannot write the operator inbox {path}: {exc}; the previous file (if any) is "
-            "unchanged.",
+            f"cannot write the operator inbox {path}: {exc}; the previous file (if any) is " "unchanged.",
             f"ls -ld {shlex.quote(str(path.parent))}",
         ) from exc
 
@@ -726,14 +723,12 @@ class _InboxLock:
         self._task = task
         self._held = None
 
-    def __enter__(self) -> "_InboxLock":
+    def __enter__(self) -> _InboxLock:
         lock_file = inbox_lock_path(self._ctx, self._project)
         deadline = time.monotonic() + LOCK_WAIT_SECONDS
         while True:
             try:
-                self._held = acquire_lock(
-                    lock_file, holder=_LOCK_HOLDER, pid=os.getpid(), op=self._op, task=self._task
-                )
+                self._held = acquire_lock(lock_file, holder=_LOCK_HOLDER, pid=os.getpid(), op=self._op, task=self._task)
                 return self
             except LockContended as busy:
                 if time.monotonic() >= deadline:
@@ -763,9 +758,6 @@ class _InboxLock:
             self._held = None
 
 
-_R = TypeVar("_R")
-
-
 @dataclasses.dataclass(frozen=True)
 class _Unchanged:
     """What a ``_mutate`` change returns to leave the file untouched: *result* is returned, nothing is written."""
@@ -773,9 +765,7 @@ class _Unchanged:
     result: object
 
 
-def _mutate(
-    ctx: OpsContext, project: str, op: str, task: str, change: Callable[[_Document], _R]
-) -> _R:
+def _mutate[R](ctx: OpsContext, project: str, op: str, task: str, change: Callable[[_Document], R]) -> R:
     """Run *change* on the parsed inbox under the writers' lock, then write the result.
 
     *change* edits the document in place and returns what the caller
@@ -794,9 +784,9 @@ def _mutate(
     return result
 
 
-def _timestamp(now: Optional[datetime.datetime]) -> str:
+def _timestamp(now: datetime.datetime | None) -> str:
     """ISO-8601 UTC for *now*, or for the current time when ``None``."""
-    return format_iso(now if now is not None else datetime.datetime.now(datetime.timezone.utc))
+    return format_iso(now if now is not None else datetime.datetime.now(datetime.UTC))
 
 
 def write_entry(
@@ -807,7 +797,7 @@ def write_entry(
     question: str,
     meanwhile: str,
     how_to_answer: str,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
     once: bool = False,
 ) -> InboxEntry:
     """Append one open question to *project*'s inbox and return it.
@@ -902,18 +892,20 @@ def answer_entry(
     entry_id: str,
     answer: str,
     *,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> InboxEntry:
     """Record *answer* on open entry *entry_id* and return the updated entry.
 
     The entry stays under ``## Open`` until :func:`close_entry` moves it. A
     second answer replaces the first.
 
-    When the entry's Source names a bug or priority item at
-    ``needs-operator``, the item is set back to ``open`` once the answer is
-    recorded (``ops.write.reopen_needs_operator_item``); every answer
+    When the entry's Source names a bug or priority item, the answer, the
+    entry ID and the time are appended to the item's ``## Operator
+    Answers`` section (``ops.write.record_operator_answer``), where the
+    planner reads it, and an item at ``needs-operator`` is set back to
+    ``open`` (``ops.write.reopen_needs_operator_item``); every answer
     surface -- this module's command line, ``inbox.sh``, ``POST
-    /operations/inbox-answer`` -- calls this function and so reopens it. A
+    /operations/inbox-answer`` -- calls this function and so does both. A
     Source that names anything else (an RC, a task) changes no item.
 
     Raises:
@@ -921,8 +913,8 @@ def answer_entry(
             an entry already closed, or the lock stayed busy.
         InboxNotFound: the project directory or the entry does not exist.
         InboxIoError:  the file or lock could not be read or written, or the
-            answer was recorded but the item it names could not be reopened
-            (``inbox.reopen_failed``; answering again retries).
+            answer was recorded in the inbox but the item it names could not
+            be updated (``inbox.reopen_failed``; answering again retries).
     """
     normalized = _checked_entry_id(entry_id, project)
     cleaned = _clean_value(answer)
@@ -931,9 +923,7 @@ def answer_entry(
             InboxRefused,
             "inbox.empty_answer",
             f"the answer for inbox entry {normalized} is empty; nothing was written.",
-            _module_command(
-                "answer", "--project", project, "--id", normalized, "--answer", "yes, go ahead"
-            ),
+            _module_command("answer", "--project", project, "--id", normalized, "--answer", "yes, go ahead"),
         )
     answered_at = _timestamp(now)
 
@@ -949,19 +939,20 @@ def answer_entry(
 
 
 def _reopen_named_item(ctx: OpsContext, project: str, entry: InboxEntry) -> None:
-    """Set the needs-operator item *entry*'s Source names back to ``open``, if any."""
+    """Record *entry*'s answer on the item its Source names and reopen it, if any."""
     try:
+        _ops_write.record_operator_answer(ctx, project, entry.source, entry.entry_id, entry.answer, entry.answered_at)
         _ops_write.reopen_needs_operator_item(ctx, project, entry.source)
     except OpsError as exc:
         item = entry.source.strip().split("\n", 1)[0]
-        # AGENT-RESOLVABLE: the answer is recorded and nothing is lost; the
-        # item stays needs-operator until the caller answers again (which
-        # retries this) or reopens it with the remedy, in the same session.
+        # AGENT-RESOLVABLE: the answer is recorded in the inbox and nothing is
+        # lost; the item stays as it was until the caller answers again
+        # (which retries this) or reopens it with the remedy, in the same session.
         # CENSUS-ANCHOR: operator-inbox-reopen-failed-01
         raise InboxIoError(
             "inbox.reopen_failed",
-            f"the answer to {entry.entry_id} was recorded, but {item} could not be set back "
-            f"to open: {exc}",
+            f"the answer to {entry.entry_id} was recorded in the inbox, but {item} could not be "
+            f"updated with it or set back to open: {exc}",
             shlex.quote(str(ctx.kanban_root / "scripts" / "reset.sh"))
             + f" --project {shlex.quote(project)} --key {shlex.quote(item)}",
         ) from exc
@@ -972,7 +963,7 @@ def close_entry(
     project: str,
     entry_id: str,
     *,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> InboxEntry:
     """Move open entry *entry_id* to the end of ``## Done`` and return it.
 
@@ -1011,9 +1002,7 @@ _COMMAND_ALIASES: dict[str, str] = {
     "close_entry": "close",
     "inbox_summary": "summary",
 }
-_ALIASES_BY_COMMAND: dict[str, list[str]] = {
-    command: [alias] for alias, command in _COMMAND_ALIASES.items()
-}
+_ALIASES_BY_COMMAND: dict[str, list[str]] = {command: [alias] for alias, command in _COMMAND_ALIASES.items()}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1039,7 +1028,9 @@ def _build_parser() -> argparse.ArgumentParser:
         p.add_argument("--json", action="store_true", help="print JSON instead of markdown text")
 
     write = sub.add_parser(
-        "write", aliases=_ALIASES_BY_COMMAND["write"], help="add an open question",
+        "write",
+        aliases=_ALIASES_BY_COMMAND["write"],
+        help="add an open question",
         description="Add an open question.",
     )
     common(write)
@@ -1054,14 +1045,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     lister = sub.add_parser(
-        "list", aliases=_ALIASES_BY_COMMAND["list"], help="list open entries",
+        "list",
+        aliases=_ALIASES_BY_COMMAND["list"],
+        help="list open entries",
         description="List open entries.",
     )
     common(lister)
     lister.add_argument("--all", action="store_true", help="list closed entries too, under Done")
 
     answer = sub.add_parser(
-        "answer", aliases=_ALIASES_BY_COMMAND["answer"],
+        "answer",
+        aliases=_ALIASES_BY_COMMAND["answer"],
         help="record an answer; answering an entry about a needs-operator bug or priority returns that item to open",
         description=(
             "Record an answer on an open entry. When the entry's Source names a bug or "
@@ -1073,14 +1067,18 @@ def _build_parser() -> argparse.ArgumentParser:
     answer.add_argument("--answer", default="", help="the answer text")
 
     close = sub.add_parser(
-        "close", aliases=_ALIASES_BY_COMMAND["close"], help="close an entry",
+        "close",
+        aliases=_ALIASES_BY_COMMAND["close"],
+        help="close an entry",
         description="Move an open entry to Done.",
     )
     common(close)
     close.add_argument("--id", default="", help="entry ID, e.g. INBOX-0001 (case and leading zeros ignored)")
 
     summary = sub.add_parser(
-        "summary", aliases=_ALIASES_BY_COMMAND["summary"], help="open count and newest open question",
+        "summary",
+        aliases=_ALIASES_BY_COMMAND["summary"],
+        help="open count and newest open question",
         description="Print the open count and newest open question.",
     )
     common(summary)
@@ -1107,7 +1105,7 @@ def _print_entries(title: str, entries: tuple[InboxEntry, ...]) -> None:
     print("\n\n".join(render_entry(e) for e in entries) if entries else "(none)")
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the command line; return the exit code."""
     parser = _build_parser()
     args = parser.parse_args(argv)

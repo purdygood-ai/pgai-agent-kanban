@@ -54,10 +54,7 @@ def _resolve(
     extra_env = dict(os.environ)
     if fake_bin_dir is not None:
         extra_env["PATH"] = f"{fake_bin_dir}:{extra_env.get('PATH', '')}"
-    script = (
-        f"source {_INI_PARSER} && source {_DOCKER_ENGINE} && "
-        f"resolve_docker_exe '{kanban_root}'"
-    )
+    script = f"source {_INI_PARSER} && source {_DOCKER_ENGINE} && " f"resolve_docker_exe '{kanban_root}'"
     return run_bash(tmp_path, script, extra_env=extra_env)
 
 
@@ -73,15 +70,21 @@ def _resolve(
     [
         pytest.param(None, "docker", "docker", id="absent_kanban_cfg_falls_back_to_docker"),
         pytest.param(
-            "[providers]\nactive = claude\n", "docker", "docker",
+            "[providers]\nactive = claude\n",
+            "docker",
+            "docker",
             id="absent_docker_section_falls_back_to_docker",
         ),
         pytest.param(
-            "[docker]\ndocker_exe = \n", "docker", "docker",
+            "[docker]\ndocker_exe = \n",
+            "docker",
+            "docker",
             id="blank_docker_exe_value_falls_back_to_docker",
         ),
         pytest.param(
-            "[docker]\ndocker_exe = podman\n", "podman", "podman",
+            "[docker]\ndocker_exe = podman\n",
+            "podman",
+            "podman",
             id="configured_value_used_as_is_when_present_on_path",
         ),
     ],

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import sys
 
 import pytest
 
@@ -46,9 +47,7 @@ def test_result_contains_no_name_the_invoking_shell_set(
     )
 
 
-def test_result_contains_no_other_ambient_name_either(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
-) -> None:
+def test_result_contains_no_other_ambient_name_either(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
     """The negative claim generalised: the result's keys are exactly the
     three base names this builder constructs, nothing more -- not a subset
     of `os.environ` filtered down, but a fixed, small set built from
@@ -57,8 +56,7 @@ def test_result_contains_no_other_ambient_name_either(
     env = build_scrubbed_env(home_dir=tmp_path / "home")
 
     assert set(env) == {"PATH", "HOME", "LANG"}, (
-        f"expected exactly PATH/HOME/LANG with no extras or omissions; "
-        f"got keys: {sorted(env)!r}"
+        f"expected exactly PATH/HOME/LANG with no extras or omissions; " f"got keys: {sorted(env)!r}"
     )
     if "PWD" in os.environ:
         assert "PWD" not in env
@@ -79,8 +77,7 @@ def test_caller_supplied_value_wins_over_the_builders_own_default(
     )
 
     assert env["HOME"] == str(override_home), (
-        f"expected the caller-supplied HOME to win over the base default "
-        f"{str(base_home)!r}; got {env['HOME']!r}"
+        f"expected the caller-supplied HOME to win over the base default " f"{str(base_home)!r}; got {env['HOME']!r}"
     )
 
 
@@ -102,24 +99,27 @@ def test_extra_path_dirs_are_prepended_ahead_of_the_standard_toolchain(
     tmp_path: pathlib.Path,
 ) -> None:
     """A caller-supplied directory (e.g. a stub-binary bin/) must resolve
-    ahead of the standard POSIX toolchain directories, in the order given,
-    never appended after them."""
+    ahead of the suite's interpreter directory and the standard POSIX
+    toolchain directories, in the order given, never appended after them."""
     stub_bin = tmp_path / "stub_bin"
 
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_path_dirs=(stub_bin,))
 
-    expected = os.pathsep.join([str(stub_bin), "/usr/local/bin", "/usr/bin", "/bin"])
+    interpreter_dir = str(pathlib.Path(sys.executable).parent)
+    expected = os.pathsep.join([str(stub_bin), interpreter_dir, "/usr/local/bin", "/usr/bin", "/bin"])
     assert env["PATH"] == expected, f"expected {expected!r}, got {env['PATH']!r}"
 
 
 def test_default_path_has_no_extra_dirs_when_none_are_given(
     tmp_path: pathlib.Path,
 ) -> None:
-    """No *extra_path_dirs* -- the default, most common case -- yields
-    exactly the standard toolchain, nothing prepended."""
+    """No *extra_path_dirs* -- the default, most common case -- yields the
+    suite's interpreter directory followed by the standard toolchain, so a
+    script under test runs `python3` as the Python the suite runs under."""
     env = build_scrubbed_env(home_dir=tmp_path / "home")
 
-    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+    interpreter_dir = str(pathlib.Path(sys.executable).parent)
+    assert env["PATH"] == os.pathsep.join([interpreter_dir, "/usr/local/bin", "/usr/bin", "/bin"])
 
 
 def test_lang_defaults_to_c_utf8_but_is_overridable(tmp_path: pathlib.Path) -> None:
@@ -161,8 +161,7 @@ def test_scrub_agent_scoped_env_removes_every_agent_scoped_name() -> None:
     scrub_agent_scoped_env(env)
 
     assert not any(name in env for name in AGENT_SCOPED_ENV_NAMES), (
-        f"expected every name in {AGENT_SCOPED_ENV_NAMES!r} to be removed; "
-        f"remaining keys: {sorted(env)!r}"
+        f"expected every name in {AGENT_SCOPED_ENV_NAMES!r} to be removed; " f"remaining keys: {sorted(env)!r}"
     )
 
 
@@ -179,8 +178,7 @@ def test_scrub_agent_scoped_env_leaves_unrelated_names_untouched() -> None:
 
     for name, value in unrelated.items():
         assert env.get(name) == value, (
-            f"expected unrelated name {name!r} to survive with value "
-            f"{value!r}; got {env.get(name)!r}"
+            f"expected unrelated name {name!r} to survive with value " f"{value!r}; got {env.get(name)!r}"
         )
 
 

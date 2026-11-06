@@ -49,7 +49,7 @@ import os
 import pathlib
 import sys
 import xml.etree.ElementTree as ET
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 #: How many of the slowest tests are listed (pytest --durations).
 DURATIONS_LIMIT = 25
@@ -66,14 +66,14 @@ def lane_args(xml_path: str) -> list[str]:
     ]
 
 
-def _float(text: "str | None") -> float:
+def _float(text: str | None) -> float:
     try:
         return float(text or 0)
     except ValueError:
         return 0.0
 
 
-def _int(text: "str | None") -> int:
+def _int(text: str | None) -> int:
     try:
         return int(text or 0)
     except ValueError:
@@ -87,7 +87,7 @@ def _suites(root: ET.Element) -> list[ET.Element]:
     return list(root.iter("testsuite"))
 
 
-def summarize(xml_paths: Iterable["str | pathlib.Path"], suite: str) -> "dict | None":
+def summarize(xml_paths: Iterable[str | pathlib.Path], suite: str) -> dict | None:
     """Merge the lanes' JUnit reports into the durations record.
 
     Returns None when no report could be read.
@@ -119,16 +119,13 @@ def summarize(xml_paths: Iterable["str | pathlib.Path"], suite: str) -> "dict | 
         "suite": suite,
         "limit": DURATIONS_LIMIT,
         "min_seconds": DURATIONS_MIN_SECONDS,
-        "tests": [
-            {"test": test, "seconds": round(seconds, 3)}
-            for seconds, test in entries[:DURATIONS_LIMIT]
-        ],
+        "tests": [{"test": test, "seconds": round(seconds, 3)} for seconds, test in entries[:DURATIONS_LIMIT]],
         "total_seconds": round(total_seconds, 3),
         "test_count": test_count,
     }
 
 
-def record(suite: str, out: "str | pathlib.Path", xml_paths: Sequence["str | pathlib.Path"]) -> str:
+def record(suite: str, out: str | pathlib.Path, xml_paths: Sequence[str | pathlib.Path]) -> str:
     """Write the durations record for *suite* to *out*; return a narration line."""
     summary = summarize(xml_paths, suite)
     if summary is None:
@@ -163,16 +160,17 @@ def _build_parser() -> argparse.ArgumentParser:
             f"{DURATIONS_MIN_SECONDS}s), the total run time and the test count."
         ),
     )
-    rec.add_argument("--suite", required=True, choices=("unit", "integration"),
-                     help="the suite the run certified")
-    rec.add_argument("--out", required=True, metavar="FILE",
-                     help="the JSON file to write (lint/durations-<suite>.json)")
-    rec.add_argument("lane_xml", nargs="*", metavar="LANE_XML",
-                     help="a lane's --junitxml report; unreadable ones are skipped")
+    rec.add_argument("--suite", required=True, choices=("unit", "integration"), help="the suite the run certified")
+    rec.add_argument(
+        "--out", required=True, metavar="FILE", help="the JSON file to write (lint/durations-<suite>.json)"
+    )
+    rec.add_argument(
+        "lane_xml", nargs="*", metavar="LANE_XML", help="a lane's --junitxml report; unreadable ones are skipped"
+    )
     return parser
 
 
-def main(argv: "Sequence[str] | None" = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Run the durations CLI: ``record --suite SUITE --out FILE [LANE_XML ...]``.
 
     Prints one narration line. Exits 0 whether or not a file was written;

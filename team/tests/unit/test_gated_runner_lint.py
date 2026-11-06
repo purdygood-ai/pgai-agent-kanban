@@ -103,8 +103,7 @@ def test_failing_command_is_recorded_and_wrapper_continues(tmp_path: pathlib.Pat
     under `set -e` keeps running -- this is the exact previously-fatal ->
     warn+file+continue transition the v2.3.6 requirements ask for.
     """
-    script = _source(
-        """
+    script = _source("""
 synthetic_failing_lint() {
   echo "synthetic_failing_lint: 1 violation(s) found" >&2
   return 1
@@ -113,28 +112,22 @@ gated_runner_run_quality_lint "synthetic_failing_lint" -- synthetic_failing_lint
 echo "WRAPPER_RETURNED=$?"
 echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
 echo "FINDING_JSON=${GATED_RUNNER_FINDINGS[0]}"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, (
         f"expected the wrapper script to exit 0 (continue past the failing "
         f"lint); got {result.returncode}. stderr={result.stderr!r}"
     )
     assert "synthetic_failing_lint: 1 violation(s) found" in result.stdout, (
-        "the failing command's own output must be printed in full "
-        "(user-facing channel)"
+        "the failing command's own output must be printed in full " "(user-facing channel)"
     )
     assert "WRAPPER_RETURNED=0" in result.stdout, (
-        "gated_runner_run_quality_lint must always return 0, regardless of "
-        "the wrapped command's exit code"
+        "gated_runner_run_quality_lint must always return 0, regardless of " "the wrapped command's exit code"
     )
     assert "FINDINGS_COUNT=1" in result.stdout, (
-        "a failing command must append exactly one finding to "
-        "GATED_RUNNER_FINDINGS"
+        "a failing command must append exactly one finding to " "GATED_RUNNER_FINDINGS"
     )
-    finding_line = next(
-        line for line in result.stdout.splitlines() if line.startswith("FINDING_JSON=")
-    )
+    finding_line = next(line for line in result.stdout.splitlines() if line.startswith("FINDING_JSON="))
     finding = json.loads(finding_line.removeprefix("FINDING_JSON="))
     assert finding["lint"] == "synthetic_failing_lint"
     assert finding["severity"] == "quality"
@@ -147,13 +140,11 @@ echo "FINDING_JSON=${GATED_RUNNER_FINDINGS[0]}"
 
 def test_passing_command_produces_no_finding(tmp_path: pathlib.Path) -> None:
     """A clean quality-class command records nothing and prints OK."""
-    script = _source(
-        """
+    script = _source("""
 gated_runner_run_quality_lint "synthetic_clean_lint" -- true
 echo "WRAPPER_RETURNED=$?"
 echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     assert "[gated-runner] synthetic_clean_lint: OK" in result.stdout
@@ -184,14 +175,12 @@ def test_dashboard_network_gate_violation_warns_files_and_continues(
     dashboard_dir = team_dir / "scripts" / "dashboard"
     dashboard_dir.mkdir(parents=True)
     (dashboard_dir / "git-status.sh").write_text(
-        "#!/usr/bin/env bash\n"
-        'git -C "$dev_tree" fetch origin --tags\n',
+        "#!/usr/bin/env bash\n" 'git -C "$dev_tree" fetch origin --tags\n',
         encoding="utf-8",
     )
 
     findings_file = tmp_path / "dashboard_network_git_gate.json"
-    script = _source(
-        f"""
+    script = _source(f"""
 gated_runner_run_quality_lint "dashboard_network_git_gate" -- \\
   python3 scripts/lint_dashboard_network_git_gate.py --team-dir {team_dir} \\
   --findings-file {findings_file}
@@ -199,8 +188,7 @@ echo "WRAPPER_RETURNED=$?"
 gated_runner_merge_findings_file {findings_file}
 echo "FINDINGS_COUNT=${{#GATED_RUNNER_FINDINGS[@]}}"
 printf '%s\\n' "${{GATED_RUNNER_FINDINGS[@]}}"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, (
         "a real network-git violation must not abort the runner once wired "
@@ -214,8 +202,7 @@ printf '%s\\n' "${{GATED_RUNNER_FINDINGS[@]}}"
     )
     assert '"exit_code"' not in result.stdout, result.stdout
     assert "git-status.sh" in result.stdout, (
-        "the violation's file name must appear in the printed (user-facing) "
-        "output"
+        "the violation's file name must appear in the printed (user-facing) " "output"
     )
 
 
@@ -247,8 +234,7 @@ def test_post_suite_cleanliness_style_check_warns_files_and_continues(
     # synthetic stand-in echoes to stderr -- it names no real path and is
     # never created, opened, or deleted; it only proves the wrapper surfaces
     # the underlying check's diagnostic line unchanged.
-    script = _source(
-        """
+    script = _source("""
 _synthetic_bare_tmp_cleanliness_check() {
   echo "[pgai-cleanliness] FAIL: kanban suite left residue in bare /tmp." >&2
   echo "[pgai-cleanliness]   /tmp/pgai_orphan_test_residue" >&2
@@ -259,19 +245,15 @@ gated_runner_run_quality_lint "bare_tmp_cleanliness" -- _synthetic_bare_tmp_clea
 echo "RUNNER_STILL_RUNNING=yes"
 echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
 exit 0
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, (
         "the previously-fatal cleanliness `exit 1` must be gone -- a residue "
         f"finding must not abort the runner; got exit {result.returncode}"
     )
-    assert "[pgai-cleanliness] FAIL" in result.stdout, (
-        "the check's own diagnostic must still print in full"
-    )
+    assert "[pgai-cleanliness] FAIL" in result.stdout, "the check's own diagnostic must still print in full"
     assert "RUNNER_STILL_RUNNING=yes" in result.stdout, (
-        "script execution must continue past the check (this line would "
-        "never print under the old `exit 1` behavior)"
+        "script execution must continue past the check (this line would " "never print under the old `exit 1` behavior)"
     )
     assert "FINDINGS_COUNT=1" in result.stdout
 
@@ -284,13 +266,11 @@ exit 0
 def test_write_findings_file_schema(tmp_path: pathlib.Path) -> None:
     """The findings file always exists and matches the documented schema."""
     out_path = tmp_path / "findings.json"
-    script = _source(
-        f"""
+    script = _source(f"""
 synthetic_failing_lint() {{ echo "boom" >&2; return 1; }}
 gated_runner_run_quality_lint "synthetic_failing_lint" -- synthetic_failing_lint
 gated_runner_write_findings_file "{out_path}" "test-runner.sh"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     assert out_path.is_file(), "findings file must be written unconditionally"
@@ -325,19 +305,15 @@ def test_write_findings_file_written_even_when_empty(tmp_path: pathlib.Path) -> 
 def test_record_finding_appends_a_hand_authored_quality_finding(tmp_path: pathlib.Path) -> None:
     """A caller with no command output to summarize (a fatal pre-flight
     gate noting it aborted the run) can still add a well-shaped finding."""
-    script = _source(
-        """
+    script = _source("""
 gated_runner_record_finding "runner_incomplete" "aborted before pytest ran"
 echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
 echo "FINDING_JSON=${GATED_RUNNER_FINDINGS[0]}"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     assert "FINDINGS_COUNT=1" in result.stdout
-    finding_line = next(
-        line for line in result.stdout.splitlines() if line.startswith("FINDING_JSON=")
-    )
+    finding_line = next(line for line in result.stdout.splitlines() if line.startswith("FINDING_JSON="))
     finding = json.loads(finding_line.removeprefix("FINDING_JSON="))
     assert finding == {
         "lint": "runner_incomplete",
@@ -359,13 +335,11 @@ def test_claim_writes_empty_findings_document_and_a_matching_sidecar_token(
     (proving the "clear" half of clear-then-gate) and records the same
     token in the sidecar it echoes -- the token round-trips."""
     out_path = tmp_path / "findings.json"
-    script = _source(
-        f"""
+    script = _source(f"""
 echo "PRE-EXISTING CONTENT" > "{out_path}"
 TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
 echo "TOKEN=$TOKEN"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     token_line = next(line for line in result.stdout.splitlines() if line.startswith("TOKEN="))
@@ -392,19 +366,17 @@ def test_assert_findings_claim_succeeds_when_uncontested(tmp_path: pathlib.Path)
     assert, so the token still matches and the assert is silent (returns 0,
     prints nothing)."""
     out_path = tmp_path / "findings.json"
-    script = _source_with_error_contract(
-        f"""
+    script = _source_with_error_contract(f"""
 TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
 gated_runner_assert_findings_claim "{out_path}" "$TOKEN"
 echo "ASSERT_RETURNED=$?"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     assert "ASSERT_RETURNED=0" in result.stdout
-    assert "error:   gated_runner.stale_findings_claim" not in result.stderr, (
-        "an uncontested claim must not print the stale-claim refusal"
-    )
+    assert (
+        "error:   gated_runner.stale_findings_claim" not in result.stderr
+    ), "an uncontested claim must not print the stale-claim refusal"
 
 
 def test_assert_findings_claim_refuses_with_dual_channel_contract_when_reclaimed(
@@ -417,29 +389,27 @@ def test_assert_findings_claim_refuses_with_dual_channel_contract_when_reclaimed
     and the refusal carries the full dual-channel contract (error key,
     message, remedy) plus a census anchor comment at the refusal site."""
     out_path = tmp_path / "findings.json"
-    script = _source_with_error_contract(
-        f"""
+    script = _source_with_error_contract(f"""
 TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
 echo "a-different-invocations-token" > "{out_path}.runid"
 gated_runner_assert_findings_claim "{out_path}" "$TOKEN"
 echo "ASSERT_RETURNED=$?"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, "the wrapping script must still complete (assert never exits)"
     assert "ASSERT_RETURNED=1" in result.stdout, (
         "a moved token must make the assert return 1 so the caller can "
         "skip trusting the file (e.g. skip handing it to the bug filer)"
     )
-    assert "error:   gated_runner.stale_findings_claim" in result.stderr, (
-        "the refusal's machine key must be stable and grep-able"
-    )
-    assert "no longer carries this invocation's run-identity claim" in result.stderr, (
-        "the refusal's plain-language message must explain what happened"
-    )
-    assert "Re-run the gated runner that owns" in result.stderr, (
-        "the refusal's remedy must be runnable, naming the concrete next step"
-    )
+    assert (
+        "error:   gated_runner.stale_findings_claim" in result.stderr
+    ), "the refusal's machine key must be stable and grep-able"
+    assert (
+        "no longer carries this invocation's run-identity claim" in result.stderr
+    ), "the refusal's plain-language message must explain what happened"
+    assert (
+        "Re-run the gated runner that owns" in result.stderr
+    ), "the refusal's remedy must be runnable, naming the concrete next step"
     assert str(out_path) in result.stderr, "the remedy must name the actual file at issue"
 
 
@@ -450,16 +420,12 @@ def test_assert_findings_claim_refuses_when_sidecar_absent(tmp_path: pathlib.Pat
     out_path = tmp_path / "findings.json"
     out_path.write_text('{"schema_version": 1, "findings": []}\n', encoding="utf-8")
     script = _source_with_error_contract(
-        f'gated_runner_assert_findings_claim "{out_path}" "some-token"\n'
-        'echo "ASSERT_RETURNED=$?"\n'
+        f'gated_runner_assert_findings_claim "{out_path}" "some-token"\n' 'echo "ASSERT_RETURNED=$?"\n'
     )
     result = run_bash(tmp_path, script)
     assert "ASSERT_RETURNED=1" in result.stdout
     assert "error:   gated_runner.stale_findings_claim" in result.stderr
-    assert "<absent>" in result.stderr, (
-        "the message must say the sidecar was absent, not just print an "
-        "empty token"
-    )
+    assert "<absent>" in result.stderr, "the message must say the sidecar was absent, not just print an " "empty token"
 
 
 def test_reclaiming_after_a_refused_assert_succeeds(tmp_path: pathlib.Path) -> None:
@@ -467,8 +433,7 @@ def test_reclaiming_after_a_refused_assert_succeeds(tmp_path: pathlib.Path) -> N
     produces a fresh token that the sidecar now agrees with, so a
     subsequent assert against the NEW token succeeds."""
     out_path = tmp_path / "findings.json"
-    script = _source_with_error_contract(
-        f"""
+    script = _source_with_error_contract(f"""
 TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
 echo "a-different-invocations-token" > "{out_path}.runid"
 gated_runner_assert_findings_claim "{out_path}" "$TOKEN" 2>/dev/null
@@ -477,8 +442,7 @@ echo "FIRST_ASSERT_RETURNED=$?"
 NEW_TOKEN="$(gated_runner_claim_findings_file "{out_path}" "test-runner.sh")"
 gated_runner_assert_findings_claim "{out_path}" "$NEW_TOKEN"
 echo "SECOND_ASSERT_RETURNED=$?"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0
     assert "FIRST_ASSERT_RETURNED=1" in result.stdout
@@ -494,11 +458,7 @@ echo "SECOND_ASSERT_RETURNED=$?"
 
 
 def _findings_from(stdout: str) -> list[dict]:
-    return [
-        json.loads(line.removeprefix("FINDING="))
-        for line in stdout.splitlines()
-        if line.startswith("FINDING=")
-    ]
+    return [json.loads(line.removeprefix("FINDING=")) for line in stdout.splitlines() if line.startswith("FINDING=")]
 
 
 _PRINT_FINDINGS = 'for f in "${GATED_RUNNER_FINDINGS[@]}"; do printf \'FINDING=%s\\n\' "$f"; done\n'
@@ -508,8 +468,7 @@ def test_instance_check_records_one_finding_per_named_instance(tmp_path: pathlib
     """A check that fills its array with two instances and returns 1 yields
     two per-instance findings (through the formatter), no coarse exit-code
     entry, a non-blocking narration, and a caller that keeps running."""
-    script = _source(
-        """
+    script = _source("""
 _synthetic_listener_check() {
   echo "[pgai-listener] FAIL: two listeners survived." >&2
   SYNTHETIC_FOUND+=($'101\\tpython3 -m http.server' $'202\\tnc -l 9000')
@@ -519,9 +478,7 @@ SYNTHETIC_FOUND=(left-over-from-an-earlier-call)
 gated_runner_run_instance_check "listener_cleanliness" SYNTHETIC_FOUND \\
   gated_runner_listener_finding -- _synthetic_listener_check
 echo "RUNNER_STILL_RUNNING=yes"
-"""
-        + _PRINT_FINDINGS
-    )
+""" + _PRINT_FINDINGS)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RUNNER_STILL_RUNNING=yes" in result.stdout
@@ -541,14 +498,11 @@ echo "RUNNER_STILL_RUNNING=yes"
 
 
 def test_instance_check_that_names_no_instance_records_one_finding(tmp_path: pathlib.Path) -> None:
-    script = _source(
-        """
+    script = _source("""
 _synthetic_failing_check() { echo "snapshot file missing" >&2; return 1; }
 gated_runner_run_instance_check "bare_tmp_cleanliness" SYNTHETIC_FOUND \\
   gated_runner_tmp_residue_finding -- _synthetic_failing_check
-"""
-        + _PRINT_FINDINGS
-    )
+""" + _PRINT_FINDINGS)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stdout + result.stderr
     findings = _findings_from(result.stdout)
@@ -559,13 +513,11 @@ gated_runner_run_instance_check "bare_tmp_cleanliness" SYNTHETIC_FOUND \\
 
 
 def test_instance_check_passing_records_nothing(tmp_path: pathlib.Path) -> None:
-    script = _source(
-        """
+    script = _source("""
 gated_runner_run_instance_check "sentinel_leak" SYNTHETIC_FOUND \\
   gated_runner_sentinel_finding -- true
 echo "FINDINGS_COUNT=${#GATED_RUNNER_FINDINGS[@]}"
-"""
-    )
+""")
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[gated-runner] sentinel_leak: OK" in result.stdout
@@ -579,22 +531,17 @@ def test_residue_and_sentinel_formatters_name_the_path_and_an_inspection(
     its path, and its remedy inspects -- never repairs -- that path."""
     residue = "/" + "tmp/pgai_tmp.SEED01"  # never created; a name the check would report
     halt = tmp_path / "live" / "HALT"
-    script = _source(
-        f"""
+    script = _source(f"""
 REPO_ROOT={tmp_path}
 gated_runner_tmp_residue_finding bare_tmp_cleanliness '{residue}'
 gated_runner_sentinel_finding sentinel_leak $'removed\\t{halt}\\t'
 gated_runner_sentinel_finding sentinel_leak $'added\\t{halt}\\tWritten by halt under test t::x.'
-"""
-        + _PRINT_FINDINGS
-    )
+""" + _PRINT_FINDINGS)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, result.stdout + result.stderr
     tmp_finding, removed, added = _findings_from(result.stdout)
     assert (tmp_finding["kind"], tmp_finding["path"]) == ("bare-tmp-residue", residue)
-    assert tmp_finding["remedy"] == (
-        f"ls -ld -- {residue} && grep -rnF -- pgai_tmp {tmp_path}/team/tests"
-    ), tmp_finding
+    assert tmp_finding["remedy"] == (f"ls -ld -- {residue} && grep -rnF -- pgai_tmp {tmp_path}/team/tests"), tmp_finding
     assert (removed["kind"], removed["path"]) == ("sentinel-removed", str(halt))
     assert removed["remedy"] == f"ls -la -- {halt.parent}"
     assert (added["kind"], added["remedy"]) == ("sentinel-added", f"cat -- {halt}")

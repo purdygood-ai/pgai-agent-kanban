@@ -39,30 +39,42 @@ after SIGKILL), ``survived`` (still present after SIGKILL and the second
 wait: in kernel teardown), ``kept`` (``--skip-terminals`` left it), or with
 ``--dry-run`` ``would-stop`` (nothing is signalled).
 
+A ``/proc`` read that fails for any reason other than the process having
+exited (a permission or mount problem, not ``ENOENT``/``ESRCH``) is counted,
+not treated as "nothing there". When any such read failed, one summary line
+goes to stderr after the process lines:
+
+    process_reap: unreadable=<count> first_errno=<ERRNAME> first_path=<path> ...
+
 Exit status: 0 when no matched process is left running (nothing matched
-included); 3 when one is (``kept`` or ``survived``); 2 for a usage error,
-an ``--env`` value that is not ``NAME=VALUE`` with both parts non-empty, or
-a ``--cwd-under`` that is not an existing directory other than ``/``.
+included); 3 when one is (``kept`` or ``survived``); 4 when ``/proc`` itself
+could not be listed, so nothing was scanned; 2 for a usage error, an
+``--env`` value that is not ``NAME=VALUE`` with both parts non-empty, or a
+``--cwd-under`` that is not an existing directory other than ``/``.
 ``--help`` prints this text and exits 0.
 
 Public API:
     ProcessRecord
+    ReadFailures
     find_by_env(entry) -> list[ProcessRecord]
     find_by_cwd(directory) -> list[ProcessRecord]
     stop(records, grace_seconds) -> list[tuple[ProcessRecord, str]]
+    read_failures() -> ReadFailures
+    reset_read_failures() -> None
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import errno
 import os
 import pathlib
 import shlex
 import signal
 import sys
 import time
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 # Started by file path (python3 .../lib/process_reap.py) there is no parent
 # package: put the package root this file sits in -- the directory holding
@@ -80,16 +92,21 @@ from pgai_agent_kanban.lib.temp_root import resolve_temp_root  # noqa: E402
 __all__ = [
     "EXIT_LEFT_RUNNING",
     "EXIT_OK",
+    "EXIT_PROC_UNLISTABLE",
     "EXIT_USAGE",
     "ProcessRecord",
+    "ReadFailures",
     "find_by_cwd",
     "find_by_env",
+    "read_failures",
+    "reset_read_failures",
     "stop",
 ]
 
 EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_LEFT_RUNNING = 3
+EXIT_PROC_UNLISTABLE = 4
 
 _PROC = pathlib.Path("/proc")
 # Seconds between liveness polls while waiting for a signalled process.
@@ -124,15 +141,78 @@ class ProcessRecord:
     has_terminal: bool
 
 
-def _stat_fields(pid: int) -> Optional[list[str]]:
+@dataclasses.dataclass
+class ReadFailures:
+    """``/proc`` reads that failed for a reason other than the process exiting.
+
+    Attributes:
+        count:        How many reads failed.
+        first_errno:  The errno of the first failure (None when count is 0).
+        first_path:   The path the first failure was reading.
+        listing:      True when ``/proc`` itself could not be listed, so the
+                      scan saw no process at all.
+    """
+
+    count: int = 0
+    first_errno: int | None = None
+    first_path: str = ""
+    listing: bool = False
+
+    def record(self, path: str | os.PathLike[str], exc: OSError) -> None:
+        """Count *exc*; the first one's errno and path are kept."""
+        if self.count == 0:
+            self.first_errno = exc.errno
+            self.first_path = str(path)
+        self.count += 1
+
+    def summary(self) -> str:
+        """One line naming the count, the first errno by name, and its path."""
+        name = errno.errorcode.get(self.first_errno or 0, str(self.first_errno))
+        what = (
+            "/proc could not be listed, so no process was scanned"
+            if self.listing
+            else ("the scan may have missed processes or kept one it could not re-check")
+        )
+        return (
+            f"process_reap: unreadable={self.count} first_errno={name} first_path={self.first_path}"
+            f" -- {self.count} /proc read(s) failed ({os.strerror(self.first_errno or 0)}); {what}"
+        )
+
+
+# Errors that mean the process is gone, not that /proc could not be read.
+_GONE_ERRNOS = frozenset({errno.ENOENT, errno.ESRCH})
+_READ_FAILURES = ReadFailures()
+
+
+def read_failures() -> ReadFailures:
+    """The ``/proc`` read failures counted since the last :func:`reset_read_failures`."""
+    return dataclasses.replace(_READ_FAILURES)
+
+
+def reset_read_failures() -> None:
+    """Start a fresh failure count (``main`` does this once per run)."""
+    global _READ_FAILURES
+    _READ_FAILURES = ReadFailures()
+
+
+def _note_read_failure(path: str | os.PathLike[str], exc: OSError) -> None:
+    if exc.errno not in _GONE_ERRNOS:
+        _READ_FAILURES.record(path, exc)
+
+
+def _stat_fields(pid: int) -> list[str] | None:
     """``/proc/<pid>/stat`` from field 3 (state) on, or None when unreadable.
 
     The command name (field 2) is in parentheses and may itself hold spaces
-    or parentheses, so the split starts after the last ``)``.
+    or parentheses, so the split starts after the last ``)``. A read that
+    fails because the process has exited is the ordinary "gone" answer; any
+    other failure is also counted in :func:`read_failures`.
     """
+    path = _PROC / str(pid) / "stat"
     try:
-        text = (_PROC / str(pid) / "stat").read_text(encoding="utf-8", errors="replace")
-    except OSError:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        _note_read_failure(path, exc)
         return None
     _head, _sep, tail = text.rpartition(")")
     fields = tail.split()
@@ -140,7 +220,11 @@ def _stat_fields(pid: int) -> Optional[list[str]]:
 
 
 def _is_running(pid: int, start_time: str) -> bool:
-    """True while *pid* is the same process (same start time) and not a zombie."""
+    """True while *pid* is the same process (same start time) and not a zombie.
+
+    An unreadable ``stat`` answers False; when the cause is not the process
+    exiting, :func:`_stat_fields` has counted it in :func:`read_failures`.
+    """
     fields = _stat_fields(pid)
     if fields is None:
         return False
@@ -180,14 +264,14 @@ def _command(pid: int) -> str:
     return text
 
 
-def _cwd(pid: int) -> Optional[str]:
+def _cwd(pid: int) -> str | None:
     try:
         return os.readlink(_PROC / str(pid) / "cwd")
     except OSError:
         return None
 
 
-def _record(pid: int, cwd: Optional[str] = None) -> Optional[ProcessRecord]:
+def _record(pid: int, cwd: str | None = None) -> ProcessRecord | None:
     fields = _stat_fields(pid)
     if fields is None or fields[0] in ("Z", "X", "x"):
         return None
@@ -206,7 +290,9 @@ def _candidate_pids() -> Iterable[int]:
     protected = _protected_pids()
     try:
         names = os.listdir(_PROC)
-    except OSError:
+    except OSError as exc:
+        _READ_FAILURES.record(_PROC, exc)
+        _READ_FAILURES.listing = True
         return []
     return sorted(int(name) for name in names if name.isdigit() and int(name) not in protected)
 
@@ -236,7 +322,7 @@ def _inside(path: str, directory: str) -> bool:
     return path == directory or path.startswith(directory.rstrip("/") + "/")
 
 
-def find_by_cwd(directory: "str | os.PathLike[str]") -> list[ProcessRecord]:
+def find_by_cwd(directory: str | os.PathLike[str]) -> list[ProcessRecord]:
     """Every readable process whose working directory is *directory* or inside it.
 
     *directory* is resolved (symlinks followed) first, as the kernel reports
@@ -324,11 +410,21 @@ def _parser() -> argparse.ArgumentParser:
     )
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--env", metavar="NAME=VALUE", help="stop every process whose environment holds NAME=VALUE")
-    which.add_argument("--cwd-under", metavar="DIR", help="stop every process whose working directory is DIR or inside it")
-    parser.add_argument("--grace", type=float, default=30.0, metavar="SECONDS",
-                        help="seconds to wait after SIGTERM, and again after SIGKILL (default 30)")
-    parser.add_argument("--skip-terminals", action="store_true",
-                        help="leave a process attached to a controlling terminal running (reported 'kept')")
+    which.add_argument(
+        "--cwd-under", metavar="DIR", help="stop every process whose working directory is DIR or inside it"
+    )
+    parser.add_argument(
+        "--grace",
+        type=float,
+        default=30.0,
+        metavar="SECONDS",
+        help="seconds to wait after SIGTERM, and again after SIGKILL (default 30)",
+    )
+    parser.add_argument(
+        "--skip-terminals",
+        action="store_true",
+        help="leave a process attached to a controlling terminal running (reported 'kept')",
+    )
     parser.add_argument("--dry-run", action="store_true", help="report what would be stopped; signal nothing")
     return parser
 
@@ -360,8 +456,9 @@ def _refuse_scope(error: str, message: str, remedy: str) -> int:
     return EXIT_USAGE
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Command-line entry point; see the module docstring."""
+    reset_read_failures()
     parser = _parser()
     try:
         args = parser.parse_args(argv)
@@ -401,6 +498,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     outcomes += [(r, OUTCOME_KEPT) for r in kept]
     for record, outcome in sorted(outcomes, key=lambda item: item[0].pid):
         print(_line(record, outcome))
+    failures = read_failures()
+    if failures.count:
+        print(failures.summary(), file=sys.stderr)
+    if failures.listing:
+        return EXIT_PROC_UNLISTABLE
     left = any(outcome in (OUTCOME_KEPT, OUTCOME_SURVIVED) for _r, outcome in outcomes)
     return EXIT_LEFT_RUNNING if left else EXIT_OK
 

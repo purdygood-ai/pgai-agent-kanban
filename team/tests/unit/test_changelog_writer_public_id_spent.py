@@ -38,7 +38,6 @@ import subprocess
 import sys
 import textwrap
 
-import pytest
 
 from pgai_agent_kanban.cm import changelog_writer
 from pgai_agent_kanban.cm.changelog_writer import parse_bug_file, regenerate
@@ -78,8 +77,7 @@ def _seed_repo(
     notes_dir.mkdir(parents=True)
     (notes_dir / "PUBLISHED").write_text(f"{_VERSION}\n", encoding="utf-8")
     (notes_dir / f"{_VERSION}.md").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             # Release {_VERSION}
 
             **Release Date:** 2026-01-01
@@ -91,8 +89,7 @@ def _seed_repo(
             ## Features
 
             - Initial feature set.
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     (repo_root / "CHANGELOG.md").write_text(
@@ -119,8 +116,7 @@ def _write_bug(
     fixed_in: str | None = None,
 ) -> pathlib.Path:
     """Write a minimal bug file affecting the published version."""
-    body = textwrap.dedent(
-        f"""\
+    body = textwrap.dedent(f"""\
         # BUG-{number:04d}-seeded
 
         **Bug ID:** BUG-{number:04d}-seeded
@@ -134,8 +130,7 @@ def _write_bug(
 
         ## Affects
         {_VERSION}
-        """
-    )
+        """)
     if fixed_in:
         body += f"\n## Fixed In\n{fixed_in}\n"
     if public_id:
@@ -174,9 +169,7 @@ def _import_lint():
 
 
 class TestPublishedIdIsSpent:
-    def test_published_id_without_surviving_file_is_never_reissued(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_published_id_without_surviving_file_is_never_reissued(self, tmp_path: pathlib.Path) -> None:
         """A new bug gets the next counter; the orphaned published line is kept."""
         repo_root, bugs_dir = _seed_repo(tmp_path, known_issues=_OLDER_KNOWN_ISSUE)
         bug_path = _write_bug(bugs_dir, 2, _NEW_TITLE)
@@ -193,9 +186,7 @@ class TestPublishedIdIsSpent:
             f"KI-{_ANCHOR}.2 — {_NEW_TITLE}; affects {_VERSION} · open",
         ], f"Known Issues body was:\n{lines}"
 
-    def test_published_fixed_line_without_surviving_file_is_kept(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_published_fixed_line_without_surviving_file_is_kept(self, tmp_path: pathlib.Path) -> None:
         """A Fixed-section line no release note or bug file produces is history."""
         repo_root, bugs_dir = _seed_repo(tmp_path, fixed=_OLDER_FIXED_LINE)
         bug_path = _write_bug(bugs_dir, 2, _NEW_TITLE)
@@ -206,9 +197,7 @@ class TestPublishedIdIsSpent:
         assert parse_bug_file(bug_path).public_id == f"KI-{_ANCHOR}.2"
         assert _OLDER_FIXED_LINE in content.splitlines()
 
-    def test_persisted_id_published_for_a_different_title_is_reissued(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_persisted_id_published_for_a_different_title_is_reissued(self, tmp_path: pathlib.Path) -> None:
         """The published line stays; the bug is given an ID the artifact lacks."""
         repo_root, bugs_dir = _seed_repo(tmp_path, known_issues=_OLDER_KNOWN_ISSUE)
         bug_path = _write_bug(bugs_dir, 2, _NEW_TITLE, public_id=f"KI-{_ANCHOR}.1")
@@ -217,9 +206,7 @@ class TestPublishedIdIsSpent:
         content = _regenerate(repo_root, bugs_dir)
 
         reissued = parse_bug_file(bug_path).public_id
-        assert reissued and reissued not in published_ids, (
-            f"bug still persists a published ID: {reissued!r}"
-        )
+        assert reissued and reissued not in published_ids, f"bug still persists a published ID: {reissued!r}"
         assert reissued == f"KI-{_ANCHOR}.2"
         assert _known_issue_lines(content) == [
             _OLDER_KNOWN_ISSUE,
@@ -229,14 +216,16 @@ class TestPublishedIdIsSpent:
         text = bug_path.read_text(encoding="utf-8")
         assert text.count("KI-") == 1 and f"## Public ID\n{reissued}\n" in text, text
 
-    def test_same_title_with_moved_status_keeps_its_id(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_same_title_with_moved_status_keeps_its_id(self, tmp_path: pathlib.Path) -> None:
         """A status clause moving from open to pending is the same entry."""
         repo_root, bugs_dir = _seed_repo(tmp_path, known_issues=_OLDER_KNOWN_ISSUE)
         bug_path = _write_bug(
-            bugs_dir, 2, _OLDER_TITLE, public_id=f"KI-{_ANCHOR}.1",
-            status="resolved", fixed_in="v1.0.1",
+            bugs_dir,
+            2,
+            _OLDER_TITLE,
+            public_id=f"KI-{_ANCHOR}.1",
+            status="resolved",
+            fixed_in="v1.0.1",
         )
 
         content = _regenerate(repo_root, bugs_dir)
@@ -257,9 +246,7 @@ class TestPublishedIdIsSpent:
 
         assert second == first
 
-    def test_nothing_published_reserves_only_bug_file_ids(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_nothing_published_reserves_only_bug_file_ids(self, tmp_path: pathlib.Path) -> None:
         """published_changelog=None ignores the artifact on disk entirely."""
         repo_root, bugs_dir = _seed_repo(tmp_path, known_issues=_OLDER_KNOWN_ISSUE)
         bug_path = _write_bug(bugs_dir, 2, _NEW_TITLE)
@@ -269,23 +256,23 @@ class TestPublishedIdIsSpent:
         assert parse_bug_file(bug_path).public_id == f"KI-{_ANCHOR}.1"
         assert _OLDER_KNOWN_ISSUE not in content
 
-    def test_writer_loaded_by_file_path_resolves_shared_reader(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_writer_loaded_by_file_path_resolves_shared_reader(self, tmp_path: pathlib.Path) -> None:
         """An interpreter that loads the writer by path still finds the lib."""
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-        script = textwrap.dedent(
-            f"""\
+        script = textwrap.dedent(f"""\
             import importlib.util
             spec = importlib.util.spec_from_file_location("changelog_writer", {str(_WRITER_PATH)!r})
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             print(module._extract_ki_id_from_line("- KI-1.0.0.1 — resolved"))
-            """
-        )
+            """)
         result = subprocess.run(
             [sys.executable, "-c", script],
-            cwd=str(tmp_path), env=env, capture_output=True, text=True, check=False,
+            cwd=str(tmp_path),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "KI-1.0.0.1"
@@ -299,12 +286,11 @@ class TestPublishedIdIsSpent:
 class TestSharedReaderAndLint:
     def test_reader_returns_full_public_ids(self) -> None:
         assert extract_ki_ids("KI-1.0.0.1 — a\n- KI-1.23.0.1 — b\nprose") == {
-            "KI-1.0.0.1", "KI-1.23.0.1",
+            "KI-1.0.0.1",
+            "KI-1.23.0.1",
         }
 
-    def test_lint_names_a_rewritten_title_as_a_collision(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_lint_names_a_rewritten_title_as_a_collision(self, tmp_path: pathlib.Path) -> None:
         lint = _import_lint()
         checked_in = f"### Known Issues\n{_OLDER_KNOWN_ISSUE}\n"
         regenerated = f"### Known Issues\nKI-{_ANCHOR}.1 — {_NEW_TITLE}; affects {_VERSION} · open\n"
@@ -316,14 +302,11 @@ class TestSharedReaderAndLint:
         assert causes[0].startswith(f"{path}:2: collision — 'KI-{_ANCHOR}.1'"), causes[0]
         assert _OLDER_TITLE in causes[0] and _NEW_TITLE in causes[0]
 
-    def test_lint_names_a_moved_status_clause_not_a_collision(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_lint_names_a_moved_status_clause_not_a_collision(self, tmp_path: pathlib.Path) -> None:
         lint = _import_lint()
         checked_in = f"### Known Issues\n{_OLDER_KNOWN_ISSUE}\n"
         regenerated = (
-            f"### Known Issues\nKI-{_ANCHOR}.1 — {_OLDER_TITLE}; "
-            f"affects {_VERSION} · fix pending next release\n"
+            f"### Known Issues\nKI-{_ANCHOR}.1 — {_OLDER_TITLE}; " f"affects {_VERSION} · fix pending next release\n"
         )
         path = tmp_path / "CHANGELOG.md"
 
@@ -338,8 +321,7 @@ class TestSharedReaderAndLint:
         lint = _import_lint()
         checked_in = f"### Known Issues\n{_OLDER_KNOWN_ISSUE}\n"
         regenerated = (
-            f"### Known Issues\n{_OLDER_KNOWN_ISSUE}\n"
-            f"KI-{_ANCHOR}.1 — {_NEW_TITLE}; affects {_VERSION} · open\n"
+            f"### Known Issues\n{_OLDER_KNOWN_ISSUE}\n" f"KI-{_ANCHOR}.1 — {_NEW_TITLE}; affects {_VERSION} · open\n"
         )
 
         tolerable, _ = lint._diff_is_rc_tolerable(checked_in, regenerated)

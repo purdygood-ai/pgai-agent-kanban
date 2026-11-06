@@ -104,7 +104,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 # The finding shape and the error-contract emitter live in the team package
 # beside scripts/; this script is run directly as well as imported, so the
@@ -143,9 +143,9 @@ _BASH_APPROVED_PRELUDES: tuple[str, ...] = (
 # Bash script directories to sweep, relative to team/scripts/.
 # Each tuple is (base_dir_relative_to_scripts, recursive).
 _BASH_SCRIPT_SUBDIRS: tuple[str, ...] = (
-    "",          # scripts/ itself (non-recursive, only direct children)
-    "cm",        # scripts/cm/
-    "dashboard", # scripts/dashboard/
+    "",  # scripts/ itself (non-recursive, only direct children)
+    "cm",  # scripts/cm/
+    "dashboard",  # scripts/dashboard/
 )
 
 # Python module directories to scan, relative to team/.
@@ -162,11 +162,7 @@ _CANONICAL_RESOLVER_PACKAGE = "pgai_agent_kanban"
 
 # Pattern: a non-comment line in a Python file that reads the root env var
 # directly via os.environ (both dict-style and .get() form).
-_PY_DIRECT_ENV_READ_RE = re.compile(
-    r'os\.environ\s*(?:\[|\.get\s*\()\s*["\']'
-    + re.escape(_ROOT_VAR)
-    + r'["\']'
-)
+_PY_DIRECT_ENV_READ_RE = re.compile(r'os\.environ\s*(?:\[|\.get\s*\()\s*["\']' + re.escape(_ROOT_VAR) + r'["\']')
 
 
 # ---------------------------------------------------------------------------
@@ -186,9 +182,9 @@ class Violation(NamedTuple):
 
     path: Path
     message: str
-    line: Optional[int] = None
+    line: int | None = None
     kind: str = ""
-    prelude_line: Optional[int] = None
+    prelude_line: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +217,7 @@ def _heredoc_body_line_numbers(lines: list[str]) -> set[int]:
     """
     # Regex to detect a heredoc opener embedded anywhere in a non-comment line.
     # Captures: optional '-' (tab-strip flag), optional quote char, the TOKEN.
-    _HEREDOC_OPEN_RE = re.compile(
-        r'<<(-?)([\'"]?)([A-Za-z_][A-Za-z0-9_]*)\2'
-    )
+    _HEREDOC_OPEN_RE = re.compile(r'<<(-?)([\'"]?)([A-Za-z_][A-Za-z0-9_]*)\2')
 
     body_lines: set[int] = set()
     # Stack of active heredoc delimiters (unquoted TOKEN strings).
@@ -289,13 +283,10 @@ def _file_sources_approved_prelude(text: str) -> bool:
         for prelude in _BASH_APPROVED_PRELUDES:
             # Match: source "...env_bootstrap.sh" or . "...env_bootstrap.sh"
             # or source '...' or the bare form: source lib/env_bootstrap.sh
-            if (
-                re.search(
-                    r'\b(source|\.)\b.*' + re.escape(prelude),
-                    stripped,
-                )
-                and not stripped.startswith("#")
-            ):
+            if re.search(
+                r"\b(source|\.)\b.*" + re.escape(prelude),
+                stripped,
+            ) and not stripped.startswith("#"):
                 return True
     return False
 
@@ -350,7 +341,7 @@ def _source_precedes_first_usage(text: str) -> tuple[bool, int, int]:
         # Detect the first approved-prelude source call.
         if first_source_line == 0:
             for prelude in _BASH_APPROVED_PRELUDES:
-                if re.search(r'\b(source|\.)\b.*' + re.escape(prelude), stripped):
+                if re.search(r"\b(source|\.)\b.*" + re.escape(prelude), stripped):
                     first_source_line = lineno
                     break
 
@@ -551,10 +542,7 @@ def _should_exclude_python_file(
     name = py_path.name
 
     # The canonical resolver owns the env-var access pattern.
-    if (
-        name == _CANONICAL_RESOLVER_NAME
-        and _CANONICAL_RESOLVER_PACKAGE in str(py_path)
-    ):
+    if name == _CANONICAL_RESOLVER_NAME and _CANONICAL_RESOLVER_PACKAGE in str(py_path):
         return True
 
     # Test files and conftest files may monkeypatch the env var.
@@ -662,7 +650,7 @@ def _remedy(v: Violation, *, scripts_dir: Path, relint: str) -> str:
     """
     if v.kind == _KIND_BASH_MISSING_PRELUDE:
         prelude = os.path.relpath(scripts_dir / "lib" / "env_bootstrap.sh", v.path.parent)
-        source_line = f'source "$(dirname "${{BASH_SOURCE[0]}}")/{prelude}"'
+        source_line = f'source "$(dirname "$(readlink -f "${{BASH_SOURCE[0]}}")")/{prelude}"'
         return f"sed -i '1a {source_line}' \"{v.path}\" && {relint}"
     if v.kind == _KIND_BASH_PRELUDE_ORDER:
         return (
@@ -811,10 +799,7 @@ def main(argv: list[str] | None = None) -> int:
         sides.append("python")
 
     if all_violations:
-        print(
-            f"\nlint_env_bootstrap: {len(all_violations)} violation(s) found "
-            f"(sides checked: {', '.join(sides)})"
-        )
+        print(f"\nlint_env_bootstrap: {len(all_violations)} violation(s) found " f"(sides checked: {', '.join(sides)})")
         # CENSUS-ANCHOR: env-bootstrap-01
         # CONVERT: a kanban-root read outside the canonical resolver is a
         # contract gap with zero runtime-failure risk to this run -- recorded

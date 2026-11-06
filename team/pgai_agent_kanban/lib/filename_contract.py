@@ -265,6 +265,5 @@ def intake_destination(name: str) -> str:
             return subdir
     raise IntakeFilenameRefused(
         INTAKE_FILENAME_UNROUTABLE,
-        f"cannot route '{name}': filename does not match "
-        "BUG-*, PRIORITY-*, or vX.Y.Z-* intake patterns",
+        f"cannot route '{name}': filename does not match " "BUG-*, PRIORITY-*, or vX.Y.Z-* intake patterns",
     )

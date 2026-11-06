@@ -157,16 +157,10 @@ def _make_sandbox(
     sb.task_dir.mkdir(parents=True)
     (sb.root / "home").mkdir()
     (sb.root / "tmp").mkdir()
-    (sb.task_dir / "README.md").write_text(
-        f"# Task: example\n\n## Role\n{readme_role}\n", encoding="utf-8"
-    )
-    text = _STATUS_TEXT.replace("{status_role}", status_role).replace(
-        "## State\nWORKING\n", f"## State\n{state}\n"
-    )
+    (sb.task_dir / "README.md").write_text(f"# Task: example\n\n## Role\n{readme_role}\n", encoding="utf-8")
+    text = _STATUS_TEXT.replace("{status_role}", status_role).replace("## State\nWORKING\n", f"## State\n{state}\n")
     if record_between:
-        text = text.replace(
-            "## Needs Human\n", f"## Block Record\n{_RECORD_BODY}\n## Needs Human\n"
-        )
+        text = text.replace("## Needs Human\n", f"## Block Record\n{_RECORD_BODY}\n## Needs Human\n")
     sb.status.write_text(text, encoding="utf-8")
     return sb
 
@@ -187,8 +181,14 @@ def _assert_refused_unchanged(result: subprocess.CompletedProcess, before: bytes
 def test_operator_data_action_block_records_code_role_and_typed_args(tmp_path: pathlib.Path) -> None:
     sb = _make_sandbox(tmp_path)
     result = sb.run(
-        "--state", "BLOCKED", "--needs-human", "yes",
-        "--reason-code", "agent_operator_data_action", "--action-args", *_ACTION_ARGS,
+        "--state",
+        "BLOCKED",
+        "--needs-human",
+        "yes",
+        "--reason-code",
+        "agent_operator_data_action",
+        "--action-args",
+        *_ACTION_ARGS,
     )
     assert result.returncode == 0, result.stderr
     text = sb.status.read_text(encoding="utf-8")
@@ -235,8 +235,14 @@ def test_blocked_without_reason_code_records_agent_unclassified(tmp_path: pathli
 def test_transient_provider_error_block_records_its_code(tmp_path: pathlib.Path) -> None:
     sb = _make_sandbox(tmp_path, readme_role="CM")
     result = sb.run(
-        "--state", "BLOCKED", "--needs-human", "no", "--reason-code", "agent_transient_provider_error",
-        "--blockers", "The provider aborted the model call twice before the release ran.",
+        "--state",
+        "BLOCKED",
+        "--needs-human",
+        "no",
+        "--reason-code",
+        "agent_transient_provider_error",
+        "--blockers",
+        "The provider aborted the model call twice before the release ran.",
     )
     assert result.returncode == 0, result.stderr
     assert "reason_code: agent_transient_provider_error\n" in sb.status.read_text(encoding="utf-8")
@@ -298,8 +304,14 @@ def test_wake_reason_code_is_not_an_agent_code(tmp_path: pathlib.Path) -> None:
     "action_args",
     [
         pytest.param(["please restamp the fixed-in field"], id="prose-only"),
-        pytest.param(["verb=restamp-fixed-in", "project=pgai-agent-kanban", "version=2.28", "bugs=BUG-0412"], id="malformed-version"),
-        pytest.param(["verb=restamp-fixed-in", "project=pgai-agent-kanban", "version=v2.28.0", "bugs=BUG-412"], id="malformed-bug"),
+        pytest.param(
+            ["verb=restamp-fixed-in", "project=pgai-agent-kanban", "version=2.28", "bugs=BUG-0412"],
+            id="malformed-version",
+        ),
+        pytest.param(
+            ["verb=restamp-fixed-in", "project=pgai-agent-kanban", "version=v2.28.0", "bugs=BUG-412"],
+            id="malformed-bug",
+        ),
         pytest.param(["verb=restamp-fixed-in", "project=pgai-agent-kanban", "version=v2.28.0"], id="missing-arg"),
         pytest.param([*_ACTION_ARGS, "force=yes"], id="unknown-key"),
         pytest.param([*_ACTION_ARGS, "version=v2.29.0"], id="repeated-key"),
@@ -311,7 +323,12 @@ def test_invalid_action_args_refuse_and_write_nothing(tmp_path: pathlib.Path, ac
     sb = _make_sandbox(tmp_path)
     before = sb.status.read_bytes()
     result = sb.run(
-        "--state", "BLOCKED", "--reason-code", "agent_operator_data_action", "--action-args", *action_args,
+        "--state",
+        "BLOCKED",
+        "--reason-code",
+        "agent_operator_data_action",
+        "--action-args",
+        *action_args,
     )
     _assert_refused_unchanged(result, before, sb, "task-status.invalid-action-args")
 
@@ -404,8 +421,12 @@ def test_library_refusal_raises_before_any_write(tmp_path: pathlib.Path) -> None
     sb = _make_sandbox(tmp_path)
     before = sb.status.read_bytes()
     with pytest.raises(TaskStatusError) as excinfo:
-        write_task_status(sb.status, state="BLOCKED", reason_code="agent_operator_data_action",
-                          action_args=["verb=restamp-fixed-in", "project=Not_A_Name"])
+        write_task_status(
+            sb.status,
+            state="BLOCKED",
+            reason_code="agent_operator_data_action",
+            action_args=["verb=restamp-fixed-in", "project=Not_A_Name"],
+        )
     assert excinfo.value.error_key == "task-status.invalid-action-args"
     assert "<" not in excinfo.value.remedy  # runnable as printed
     assert sb.status.read_bytes() == before

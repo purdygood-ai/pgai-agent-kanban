@@ -70,9 +70,7 @@ def _root(tmp_path: pathlib.Path) -> pathlib.Path:
     queues = root / "projects" / _PROJECT / "tasks" / "queues"
     queues.mkdir(parents=True)
     (root / "locks").mkdir()
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     for agent in ("pm", "cm", "coder", "writer", "tester"):
         (queues / f"{agent}_backlog.md").write_text(f"# {agent} backlog\n\n", encoding="utf-8")
     return root
@@ -121,8 +119,16 @@ class _Holder:
             self.proc.wait(timeout=5)
 
 
-def _preamble(root: pathlib.Path, tmp_path: pathlib.Path, *, now: int, release_at: int | None,
-              wake_start: int, max_runtime: int = 14400, agent: str = "cm") -> str:
+def _preamble(
+    root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    *,
+    now: int,
+    release_at: int | None,
+    wake_start: int,
+    max_runtime: int = 14400,
+    agent: str = "cm",
+) -> str:
     """Source the stage and its real dependencies, then install the fake
     clock, a log() that prints, and the stop-file check the wake defines."""
     release = "" if release_at is None else str(release_at)
@@ -183,17 +189,34 @@ def _field(stdout: str, key: str) -> str:
     return ""
 
 
-def _run_against_holder(tmp_path, *, op: str, release_at: int | None, now: int,
-                        wake_start: int | None = None, max_runtime: int = 14400,
-                        extra: str = "", body: str = _ACQUIRE, agent: str = "cm"):
+def _run_against_holder(
+    tmp_path,
+    *,
+    op: str,
+    release_at: int | None,
+    now: int,
+    wake_start: int | None = None,
+    max_runtime: int = 14400,
+    extra: str = "",
+    body: str = _ACQUIRE,
+    agent: str = "cm",
+):
     root = _root(tmp_path)
     env = _env(tmp_path, root)
     holder = _Holder(tmp_path, env, _lock_file(root), op)
-    script = _preamble(
-        root, tmp_path, now=now, release_at=release_at,
-        wake_start=now if wake_start is None else wake_start,
-        max_runtime=max_runtime, agent=agent,
-    ) + extra + body
+    script = (
+        _preamble(
+            root,
+            tmp_path,
+            now=now,
+            release_at=release_at,
+            wake_start=now if wake_start is None else wake_start,
+            max_runtime=max_runtime,
+            agent=agent,
+        )
+        + extra
+        + body
+    )
     started = time.monotonic()
     try:
         result = run_bash(tmp_path, script, base_env=env, timeout=120)
@@ -205,7 +228,10 @@ def _run_against_holder(tmp_path, *, op: str, release_at: int | None, now: int,
 def test_wake_chain_holder_released_during_the_wait_is_acquired(tmp_path):
     # Holder took the lock at T0 and lets go at T0+80; the waiter starts at T0+60.
     result, real_seconds = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=_T0 + 80, now=_T0 + 60,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=_T0 + 80,
+        now=_T0 + 60,
     )
     out = result.stdout
     assert _field(out, "RC") == "0", out + result.stderr
@@ -219,7 +245,10 @@ def test_wake_chain_holder_released_during_the_wait_is_acquired(tmp_path):
 
 def test_wake_chain_holder_past_the_budget_is_given_up_at_the_budget(tmp_path):
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0 + 60,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=None,
+        now=_T0 + 60,
     )
     out = result.stdout
     assert _field(out, "RC") == "1", out + result.stderr
@@ -230,7 +259,10 @@ def test_wake_chain_holder_past_the_budget_is_given_up_at_the_budget(tmp_path):
 
 def test_configured_lock_wait_seconds_sets_the_budget(tmp_path):
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=None,
+        now=_T0,
         extra="LOCK_WAIT_SECONDS=30\n",
     )
     assert _field(result.stdout, "RC") == "1", result.stdout + result.stderr
@@ -239,7 +271,10 @@ def test_configured_lock_wait_seconds_sets_the_budget(tmp_path):
 
 def test_holder_that_is_not_a_wake_chain_is_not_waited_on(tmp_path):
     result, _ = _run_against_holder(
-        tmp_path, op="overwatch-halt-first-fix:check", release_at=_T0 + 80, now=_T0 + 60,
+        tmp_path,
+        op="overwatch-halt-first-fix:check",
+        release_at=_T0 + 80,
+        now=_T0 + 60,
     )
     out = result.stdout
     assert _field(out, "RC") == "1", out + result.stderr
@@ -250,7 +285,11 @@ def test_holder_that_is_not_a_wake_chain_is_not_waited_on(tmp_path):
 
 def test_refused_acquisition_is_not_waited_on(tmp_path):
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=_T0 + 80, now=_T0 + 60, agent="",
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=_T0 + 80,
+        now=_T0 + 60,
+        agent="",
     )
     out = result.stdout
     assert _field(out, "RC") == "2", out + result.stderr
@@ -261,8 +300,12 @@ def test_refused_acquisition_is_not_waited_on(tmp_path):
 def test_wait_never_exceeds_the_remaining_batch_budget(tmp_path):
     # Batch of 100 s started 70 s ago: 30 s left, well under lock_wait_seconds.
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0 + 60,
-        wake_start=_T0 - 10, max_runtime=100,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=None,
+        now=_T0 + 60,
+        wake_start=_T0 - 10,
+        max_runtime=100,
     )
     out = result.stdout
     assert _field(out, "RC") == "1", out + result.stderr
@@ -272,8 +315,12 @@ def test_wait_never_exceeds_the_remaining_batch_budget(tmp_path):
 
 def test_exhausted_batch_budget_means_a_single_attempt(tmp_path):
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0 + 60,
-        wake_start=_T0 - 100, max_runtime=100,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=None,
+        now=_T0 + 60,
+        wake_start=_T0 - 100,
+        max_runtime=100,
     )
     out = result.stdout
     assert _field(out, "RC") == "1", out + result.stderr
@@ -284,18 +331,27 @@ def test_exhausted_batch_budget_means_a_single_attempt(tmp_path):
 def test_stop_file_ends_the_wait(tmp_path):
     (tmp_path / "stop").write_text("", encoding="utf-8")
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=_T0 + 80, now=_T0 + 60,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=_T0 + 80,
+        now=_T0 + 60,
     )
     out = result.stdout
     assert _field(out, "RC") == "1", out + result.stderr
     assert _field(out, "PAUSES") == "0", out
-    assert f"LOG: project {_PROJECT}: not waiting for the repo lock: stop file present at {tmp_path / 'stop'}" in out, out
+    assert (
+        f"LOG: project {_PROJECT}: not waiting for the repo lock: stop file present at {tmp_path / 'stop'}" in out
+    ), out
 
 
 def test_one_wait_budget_per_project_per_firing(tmp_path):
     twice = _ACQUIRE + 'echo "---"\n' + _ACQUIRE
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0, body=twice,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=None,
+        now=_T0,
+        body=twice,
     )
     first, second = result.stdout.split("---\n")
     assert _field(first, "RC") == "1" and int(_field(first, "WAITED")) == 120, first
@@ -330,7 +386,11 @@ def test_deferral_while_others_remain_leaves_the_whole_budget_for_the_retry(tmp_
     # count): the retry waits the full lock_wait_seconds, not what is left.
     body = _acquire("1") + 'echo "---"\n' + _ACQUIRE
     result, _ = _run_against_holder(
-        tmp_path, op=f"wake-chain:{_PROJECT}", release_at=None, now=_T0, body=body,
+        tmp_path,
+        op=f"wake-chain:{_PROJECT}",
+        release_at=None,
+        now=_T0,
+        body=body,
     )
     first, retry = result.stdout.split("---\n")
     assert _field(first, "RC") == "1" and _field(first, "PAUSES") == "0", first
@@ -342,7 +402,11 @@ def test_deferral_while_others_remain_leaves_the_whole_budget_for_the_retry(tmp_
 
 def test_holder_that_is_not_a_wake_chain_still_defers_as_before_while_others_remain(tmp_path):
     result, _ = _run_against_holder(
-        tmp_path, op="overwatch-halt-first-fix:check", release_at=None, now=_T0, body=_acquire("3"),
+        tmp_path,
+        op="overwatch-halt-first-fix:check",
+        release_at=None,
+        now=_T0,
+        body=_acquire("3"),
     )
     out = result.stdout
     assert _field(out, "RC") == "1" and _field(out, "PAUSES") == "0", out + result.stderr
@@ -389,7 +453,10 @@ def test_third_consecutive_deferral_warns_and_flags_the_role_for_pm(tmp_path):
     out = result.stdout
     assert result.returncode == 0, out + result.stderr
     lines = out.splitlines()
-    assert f"LOG: project {_PROJECT}: lock starvation count for cm: 1 of 3 consecutive contention deferral(s) with task {_CM_TASK} BACKLOG" in lines
+    assert (
+        f"LOG: project {_PROJECT}: lock starvation count for cm: 1 of 3 consecutive contention deferral(s) with task {_CM_TASK} BACKLOG"
+        in lines
+    )
     assert lines.count("NOT-STARVED") == 2, out
     assert out.count("WARNING: lock starvation") == 1 and _WARNING in lines, out
     assert lines[-1] == f"STARVED role=cm task={_CM_TASK} deferrals=3", out
@@ -417,10 +484,7 @@ def test_deferral_without_a_backlog_task_resets_and_is_not_counted(tmp_path):
         f"printf '# Status\\n\\n## State\\nWAITING\\n' > "
         f"\"{root / 'projects' / _PROJECT / 'tasks' / _CM_TASK / 'status.md'}\"\n"
     )
-    body = (
-        f"wlw_starvation_note_deferral {_PROJECT}\n" + flip
-        + f"wlw_starvation_note_deferral {_PROJECT}\n{_PM_CHECK}"
-    )
+    body = f"wlw_starvation_note_deferral {_PROJECT}\n" + flip + f"wlw_starvation_note_deferral {_PROJECT}\n{_PM_CHECK}"
     script = _preamble(root, tmp_path, now=_T0, release_at=None, wake_start=_T0) + body
     result = run_bash(tmp_path, script, base_env=_env(tmp_path, root), timeout=60)
     out = result.stdout

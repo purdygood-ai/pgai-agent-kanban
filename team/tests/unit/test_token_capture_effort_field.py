@@ -81,9 +81,7 @@ _LEGACY_SCHEMA_USAGE = json.dumps(
 )
 
 # The captured:false sentinel token_capture_parse_result emits on parse failure.
-_FAILURE_USAGE = json.dumps(
-    {"captured": False, "reason": "agent exited without usage output"}
-)
+_FAILURE_USAGE = json.dumps({"captured": False, "reason": "agent exited without usage output"})
 
 
 def _merge(
@@ -109,8 +107,7 @@ def _merge(
     artifact_dir = tmp_path / "artifacts"
     effort_arg = f" {effort!r}" if effort is not None else ""
     fallback_shim = (
-        'command() { if [[ "$1" == "-v" && "$2" == "jq" ]]; then return 1; '
-        'fi; builtin command "$@"; }\n'
+        'command() { if [[ "$1" == "-v" && "$2" == "jq" ]]; then return 1; ' 'fi; builtin command "$@"; }\n'
         if force_python_fallback
         else ""
     )
@@ -141,9 +138,7 @@ def _merge(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "usage_json", [_NEW_SCHEMA_USAGE, _LEGACY_SCHEMA_USAGE, _FAILURE_USAGE]
-)
+@pytest.mark.parametrize("usage_json", [_NEW_SCHEMA_USAGE, _LEGACY_SCHEMA_USAGE, _FAILURE_USAGE])
 @pytest.mark.parametrize("force_python_fallback", [False, True])
 def test_absent_effort_omits_effort_key_from_tokens_json(
     tmp_path: pathlib.Path, usage_json: str, force_python_fallback: bool
@@ -161,9 +156,7 @@ def test_absent_effort_omits_effort_key_from_tokens_json(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "usage_json", [_NEW_SCHEMA_USAGE, _LEGACY_SCHEMA_USAGE, _FAILURE_USAGE]
-)
+@pytest.mark.parametrize("usage_json", [_NEW_SCHEMA_USAGE, _LEGACY_SCHEMA_USAGE, _FAILURE_USAGE])
 @pytest.mark.parametrize("force_python_fallback", [False, True])
 def test_supplied_effort_is_recorded_on_tokens_json(
     tmp_path: pathlib.Path, usage_json: str, force_python_fallback: bool
@@ -198,12 +191,9 @@ def test_merge_preserves_effort_across_invocations_that_omit_it(
         force_python_fallback=force_python_fallback,
         effort="high",
     )
-    record = _merge(
-        tmp_path, _NEW_SCHEMA_USAGE, force_python_fallback=force_python_fallback
-    )
+    record = _merge(tmp_path, _NEW_SCHEMA_USAGE, force_python_fallback=force_python_fallback)
     assert record.get("effort") == "high", (
-        f"expected effort='high' preserved from the prior invocation; "
-        f"got {record!r}"
+        f"expected effort='high' preserved from the prior invocation; " f"got {record!r}"
     )
     assert record["invocations"] == 2
 
@@ -242,9 +232,7 @@ def test_merge_overwrites_effort_when_a_new_value_is_supplied(
 
 
 @pytest.mark.parametrize("force_python_fallback", [False, True])
-def test_effort_field_is_additive_on_legacy_schema(
-    tmp_path: pathlib.Path, force_python_fallback: bool
-) -> None:
+def test_effort_field_is_additive_on_legacy_schema(tmp_path: pathlib.Path, force_python_fallback: bool) -> None:
     """Adding effort to a legacy-schema tokens.json record does not disturb
     any of the pre-existing legacy fields."""
     record = _merge(

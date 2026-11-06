@@ -34,9 +34,7 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import textwrap
-from typing import Optional
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants (resolve from this file's own location)
@@ -61,8 +59,8 @@ def _run_discovery(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
-    settle_seconds: Optional[int] = None,
+    extra_env: dict | None = None,
+    settle_seconds: int | None = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -163,8 +161,7 @@ def _build_single_project_root(
 
     # kanban.cfg
     (root / "kanban.cfg").write_text(
-        "[paths]\n\n[chain]\npm_mode = automatic\n\n[wake]\n"
-        "max_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
+        "[paths]\n\n[chain]\npm_mode = automatic\n\n[wake]\n" "max_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
         encoding="utf-8",
     )
 
@@ -206,8 +203,13 @@ def _build_single_project_root(
     queues_dir.mkdir(parents=True, exist_ok=True)
     (queues_dir / "plans").mkdir(parents=True, exist_ok=True)
     for qf in [
-        "coder_backlog.md", "pm_backlog.md", "writer_backlog.md",
-        "tester_backlog.md", "cm_backlog.md", "bug_backlog.md", "priority_backlog.md",
+        "coder_backlog.md",
+        "pm_backlog.md",
+        "writer_backlog.md",
+        "tester_backlog.md",
+        "cm_backlog.md",
+        "bug_backlog.md",
+        "priority_backlog.md",
     ]:
         agent = qf.replace("_backlog.md", "")
         (queues_dir / qf).write_text(
@@ -254,9 +256,7 @@ def _add_bug_file(
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -302,9 +302,7 @@ class TestSettleGuardPreventsDoubleHandling:
     expires.  This closes the cancel→reset→re-tick double-handling race.
     """
 
-    def test_freshly_reset_bug_is_deferred_by_settle_guard(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_freshly_reset_bug_is_deferred_by_settle_guard(self, two_project_root: pathlib.Path) -> None:
         """A bug file with a fresh settle marker is not bundled in the next tick.
 
         Simulates: bug file's Status is 'open' but a settle marker was just
@@ -322,8 +320,7 @@ class TestSettleGuardPreventsDoubleHandling:
         result = _run_discovery(root, "project-a", settle_seconds=3600)
 
         assert result.returncode == 0, (
-            f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n"
-            f"stderr: {result.stderr}"
+            f"discovery_run_pipeline exited non-zero.\nstdout: {result.stdout}\n" f"stderr: {result.stderr}"
         )
 
         # The bug must NOT have been bundled — settle guard deferred it.
@@ -334,9 +331,7 @@ class TestSettleGuardPreventsDoubleHandling:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_settle_guard_logs_deferred_item(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_settle_guard_logs_deferred_item(self, two_project_root: pathlib.Path) -> None:
         """When the settle guard defers an item, a log line is emitted.
 
         The log line must name the deferred item so an operator can diagnose
@@ -353,13 +348,10 @@ class TestSettleGuardPreventsDoubleHandling:
         # The settle guard should emit a log mentioning the item basename.
         combined_output = result.stdout + result.stderr
         assert "BUG-0101-settle-log-check.md" in combined_output, (
-            f"Expected log line mentioning the deferred item.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected log line mentioning the deferred item.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_bug_is_processed_after_settle_window_expires(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_bug_is_processed_after_settle_window_expires(self, two_project_root: pathlib.Path) -> None:
         """After the settle window expires, the bug is bundled on the next tick.
 
         Uses settle_seconds=0 to disable the guard on the second call, simulating
@@ -384,19 +376,16 @@ class TestSettleGuardPreventsDoubleHandling:
 
         # Second tick: disable settle guard (window=0) — item should now be picked up.
         result2 = _run_discovery(root, "project-a", settle_seconds=0)
-        assert result2.returncode == 0, (
-            f"Second discovery tick failed.\nstdout: {result2.stdout}\nstderr: {result2.stderr}"
-        )
+        assert (
+            result2.returncode == 0
+        ), f"Second discovery tick failed.\nstdout: {result2.stdout}\nstderr: {result2.stderr}"
 
         after_tick2 = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
         assert after_tick2, (
-            "Expected bug bundle after settle window expires.\n"
-            f"stdout: {result2.stdout}\nstderr: {result2.stderr}"
+            "Expected bug bundle after settle window expires.\n" f"stdout: {result2.stdout}\nstderr: {result2.stderr}"
         )
 
-    def test_settle_guard_inactive_without_settle_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_settle_guard_inactive_without_settle_file(self, two_project_root: pathlib.Path) -> None:
         """When no settle marker exists, bugs are bundled normally.
 
         Confirms the guard is opt-in: without a settle marker, discovery behaves
@@ -409,9 +398,9 @@ class TestSettleGuardPreventsDoubleHandling:
 
         result = _run_discovery(root, "project-a", settle_seconds=3600)
 
-        assert result.returncode == 0, (
-            f"discovery_run_pipeline failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"discovery_run_pipeline failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         req_dir = _requirements_dir(root, "project-a")
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md")) if req_dir.exists() else []
@@ -440,9 +429,7 @@ class TestDrillFixtureCancelResetReselect:
       Reset + immediate discovery tick does NOT double-handle the intake item.
     """
 
-    def test_bug_bundle_produced_before_requirement_after_cancel_reset(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bug_bundle_produced_before_requirement_after_cancel_reset(self, tmp_path: pathlib.Path) -> None:
         """Bug is bundled first (Step 1), requirement queued second (Step 3).
 
         Simulates the post-cancel state:
@@ -461,7 +448,8 @@ class TestDrillFixtureCancelResetReselect:
 
         # State after cancel: Active RC cleared, requirement reset to open.
         req_file = _add_requirements_file(
-            root, project_name,
+            root,
+            project_name,
             version="v0.1.0",
             slug="hardcoded-target-feature",
             status="open",
@@ -469,7 +457,8 @@ class TestDrillFixtureCancelResetReselect:
 
         # Bug file exists (Status=open, not yet bundled).
         bug_file = _add_bug_file(
-            root, project_name,
+            root,
+            project_name,
             bug_id="BUG-0110",
             slug="defect-found-after-cancel",
         )
@@ -477,12 +466,10 @@ class TestDrillFixtureCancelResetReselect:
         # Tick 1: disable settle guard so we exercise normal bug-first ordering.
         result1 = _run_discovery(root, project_name, settle_seconds=0)
 
-        assert result1.returncode == 0, (
-            f"Tick 1 discovery failed.\nstdout: {result1.stdout}\nstderr: {result1.stderr}"
-        )
-        assert "DISCOVERY_STATUS=produced_work" in result1.stdout, (
-            f"Expected produced_work on tick 1.\nstdout: {result1.stdout}"
-        )
+        assert result1.returncode == 0, f"Tick 1 discovery failed.\nstdout: {result1.stdout}\nstderr: {result1.stderr}"
+        assert (
+            "DISCOVERY_STATUS=produced_work" in result1.stdout
+        ), f"Expected produced_work on tick 1.\nstdout: {result1.stdout}"
 
         # Bug bundle must be in requirements/.
         req_dir = _requirements_dir(root, project_name)
@@ -498,12 +485,13 @@ class TestDrillFixtureCancelResetReselect:
         req_text = req_file.read_text(encoding="utf-8")
         req_status_line = [ln for ln in req_text.splitlines() if ln.strip() and not ln.startswith("#")]
         # The status should still be 'open'; 'running' would mean Step 3 fired incorrectly.
-        assert "running" not in req_text.lower() or "running" not in req_text.splitlines()[
-            next(
-                (i + 1 for i, ln in enumerate(req_text.splitlines()) if "## Status" in ln),
-                0
-            )
-        ], (
+        assert (
+            "running" not in req_text.lower()
+            or "running"
+            not in req_text.splitlines()[
+                next((i + 1 for i, ln in enumerate(req_text.splitlines()) if "## Status" in ln), 0)
+            ]
+        ), (
             "Requirements file must still be 'open' after tick 1 (Step 3 deferred by Step 1).\n"
             f"Requirement content:\n{req_text}"
         )
@@ -514,9 +502,7 @@ class TestDrillFixtureCancelResetReselect:
         # The bug bundle must have been produced — we assert it exists and Step 3 was deferred.
         assert bundle_path.exists(), "Bug bundle must exist after tick 1"
 
-    def test_requirement_not_double_handled_on_immediate_discovery(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_requirement_not_double_handled_on_immediate_discovery(self, tmp_path: pathlib.Path) -> None:
         """A just-reset requirement with a fresh settle marker is not acted upon.
 
         Simulates the race condition: cancel-rc clears the Active RC, the
@@ -528,7 +514,8 @@ class TestDrillFixtureCancelResetReselect:
 
         # Requirements file reset to 'open' just moments ago.
         req_file = _add_requirements_file(
-            root, project_name,
+            root,
+            project_name,
             version="v0.1.0",
             slug="just-reset-feature",
             status="open",
@@ -543,9 +530,9 @@ class TestDrillFixtureCancelResetReselect:
         # Run discovery with a large settle window.
         result = _run_discovery(root, project_name, settle_seconds=3600)
 
-        assert result.returncode == 0, (
-            f"discovery_run_pipeline failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"discovery_run_pipeline failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Step 3 should NOT have fired — settle guard deferred the requirement.
         # The requirement file must remain 'open' (not 'running').
@@ -570,9 +557,7 @@ class TestDrillFixtureCancelResetReselect:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_zero_collisions_bug_first_then_requirement(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_zero_collisions_bug_first_then_requirement(self, tmp_path: pathlib.Path) -> None:
         """Two-tick drill: bug first (v next-patch), requirement second (freed slot).
 
         After cancel, the post-cancel state has:
@@ -596,7 +581,8 @@ class TestDrillFixtureCancelResetReselect:
 
         # Requirements file targeting the freed slot.
         _add_requirements_file(
-            root, project_name,
+            root,
+            project_name,
             version="v0.1.0",
             slug="freed-slot-feature",
             status="open",
@@ -608,15 +594,12 @@ class TestDrillFixtureCancelResetReselect:
 
         req_dir = _requirements_dir(root, project_name)
         bug_bundles_t1 = list(req_dir.glob("*-bugfix-bundle-*.md"))
-        assert bug_bundles_t1, (
-            f"Expected bug bundle after tick 1.\nstdout: {result1.stdout}\nstderr: {result1.stderr}"
-        )
+        assert bug_bundles_t1, f"Expected bug bundle after tick 1.\nstdout: {result1.stdout}\nstderr: {result1.stderr}"
 
         # The bug bundle version must be v0.0.10 (next patch after v0.0.9).
         bundle_name = bug_bundles_t1[0].name
         assert "v0.0.10" in bundle_name, (
-            f"Expected bug bundle at v0.0.10 (next patch after v0.0.9).\n"
-            f"Actual bundle name: {bundle_name}"
+            f"Expected bug bundle at v0.0.10 (next patch after v0.0.9).\n" f"Actual bundle name: {bundle_name}"
         )
 
         # The requirements file must NOT have been bundled (remains open).
@@ -624,8 +607,7 @@ class TestDrillFixtureCancelResetReselect:
         assert req_files, "Requirements file must still exist"
         req_text = req_files[0].read_text(encoding="utf-8")
         assert "running" not in _extract_status(req_text), (
-            "Requirements file must remain 'open' after tick 1 (Step 3 deferred).\n"
-            f"Content: {req_text}"
+            "Requirements file must remain 'open' after tick 1 (Step 3 deferred).\n" f"Content: {req_text}"
         )
 
 
@@ -653,9 +635,7 @@ class TestCategoryFirstOrderingFixture:
     LOWER than what the bug bundle will claim.
     """
 
-    def test_bug_file_bundled_before_lower_version_requirement_queued(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_bug_file_bundled_before_lower_version_requirement_queued(self, two_project_root: pathlib.Path) -> None:
         """An unhandled bug is bundled (Step 1) before a pending requirement is queued (Step 3).
 
         Fixture: one open BUG-*.md in bugs/ + one open requirements file at v0.0.2.
@@ -684,9 +664,7 @@ class TestCategoryFirstOrderingFixture:
 
         result = _run_discovery(root, "project-a", settle_seconds=0)
 
-        assert result.returncode == 0, (
-            f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Step 1 must have fired: a bugfix-bundle-*.md appears in requirements/.
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))
@@ -710,9 +688,7 @@ class TestCategoryFirstOrderingFixture:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_bug_at_higher_version_still_selected_before_requirement(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_bug_at_higher_version_still_selected_before_requirement(self, two_project_root: pathlib.Path) -> None:
         """Bug bundle is authored at a higher version than the requirement yet selected first.
 
         Fixture: last_released state uses done requirements at v0.0.1/v0.0.2 so that
@@ -752,9 +728,7 @@ class TestCategoryFirstOrderingFixture:
 
         result = _run_discovery(root, "project-a", settle_seconds=0)
 
-        assert result.returncode == 0, (
-            f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"Pipeline must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Bug bundle must have been written (Step 1 fired).
         bundle_files = list(req_dir.glob("*-bugfix-bundle-*.md"))

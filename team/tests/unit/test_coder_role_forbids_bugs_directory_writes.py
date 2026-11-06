@@ -90,9 +90,7 @@ def test_assertion_fails_once_the_boundary_sentence_is_removed(
     gutted_copy.write_text(gutted, encoding="utf-8")
 
     with pytest.raises(AssertionError):
-        _assert_forbids_bugs_directory_writes(
-            gutted_copy.read_text(encoding="utf-8")
-        )
+        _assert_forbids_bugs_directory_writes(gutted_copy.read_text(encoding="utf-8"))
 
 
 def test_assertion_is_position_independent(tmp_path: pathlib.Path) -> None:
@@ -102,12 +100,9 @@ def test_assertion_is_position_independent(tmp_path: pathlib.Path) -> None:
     original = _CODER_ROLE_FILE.read_text(encoding="utf-8")
     lines = original.splitlines(keepends=True)
 
-    boundary_line_indexes = [
-        i for i, line in enumerate(lines) if _BOUNDARY_PHRASE in line
-    ]
+    boundary_line_indexes = [i for i, line in enumerate(lines) if _BOUNDARY_PHRASE in line]
     assert len(boundary_line_indexes) == 1, (
-        "expected exactly one line carrying the boundary phrase in "
-        "team/roles/CODER.md"
+        "expected exactly one line carrying the boundary phrase in " "team/roles/CODER.md"
     )
     boundary_line = lines.pop(boundary_line_indexes[0])
 
@@ -118,6 +113,4 @@ def test_assertion_is_position_independent(tmp_path: pathlib.Path) -> None:
     moved_copy = tmp_path / "CODER.md"
     moved_copy.write_text(reordered_text, encoding="utf-8")
 
-    _assert_forbids_bugs_directory_writes(
-        moved_copy.read_text(encoding="utf-8")
-    )
+    _assert_forbids_bugs_directory_writes(moved_copy.read_text(encoding="utf-8"))

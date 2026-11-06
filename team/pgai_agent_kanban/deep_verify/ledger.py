@@ -106,6 +106,7 @@ if not __package__:
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.text import lf_to_spaces  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import utc_now_iso  # noqa: E402
+from pgai_agent_kanban.lib.dataclass_records import from_known_fields  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -134,8 +135,7 @@ except ImportError:  # pragma: no cover - defensive fallback, same values
 # ---------------------------------------------------------------------------
 
 _RECORD_HEADER_RE = re.compile(
-    r"^##\s+Deep-Verify Run:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+"
-    r"(?P<version>\S+)\s*$"
+    r"^##\s+Deep-Verify Run:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+" r"(?P<version>\S+)\s*$"
 )
 _COMMIT_RE = re.compile(r"^-\s*Commit:\s*(?P<value>.*)$")
 _VERDICT_RE = re.compile(r"^-\s*Verdict:\s*(?P<value>.*)$")
@@ -160,10 +160,9 @@ class DeepVerifyRecord:
     detail: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict) -> "DeepVerifyRecord":
+    def from_dict(cls, data: dict) -> DeepVerifyRecord:
         """Build a record from a plain dict (parsed JSON, say), ignoring unknown keys."""
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        return from_known_fields(cls, data)
 
     def to_dict(self) -> dict:
         """Return the record as a dict keyed by field name: timestamp, project, version, commit, verdict, detail."""
@@ -175,8 +174,7 @@ def format_record(record: DeepVerifyRecord) -> str:
     trailing blank lines -- the caller controls spacing between records)."""
     return "\n".join(
         [
-            f"## Deep-Verify Run: {record.timestamp} — {record.project} — "
-            f"{record.version}",
+            f"## Deep-Verify Run: {record.timestamp} — {record.project} — " f"{record.version}",
             f"- Commit: {lf_to_spaces(record.commit)}",
             f"- Verdict: {lf_to_spaces(record.verdict)}",
             f"- Detail: {lf_to_spaces(record.detail)}",
@@ -190,11 +188,7 @@ def _ledger_header(ledger_path: str) -> str:
     basename (the standard projects/<name>/deep-verify-ledger.md
     convention); falls back to a generic title otherwise."""
     project_name = os.path.basename(os.path.dirname(os.path.abspath(ledger_path)))
-    title = (
-        f"# Deep-Verify Ledger — {project_name}"
-        if project_name
-        else "# Deep-Verify Ledger"
-    )
+    title = f"# Deep-Verify Ledger — {project_name}" if project_name else "# Deep-Verify Ledger"
     return (
         f"{title}\n\n"
         "Append-only. One record per deep-verify run (on demand, scheduled, "
@@ -237,13 +231,12 @@ def append_record(ledger_path: str, record: DeepVerifyRecord) -> None:
     """
     if record.verdict not in VALID_VERDICTS:
         raise LedgerError(
-            f"deep_verify.ledger: refusing to write verdict {record.verdict!r} -- "
-            f"must be one of {VALID_VERDICTS}"
+            f"deep_verify.ledger: refusing to write verdict {record.verdict!r} -- " f"must be one of {VALID_VERDICTS}"
         )
 
     existing = ""
     if os.path.isfile(ledger_path):
-        with open(ledger_path, "r", encoding="utf-8") as handle:
+        with open(ledger_path, encoding="utf-8") as handle:
             existing = handle.read()
 
     block = format_record(record)
@@ -318,7 +311,7 @@ def parse_records(ledger_path: str) -> list:
     """
     if not os.path.isfile(ledger_path):
         return []
-    with open(ledger_path, "r", encoding="utf-8") as handle:
+    with open(ledger_path, encoding="utf-8") as handle:
         text = handle.read()
     if not text.strip():
         return []
@@ -420,7 +413,7 @@ def main() -> int:
         description=(
             "Append or read the append-only per-project deep-verify ledger. "
             "'append' writes a new record. 'latest' prints the most recent "
-            "record as JSON, or {\"found\": false} when the project has "
+            'record as JSON, or {"found": false} when the project has '
             "never been deep-verified. 'list' prints every record as a JSON "
             "array."
         )

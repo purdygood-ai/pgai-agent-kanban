@@ -178,7 +178,6 @@ import os
 import pathlib
 import re
 import sys
-from typing import Optional
 
 # Run by file path (``python3 .../tester_report.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -239,8 +238,7 @@ _NOSPACE_FINDING_HEADING_RE = re.compile(r"^ {0,3}(#{2,6})((?i:finding)(?![A-Za-
 _CLOSING_HASHES_RE = re.compile(r"(?:^|[ \t]+)#+[ \t]*$")
 _FINDING_WORD_RE = re.compile(r"^[*_`\s]*(?i:finding)(?![A-Za-z0-9_])[*_]*")
 _FINDING_LABEL_RE = re.compile(
-    r"\s*(?:(?i:no\.|number)\s*|#\s*)?"
-    r"(?P<label>\d+(?:\.\d+)*[A-Za-z]?(?![A-Za-z0-9])|[A-Z](?=\s*(?:[:.)–—-]|$)))"
+    r"\s*(?:(?i:no\.|number)\s*|#\s*)?" r"(?P<label>\d+(?:\.\d+)*[A-Za-z]?(?![A-Za-z0-9])|[A-Z](?=\s*(?:[:.)–—-]|$)))"
 )
 _TITLE_SEPARATOR_RE = re.compile(r"^[\s*_]*[:.)–—-]*\s*")
 _FIRST_DIGITS_RE = re.compile(r"\d+")
@@ -268,20 +266,20 @@ _SUMMARY_HEADINGS = ("Summary", "Executive Summary")
 class Finding:
     """One finding: its heading, its body, and the fields read from it."""
 
-    number: Optional[int]
-    label: Optional[str]
+    number: int | None
+    label: str | None
     title: str
     heading: str
     level: int
     body: str
-    filed_as: Optional[str] = None
-    filed_by: Optional[str] = None
-    severity: Optional[str] = None
-    category: Optional[str] = None
-    regression: Optional[str] = None
-    integrity: Optional[str] = None
-    fix_effort: Optional[str] = None
-    systemic_risk: Optional[str] = None
+    filed_as: str | None = None
+    filed_by: str | None = None
+    severity: str | None = None
+    category: str | None = None
+    regression: str | None = None
+    integrity: str | None = None
+    fix_effort: str | None = None
+    systemic_risk: str | None = None
     extra: dict = dataclasses.field(default_factory=dict)
     raw: dict = dataclasses.field(default_factory=dict)
     sub_findings: list = dataclasses.field(default_factory=list)
@@ -295,9 +293,9 @@ class Finding:
 class TesterReport:
     """A parsed TESTER report: report-level fields plus its findings."""
 
-    recommendation: Optional[str]
-    systemic_risk: Optional[str]
-    summary: Optional[str]
+    recommendation: str | None
+    systemic_risk: str | None
+    summary: str | None
     findings: list
     raw: dict = dataclasses.field(default_factory=dict)
 
@@ -336,9 +334,9 @@ class TesterReport:
 
 @dataclasses.dataclass
 class _Line:
-    raw: str     # the line as written
-    text: str    # the line with HTML comments removed; "" inside a fence
-    code: bool   # part of a fenced code block, delimiters included
+    raw: str  # the line as written
+    text: str  # the line with HTML comments removed; "" inside a fence
+    code: bool  # part of a fenced code block, delimiters included
 
 
 def _code_line_flags(lines: list) -> list:
@@ -368,7 +366,7 @@ def _closed_comment_spans(text: str) -> list:
         found = comment_spans(text[base:])
         if found:
             start, end = found[-1]
-            if base + end == len(text) and not text[base + start:base + end].endswith("-->"):
+            if base + end == len(text) and not text[base + start : base + end].endswith("-->"):
                 spans.extend((s + base, e + base) for s, e in found[:-1])
                 base += start + len("<!--")
                 continue
@@ -390,8 +388,7 @@ def _visible_lines(report_text: str) -> list:
     pieces.append(masked[pos:])
     visible = "".join(pieces).split("\n")
     return [
-        _Line(raw=line, text="" if is_code else text, code=is_code)
-        for line, text, is_code in zip(lines, visible, code)
+        _Line(raw=line, text="" if is_code else text, code=is_code) for line, text, is_code in zip(lines, visible, code)
     ]
 
 
@@ -400,7 +397,7 @@ def _visible_lines(report_text: str) -> list:
 # ---------------------------------------------------------------------------
 
 
-def _heading(line: _Line) -> "tuple[int, str, bool] | None":
+def _heading(line: _Line) -> tuple[int, str, bool] | None:
     """``(level, text, opens_finding)`` when *line* is a heading, else None."""
     if line.code:
         return None
@@ -413,14 +410,14 @@ def _heading(line: _Line) -> "tuple[int, str, bool] | None":
     return level, text, opens
 
 
-def _finding_identity(heading_text: str) -> "tuple[Optional[int], Optional[str], str]":
+def _finding_identity(heading_text: str) -> tuple[int | None, str | None, str]:
     """``(number, label, title)`` from a finding heading's text (Rule 1)."""
-    rest = heading_text[_FINDING_WORD_RE.match(heading_text).end():]
+    rest = heading_text[_FINDING_WORD_RE.match(heading_text).end() :]
     label = None
     match = _FINDING_LABEL_RE.match(rest)
     if match:
         label = match.group("label")
-        rest = rest[match.end():]
+        rest = rest[match.end() :]
     title = _TITLE_SEPARATOR_RE.sub("", rest, count=1).strip().strip("*_").strip()
     digits = _FIRST_DIGITS_RE.match(label) if label else None
     return (int(digits.group(0)) if digits else None), label, title
@@ -439,14 +436,16 @@ def _unquote(value: str) -> str:
     return value
 
 
-def _split_field_line(text: str) -> "tuple[str, str, bool] | None":
+def _split_field_line(text: str) -> tuple[str, str, bool] | None:
     """``(label, value, bold)`` when *text* is a field line (Rule 3), else None."""
     line = _LIST_MARKER_RE.sub("", text, count=1).strip()
     emphasis = _EMPHASIS_OPEN_RE.match(line)
     if emphasis:
         marker = emphasis.group(1)
         close = line.find(marker, len(marker))
-        inner, rest = (line[len(marker):], "") if close == -1 else (line[len(marker):close], line[close + len(marker):])
+        inner, rest = (
+            (line[len(marker) :], "") if close == -1 else (line[len(marker) : close], line[close + len(marker) :])
+        )
         if ":" in inner:
             label, value = inner.split(":", 1)
             value += rest
@@ -477,7 +476,7 @@ def _extra_key(label: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
 
 
-def _leading_token(value: str, tokens) -> Optional[str]:
+def _leading_token(value: str, tokens) -> str | None:
     """The token that leads *value* and stands alone (Rule 4), or None."""
     for token in sorted(tokens, key=len, reverse=True):
         pattern = r"[\s_-]+".join(re.escape(part) for part in token.split("-"))
@@ -486,7 +485,7 @@ def _leading_token(value: str, tokens) -> Optional[str]:
     return None
 
 
-def _enum_value(value: str, tokens) -> Optional[str]:
+def _enum_value(value: str, tokens) -> str | None:
     """Normalise *value* to one of *tokens*, or None (Rule 4)."""
     cleaned = _unquote(value.replace("*", "").replace("`", "")).strip("_ \t")
     parts = _ALTERNATIVES_SPLIT_RE.split(cleaned)
@@ -495,7 +494,7 @@ def _enum_value(value: str, tokens) -> Optional[str]:
     return _leading_token(cleaned, tokens)
 
 
-def _filed_as_id(value: str) -> Optional[str]:
+def _filed_as_id(value: str) -> str | None:
     """The first BUG-/PRIORITY- id in *value*, canonical form, or None."""
     match = _ID_RE.search(value)
     return f"{match.group(1).upper()}-{int(match.group(2)):04d}" if match else None
@@ -533,7 +532,7 @@ def _read_fields(finding: Finding, lines: list) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _section_value(lines: list, name: str) -> Optional[str]:
+def _section_value(lines: list, name: str) -> str | None:
     """The value line of the ``## <name>`` section, as written, or None.
 
     The section is read by :func:`task_status.read_section` over the
@@ -552,7 +551,7 @@ def _section_value(lines: list, name: str) -> Optional[str]:
     return None
 
 
-def _report_token(raw: Optional[str], tokens) -> Optional[str]:
+def _report_token(raw: str | None, tokens) -> str | None:
     """Read a report-level value line whole, then as a field line."""
     if raw is None:
         return None
@@ -564,7 +563,7 @@ def _report_token(raw: Optional[str], tokens) -> Optional[str]:
     return token
 
 
-def _summary(lines: list) -> Optional[str]:
+def _summary(lines: list) -> str | None:
     """The ``## Summary`` (else ``## Executive Summary``) body, or None.
 
     Read by :func:`task_status.read_section` over the report with comments
@@ -596,7 +595,7 @@ def _strip_blank_edges(lines: list) -> list:
     return lines[start:end]
 
 
-def _split_blocks(lines: list) -> "tuple[list, list]":
+def _split_blocks(lines: list) -> tuple[list, list]:
     """Split *lines* by Rules 1 and 2 into ``(outside, blocks)``: the lines
     belonging to no finding block, and one ``(level, heading text, body
     lines)`` per finding block, in order."""
@@ -629,7 +628,11 @@ def _build_finding(level: int, text: str, body: list) -> Finding:
     own, sub_blocks = _split_blocks(body)
     number, label, title = _finding_identity(text)
     finding = Finding(
-        number=number, label=label, title=title, heading=text, level=level,
+        number=number,
+        label=label,
+        title=title,
+        heading=text,
+        level=level,
         body="\n".join(line.raw for line in body),
     )
     _read_fields(finding, own)
@@ -642,7 +645,7 @@ def _findings(lines: list) -> list:
     return [_build_finding(*block) for block in _split_blocks(lines)[1]]
 
 
-def read_report_text(path: "str | os.PathLike[str]") -> str:
+def read_report_text(path: str | os.PathLike[str]) -> str:
     """Return the text of the report at *path* (UTF-8; undecodable bytes are
     replaced, never fatal). Raises OSError when the file cannot be read."""
     return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
@@ -667,7 +670,7 @@ def parse_report_text(text: str) -> TesterReport:
     )
 
 
-def parse_report(path_or_text: "str | os.PathLike[str]") -> TesterReport:
+def parse_report(path_or_text: str | os.PathLike[str]) -> TesterReport:
     """Parse a TESTER report given as a path or as its text.
 
     A path object (``os.PathLike``) is always read as a path. A ``str`` is
@@ -683,9 +686,7 @@ def parse_report(path_or_text: "str | os.PathLike[str]") -> TesterReport:
         if "\n" in path_or_text or not path_or_text:
             return parse_report_text(path_or_text)
         return parse_report_text(read_report_text(path_or_text))
-    raise TypeError(
-        f"parse_report takes a report path or report text, not {type(path_or_text).__name__}"
-    )
+    raise TypeError(f"parse_report takes a report path or report text, not {type(path_or_text).__name__}")
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +694,7 @@ def parse_report(path_or_text: "str | os.PathLike[str]") -> TesterReport:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.reports.tester_report",

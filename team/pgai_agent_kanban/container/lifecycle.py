@@ -108,7 +108,7 @@ import os
 import pathlib
 import re
 import sys
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 # Run by file path or loaded from a file outside its package, this module
 # has no parent package and the interpreter puts only its own directory on
@@ -211,9 +211,9 @@ class ContainerState:
 
     name: str
     state: str
-    image: Optional[str] = None
-    started_at: Optional[datetime.datetime] = None
-    uptime_seconds: Optional[int] = None
+    image: str | None = None
+    started_at: datetime.datetime | None = None
+    uptime_seconds: int | None = None
     engine_status: str = ""
 
     @property
@@ -254,8 +254,8 @@ class Heartbeat:
     ``fired`` line (at or after ``since``, when one was given).
     """
 
-    last_fired_at: Optional[datetime.datetime]
-    age_seconds: Optional[int]
+    last_fired_at: datetime.datetime | None
+    age_seconds: int | None
 
     @property
     def found(self) -> bool:
@@ -370,10 +370,10 @@ class StatusReport:
 
 
 def _utc_now() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
-def _format_age(seconds: Optional[int]) -> Optional[str]:
+def _format_age(seconds: int | None) -> str | None:
     return None if seconds is None else format_age_seconds(seconds)
 
 
@@ -387,7 +387,7 @@ def _seconds_between(earlier: datetime.datetime, later: datetime.datetime) -> in
 _FRACTION_RE = re.compile(r"(\.\d{6})\d+")
 
 
-def _parse_engine_time(value: object) -> Optional[datetime.datetime]:
+def _parse_engine_time(value: object) -> datetime.datetime | None:
     """Parse an engine timestamp; ``None`` for a blank, unparseable or
     zero-value (``0001-01-01...``, a never-started container) time."""
     if not isinstance(value, str) or not value.strip():
@@ -426,7 +426,7 @@ def parse_container_state(
     inspect_output: str,
     *,
     name: str = "",
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> ContainerState:
     """Parse ``<engine> container inspect NAME`` output into a state.
 
@@ -548,14 +548,14 @@ def heartbeat_log_path(kanban_root: os.PathLike | str) -> pathlib.Path:
     return pathlib.Path(kanban_root) / HEARTBEAT_LOG_RELATIVE
 
 
-def _fired_at(line: str) -> Optional[datetime.datetime]:
+def _fired_at(line: str) -> datetime.datetime | None:
     match = _FIRED_RE.match(line)
     if not match:
         return None
     return try_parse_iso(match.group("ts"))
 
 
-def _last_fired(lines: Iterable[str]) -> Optional[datetime.datetime]:
+def _last_fired(lines: Iterable[str]) -> datetime.datetime | None:
     """The timestamp of the last ``fired`` line in *lines* (file order)."""
     last = None
     for line in lines:
@@ -566,9 +566,9 @@ def _last_fired(lines: Iterable[str]) -> Optional[datetime.datetime]:
 
 
 def _heartbeat_from(
-    fired: Optional[datetime.datetime],
-    since: Optional[datetime.datetime],
-    now: Optional[datetime.datetime],
+    fired: datetime.datetime | None,
+    since: datetime.datetime | None,
+    now: datetime.datetime | None,
 ) -> Heartbeat:
     if fired is None or (since is not None and fired < since):
         return Heartbeat(last_fired_at=None, age_seconds=None)
@@ -578,8 +578,8 @@ def _heartbeat_from(
 def parse_heartbeat(
     log_text: str,
     *,
-    now: Optional[datetime.datetime] = None,
-    since: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
+    since: datetime.datetime | None = None,
 ) -> Heartbeat:
     """The last heartbeat in pseudocron log text.
 
@@ -591,7 +591,7 @@ def parse_heartbeat(
     return _heartbeat_from(_last_fired((log_text or "").splitlines()), since, now)
 
 
-def _last_fired_in_file(path: pathlib.Path) -> Optional[datetime.datetime]:
+def _last_fired_in_file(path: pathlib.Path) -> datetime.datetime | None:
     """Scan *path* backwards in chunks for its last ``fired`` line, so a
     long-running log is not read whole on every poll."""
     with open(path, "rb") as fh:
@@ -617,8 +617,8 @@ def _last_fired_in_file(path: pathlib.Path) -> Optional[datetime.datetime]:
 def read_heartbeat(
     log_path: os.PathLike | str,
     *,
-    now: Optional[datetime.datetime] = None,
-    since: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
+    since: datetime.datetime | None = None,
 ) -> Heartbeat:
     """The last heartbeat in the pseudocron log at *log_path*.
 
@@ -645,7 +645,7 @@ _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*=")
 _WAKE_SCRIPT_RE = re.compile(r"(?:^|[\s/'\"=;&|(])scripts/wake(?:-batch|-now)?\.sh(?=$|[\s'\";&|)])")
 
 
-def _cron_command(line: str) -> Optional[str]:
+def _cron_command(line: str) -> str | None:
     """The command part of a crontab job line, or ``None`` when the line is
     not a job (too few fields for a schedule)."""
     fields = line.split(None, 1 if line.startswith("@") else 5)
@@ -732,9 +732,7 @@ def list_agent_sessions(
         proc = by_pid.get(int(pid_text))
         if proc is None or not _names_session(proc.args, task_id, provider):
             continue
-        sessions.append(
-            AgentSession(role=_role_of(task_id), task_id=task_id, pid=proc.pid, provider=provider)
-        )
+        sessions.append(AgentSession(role=_role_of(task_id), task_id=task_id, pid=proc.pid, provider=provider))
     return sorted(sessions, key=lambda s: s.task_id)
 
 
@@ -794,7 +792,7 @@ def build_status_report(
     processes: Sequence[Process] = (),
     kanban_root: os.PathLike | str | None = None,
     crontab_text: str = "",
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> StatusReport:
     """Assemble the status of the kanban container.
 
@@ -859,7 +857,11 @@ def render_status_text(report: StatusReport) -> str:
     for session in report.sessions:
         lines.append(f"  {session.role or '-':<8} {session.task_id}")
     count = len(report.crontab_wake_lines)
-    lines.append(f"{_label('host crontab')}{count} kanban wake line(s)" if count else f"{_label('host crontab')}no kanban wake lines")
+    lines.append(
+        f"{_label('host crontab')}{count} kanban wake line(s)"
+        if count
+        else f"{_label('host crontab')}no kanban wake lines"
+    )
     for error in report.errors:
         lines.append(f"ERROR: {error}")
     return "\n".join(lines)
@@ -870,25 +872,27 @@ def render_status_text(report: StatusReport) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _read_input(path: Optional[str]) -> str:
+def _read_input(path: str | None) -> str:
     if path in (None, "-"):
         return sys.stdin.read()
     return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
 
 
-def _read_optional(path: Optional[str]) -> str:
+def _read_optional(path: str | None) -> str:
     """Text of *path*, or ``""`` when no path was given."""
     if not path:
         return ""
     return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
 
 
-def _parse_time_arg(value: Optional[str], flag: str) -> Optional[datetime.datetime]:
+def _parse_time_arg(value: str | None, flag: str) -> datetime.datetime | None:
     if value is None:
         return None
     parsed = try_parse_iso(value)
     if parsed is None:
-        raise argparse.ArgumentTypeError(f"{flag} expects an ISO-8601 timestamp such as 2026-10-11T07:49:04Z, got {value!r}")
+        raise argparse.ArgumentTypeError(
+            f"{flag} expects an ISO-8601 timestamp such as 2026-10-11T07:49:04Z, got {value!r}"
+        )
     return parsed
 
 
@@ -913,7 +917,7 @@ def _kv(data: dict) -> list[str]:
     return out
 
 
-def _container_state_from_args(args: argparse.Namespace, now: Optional[datetime.datetime]) -> ContainerState:
+def _container_state_from_args(args: argparse.Namespace, now: datetime.datetime | None) -> ContainerState:
     if args.exit_code:
         # A failed query has no state to parse; its stderr decides between
         # absent and a failed query, and the inspect output is not read.
@@ -924,17 +928,31 @@ def _container_state_from_args(args: argparse.Namespace, now: Optional[datetime.
 
 def _add_common(p: argparse.ArgumentParser, *, input_help: str) -> None:
     p.add_argument("--input", metavar="FILE", default=None, help=f"{input_help} (default: stdin; '-' reads stdin)")
-    p.add_argument("--format", choices=("text", "json"), default="text", help="output form (default: text key=value lines)")
-    p.add_argument("--now", metavar="ISO", default=None, help="the current time, ISO-8601 (default: the clock); fixes ages for tests")
+    p.add_argument(
+        "--format", choices=("text", "json"), default="text", help="output form (default: text key=value lines)"
+    )
+    p.add_argument(
+        "--now",
+        metavar="ISO",
+        default=None,
+        help="the current time, ISO-8601 (default: the clock); fixes ages for tests",
+    )
 
 
 def _add_state_query(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--name", default="", help="the container name, reported back (default: the name in the inspect output)")
     p.add_argument(
-        "--exit-code", type=int, default=0, metavar="N",
+        "--name", default="", help="the container name, reported back (default: the name in the inspect output)"
+    )
+    p.add_argument(
+        "--exit-code",
+        type=int,
+        default=0,
+        metavar="N",
         help="the engine's exit status for the inspect; non-zero reads as absent when the engine said 'no such container', else as a failed query (exit 1)",
     )
-    p.add_argument("--stderr-file", metavar="FILE", default=None, help="file holding the engine's stderr for the inspect")
+    p.add_argument(
+        "--stderr-file", metavar="FILE", default=None, help="file holding the engine's stderr for the inspect"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -948,36 +966,48 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="VERB")
 
     p = sub.add_parser(
-        "container-state", help="container state from 'container inspect' output",
+        "container-state",
+        help="container state from 'container inspect' output",
         description="Print state, image, started_at and uptime from '<engine> container inspect NAME' output. Exit 0 running, 3 absent or stopped, 1 failed query.",
     )
     _add_common(p, input_help="file holding the inspect output")
     _add_state_query(p)
 
     p = sub.add_parser(
-        "scheduler", help="pseudocron processes in a 'ps -eo pid=,args=' table",
+        "scheduler",
+        help="pseudocron processes in a 'ps -eo pid=,args=' table",
         description="Print whether a pseudocron scheduler runs and its pids. Exit 0 when at least one runs, 3 when none.",
     )
     _add_common(p, input_help="file holding the container's 'ps -eo pid=,args=' output")
 
     p = sub.add_parser(
-        "heartbeat", help="last heartbeat in logs/pseudocron.log",
+        "heartbeat",
+        help="last heartbeat in logs/pseudocron.log",
         description="Print the last 'fired (minute=NN)' heartbeat and its age. Exit 0 when one is found, 3 when none.",
     )
-    p.add_argument("--kanban-root", metavar="PATH", default=None, help="kanban root whose logs/pseudocron.log is read (default: $PGAI_AGENT_KANBAN_ROOT_PATH)")
+    p.add_argument(
+        "--kanban-root",
+        metavar="PATH",
+        default=None,
+        help="kanban root whose logs/pseudocron.log is read (default: $PGAI_AGENT_KANBAN_ROOT_PATH)",
+    )
     p.add_argument("--log", metavar="FILE", default=None, help="read this log instead of the kanban root's")
     p.add_argument("--since", metavar="ISO", default=None, help="ignore heartbeats before this ISO-8601 time")
-    p.add_argument("--format", choices=("text", "json"), default="text", help="output form (default: text key=value lines)")
+    p.add_argument(
+        "--format", choices=("text", "json"), default="text", help="output form (default: text key=value lines)"
+    )
     p.add_argument("--now", metavar="ISO", default=None, help="the current time, ISO-8601 (default: the clock)")
 
     p = sub.add_parser(
-        "crontab-wake-lines", help="kanban wake lines in crontab text",
+        "crontab-wake-lines",
+        help="kanban wake lines in crontab text",
         description="Print each kanban wake line of a crontab ('crontab -l' output). Exit 0 when there is at least one, 3 when none.",
     )
     _add_common(p, input_help="file holding the crontab text")
 
     p = sub.add_parser(
-        "sessions", help="agent sessions, wake drivers and OVERWATCH sweeps running in the container",
+        "sessions",
+        help="agent sessions, wake drivers and OVERWATCH sweeps running in the container",
         description=(
             "Print one 'role=R task=T pid=P provider=X' line per running agent session, then one "
             "'driver=SCRIPT pid=P' line per running wake driver (wake-batch.sh, wake.sh, wake-now.sh), "
@@ -986,21 +1016,39 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     _add_common(p, input_help="file holding the container's 'ps -eo pid=,args=' output")
-    p.add_argument("--kanban-root", metavar="PATH", default=None, help="kanban root holding locks/task-liveness/ (default: $PGAI_AGENT_KANBAN_ROOT_PATH)")
+    p.add_argument(
+        "--kanban-root",
+        metavar="PATH",
+        default=None,
+        help="kanban root holding locks/task-liveness/ (default: $PGAI_AGENT_KANBAN_ROOT_PATH)",
+    )
 
     p = sub.add_parser(
-        "status", help="the whole container status block",
+        "status",
+        help="the whole container status block",
         description="Print the container status block (or --format json). Exit 0 running with a live scheduler, 3 otherwise, 1 failed state query.",
     )
     _add_common(p, input_help="file holding the 'container inspect' output")
     _add_state_query(p)
-    p.add_argument("--ps-file", metavar="FILE", default=None, help="file holding the container's 'ps -eo pid=,args=' output (omit when the container is not running)")
-    p.add_argument("--crontab-file", metavar="FILE", default=None, help="file holding the host 'crontab -l' output (omit for none)")
-    p.add_argument("--kanban-root", metavar="PATH", default=None, help="kanban root for the heartbeat log and agent sessions (default: $PGAI_AGENT_KANBAN_ROOT_PATH)")
+    p.add_argument(
+        "--ps-file",
+        metavar="FILE",
+        default=None,
+        help="file holding the container's 'ps -eo pid=,args=' output (omit when the container is not running)",
+    )
+    p.add_argument(
+        "--crontab-file", metavar="FILE", default=None, help="file holding the host 'crontab -l' output (omit for none)"
+    )
+    p.add_argument(
+        "--kanban-root",
+        metavar="PATH",
+        default=None,
+        help="kanban root for the heartbeat log and agent sessions (default: $PGAI_AGENT_KANBAN_ROOT_PATH)",
+    )
     return parser
 
 
-def _kanban_root_arg(value: Optional[str]) -> Optional[str]:
+def _kanban_root_arg(value: str | None) -> str | None:
     """Return the kanban root a verb reads, or None when there is none.
 
     An explicit ``--kanban-root`` wins. Otherwise the root comes from the
@@ -1088,7 +1136,7 @@ def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return EXIT_USAGE
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the exit code (see the module docstring)."""
     parser = _parser()
     args = parser.parse_args(argv)

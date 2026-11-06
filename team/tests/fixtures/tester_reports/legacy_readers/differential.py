@@ -69,7 +69,6 @@ import dataclasses
 import io
 import pathlib
 import re
-from typing import Optional
 
 from tests.fixtures.tester_reports.legacy_readers import resolution_matrix as legacy_matrix
 from tests.fixtures.tester_reports.legacy_readers import ship_policy_report as legacy_ship_policy
@@ -130,7 +129,7 @@ class ReaderReading:
     """
 
     reader: str
-    blocks: Optional[tuple]
+    blocks: tuple | None
     findings: tuple
     report: dict
 
@@ -146,7 +145,7 @@ class Disagreement:
     """
 
     report: str
-    finding: Optional[int]
+    finding: int | None
     field: str
     values: tuple
 
@@ -155,11 +154,11 @@ class Disagreement:
         return (self.report, self.finding, self.field)
 
 
-def _vocabulary_token(word: str, field: str) -> Optional[str]:
+def _vocabulary_token(word: str, field: str) -> str | None:
     return word if word in ENUMERATED_FIELDS[field] else None
 
 
-def _canonical_id(value: str) -> Optional[str]:
+def _canonical_id(value: str) -> str | None:
     match = _ID_RE.search(value)
     return f"{match.group(1).upper()}-{int(match.group(2)):04d}" if match else None
 
@@ -178,7 +177,7 @@ def read_with_stop_bug_files(report_text: str) -> ReaderReading:
     return ReaderReading(STOP_BUG_FILES, blocks, tuple(findings), {})
 
 
-def _matrix_filed_as(raw: Optional[str]) -> Optional[str]:
+def _matrix_filed_as(raw: str | None) -> str | None:
     """resolution_matrix's Filed As reading in the parser's vocabulary."""
     if raw is None or raw.strip().lower() in legacy_matrix._NOT_FILED_VALUES:
         return None
@@ -202,10 +201,7 @@ def read_with_ship_policy_values(report_path: pathlib.Path) -> ReaderReading:
     """The ship-policy values mode's report-level reading."""
     with contextlib.redirect_stderr(io.StringIO()):
         values = legacy_ship_policy.report_values(str(report_path))
-    report = {
-        field: (None if values[field] in ("none", "unparseable") else values[field])
-        for field in REPORT_FIELDS
-    }
+    report = {field: (None if values[field] in ("none", "unparseable") else values[field]) for field in REPORT_FIELDS}
     return ReaderReading(SHIP_POLICY_VALUES, None, (), report)
 
 
@@ -239,24 +235,26 @@ def disagreements(report_name: str, readings: dict) -> list:
     """Every field of the report two or more legacy readers read differently."""
     found = []
     if not split_agrees(readings):
-        found.append(Disagreement(
-            report_name, None, SPLIT_FIELD,
-            tuple((r.reader, len(r.blocks)) for r in _splitters(readings)),
-        ))
+        found.append(
+            Disagreement(
+                report_name,
+                None,
+                SPLIT_FIELD,
+                tuple((r.reader, len(r.blocks)) for r in _splitters(readings)),
+            )
+        )
     else:
         for index in range(finding_count(readings)):
             for field in FINDING_FIELDS:
                 values = tuple(
                     (name, readings[name].findings[index][field])
-                    for name in READERS if field in READER_FINDING_FIELDS[name]
+                    for name in READERS
+                    if field in READER_FINDING_FIELDS[name]
                 )
                 if len({value for _name, value in values}) > 1:
                     found.append(Disagreement(report_name, index + 1, field, values))
     for field in REPORT_FIELDS:
-        values = tuple(
-            (name, readings[name].report[field])
-            for name in READERS if field in READER_REPORT_FIELDS[name]
-        )
+        values = tuple((name, readings[name].report[field]) for name in READERS if field in READER_REPORT_FIELDS[name])
         if len({value for _name, value in values}) > 1:
             found.append(Disagreement(report_name, None, field, values))
     return found
@@ -272,16 +270,12 @@ def agreed_values(readings: dict) -> dict:
         for index in range(finding_count(readings)):
             for field in FINDING_FIELDS:
                 values = {
-                    readings[name].findings[index][field]
-                    for name in READERS if field in READER_FINDING_FIELDS[name]
+                    readings[name].findings[index][field] for name in READERS if field in READER_FINDING_FIELDS[name]
                 }
                 if len(values) == 1:
                     agreed[(index + 1, field)] = values.pop()
     for field in REPORT_FIELDS:
-        values = {
-            readings[name].report[field]
-            for name in READERS if field in READER_REPORT_FIELDS[name]
-        }
+        values = {readings[name].report[field] for name in READERS if field in READER_REPORT_FIELDS[name]}
         if len(values) == 1:
             agreed[(None, field)] = values.pop()
     return agreed

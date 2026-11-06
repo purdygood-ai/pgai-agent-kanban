@@ -26,12 +26,12 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 __all__ = ["display_path", "quality_finding", "write_findings_file"]
 
 
-def display_path(path: Union[str, Path], root: Union[str, Path]) -> str:
+def display_path(path: str | Path, root: str | Path) -> str:
     """*path* relative to *root* when it lies inside it, else *path* as given.
 
     Findings name files the way a reader at the repository root would type
@@ -50,8 +50,8 @@ def quality_finding(
     cause: str,
     remedy: str,
     *,
-    file: Optional[str] = None,
-    line: Optional[int] = None,
+    file: str | None = None,
+    line: int | None = None,
     **extra: Any,
 ) -> dict:
     """One per-instance quality finding.
@@ -83,9 +83,7 @@ def quality_finding(
     return finding
 
 
-def write_findings_file(
-    path: Optional[Union[str, Path]], findings: list, *, lint: str
-) -> bool:
+def write_findings_file(path: str | Path | None, findings: list, *, lint: str) -> bool:
     """Write *findings* to *path* as a JSON array, creating parent directories.
 
     The file is written even when *findings* is empty, so a reader can tell

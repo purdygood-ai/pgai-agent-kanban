@@ -49,11 +49,21 @@
 #                             a fresh record — is preferred over a marker
 #                             kept forever. The log line names the absent
 #                             record so the decision is never silent.
-#         3. An orphaned task has any worktree/branch the interrupted
-#            attempt left behind torn down first, so the next
-#            create_task_worktree call gets a clean slate, then goes through
+#         3. An orphaned task has any worktree the interrupted attempt left
+#            behind torn down first, then goes through
 #            zero_progress_advance_or_escalate: BACKLOG below the cap,
-#            BLOCKED + Needs Human at it.
+#            BLOCKED + Needs Human at it. Its feature branch is deleted
+#            when every commit on it is reachable from another branch, a
+#            tag or the dev tree's HEAD. A branch holding commits nothing
+#            else reaches (the reset path's test, ops
+#            unmerged_branch_commits) is kept, one log line names its tip
+#            and commit count, and resume mode branch is recorded
+#            (wd_record_branch_resume) so the next dispatch attaches it at
+#            that tip instead of re-creating it from the source branch.
+#            A branch kept because that test itself failed also gets the
+#            ops exit code and the tip appended to the task's ## Summary
+#            (_sweep_note_unverified_kept_branch), so the next agent and
+#            the operator read why it resumes on an unverified branch.
 #
 #   reconcile_terminal_worktrees
 #       Companion sweep, keyed off status.md's own ## State (the SOT) rather
@@ -86,6 +96,7 @@
 # -----------------------------------------------------------------------
 #   wake_bootstrap.sh    — BACKLOG, TASKS_ROOT globals, and log().
 #   wake_task_state.sh   — mark_backlog, get_state, normalize_status_file,
+#     _read_status_section, set_block_or_append,
 #     task_liveness_record_path, task_liveness_record, task_liveness_verdict,
 #     task_liveness_is_alive; sourced immediately before this file. It
 #     also self-sources wake_task_id_gate.sh, which supplies
@@ -107,8 +118,13 @@
 #     teardown and reconcile_terminal_worktrees' own sweep); sourced by the
 #     calling wake script before run_project_chain invokes either function —
 #     pre-existing, unchanged by this move.
+#   pp_run_ops (wake_bootstrap.sh) — the queue scan and the committed-work
+#     test that decides whether an orphaned task's feature branch is kept.
+#   wake_task_budget.sh — wd_record_branch_resume, the resume mode a kept
+#     branch needs; wake_driver.sh sources it before run_project_chain.
+#     Without it a kept branch is logged and no resume mode is recorded.
 #
-# python3 must be on PATH (used by reconcile_stale_active's own heredoc).
+# python3 must be on PATH (reconcile_stale_active's pp_run_ops module calls).
 # Sourced by wake_common.sh immediately after wake_task_state.sh.
 
 # ---------------------------------------------------------------------------
@@ -271,6 +287,22 @@ _sweep_correct_terminal_marker() {
   return 2
 }
 
+# _sweep_note_unverified_kept_branch <task_id> <task_status> <branch> <exit> <tip>
+# Appends to the task's ## Summary (written after the reset or escalation,
+# so it survives the reset's own Summary) that <branch> was kept at <tip>
+# because ops unmerged_branch_commits failed with <exit>. Never fails; a
+# write it cannot make is a WARNING log line.
+_sweep_note_unverified_kept_branch() {
+  local task_id="$1" task_status="$2" branch="$3" uc_exit="$4" tip="$5" summary="" note
+  note="The wake kept feature branch ${branch} at ${tip} without knowing what it holds: its unmerged-commit check (ops unmerged_branch_commits) failed with exit ${uc_exit}, so the next dispatch resumes on that branch unverified."
+  summary="$(_read_status_section "$task_status" "Summary" 2>/dev/null)" || summary=""
+  if set_block_or_append "$task_status" "Summary" "${summary:+${summary} }${note}"; then
+    log "stale-active: ${task_id} ## Summary records the failed unmerged-commit check (exit ${uc_exit}) and the kept tip ${tip}"
+  else
+    log "stale-active: ${task_id} WARNING: could not record the failed unmerged-commit check (exit ${uc_exit}, tip ${tip}) in ${task_status}"
+  fi
+}
+
 reconcile_stale_active() {
   # Every [A] id is checked against the canonical task-id shape before it
   # can become a worktree path, a branch name or a status path: a line
@@ -353,9 +385,13 @@ reconcile_stale_active() {
     # them down (teardown_task_worktree from worktree.sh, pp_prefix_branch
     # from project_paths.sh — both sourced by the caller before
     # reconcile_stale_active runs) so the next create_task_worktree call gets
-    # a clean slate instead of hard-blocking on "branch already exists".
+    # a clean slate instead of hard-blocking on "branch already exists" —
+    # except a branch holding committed work, which is kept for the next
+    # dispatch to attach (Step 2).
     # PP_dev_tree_path (falls back to PGAI_DEV_TREE_PATH) locates the dev
     # tree. Best-effort: failures WARN but never block the state reset.
+    # Set by Step 2 below when the feature branch is kept; reset per task.
+    local _sa_unique="" _sa_uc_exit=0
     local _sa_dev_tree="${PP_dev_tree_path:-${PGAI_DEV_TREE_PATH:-}}"
     if [[ -n "$_sa_dev_tree" && -d "$_sa_dev_tree/.git" ]]; then
       # Compute the prefix-aware feature branch name (mirrors reset.sh Step 4).
@@ -380,8 +416,28 @@ reconcile_stale_active() {
         fi
       fi
 
-      # Step 2: delete the feature branch if it still exists locally.
+      # Step 2: a feature branch holding commits no other branch, tag or the
+      # dev tree's HEAD reaches is kept, and the task resumes from it (the
+      # reset path's committed-work test, ops unmerged_branch_commits, prints
+      # "<count> <tip>" for such a branch and nothing otherwise). A check
+      # that fails keeps the branch too: an unknown answer never deletes work.
+      # Any other branch still present locally is deleted as before.
       if git -C "$_sa_dev_tree" rev-parse --verify "refs/heads/${_sa_feature_branch}" >/dev/null 2>&1; then
+        set +e
+        _sa_unique="$(pp_run_ops pgai_agent_kanban.ops unmerged_branch_commits "$_sa_dev_tree" "$_sa_feature_branch")"
+        _sa_uc_exit=$?
+        set -e
+        if [[ $_sa_uc_exit -ne 0 ]]; then
+          _sa_unique="-1 $(git -C "$_sa_dev_tree" rev-parse --short "refs/heads/${_sa_feature_branch}" 2>/dev/null || echo unknown)"
+          log "stale-active: ${task_id} WARNING: could not check feature branch ${_sa_feature_branch} for unmerged commits (exit ${_sa_uc_exit}); keeping it"
+        fi
+      fi
+      if [[ -n "$_sa_unique" ]]; then
+        local _sa_count="" _sa_tip=""
+        read -r _sa_count _sa_tip _ <<< "$_sa_unique" || true
+        [[ "$_sa_count" =~ ^[0-9]+$ ]] || _sa_count="an unknown number of"
+        log "stale-active: ${task_id} keeping feature branch ${_sa_feature_branch} at ${_sa_tip}: it holds ${_sa_count} commit(s) no other branch, tag or the dev tree's HEAD reaches; the next dispatch resumes from it"
+      elif git -C "$_sa_dev_tree" rev-parse --verify "refs/heads/${_sa_feature_branch}" >/dev/null 2>&1; then
         log "stale-active: ${task_id} deleting prior feature branch ${_sa_feature_branch}"
         # Suppress stdout as well as stderr — git branch -D emits "Deleted branch ..."
         # to stdout, which would appear as stray output in cron logs.
@@ -403,6 +459,19 @@ reconcile_stale_active() {
         "stale_active_orphan" "orphaned WORKING task, no live process" \
         "wake.reconcile.zero-progress-cap" >/dev/null; then
       reconciled=$((reconciled + 1))
+    fi
+    # A kept branch is useful only if the next dispatch attaches it: record
+    # resume mode branch (wake_task_budget.sh) after the reset or escalation,
+    # so a Block Record the escalation writes carries it as well.
+    if [[ -n "${_sa_unique:-}" ]]; then
+      if declare -F wd_record_branch_resume >/dev/null; then
+        wd_record_branch_resume "$task_id" "$task_status"
+      else
+        log "stale-active: ${task_id} WARNING: wd_record_branch_resume is not loaded; no resume mode recorded, so the next dispatch re-creates the kept feature branch"
+      fi
+      if (( _sa_uc_exit != 0 )); then
+        _sweep_note_unverified_kept_branch "$task_id" "$task_status" "$_sa_feature_branch" "$_sa_uc_exit" "$_sa_tip"
+      fi
     fi
   done <<< "$stale_ids"
 

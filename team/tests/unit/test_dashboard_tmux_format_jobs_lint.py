@@ -28,7 +28,10 @@ _LINT = _TEAM_DIR / "scripts" / "dashboard" / "lint_tmux_format_jobs.py"
 def _run(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_LINT), *args],
-        capture_output=True, text=True, timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
 
 
@@ -59,16 +62,14 @@ def test_seeded_format_job_in_status_right_fails(tmp_path: pathlib.Path) -> None
     [
         ('# tmux set-option -g status-right "#(echo hi)"\n', 0),
         ('echo "a #(literal) outside tmux"\n', 0),
-        ('tmux set-hook -g client-attached "run-shell \'#(echo hi)\'"\n', 0),
+        ("tmux set-hook -g client-attached \"run-shell '#(echo hi)'\"\n", 0),
         ('tmux setw -g window-status-format "#(date)"\n', 1),
         ('tmux set-option -t "$S" -g "status-format[2]" \\\n  "#[bg=red]#(cmd)#[default]"\n', 1),
         ('tmux select-pane -t "$P" -T "#(hostname)"\n', 1),
     ],
     ids=["comment", "not-a-tmux-option", "set-hook", "setw", "continued-line", "pane-title"],
 )
-def test_only_tmux_option_setters_are_findings(
-    tmp_path: pathlib.Path, body: str, findings: int
-) -> None:
+def test_only_tmux_option_setters_are_findings(tmp_path: pathlib.Path, body: str, findings: int) -> None:
     script = tmp_path / "case.sh"
     script.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
     result = _run("--path", str(tmp_path))

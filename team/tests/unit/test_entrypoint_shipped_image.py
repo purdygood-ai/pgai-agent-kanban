@@ -15,10 +15,21 @@ the launcher's own mount convention), and PGAI_AGENT_KANBAN_ROOT_PATH set to
 that path. The baked /entrypoint.sh (docker/entrypoint.sh, COPY'd in by both
 Dockerfiles) handles verification, cd, and exec.
 
+OPERATOR-ONLY GATE
+------------------
+Building images and starting containers is the operator-only container tier
+(team/scripts/lib/container_tier.sh). Unless PGAI_CONTAINER_TIER=1 is set
+outside an agent wake, every image test skips with a narrated reason naming
+that gate, before any docker command runs -- however pytest was asked to
+collect this module. The operator runs it with
+PGAI_CONTAINER_TIER=1 bash team/scripts/run-gated-tests.sh.
+
 DOCKER-AVAILABILITY GATE
 -------------------------
-When the docker binary is absent or the daemon is unreachable, every test in
-this module is skipped with a narrated reason — never a silent pass.
+When the docker binary is absent or the daemon is unreachable, every image
+test in this module is skipped with a narrated reason — never a silent pass.
+
+The Dockerfile structural tests need no engine and run in every case.
 
 Test naming describes behavior, never bug IDs or scaffolding labels.
 """
@@ -26,12 +37,13 @@ Test naming describes behavior, never bug IDs or scaffolding labels.
 from __future__ import annotations
 
 import pathlib
+import shlex
 import subprocess
 from typing import NamedTuple
 
 import pytest
 
-from tests.fixtures.binary_guard import require_docker_daemon
+from tests.fixtures.binary_guard import require_container_tier, require_docker_daemon
 from tests.fixtures.docker_cli_pins import cli_pins_build_args
 
 # ---------------------------------------------------------------------------
@@ -44,6 +56,9 @@ _THIS_FILE = pathlib.Path(__file__).resolve()
 _TEAM_DIR = _THIS_FILE.parent.parent.parent
 _REPO_ROOT = _TEAM_DIR.parent
 
+# What an operator runs to exercise this module (named in the operator-only skip).
+_OPERATOR_COMMAND = f"PGAI_CONTAINER_TIER=1 bash {shlex.quote(str(_TEAM_DIR / 'scripts' / 'run-gated-tests.sh'))}"
+
 
 # ---------------------------------------------------------------------------
 # Flavor configuration (parametrize both Dockerfiles)
@@ -52,6 +67,7 @@ _REPO_ROOT = _TEAM_DIR.parent
 
 class _FlavorConfig(NamedTuple):
     """Build parameters for one image flavor."""
+
     name: str
     dockerfile: pathlib.Path
     build_context: pathlib.Path
@@ -102,10 +118,12 @@ def shipped_image_tag(request: pytest.FixtureRequest) -> str:
 
     Module-scoped so each flavor's image is built once and reused by every
     test in this module, then removed in teardown. Skips (with narration)
-    when Docker is unavailable or the flavor's Dockerfile is missing.
+    without the operator's container-tier authorization -- checked before
+    any docker command -- or when Docker is unavailable.
     """
     flavor: _FlavorConfig = request.param
 
+    require_container_tier(label="entrypoint-shipped-image", operator_command=_OPERATOR_COMMAND)
     require_docker_daemon(label="entrypoint-shipped-image")
 
     if not flavor.dockerfile.exists():
@@ -115,15 +133,17 @@ def shipped_image_tag(request: pytest.FixtureRequest) -> str:
         )
 
     print(
-        f"\n[entrypoint-shipped-image] [{flavor.name}] Building image "
-        f"from {flavor.dockerfile} ...",
+        f"\n[entrypoint-shipped-image] [{flavor.name}] Building image " f"from {flavor.dockerfile} ...",
         flush=True,
     )
     result = subprocess.run(
         [
-            "docker", "build",
-            "--tag", flavor.image_tag,
-            "--file", str(flavor.dockerfile),
+            "docker",
+            "build",
+            "--tag",
+            flavor.image_tag,
+            "--file",
+            str(flavor.dockerfile),
             *cli_pins_build_args(),
             str(flavor.build_context),
         ],
@@ -155,10 +175,7 @@ def shipped_image_tag(request: pytest.FixtureRequest) -> str:
                 "this environment — see BUILD STDERR above for the "
                 "underlying package-resolution error"
             )
-        pytest.fail(
-            f"docker build [{flavor.name}] exited {result.returncode}; "
-            "see build output above"
-        )
+        pytest.fail(f"docker build [{flavor.name}] exited {result.returncode}; " "see build output above")
 
     print(
         f"[entrypoint-shipped-image] [{flavor.name}] Image built: {flavor.image_tag}",
@@ -211,9 +228,7 @@ def test_dockerfile_copies_entrypoint_with_exec_permission(flavor: _FlavorConfig
     Without --chmod=+x (or --chmod=755), docker exec'ing /entrypoint.sh fails
     with "permission denied". Requires no docker daemon.
     """
-    assert flavor.dockerfile.exists(), (
-        f"docker/{flavor.name}/Dockerfile not found at {flavor.dockerfile}"
-    )
+    assert flavor.dockerfile.exists(), f"docker/{flavor.name}/Dockerfile not found at {flavor.dockerfile}"
     content = flavor.dockerfile.read_text(encoding="utf-8")
     has_copy_with_x = (
         "COPY --chmod=+x docker/entrypoint.sh /entrypoint.sh" in content
@@ -251,12 +266,8 @@ def test_missing_root_env_var_exits_one_naming_it(shipped_image_tag: str) -> Non
         flush=True,
     )
 
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nFull output:\n{combined}"
-    )
-    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in combined, (
-        f"variable name not named in output:\n{combined}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nFull output:\n{combined}"
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in combined, f"variable name not named in output:\n{combined}"
 
 
 def test_unmounted_root_path_exits_one_naming_the_path(shipped_image_tag: str) -> None:
@@ -271,8 +282,11 @@ def test_unmounted_root_path_exits_one_naming_the_path(shipped_image_tag: str) -
 
     result = subprocess.run(
         [
-            "docker", "run", "--rm",
-            "--env", f"PGAI_AGENT_KANBAN_ROOT_PATH={unmounted_path}",
+            "docker",
+            "run",
+            "--rm",
+            "--env",
+            f"PGAI_AGENT_KANBAN_ROOT_PATH={unmounted_path}",
             shipped_image_tag,
         ],
         capture_output=True,
@@ -286,12 +300,8 @@ def test_unmounted_root_path_exits_one_naming_the_path(shipped_image_tag: str) -
         flush=True,
     )
 
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nFull output:\n{combined}"
-    )
-    assert unmounted_path in combined, (
-        f"missing root path not named in output:\n{combined}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nFull output:\n{combined}"
+    assert unmounted_path in combined, f"missing root path not named in output:\n{combined}"
 
 
 def test_mounted_root_lands_shell_in_that_directory(
@@ -317,9 +327,14 @@ def test_mounted_root_lands_shell_in_that_directory(
 
     result = subprocess.run(
         [
-            "docker", "run", "--rm", "-i",
-            "--volume", f"{kanban_root}:{kanban_root}",
-            "--env", f"PGAI_AGENT_KANBAN_ROOT_PATH={kanban_root}",
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--volume",
+            f"{kanban_root}:{kanban_root}",
+            "--env",
+            f"PGAI_AGENT_KANBAN_ROOT_PATH={kanban_root}",
             shipped_image_tag,
         ],
         input="pwd\n",
@@ -329,14 +344,12 @@ def test_mounted_root_lands_shell_in_that_directory(
     )
 
     print(
-        f"\n[entrypoint-shipped-image] mounted-root stdout:\n{result.stdout}\n"
-        f"stderr:\n{result.stderr}",
+        f"\n[entrypoint-shipped-image] mounted-root stdout:\n{result.stdout}\n" f"stderr:\n{result.stderr}",
         flush=True,
     )
 
     assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     printed_cwd = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
     assert printed_cwd == str(kanban_root), (

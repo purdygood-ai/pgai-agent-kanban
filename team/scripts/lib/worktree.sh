@@ -343,7 +343,10 @@ _wt_clear_task_worktree_path() {
 # Resume modes (passed by the wake's worktree stage, wd_setup_task_worktree:
 # the task's Block Record 'resume:' value, or for a task with no Block Record
 # its ## Resume Mode section -- 'branch' after the wake's time budget stopped
-# a dispatch, so the commits that dispatch made are kept -- else fresh):
+# a dispatch, after the wake's stale-active sweep returned an orphaned task to
+# BACKLOG keeping a feature branch holding unmerged commits, or after a reset
+# kept such a branch, so the commits that dispatch made are kept -- else
+# fresh):
 #   fresh  (default; also an empty argument) — the worktree is checked out on
 #          a new local <feature_branch> branched from the local <rc_branch>.
 #          A pre-existing <feature_branch> is force-deleted (git branch -D)

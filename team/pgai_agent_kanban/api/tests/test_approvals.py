@@ -33,7 +33,6 @@ import io
 import pathlib
 import sys
 import textwrap
-from typing import Generator
 from unittest.mock import patch
 
 import pytest
@@ -45,7 +44,7 @@ from fastapi.testclient import TestClient
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _API_TESTS_DIR = _THIS_FILE.parent
 _TEAM_DIR = _API_TESTS_DIR.parent.parent.parent  # team/
-_PROJECT_ROOT = _TEAM_DIR.parent                  # project root (contains team/)
+_PROJECT_ROOT = _TEAM_DIR.parent  # project root (contains team/)
 
 _project_root_str = str(_PROJECT_ROOT)
 if _project_root_str not in sys.path:
@@ -177,7 +176,8 @@ class TestApprovalsEmptyState:
     ) -> None:
         """Project directory exists but no pending tasks → response is []."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "DONE", _RC_ALPHA, "Already approved.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -193,7 +193,8 @@ class TestApprovalsEmptyState:
     ) -> None:
         """?project= for a registered project with no pending tasks → []."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "DONE", _RC_ALPHA, "Already approved.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -209,8 +210,16 @@ class TestApprovalsEmptyState:
 
 
 _REQUIRED_FIELDS = {
-    "task_id", "project", "state", "rc", "target_version",
-    "age", "review", "review_cmds", "approve_cmd", "reject_cmd",
+    "task_id",
+    "project",
+    "state",
+    "rc",
+    "target_version",
+    "age",
+    "review",
+    "review_cmds",
+    "approve_cmd",
+    "reject_cmd",
 }
 
 
@@ -224,7 +233,8 @@ class TestApprovalsShape:
     ) -> None:
         """One pending approval record contains all required fields."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review release v1.10.0.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -244,7 +254,8 @@ class TestApprovalsShape:
     ) -> None:
         """task_id in the response matches the task directory name."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -260,7 +271,8 @@ class TestApprovalsShape:
     ) -> None:
         """project in the response matches the fixture project name."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -276,7 +288,8 @@ class TestApprovalsShape:
     ) -> None:
         """rc in the response matches ## Release Version from README."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -292,7 +305,8 @@ class TestApprovalsShape:
     ) -> None:
         """target_version is the same value as rc."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -308,7 +322,8 @@ class TestApprovalsShape:
     ) -> None:
         """approve_cmd contains the project name and task_id."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -326,7 +341,8 @@ class TestApprovalsShape:
     ) -> None:
         """reject_cmd contains the project name and task_id."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -344,7 +360,8 @@ class TestApprovalsShape:
     ) -> None:
         """state field is one of the pending states (WAITING or BACKLOG)."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [
                 (_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review."),
                 ("HUMAN-APPROVE-v1.10.0-100", "BACKLOG", _RC_ALPHA, "Review2."),
@@ -354,9 +371,7 @@ class TestApprovalsShape:
             resp = client.get("/approvals")
 
         for record in resp.json():
-            assert record["state"] in ("WAITING", "BACKLOG"), (
-                f"Unexpected state value: {record['state']}"
-            )
+            assert record["state"] in ("WAITING", "BACKLOG"), f"Unexpected state value: {record['state']}"
 
 
 # ---------------------------------------------------------------------------
@@ -374,11 +389,13 @@ class TestApprovalsProjectFilter:
     ) -> None:
         """?project=proj-alpha returns only proj-alpha records."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Alpha review.")],
         )
         _build_project(
-            tmp_path, _PROJ_BETA,
+            tmp_path,
+            _PROJ_BETA,
             [(_TASK_BETA, "WAITING", _RC_BETA, "Beta review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -397,20 +414,22 @@ class TestApprovalsProjectFilter:
     ) -> None:
         """?project=proj-alpha result does not contain proj-beta records."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Alpha review.")],
         )
         _build_project(
-            tmp_path, _PROJ_BETA,
+            tmp_path,
+            _PROJ_BETA,
             [(_TASK_BETA, "WAITING", _RC_BETA, "Beta review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
             resp = client.get("/approvals", params={"project": _PROJ_ALPHA})
 
         project_names = {r["project"] for r in resp.json()}
-        assert _PROJ_BETA not in project_names, (
-            f"proj-beta records appeared in proj-alpha filter response: {resp.json()}"
-        )
+        assert (
+            _PROJ_BETA not in project_names
+        ), f"proj-beta records appeared in proj-alpha filter response: {resp.json()}"
 
 
 # ---------------------------------------------------------------------------
@@ -428,11 +447,13 @@ class TestApprovalsAggregation:
     ) -> None:
         """Without ?project=, records from both projects are returned."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Alpha review.")],
         )
         _build_project(
-            tmp_path, _PROJ_BETA,
+            tmp_path,
+            _PROJ_BETA,
             [(_TASK_BETA, "WAITING", _RC_BETA, "Beta review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -453,11 +474,13 @@ class TestApprovalsAggregation:
     ) -> None:
         """Without ?project=, all task IDs from all projects are present."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Alpha review.")],
         )
         _build_project(
-            tmp_path, _PROJ_BETA,
+            tmp_path,
+            _PROJ_BETA,
             [(_TASK_BETA, "WAITING", _RC_BETA, "Beta review.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -486,9 +509,7 @@ class TestApprovalsUnknownProject:
         with _make_client(tmp_path, monkeypatch) as client:
             resp = client.get("/approvals", params={"project": "does-not-exist"})
 
-        assert resp.status_code == 422, (
-            f"Expected 422 for unknown project, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for unknown project, got {resp.status_code}: {resp.text}"
 
     def test_unknown_project_returns_422_not_empty_200(
         self,
@@ -499,9 +520,7 @@ class TestApprovalsUnknownProject:
         with _make_client(tmp_path, monkeypatch) as client:
             resp = client.get("/approvals", params={"project": "does-not-exist"})
 
-        assert resp.status_code != 200, (
-            "Unknown project must not return 200; returned empty 200 instead of 422."
-        )
+        assert resp.status_code != 200, "Unknown project must not return 200; returned empty 200 instead of 422."
 
     def test_unknown_project_detail_names_project(
         self,
@@ -513,9 +532,7 @@ class TestApprovalsUnknownProject:
             resp = client.get("/approvals", params={"project": "does-not-exist"})
 
         detail = resp.json().get("detail", "")
-        assert "does-not-exist" in detail, (
-            f"422 detail must name the unknown project; got: {detail!r}"
-        )
+        assert "does-not-exist" in detail, f"422 detail must name the unknown project; got: {detail!r}"
 
     def test_unknown_project_422_before_subprocess(
         self,
@@ -543,7 +560,8 @@ class TestApprovalsUnknownProject:
     ) -> None:
         """A registered project with no pending approvals returns 200 [], not 422."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "DONE", _RC_ALPHA, "Already done.")],
         )
         with _make_client(tmp_path, monkeypatch) as client:
@@ -594,7 +612,8 @@ class TestApprovalsPathConfinement:
     ) -> None:
         """GET /approvals with pending tasks does not modify any existing file."""
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Review.")],
         )
         before = self._checksum_dir(tmp_path)
@@ -647,6 +666,7 @@ class TestApprovalsJsonVsWindow14:
             Set of (task_id, project, rc) tuples.
         """
         import re
+
         records: set[tuple[str, str, str]] = set()
 
         # Pattern for header line: "! TASK-ID  [project]"
@@ -690,11 +710,13 @@ class TestApprovalsJsonVsWindow14:
 
         # Build two-project fixture.
         _build_project(
-            tmp_path, _PROJ_ALPHA,
+            tmp_path,
+            _PROJ_ALPHA,
             [(_TASK_ALPHA, "WAITING", _RC_ALPHA, "Approve alpha release.")],
         )
         _build_project(
-            tmp_path, _PROJ_BETA,
+            tmp_path,
+            _PROJ_BETA,
             [(_TASK_BETA, "BACKLOG", _RC_BETA, "Approve beta release.")],
         )
 
@@ -705,10 +727,7 @@ class TestApprovalsJsonVsWindow14:
         json_records = resp.json()
 
         # Build set of (task_id, project, rc) from JSON.
-        json_set = {
-            (r["task_id"], r["project"], r["rc"])
-            for r in json_records
-        }
+        json_set = {(r["task_id"], r["project"], r["rc"]) for r in json_records}
 
         # Get window-14 rendered text (no-color, no subprocess).
         buf = io.StringIO()
@@ -723,14 +742,8 @@ class TestApprovalsJsonVsWindow14:
         # Parse rendered text into (task_id, project, rc) set.
         window14_set = self._parse_window14_records(rendered)
 
-        assert window14_set, (
-            "window-14 parsed no records from rendered output.\n"
-            f"Rendered text:\n{rendered}"
-        )
-        assert json_set, (
-            "JSON endpoint returned no records.\n"
-            f"Response: {json_records}"
-        )
+        assert window14_set, "window-14 parsed no records from rendered output.\n" f"Rendered text:\n{rendered}"
+        assert json_set, "JSON endpoint returned no records.\n" f"Response: {json_records}"
 
         # JSON → window-14: every JSON record appears in the render.
         missing_from_window14 = json_set - window14_set

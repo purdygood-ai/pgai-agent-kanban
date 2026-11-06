@@ -53,9 +53,7 @@ def _load_script_module(name: str, path: pathlib.Path):
 _promote = _load_script_module(
     "promote_bundled_items_shared_readers", _TEAM_DIR / "scripts" / "cm" / "promote_bundled_items.py"
 )
-_pm_status = _load_script_module(
-    "pm_status_shared_readers", _TEAM_DIR / "pm-agent" / "pm_status.py"
-)
+_pm_status = _load_script_module("pm_status_shared_readers", _TEAM_DIR / "pm-agent" / "pm_status.py")
 if str(_TEAM_DIR / "scripts" / "lib") not in sys.path:
     sys.path.insert(0, str(_TEAM_DIR / "scripts" / "lib"))
 import metrics_aggregator  # noqa: E402

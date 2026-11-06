@@ -120,11 +120,13 @@ _COLLECTED_ROOTS: list[str] = [
 # Directories excluded from the "all test files" enumeration.
 # ---------------------------------------------------------------------------
 
-_EXCLUDED_DIRS: frozenset[str] = frozenset({
-    "__pycache__",
-    ".venv",
-    "fixtures",
-})
+_EXCLUDED_DIRS: frozenset[str] = frozenset(
+    {
+        "__pycache__",
+        ".venv",
+        "fixtures",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -224,21 +226,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.team_dir:
         team_dir = Path(args.team_dir).resolve()
     else:
-        script_dir = Path(__file__).resolve().parent   # team/scripts/
-        team_dir = script_dir.parent                   # team/
+        script_dir = Path(__file__).resolve().parent  # team/scripts/
+        team_dir = script_dir.parent  # team/
 
     if not team_dir.is_dir():
         print(
-            f"ERROR: team directory not found: {team_dir}\n"
-            "Use --team-dir to specify an alternative path.",
+            f"ERROR: team directory not found: {team_dir}\n" "Use --team-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
 
     print(f"lint_orphan_tests: scanning {team_dir}", flush=True)
     print(
-        "lint_orphan_tests: collected roots — "
-        + ", ".join(_COLLECTED_ROOTS),
+        "lint_orphan_tests: collected roots — " + ", ".join(_COLLECTED_ROOTS),
         flush=True,
     )
 
@@ -252,8 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         findings.append(
             quality_finding(
                 _LINT_NAME,
-                f"{rel} is not under any collected root ({', '.join(_COLLECTED_ROOTS)}), "
-                "so no gated runner runs it",
+                f"{rel} is not under any collected root ({', '.join(_COLLECTED_ROOTS)}), " "so no gated runner runs it",
                 f"git -C {repo_root} mv {rel} {unit_dest} && {relint}",
                 file=rel,
             )
@@ -262,8 +261,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if findings:
         print(
-            f"\nlint_orphan_tests: {len(findings)} orphan test file(s) "
-            "not reachable from any gated runner:\n",
+            f"\nlint_orphan_tests: {len(findings)} orphan test file(s) " "not reachable from any gated runner:\n",
             flush=True,
         )
         for finding in findings:
@@ -287,8 +285,7 @@ def main(argv: list[str] | None = None) -> int:
 
     total = len(_collect_test_files(team_dir, verbose=False))
     print(
-        f"lint_orphan_tests: ok — {total} test file(s) covered, "
-        "no orphan tests found.",
+        f"lint_orphan_tests: ok — {total} test file(s) covered, " "no orphan tests found.",
         flush=True,
     )
     return 0

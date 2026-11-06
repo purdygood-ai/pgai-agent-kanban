@@ -175,9 +175,9 @@ def test_dispatch_ledger_appends_and_reads_from_an_install_root(
     assert proc.returncode == 0, _explain(proc)
     assert proc.stdout == "/logs/coder-batch.log\t12\t80\n", _explain(proc)
     records = [
-        json.loads(line)
-        for line in (task_dir / "logs" / "dispatch.jsonl").read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in (task_dir / "logs" / "dispatch.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [(r["event"], r["offset_end"], r["exit_code"]) for r in records] == [
-        ("dispatched", None, None), ("returned", 80, 0),
+        ("dispatched", None, None),
+        ("returned", 80, 0),
     ]

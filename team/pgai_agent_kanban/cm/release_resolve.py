@@ -53,7 +53,6 @@ import dataclasses
 import pathlib
 import shlex
 import sys
-from typing import Optional
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -108,9 +107,9 @@ class SquashConflictResult:
 
     outcome: str
     reason: str
-    ledger_entry: Optional[str]
-    entry_id: Optional[str]
-    inbox_error: Optional[str]
+    ledger_entry: str | None
+    entry_id: str | None
+    inbox_error: str | None
     action_errors: tuple
 
 
@@ -158,7 +157,7 @@ def resolve_squash_conflict_for_release(
     main_sha: str,
     rc_tip: str,
     paths: list,
-    repo_root: Optional[str] = None,
+    repo_root: str | None = None,
 ) -> SquashConflictResult:
     """Cancel and rebundle *version*'s RC after its squash conflicted, when
     the matrix allows it, and leave one inbox entry naming every path.
@@ -175,9 +174,7 @@ def resolve_squash_conflict_for_release(
     repo = repo_root or "<dev tree>"
     outcome = resolve_squash_conflict(project, str(ctx.kanban_root), version, repo_root=repo_root)
     cancelled = cancel_landed(outcome, project, version)
-    conflict = (
-        f"The squash of {rc_branch} into {main_branch} conflicted on {len(paths)} path(s): {_path_list(paths)}."
-    )
+    conflict = f"The squash of {rc_branch} into {main_branch} conflicted on {len(paths)} path(s): {_path_list(paths)}."
     close_hint = (
         f"List this entry with `{_inbox_list_command(ctx, project)}` and close it with the "
         "same script's close command."
@@ -241,7 +238,7 @@ def write_tag_on_remote_entry(
     *,
     tag: str,
     remote: str,
-    repo_root: Optional[str] = None,
+    repo_root: str | None = None,
 ) -> str:
     """Write the inbox entry for a release tag already on the remote; its ID.
 
@@ -253,9 +250,12 @@ def write_tag_on_remote_entry(
     version = checked_release_version(version, ReleaseResolveError, _BAD_VERSION_KEY, _HELP_COMMAND)
     ctx = OpsContext(kanban_root=kanban_root)
     repo = shlex.quote(repo_root or "<dev tree>")
-    cancel_cmd = installed_script_command(ctx.kanban_root, "cm/cancel-rc.sh", "--project", project, "--key", version, "--yes")
+    cancel_cmd = installed_script_command(
+        ctx.kanban_root, "cm/cancel-rc.sh", "--project", project, "--key", version, "--yes"
+    )
     entry = operator_inbox.write_entry(
-        ctx, project,
+        ctx,
+        project,
         source=f"rc:{version}",
         question=(
             f"Release tag {tag} is already on {remote}, so {version} was not tagged or shipped again. Did "
@@ -314,7 +314,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run one subcommand and print its ``key=value`` lines.
 
     Returns 0 when the subcommand ran (whatever its outcome), 1 when an
@@ -325,9 +325,15 @@ def main(argv: Optional[list] = None) -> int:
     try:
         if args.command == "squash-conflict":
             result = resolve_squash_conflict_for_release(
-                args.kanban_root, args.project, args.version,
-                rc_branch=args.rc_branch, main_branch=args.main_branch, main_sha=args.main_sha,
-                rc_tip=args.rc_tip, paths=args.path, repo_root=args.repo_root or None,
+                args.kanban_root,
+                args.project,
+                args.version,
+                rc_branch=args.rc_branch,
+                main_branch=args.main_branch,
+                main_sha=args.main_sha,
+                rc_tip=args.rc_tip,
+                paths=args.path,
+                repo_root=args.repo_root or None,
             )
             print(f"outcome={result.outcome}")
             print(f"reason={' '.join(result.reason.split())}")
@@ -339,8 +345,12 @@ def main(argv: Optional[list] = None) -> int:
                 sys.stderr.write(f"release_resolve: the operator inbox entry was not written: {result.inbox_error}\n")
         else:
             entry_id = write_tag_on_remote_entry(
-                args.kanban_root, args.project, args.version,
-                tag=args.tag, remote=args.remote, repo_root=args.repo_root or None,
+                args.kanban_root,
+                args.project,
+                args.version,
+                tag=args.tag,
+                remote=args.remote,
+                repo_root=args.repo_root or None,
             )
             print(f"entry_id={entry_id}")
     except ContractError as exc:

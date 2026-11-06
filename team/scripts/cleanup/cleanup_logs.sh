@@ -26,7 +26,7 @@
 # ---------------------------------------------------------------------------
 # Bootstrap: resolve paths via project_paths.sh
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _CLEANUP_LOGS_LIB_DIR="${_SCRIPT_DIR}/../lib"
 # shellcheck source=lib/project_paths.sh
 source "${_CLEANUP_LOGS_LIB_DIR}/project_paths.sh"

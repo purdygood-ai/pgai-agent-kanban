@@ -67,9 +67,28 @@
 #                            parent, and NOT counted as a finding.
 #   record naming a test     still reported ADDED / CHANGED / REMOVED, with
 #                            the test that wrote it appended to the line.
+#   no record, a HALT whose  a chain write (a CM release's trigger HALT,
+#   body names a chain       a HALT-AFTER promotion, an OVERWATCH repair).
+#   writer                   Narrated on stdout as ATTRIBUTED, naming the
+#                            chain writer and its halt-reason, and NOT
+#                            counted as a finding.
 #   no record                reported ADDED / CHANGED / REMOVED as a
 #                            finding -- the shape of a fixture writing or
 #                            deleting the file directly on the live root.
+#
+# Chain HALT writers record nothing in the log; they put a provenance block
+# ("# halt-writer: <writer>", "# halt-reason: ...") in the HALT body
+# instead. For an added or changed HALT with no record explaining it, the
+# check asks pgai_agent_kanban.overwatch.halt_provenance (its classify
+# CLI) who wrote the file, and treats it as a chain write only when that
+# reader answers origin=chain from the body. Everything else stays a
+# finding: an empty HALT or a body naming no chain writer, the kanban root's
+# own HALT whatever its body (the reader always calls it the operator's),
+# an answer taken from the write log (records are read here with the
+# snapshot cut-off above, and an older one explains nothing), and a reader
+# that fails to run. HALT-AFTER and DEFER-LOW-BUGS carry no provenance
+# block, and a removed HALT has no body to read, so neither is asked about.
+# A record naming a test outranks the body: that sentinel is still reported.
 #
 # A record matches a path when both name the same string, the same file
 # (bash -ef), or the same basename in the same directory -- the last is how
@@ -103,7 +122,10 @@
 #                             path), then a one-line verdict. stdout: one
 #                             "[pgai-sentinel] ATTRIBUTED: ..." line per
 #                             difference a provenance record attributes to an
-#                             operator or agent write, and the clean verdict.
+#                             operator or agent write, or whose HALT body
+#                             names a chain writer (narrated as a chain
+#                             write, with writer and halt-reason, and not
+#                             counted), and the clean verdict.
 #                             Returns 1 when any unattributed difference was
 #                             found, 0 otherwise. Sets the global array
 #                             PGAI_SENTINEL_LEAKS_FOUND to one
@@ -125,6 +147,17 @@ _PGAI_SENTINEL_WRITE_LOG="logs/sentinel-writes.log"
 # The sha256 a record carries when its write removed the sentinel; the same
 # value as pgai_agent_kanban.lib.sentinel_provenance.ABSENT_DIGEST.
 _PGAI_SENTINEL_ABSENT_DIGEST="absent"
+
+# The reader that says who wrote a HALT from its body (see WHO WROTE IT).
+_PGAI_SENTINEL_HALT_READER="pgai_agent_kanban.overwatch.halt_provenance"
+
+# pp_run_ops runs that reader with this tree's own package on PYTHONPATH.
+# A caller's own pp_run_ops (a runner's, or a test stub) wins.
+_PGAI_SENTINEL_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+if ! declare -F pp_run_ops >/dev/null 2>&1 && [[ -f "${_PGAI_SENTINEL_LIB_DIR}/pp_run_ops.sh" ]]; then
+    # shellcheck source=pp_run_ops.sh
+    source "${_PGAI_SENTINEL_LIB_DIR}/pp_run_ops.sh"
+fi
 
 # ---------------------------------------------------------------------------
 # _pgai_sentinel_resolve_root [root]
@@ -207,6 +240,32 @@ _pgai_sentinel_provenance() {
 }
 
 # ---------------------------------------------------------------------------
+# _pgai_sentinel_chain_halt <root> <path>
+# Print "<writer>\t<reason>" when <path> is a HALT whose body names a chain
+# writer, as pgai_agent_kanban.overwatch.halt_provenance classifies it
+# against <root>; print nothing otherwise -- another basename, an operator's
+# HALT (the kanban root's own HALT included), an answer from the write log,
+# or a reader that is missing or fails. <reason> is "-" when the body gives
+# none. Always returns 0.
+# ---------------------------------------------------------------------------
+_pgai_sentinel_chain_halt() {
+    local root="$1" path="$2"
+    [[ "${path##*/}" == "HALT" ]] || return 0
+    declare -F pp_run_ops >/dev/null 2>&1 || return 0
+    local answer=""
+    answer="$(pp_run_ops "${_PGAI_SENTINEL_HALT_READER}" classify "${path}" --kanban-root "${root}" 2>/dev/null)" \
+        && true || answer=""
+    local origin writer reason trigger source
+    IFS=$'\t' read -r origin writer reason trigger source <<< "${answer}"
+    # Only a body-sourced answer counts: the write log is this check's own
+    # evidence, already read above with the snapshot cut-off.
+    [[ "${origin}" == "chain" && -n "${writer}" && "${writer}" != "-" ]] || return 0
+    [[ -n "${source}" && "${source}" != "sentinel-log" ]] || return 0
+    printf '%s\t%s\n' "${writer}" "${reason:--}"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # pgai_sentinel_snapshot [root]
 # Print the current sentinel set under root (see OUTPUT above).
 # ---------------------------------------------------------------------------
@@ -246,7 +305,8 @@ pgai_sentinel_snapshot() {
 # been there before) -- pass the pre-suite snapshot to make the check exact.
 # Every difference is first looked up in the provenance log (see WHO WROTE
 # IT above) and, when an operator or agent write explains it, narrated as
-# ATTRIBUTED instead of counted.
+# ATTRIBUTED instead of counted; an added or changed HALT with no record
+# whose body names a chain writer is narrated as ATTRIBUTED the same way.
 # ---------------------------------------------------------------------------
 pgai_sentinel_leak_check() {
     PGAI_SENTINEL_LEAKS_FOUND=()
@@ -287,7 +347,7 @@ pgai_sentinel_leak_check() {
     fi
 
     local findings=0 attributed=0
-    local path kind record written_by
+    local path kind record written_by chain c_writer c_reason
     local p_op p_time p_pid p_entry p_parent p_test p_sha
     for path in "${!now[@]}"; do
         if [[ -z "${before[${path}]+set}" ]]; then
@@ -315,6 +375,15 @@ pgai_sentinel_leak_check() {
                 continue
             fi
             written_by=" Written by ${p_op} under test ${p_test} (pid ${p_pid} at ${p_time})."
+        else
+            chain="$(_pgai_sentinel_chain_halt "${root}" "${path}")" && true || true
+            if [[ -n "${chain}" ]]; then
+                IFS=$'\t' read -r c_writer c_reason <<< "${chain}"
+                [[ "${c_reason}" == "-" ]] && c_reason="none given"
+                echo "[pgai-sentinel] ATTRIBUTED: ${path} -- ${kind} during the run by chain writer ${c_writer} (halt-reason: ${c_reason}), a chain write, not a sentinel the suite left behind; not counted. Provenance: the '# halt-writer:' block in the file."
+                attributed=$((attributed + 1))
+                continue
+            fi
         fi
         if [[ "${kind}" == "added" ]]; then
             echo "[pgai-sentinel] ADDED:   ${path} -- a sentinel the suite left behind on the live root; a HALT/HALT-AFTER pauses a real lane, a DEFER-LOW-BUGS changes what discovery bundles.${written_by}" >&2
@@ -351,7 +420,7 @@ pgai_sentinel_leak_check() {
         return 1
     fi
     if (( attributed > 0 )); then
-        echo "[pgai-sentinel] live kanban root ${root}: HALT / HALT-AFTER / DEFER-LOW-BUGS set unchanged by the suite (${attributed} change(s) above attributed to operator or agent writes)."
+        echo "[pgai-sentinel] live kanban root ${root}: HALT / HALT-AFTER / DEFER-LOW-BUGS set unchanged by the suite (${attributed} change(s) above attributed to operator, agent or chain writes)."
     else
         echo "[pgai-sentinel] live kanban root ${root}: HALT / HALT-AFTER / DEFER-LOW-BUGS set unchanged by the suite."
     fi

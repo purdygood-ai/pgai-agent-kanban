@@ -38,7 +38,6 @@ import os
 import pathlib
 import subprocess
 import textwrap
-from typing import Optional
 
 from pgai_agent_kanban.cm.bundle_family import parse_bundled_item_basenames
 
@@ -74,12 +73,16 @@ def _run_discovery(kanban_root: pathlib.Path, project_name: str) -> subprocess.C
     env.pop("PGAI_PROJECT_ROOT", None)
     return subprocess.run(
         ["bash", "-c", script],
-        capture_output=True, text=True, env=env, cwd=str(kanban_root), timeout=120,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(kanban_root),
+        timeout=120,
     )
 
 
 def _today() -> datetime.date:
-    return datetime.datetime.now(datetime.timezone.utc).date()
+    return datetime.datetime.now(datetime.UTC).date()
 
 
 def _add_bug_file(
@@ -89,7 +92,7 @@ def _add_bug_file(
     slug: str,
     *,
     severity: str = "low",
-    date: Optional[str] = "",
+    date: str | None = "",
 ) -> pathlib.Path:
     """Create an open bug file. date="" stamps today (UTC); None omits the Date header."""
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
@@ -231,9 +234,7 @@ class TestCountBound:
 
 
 class TestAgeBound:
-    def test_an_oldest_deferred_bug_past_the_age_bound_opens_a_bundle(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_an_oldest_deferred_bug_past_the_age_bound_opens_a_bundle(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _deferring_fixture(root, deferred_max_age_days="30")
         old_date = (_today() - datetime.timedelta(days=45)).isoformat()
@@ -255,9 +256,7 @@ class TestAgeBound:
         assert _bug_status(old) == "running"
         assert _bug_status(new) == "running"
 
-    def test_every_date_inside_the_age_bound_opens_no_bundle(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_every_date_inside_the_age_bound_opens_no_bundle(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _deferring_fixture(root, deferred_max_age_days="30")
         inside = (_today() - datetime.timedelta(days=30)).isoformat()
@@ -275,9 +274,7 @@ class TestAgeBound:
         for bug in bugs:
             assert _bug_status(bug) == "open"
 
-    def test_an_undated_bug_is_narrated_and_never_fires_the_age_bound(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_an_undated_bug_is_narrated_and_never_fires_the_age_bound(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         _deferring_fixture(root, deferred_max_age_days="0")
         undated = _add_bug_file(root, "project-a", "BUG-9001", "undated", date=None)

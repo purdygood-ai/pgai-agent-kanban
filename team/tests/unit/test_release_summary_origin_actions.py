@@ -56,7 +56,9 @@ def _git(repo: pathlib.Path, *args: str) -> str:
     """Run git with -C *repo* and return stripped stdout; raise on failure."""
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -74,7 +76,8 @@ def _build_repo_with_origin(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathl
     subprocess.run(["git", "init", "--bare", str(origin)], capture_output=True, check=True)
     subprocess.run(
         ["git", "init", f"--initial-branch={_MAIN}", str(repo)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     _git(repo, "config", "--local", "user.email", "test@pgai.local")
     _git(repo, "config", "--local", "user.name", "PGAI Test")
@@ -101,9 +104,7 @@ def _build_kanban_root(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Pa
     project_root = root / "projects" / _PROJECT
     (project_root / "bugs").mkdir(parents=True)
     (root / "scripts").symlink_to(_TEAM_DIR / "scripts", target_is_directory=True)
-    (root / "pgai_agent_kanban").symlink_to(
-        _TEAM_DIR / "pgai_agent_kanban", target_is_directory=True
-    )
+    (root / "pgai_agent_kanban").symlink_to(_TEAM_DIR / "pgai_agent_kanban", target_is_directory=True)
     release_state = project_root / "release-state.md"
     release_state.write_text(
         "# Release State\n\n"
@@ -164,13 +165,14 @@ def _summary_block(stdout: str) -> str:
     """The closing summary: everything from the 'Summary of what was done' line on."""
     marker = "Summary of what was done:"
     assert marker in stdout, f"closing summary missing from output:\n{stdout}"
-    return stdout[stdout.index(marker):]
+    return stdout[stdout.index(marker) :]
 
 
 def _origin_has_ref(origin: pathlib.Path, ref: str) -> bool:
     result = subprocess.run(
         ["git", "-C", str(origin), "rev-parse", "--verify", "--quiet", ref],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
@@ -178,9 +180,7 @@ def _origin_has_ref(origin: pathlib.Path, ref: str) -> bool:
 class TestLocalOnlyReleaseSummary:
     """push_to_remote=false: the summary claims nothing about origin it did not do."""
 
-    def test_summary_claims_no_origin_push_or_delete_and_says_local_only(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_summary_claims_no_origin_push_or_delete_and_says_local_only(self, tmp_path: pathlib.Path) -> None:
         result, repo, origin = _run_finalizer(tmp_path, "false")
         output = result.stdout + result.stderr
         assert result.returncode == 0, output
@@ -192,27 +192,23 @@ class TestLocalOnlyReleaseSummary:
         assert f"Tag {_VERSION} created locally only" in summary, summary
         assert f"{_RC_BRANCH} deleted locally; origin not touched" in summary, summary
 
-    def test_origin_is_untouched_by_a_local_only_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_origin_is_untouched_by_a_local_only_release(self, tmp_path: pathlib.Path) -> None:
         result, repo, origin = _run_finalizer(tmp_path, "false")
         assert result.returncode == 0, result.stdout + result.stderr
 
-        assert _origin_has_ref(origin, f"refs/heads/{_RC_BRANCH}"), (
-            "a local-only release must leave the RC branch on origin"
-        )
-        assert not _origin_has_ref(origin, f"refs/tags/{_VERSION}"), (
-            "a local-only release must not push the tag to origin"
-        )
+        assert _origin_has_ref(
+            origin, f"refs/heads/{_RC_BRANCH}"
+        ), "a local-only release must leave the RC branch on origin"
+        assert not _origin_has_ref(
+            origin, f"refs/tags/{_VERSION}"
+        ), "a local-only release must not push the tag to origin"
         assert _git(repo, "tag", "--list", _VERSION) == _VERSION
 
 
 class TestRemoteBackedReleaseSummary:
     """push_to_remote=true with a stub remote: the summary reports the pushes that ran."""
 
-    def test_summary_reports_tag_pushed_and_rc_deleted_from_origin(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_summary_reports_tag_pushed_and_rc_deleted_from_origin(self, tmp_path: pathlib.Path) -> None:
         result, repo, origin = _run_finalizer(tmp_path, "true")
         output = result.stdout + result.stderr
         assert result.returncode == 0, output
@@ -223,9 +219,9 @@ class TestRemoteBackedReleaseSummary:
         assert f"{_MAIN} PUSHED, tags PUSHED" in summary, summary
         assert "local only" not in summary, summary
 
-        assert _origin_has_ref(origin, f"refs/tags/{_VERSION}"), (
-            "the summary says the tag reached origin, so the stub remote must hold it"
-        )
-        assert not _origin_has_ref(origin, f"refs/heads/{_RC_BRANCH}"), (
-            "the summary says the RC branch was deleted from origin, so the stub remote must not hold it"
-        )
+        assert _origin_has_ref(
+            origin, f"refs/tags/{_VERSION}"
+        ), "the summary says the tag reached origin, so the stub remote must hold it"
+        assert not _origin_has_ref(
+            origin, f"refs/heads/{_RC_BRANCH}"
+        ), "the summary says the RC branch was deleted from origin, so the stub remote must not hold it"

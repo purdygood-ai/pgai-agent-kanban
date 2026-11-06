@@ -45,9 +45,10 @@
 #             (discovery + post-discovery) and the "intake unaffected" log
 #             line keep PM discovery running while dispatch is held.
 #   AC-4  Both provider scripts reach the shared driver: team/scripts/wake/
-#         claude.sh and codex.sh each exist, pass bash -n, source
-#         lib/wake_driver.sh, and do not define their own run_project_chain
-#         (which would shadow the driver's guarded one).
+#         claude.sh and codex.sh each exist, pass bash -n and source
+#         lib/wake_entry.sh, the shared entry body, which sources
+#         lib/wake_driver.sh; none of the three defines its own
+#         run_project_chain (which would shadow the driver's guarded one).
 #
 # Usage:
 #   team/scripts/verify-blocked-task-guard.sh [--verbose] [--help]
@@ -68,7 +69,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Locate this script and source shared helpers
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 for _helper in temp.sh task_ids.sh pp_run_ops.sh; do
     if [[ ! -f "${_SCRIPT_DIR}/lib/${_helper}" ]]; then
@@ -84,22 +85,11 @@ unset _helper
 # Defaults
 # ---------------------------------------------------------------------------
 VERBOSE=false
-PASS_COUNT=0
-FAIL_COUNT=0
-
-# ---------------------------------------------------------------------------
-# Color helpers (only when stdout is a tty)
-# ---------------------------------------------------------------------------
-if [[ -t 1 ]]; then
-    C_RED=$'\033[0;31m'
-    C_GREEN=$'\033[0;32m'
-    C_RESET=$'\033[0m'
-else
-    C_RED="" C_GREEN="" C_RESET=""
-fi
-
-pass() { echo "${C_GREEN}PASS${C_RESET}: $*"; (( PASS_COUNT++ )) || true; }
-fail() { echo "${C_RED}FAIL${C_RESET}: $*"; (( FAIL_COUNT++ )) || true; }
+# PASS_COUNT / FAIL_COUNT, the C_* colours and pass / fail / warn
+# (lib/verify_harness.sh).
+# shellcheck source=lib/verify_harness.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/verify_harness.sh"
+verify_harness_init
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -157,6 +147,7 @@ trap cleanup_fixture EXIT
 WAKE_DRIVER_SH="${_SCRIPT_DIR}/lib/wake_driver.sh"
 CLAUDE_SH="${_SCRIPT_DIR}/wake/claude.sh"
 CODEX_SH="${_SCRIPT_DIR}/wake/codex.sh"
+WAKE_ENTRY_SH="${_SCRIPT_DIR}/lib/wake_entry.sh"
 GATE_MODULE="pgai_agent_kanban.overwatch.block_storm"
 
 echo "==================================================================="
@@ -447,7 +438,10 @@ echo "  AC-4: Both provider scripts reach the shared wake driver"
 echo "==================================================================="
 echo ""
 
-for PROVIDER_SH in "$CLAUDE_SH" "$CODEX_SH"; do
+# The provider shims reach the driver through the shared entry body, so
+# the entry body is checked as a third file: the shims must source it, and
+# it must source the driver.
+for PROVIDER_SH in "$CLAUDE_SH" "$CODEX_SH" "$WAKE_ENTRY_SH"; do
     PROVIDER_NAME="$(basename "$PROVIDER_SH")"
     if [[ ! -f "$PROVIDER_SH" ]]; then
         fail "AC-4 (${PROVIDER_NAME}): provider script not found at ${PROVIDER_SH}"
@@ -462,14 +456,20 @@ for PROVIDER_SH in "$CLAUDE_SH" "$CODEX_SH"; do
         fail "AC-4 (${PROVIDER_NAME} syntax): bash -n FAILED — run: bash -n ${PROVIDER_SH}"
     fi
 
-    # An uncommented `source`/`.` line naming lib/wake_driver.sh.  Provider
-    # scripts live in wake/, so their ../lib/wake_driver.sh is the driver
-    # AC-3 checked.
-    SOURCES_DRIVER="$(count_lines_matching "$PROVIDER_SH" '^[[:space:]]*(source|\.)[[:space:]]+[^#]*lib/wake_driver\.sh')"
-    if [[ "$SOURCES_DRIVER" -ge 1 ]]; then
-        pass "AC-4 (${PROVIDER_NAME} sources driver): sources lib/wake_driver.sh"
+    # An uncommented `source`/`.` line naming the next hop: a shim in wake/
+    # sources lib/wake_entry.sh, and the entry body sources lib/wake_driver.sh
+    # (both resolve to the ../lib/ beside wake/, so the driver is the one
+    # AC-3 checked).
+    if [[ "$PROVIDER_SH" == "$WAKE_ENTRY_SH" ]]; then
+        NEXT_HOP="wake_driver.sh"
     else
-        fail "AC-4 (${PROVIDER_NAME} sources driver): no 'source \"\${SCRIPT_DIR}/../lib/wake_driver.sh\"' line — this provider never reaches the guarded run_project_chain"
+        NEXT_HOP="wake_entry.sh"
+    fi
+    SOURCES_DRIVER="$(count_lines_matching "$PROVIDER_SH" "^[[:space:]]*(source|\\.)[[:space:]]+[^#]*lib/${NEXT_HOP//./\\.}")"
+    if [[ "$SOURCES_DRIVER" -ge 1 ]]; then
+        pass "AC-4 (${PROVIDER_NAME} sources driver): sources lib/${NEXT_HOP}"
+    else
+        fail "AC-4 (${PROVIDER_NAME} sources driver): no 'source .../lib/${NEXT_HOP}' line — this provider never reaches the guarded run_project_chain"
     fi
 
     # A provider-local run_project_chain would shadow the driver's guarded one.

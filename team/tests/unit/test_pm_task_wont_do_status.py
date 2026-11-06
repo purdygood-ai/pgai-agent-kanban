@@ -72,7 +72,12 @@ def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProce
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, "--", *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -139,8 +144,13 @@ def test_readme_check_rewrite_step_runs_its_own_runner(tmp_path: pathlib.Path) -
     """)
     env = build_scrubbed_env(home_dir=tmp_path / "home")
     result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(tmp_path), timeout=60, check=False,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
     assert result.stdout == "rc=0\n", f"stdout={result.stdout}\nstderr={result.stderr}"
     assert status.read_text(encoding="utf-8") == pm_task_wont_do.wont_do_status_text(_STATUS, *_ARGS)

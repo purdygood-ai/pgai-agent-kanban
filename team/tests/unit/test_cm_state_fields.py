@@ -17,7 +17,6 @@ All tests use tmp_path; no live filesystem paths or env leakage.
 
 from __future__ import annotations
 
-import io
 import json
 import sys
 from pathlib import Path
@@ -41,7 +40,6 @@ from pgai_agent_kanban.cm.write_rc_state import (
 )
 from pgai_agent_kanban.task_status import is_horizontal_rule as _is_horizontal_rule
 from tests.fixtures.release_state_section import release_state_section_value
-
 
 # ---------------------------------------------------------------------------
 # _is_horizontal_rule helper
@@ -201,9 +199,7 @@ def test_read_state_field_returns_none_when_file_absent(tmp_path: Path) -> None:
         ),
     ],
 )
-def test_read_state_field(
-    tmp_path: Path, file_content: str, heading: str, expected: str
-) -> None:
+def test_read_state_field(tmp_path: Path, file_content: str, heading: str, expected: str) -> None:
     """read_state_field's value-extraction semantics across boundary, comment,
     whitespace, and next-heading cases (survives-as-named-parameterization of
     the original eleven discrete tests; no case dropped)."""
@@ -228,16 +224,22 @@ def test_read_state_field(
     [
         pytest.param("## Active RC\nv1.2.3\n\n## Next\nx\n", "Active RC", "v1.2.3", id="value"),
         pytest.param("## Active RC\nnone\n", "Active RC", "none", id="literal_none_is_a_value"),
-        pytest.param("## Empty Heading\n## Next Section\nvalue\n", "Empty Heading", "", id="next_heading_ends_the_section"),
+        pytest.param(
+            "## Empty Heading\n## Next Section\nvalue\n", "Empty Heading", "", id="next_heading_ends_the_section"
+        ),
         pytest.param("## Active RC\n\n## Last Released\nv1.2.3\n", "Active RC", "", id="blank_line_then_next_heading"),
         pytest.param("## Field\n### Sub\nvalue\n", "Field", "", id="deeper_heading_ends_the_section"),
         pytest.param("## Target\n# a comment\nactual\n", "Target", "actual", id="single_hash_comment_still_skipped"),
         pytest.param("## Target\n<!-- a | b -->\nactual\n", "Target", "actual", id="html_comment_still_skipped"),
         pytest.param("## Target\n---\nx\n", "Target", "", id="horizontal_rule_still_ends_the_section"),
         pytest.param("## Dangling\n", "Dangling", "", id="heading_at_eof"),
-        pytest.param("## Active RC  \n\n  v1.2.3  \n", "Active RC", "v1.2.3", id="trailing_space_heading_and_padded_value"),
+        pytest.param(
+            "## Active RC  \n\n  v1.2.3  \n", "Active RC", "v1.2.3", id="trailing_space_heading_and_padded_value"
+        ),
         pytest.param("## Other\nx\n", "Active RC", None, id="absent_heading_is_none"),
-        pytest.param("## Last Released At\n2026-01-01T00:00:00Z\n", "Last Released", None, id="retired_heading_is_not_the_field"),
+        pytest.param(
+            "## Last Released At\n2026-01-01T00:00:00Z\n", "Last Released", None, id="retired_heading_is_not_the_field"
+        ),
     ],
 )
 def test_release_state_section_value(tmp_path: Path, file_content: str, heading: str, expected) -> None:
@@ -253,7 +255,10 @@ def test_release_state_section_value_missing_file_is_none(tmp_path: Path) -> Non
 def _cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.cm.read_state_field", *args],
-        capture_output=True, text=True, timeout=30, cwd=str(Path(__file__).resolve().parents[2]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(Path(__file__).resolve().parents[2]),
     )
 
 
@@ -302,8 +307,7 @@ def test_cli_section_mode_missing_file_exits_1_with_no_output(tmp_path: Path) ->
 # Every heading present, RC Opened By Task left with no value, and a
 # version-valued field directly after it that an unbounded walk would return.
 _EMPTY_OPENED_BY = (
-    "## Active RC\nv1.2.0\n## RC Opened At\n2026-01-01T00:00:00Z\n"
-    "## RC Opened By Task\n\n## Last Released\nv1.1.0\n"
+    "## Active RC\nv1.2.0\n## RC Opened At\n2026-01-01T00:00:00Z\n" "## RC Opened By Task\n\n## Last Released\nv1.1.0\n"
 )
 _EMPTY_ACTIVE_RC = (
     "## Active RC\n\n## RC Opened At\n2026-01-01T00:00:00Z\n"
@@ -390,26 +394,32 @@ _NEVER_RELEASED = (
     [
         pytest.param(
             _OPEN_RC,
-            {"Active RC": "v3.4.1", "RC Opened At": "2026-03-01T09:15:00+00:00",
-             "RC Opened By Task": "CM-20260301-002-open-rc", "Last Released": "v3.4.0"},
+            {
+                "Active RC": "v3.4.1",
+                "RC Opened At": "2026-03-01T09:15:00+00:00",
+                "RC Opened By Task": "CM-20260301-002-open-rc",
+                "Last Released": "v3.4.0",
+            },
             id="open_rc_with_appended_event_block",
         ),
         pytest.param(
             _NO_RC,
-            {"Active RC": "none", "RC Opened At": "none", "RC Opened By Task": "none",
-             "Last Released": "v3.4.0"},
+            {"Active RC": "none", "RC Opened At": "none", "RC Opened By Task": "none", "Last Released": "v3.4.0"},
             id="no_rc",
         ),
         pytest.param(
             _RETIRED_HEADINGS,
-            {"Active RC": "none", "RC Opened At": "none", "RC Opened By Task": "none",
-             "Last Released": "v1.4.2"},
+            {"Active RC": "none", "RC Opened At": "none", "RC Opened By Task": "none", "Last Released": "v1.4.2"},
             id="retired_headings_and_appended_block",
         ),
         pytest.param(
             _NEVER_RELEASED,
-            {"Active RC": "v0.1.0", "RC Opened At": "2026-01-01T00:00:00Z",
-             "RC Opened By Task": "CM-20260101-000-open", "Last Released": "none"},
+            {
+                "Active RC": "v0.1.0",
+                "RC Opened At": "2026-01-01T00:00:00Z",
+                "RC Opened By Task": "CM-20260101-000-open",
+                "Last Released": "none",
+            },
             id="last_released_heading_absent",
         ),
     ],
@@ -436,13 +446,23 @@ def test_populated_release_state_reads_the_same_through_every_reader(
 # ---------------------------------------------------------------------------
 
 _AUTO_SHIP_EVENTS = (
-    dict(timestamp="2026-10-01T00:00:00Z", version="v3.4.1", trigger=2,
-         error_key="cm-release.trigger-2.systemic-risk-high",
-         ship_posture="always", tester_task="TESTER-fixture-verify"),
-    dict(timestamp="2026-10-02T00:00:00Z", version="v3.4.2", trigger=8,
-         error_key="cm-release.trigger-8.last-3-rcs-non-functional",
-         ship_posture="always", tester_task="TESTER-fixture-verify-2",
-         filed_bug="BUG-fixture-pattern.md"),
+    dict(
+        timestamp="2026-10-01T00:00:00Z",
+        version="v3.4.1",
+        trigger=2,
+        error_key="cm-release.trigger-2.systemic-risk-high",
+        ship_posture="always",
+        tester_task="TESTER-fixture-verify",
+    ),
+    dict(
+        timestamp="2026-10-02T00:00:00Z",
+        version="v3.4.2",
+        trigger=8,
+        error_key="cm-release.trigger-8.last-3-rcs-non-functional",
+        ship_posture="always",
+        tester_task="TESTER-fixture-verify-2",
+        filed_bug="BUG-fixture-pattern.md",
+    ),
 )
 
 _VALIDATOR_FIXTURES = [
@@ -457,9 +477,7 @@ _VALIDATOR_FIXTURES = [
 
 @pytest.mark.parametrize("event_count", [1, 2], ids=["one_event", "two_events"])
 @pytest.mark.parametrize("file_content", _VALIDATOR_FIXTURES)
-def test_validate_cli_is_unchanged_by_auto_ship_events(
-    tmp_path: Path, file_content: str, event_count: int
-) -> None:
+def test_validate_cli_is_unchanged_by_auto_ship_events(tmp_path: Path, file_content: str, event_count: int) -> None:
     """--validate gives the same exit code and output with Auto-Ship Event
     sections appended as without them: 0 on every valid fixture, and the same
     refusal on a fixture that was already refused."""
@@ -496,7 +514,9 @@ def test_field_reads_are_unchanged_by_auto_ship_events(tmp_path: Path, file_cont
         expected = read_state_field(str(plain), heading)
         assert read_state_field(str(with_events), heading) == expected, heading
         assert read_release_state_field(str(with_events), heading) == expected, heading
-        assert release_state_section_value(str(with_events), heading) == release_state_section_value(str(plain), heading), heading
+        assert release_state_section_value(str(with_events), heading) == release_state_section_value(
+            str(plain), heading
+        ), heading
 
 
 def test_populated_release_state_retired_and_appended_sections_read_as_written(tmp_path: Path) -> None:
@@ -578,18 +598,14 @@ _CLOSE_OUT_FUNCTIONS = [
 
 
 @pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
-def test_close_out_creates_file_when_absent(
-    tmp_path: Path, write_fn, expected_outcome: str
-) -> None:
+def test_close_out_creates_file_when_absent(tmp_path: Path, write_fn, expected_outcome: str) -> None:
     state_file = tmp_path / "v0.1.0.json"
     write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     assert state_file.exists()
 
 
 @pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
-def test_close_out_sets_outcome(
-    tmp_path: Path, write_fn, expected_outcome: str
-) -> None:
+def test_close_out_sets_outcome(tmp_path: Path, write_fn, expected_outcome: str) -> None:
     state_file = tmp_path / "v0.1.0.json"
     write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
     payload = json.loads(state_file.read_text())
@@ -597,9 +613,7 @@ def test_close_out_sets_outcome(
 
 
 @pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
-def test_close_out_sets_closed_at(
-    tmp_path: Path, write_fn, expected_outcome: str
-) -> None:
+def test_close_out_sets_closed_at(tmp_path: Path, write_fn, expected_outcome: str) -> None:
     state_file = tmp_path / "v0.1.0.json"
     write_fn(str(state_file), "v0.1.0", "2026-06-01T10:30:00Z")
     payload = json.loads(state_file.read_text())
@@ -607,16 +621,14 @@ def test_close_out_sets_closed_at(
 
 
 @pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
-def test_close_out_preserves_opened_at_from_existing_file(
-    tmp_path: Path, write_fn, expected_outcome: str
-) -> None:
+def test_close_out_preserves_opened_at_from_existing_file(tmp_path: Path, write_fn, expected_outcome: str) -> None:
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text(
         json.dumps(
-            {"rc": "v0.1.0", "opened_at": "2026-05-01T00:00:00Z",
-             "closed_at": None, "outcome": "in_progress"},
+            {"rc": "v0.1.0", "opened_at": "2026-05-01T00:00:00Z", "closed_at": None, "outcome": "in_progress"},
             indent=2,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
     write_fn(str(state_file), "v0.1.0", "2026-06-01T00:00:00Z")
@@ -639,9 +651,7 @@ def test_close_out_does_not_add_opened_at_when_absent_from_existing_file(
 
 
 @pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
-def test_close_out_does_not_overwrite_existing_rc(
-    tmp_path: Path, write_fn, expected_outcome: str
-) -> None:
+def test_close_out_does_not_overwrite_existing_rc(tmp_path: Path, write_fn, expected_outcome: str) -> None:
     """setdefault semantics — rc is preserved from the existing file, not overwritten."""
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text(
@@ -654,9 +664,7 @@ def test_close_out_does_not_overwrite_existing_rc(
 
 
 @pytest.mark.parametrize("write_fn, expected_outcome", _CLOSE_OUT_FUNCTIONS)
-def test_close_out_recovers_from_corrupt_json(
-    tmp_path: Path, write_fn, expected_outcome: str
-) -> None:
+def test_close_out_recovers_from_corrupt_json(tmp_path: Path, write_fn, expected_outcome: str) -> None:
     state_file = tmp_path / "v0.1.0.json"
     state_file.write_text("not json at all {{{{", encoding="utf-8")
     # Should not raise; should recover to a minimal valid record.

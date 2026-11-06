@@ -162,11 +162,7 @@ def _git(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
 
 def _registered_worktree_paths(dev_tree: pathlib.Path) -> list[str]:
     result = _git(dev_tree, "worktree", "list", "--porcelain")
-    return [
-        line[len("worktree "):]
-        for line in result.stdout.splitlines()
-        if line.startswith("worktree ")
-    ]
+    return [line[len("worktree ") :] for line in result.stdout.splitlines() if line.startswith("worktree ")]
 
 
 def _script_header(
@@ -267,9 +263,9 @@ def test_done_task_worktree_is_torn_down(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
 
     remaining = _registered_worktree_paths(dev_tree)
-    assert not any(task_id in p for p in remaining), (
-        f"expected no worktree registered for {task_id} after sweep; found: {remaining}"
-    )
+    assert not any(
+        task_id in p for p in remaining
+    ), f"expected no worktree registered for {task_id} after sweep; found: {remaining}"
     wt_dir = tmp_path / "worktrees" / task_id
     assert not wt_dir.exists(), f"worktree directory {wt_dir} should have been removed"
 
@@ -277,8 +273,7 @@ def test_done_task_worktree_is_torn_down(tmp_path: pathlib.Path) -> None:
     # liveness record along with the worktree (task ids are never reused).
     liveness_record = tmp_path / "locks" / "task-liveness" / f"{task_id}.record"
     assert not liveness_record.exists(), (
-        f"expected the liveness record for {task_id} to be cleaned up after teardown; "
-        f"found: {liveness_record}"
+        f"expected the liveness record for {task_id} to be cleaned up after teardown; " f"found: {liveness_record}"
     )
 
 
@@ -311,9 +306,9 @@ def test_working_task_worktree_is_preserved(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
 
     remaining = _registered_worktree_paths(dev_tree)
-    assert any(task_id in p for p in remaining), (
-        f"expected the WORKING task's worktree to survive the sweep; found: {remaining}"
-    )
+    assert any(
+        task_id in p for p in remaining
+    ), f"expected the WORKING task's worktree to survive the sweep; found: {remaining}"
     wt_dir = tmp_path / "worktrees" / task_id
     assert wt_dir.exists(), "a WORKING task's worktree directory must never be removed by the sweep"
 
@@ -343,9 +338,9 @@ def test_blocked_task_worktree_is_retained(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
 
     remaining = _registered_worktree_paths(dev_tree)
-    assert any(task_id in p for p in remaining), (
-        f"expected the BLOCKED task's worktree to be retained for operator inspection; found: {remaining}"
-    )
+    assert any(
+        task_id in p for p in remaining
+    ), f"expected the BLOCKED task's worktree to be retained for operator inspection; found: {remaining}"
 
 
 # ---------------------------------------------------------------------------
@@ -415,9 +410,9 @@ def test_done_task_with_live_dispatch_pid_is_skipped(tmp_path: pathlib.Path) -> 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
 
     remaining = _registered_worktree_paths(dev_tree)
-    assert any(task_id in p for p in remaining), (
-        f"expected the worktree of a task with a live recorded dispatch pid to be skipped this cycle; found: {remaining}"
-    )
+    assert any(
+        task_id in p for p in remaining
+    ), f"expected the worktree of a task with a live recorded dispatch pid to be skipped this cycle; found: {remaining}"
 
 
 # ---------------------------------------------------------------------------

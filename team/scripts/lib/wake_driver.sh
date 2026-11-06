@@ -468,11 +468,11 @@ run_project_chain() {
   # Warn (non-fatal) when the ceilings do not nest task < project <= batch.
   # _task_timeout_budget_seconds: per-dispatch watchdog limit, set by
   # wd_chain_task_timeout_budget before each dispatch (wake_task_budget.sh).
-  local _eff_project="${MAX_PROJECT_SECONDS:-${MAX_RUNTIME_SECONDS}}"
-  local _eff_task="${MAX_TASK_SECONDS:-0}" _task_timeout_budget_seconds=""
-  wd_warn_runtime_bound_nesting "$project_name" "$_eff_task" "$_eff_project" "${MAX_RUNTIME_SECONDS:-0}"
+  local _eff_project="${MAX_PROJECT_SECONDS:-$(wd_configured_max_runtime_seconds)}"
+  local _eff_task _task_timeout_budget_seconds=""; _eff_task="$(wd_configured_max_task_seconds)"
+  wd_warn_runtime_bound_nesting "$project_name" "$_eff_task" "$_eff_project" "$(wd_configured_max_runtime_seconds)"
 
-  log "project ${project_name}: starting (agent=${AGENT} max_tasks=${MAX_TASKS_PER_WAKE} max_runtime=${MAX_RUNTIME_SECONDS}s max_project=${_eff_project}s max_task=${_eff_task}s stop_on_blocked=${STOP_ON_BLOCKED})"
+  log "project ${project_name}: starting (agent=${AGENT} max_tasks=${MAX_TASKS_PER_WAKE} max_runtime=$(wd_configured_max_runtime_seconds)s max_project=${_eff_project}s max_task=${_eff_task}s stop_on_blocked=${STOP_ON_BLOCKED})"
 
   # --- Per-project config load ---
   # Load per-project config so PP_dev_tree_path is exported before any task
@@ -488,12 +488,12 @@ run_project_chain() {
     log "project ${project_name}: pp_load_config loaded; PP_dev_tree_path=${PP_dev_tree_path:-<unset>}"
   fi
 
-  # --- Per-project dev-tree existence gate (D3) ---
+  # --- Per-project dev-tree existence gate ---
   # Fires AFTER pp_load_config so PP_dev_tree_path and PP_workflow_type are
   # populated.  Release-workflow projects with a missing dev tree are skipped
   # with a per-project log line; document-workflow projects are exempt.
-  # The gate lives in wake_common.sh (_check_project_dev_tree) so both wake
-  # scripts use identical logic (sibling discipline).
+  # The gate lives in lib/wake_project.sh (_check_project_dev_tree), called
+  # only here, so both wake scripts use identical logic (sibling discipline).
   if ! _check_project_dev_tree "$project_name"; then
     pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
     return 0
@@ -626,8 +626,8 @@ run_project_chain() {
     fi
 
     ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))
-    if (( ELAPSED >= MAX_RUNTIME_SECONDS )); then
-      STOP_REASON="reached MAX_RUNTIME_SECONDS (batch) (${MAX_RUNTIME_SECONDS}s, batch_elapsed=${ELAPSED}s)"
+    if wd_batch_budget_reached "$ELAPSED"; then
+      STOP_REASON="reached MAX_RUNTIME_SECONDS (batch) ($(wd_configured_max_runtime_seconds)s, batch_elapsed=${ELAPSED}s)"
       break
     fi
 

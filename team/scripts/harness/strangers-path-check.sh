@@ -136,6 +136,9 @@
 #     and the same two mounts container-shell.sh documents, through
 #     `docker run --rm` with piped stdin instead of `-it` — every mount
 #     contract condition docker/entrypoint.sh checks still runs for real.
+#     It keeps container-shell.sh's `--init`, so the launched container
+#     has the same reaping PID 1 (the engine's init, which reaps orphaned
+#     processes) as the documented launch.
 #   - Step 8 ("tail -f ...") would block forever in a non-interactive
 #     harness. The board stage reads the same log file's contents
 #     instead of tailing it, and checks for the same two banner lines
@@ -161,7 +164,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Self-locate — each tree finds itself; never import from a sibling tree.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 TEAM_DIR="${REPO_ROOT}/team"
 
@@ -543,11 +546,12 @@ _container_stage_image() {
     return
   fi
 
-  log "container: docs/docker.md:${launch_line} — ${launch_cmd} (non-interactive equivalent: same engine/image/mounts, piped stdin instead of -it; see header)"
+  log "container: docs/docker.md:${launch_line} — ${launch_cmd} (non-interactive equivalent: same engine/image/mounts and --init, piped stdin instead of -it; see header)"
   local launch_log="${RUN_ROOT}/launch-${image}.log"
   set +e
+  # --init mirrors container-shell.sh: the engine's init is the reaping PID 1.
   printf 'pwd\ntest -e scripts/pseudocron.py && echo ENTRYPOINT_MOUNT_OK\nexit 0\n' | \
-    pgai_docker "$engine" run --rm -i \
+    pgai_docker "$engine" run --rm -i --init \
       -v "${HOME}:${HOME}" \
       -v "${INSTALL_ROOT}:${INSTALL_ROOT}" \
       -e "HOME=${HOME}" \

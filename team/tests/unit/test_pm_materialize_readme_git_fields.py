@@ -38,9 +38,7 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 
@@ -127,9 +125,7 @@ def _render(
 
 def _field(readme: str, heading: str) -> str:
     """Return the body of ``## <heading>`` up to the next ``## `` heading."""
-    match = re.search(
-        rf"^##\s+{re.escape(heading)}\s*\n+(.*?)(?=^##\s|\Z)", readme, re.M | re.S
-    )
+    match = re.search(rf"^##\s+{re.escape(heading)}\s*\n+(.*?)(?=^##\s|\Z)", readme, re.M | re.S)
     assert match, f"'## {heading}' not found in README:\n{readme}"
     return match.group(1).strip()
 
@@ -174,7 +170,9 @@ def test_testing_only_tester_gets_dispatch_wording(tmp_path: pathlib.Path) -> No
     """A read-only git workflow (git_mode = ro) still dispatches TESTER into a worktree."""
     _write_project_cfg(tmp_path / "project", branch_prefix="ai_")
     readme = _render(
-        tmp_path, _work_task("TESTER", slug="verify"), _TESTING_ONLY_CAPS,
+        tmp_path,
+        _work_task("TESTER", slug="verify"),
+        _TESTING_ONLY_CAPS,
         workflow_type="testing-only",
     )
     assert _field(readme, "Working Directory") == "(assigned at dispatch — isolated worktree)"
@@ -233,13 +231,14 @@ def test_git_repo_field_follows_project_cfg(
 ) -> None:
     """## Git Repo is the URL only when one is configured and pushing is not disabled."""
     project_root = tmp_path / "project"
-    _write_project_cfg(project_root, branch_prefix="ai_", git_repo_url=git_repo_url,
-                       push_to_remote=push_to_remote or "false")
+    _write_project_cfg(
+        project_root, branch_prefix="ai_", git_repo_url=git_repo_url, push_to_remote=push_to_remote or "false"
+    )
     if push_to_remote is None:
         cfg = project_root / "project.cfg"
         cfg.write_text(
-            "\n".join(l for l in cfg.read_text(encoding="utf-8").splitlines()
-                      if not l.startswith("push_to_remote")) + "\n",
+            "\n".join(l for l in cfg.read_text(encoding="utf-8").splitlines() if not l.startswith("push_to_remote"))
+            + "\n",
             encoding="utf-8",
         )
     readme = _render(tmp_path, _work_task("CODER"), _RELEASE_CAPS)
@@ -268,11 +267,7 @@ def test_empty_prefix_differs_only_in_workspace_lines(tmp_path: pathlib.Path) ->
     new_lines = readme.splitlines()
     old_lines = legacy.splitlines()
     assert len(new_lines) == len(old_lines)
-    changed = [
-        (old_lines[i - 1], old, new)
-        for i, (old, new) in enumerate(zip(old_lines, new_lines))
-        if old != new
-    ]
+    changed = [(old_lines[i - 1], old, new) for i, (old, new) in enumerate(zip(old_lines, new_lines)) if old != new]
     assert changed == [
         ("## Working Directory", "$PGAI_DEV_TREE_PATH", "(assigned at dispatch — isolated worktree)"),
         ("## Git Repo", "none", "local (no remote in use)"),
@@ -337,9 +332,7 @@ def _build_kanban_root(tmp_path: pathlib.Path) -> tuple:
     for plugin in ("release",):
         src = _REAL_WORKFLOWS_DIR / plugin / "workflow.cfg"
         (root / "workflows" / plugin).mkdir()
-        (root / "workflows" / plugin / "workflow.cfg").write_text(
-            src.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        (root / "workflows" / plugin / "workflow.cfg").write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
     return root, project_root
 
 
@@ -369,7 +362,8 @@ def test_main_materializes_release_plan_with_truthful_fields(
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root))
     monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
     monkeypatch.setattr(
-        sys, "argv",
+        sys,
+        "argv",
         ["pm_materialize.py", str(plan_file), "--team-root", str(project_root), "--owner", "CLAUDE"],
     )
     try:
@@ -380,7 +374,8 @@ def test_main_materializes_release_plan_with_truthful_fields(
     tasks_root = project_root / "tasks"
     readmes = {
         d.name.split("-")[0] + ("-open" if "open-rc" in d.name else ""): (d / "README.md").read_text(encoding="utf-8")
-        for d in tasks_root.iterdir() if (d / "README.md").is_file()
+        for d in tasks_root.iterdir()
+        if (d / "README.md").is_file()
     }
     assert {"CODER", "TESTER", "CM-open", "CM"} <= set(readmes), sorted(readmes)
 

@@ -3,7 +3,7 @@
 # Window 4 attention panel — shows BLOCKED tasks, quarantine alerts, and
 # active halt scopes.
 #
-# Designed to be run under `watch -c -n N -- attention.sh`.
+# Designed to be run under `cadence-loop.sh --interval N -- attention.sh`.
 #
 # BLOCKED TASKS section:
 #   ⚠ BLOCKED TASKS
@@ -79,26 +79,18 @@
 #   NO_COLOR                            — set to suppress ANSI colors
 
 set -euo pipefail
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 # Source shared ANSI color primitive (single home for the color-name ->
 # escape-code table -- see team/scripts/lib/script_common.sh).
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -139,7 +131,7 @@ C_GRAY_BG="$(ansi_code gray_bg)"
 # Status bar: [PM:mode] [HALT:<state>]
 # HALT state values: off (normal), HALT (halted), HALT-AFTER <event> (draining)
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TEAM_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_DIR="$(cd "$TEAM_DIR/.." && pwd)"
 
@@ -182,7 +174,7 @@ TEAM_ROOT="${TEAM_DIR}"
 source "${SCRIPT_DIR}/../lib/discovery.sh"
 
 # Source optional config files so env-file variables (e.g. PGAI_KANBAN_PM_MODE)
-# are available in fresh subshells (watch -n invocation).
+# are available in fresh subshells (one per cadence-loop.sh render).
 # Pattern matches wake/claude.sh lines ~136-139.
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc" 2>/dev/null || true
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env" 2>/dev/null || true
@@ -209,6 +201,13 @@ _hs_scope=""
 _hs_event=""
 IFS=$'\t' read -r _hs_state _hs_scope _hs_event \
     < <(dashboard_halt_scope "$KANBAN_ROOT" "$PGAI_DEV_TREE_PATH" "")
+# The read above takes only the first line, while dashboard_halt_scope may
+# still be scanning the remaining projects; an un-waited process
+# substitution could outlive the renderer and be left for PID 1 to reap.
+# Waiting for it (`$!` names the process substitution) collects it here. Its
+# status is non-zero when it wrote a later line into the pipe the read had
+# already closed (SIGPIPE), which is expected, so it never fails the renderer.
+wait "$!" 2>/dev/null || true
 
 # Determine scope word for the status-bar label (GLOBAL stays GLOBAL; project
 # names collapse to PROJECT — the HALTED section below lists per-project detail).
@@ -322,13 +321,20 @@ done
 # ---------------------------------------------------------------------------
 # Stale WORKING tasks: surface tasks stuck in WORKING longer than
 # max_task_seconds BEFORE the watchdog kill lands so the operator can
-# intervene.  Reads max_task_seconds from kanban.cfg (default 5400s).
+# intervene.  Reads max_task_seconds from MAX_TASK_SECONDS, else kanban.cfg,
+# else the [wake] max_task_seconds default (config_wake_max_task_seconds_default).
 # ---------------------------------------------------------------------------
 _MAX_TASK_SEC="${MAX_TASK_SECONDS:-}"
 if [[ -z "$_MAX_TASK_SEC" && -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-  _MAX_TASK_SEC="$(read_ini "$KANBAN_ROOT/kanban.cfg" wake max_task_seconds 5400 2>/dev/null || echo 5400)"
+  _MAX_TASK_SEC="$(read_ini "$KANBAN_ROOT/kanban.cfg" wake max_task_seconds "" 2>/dev/null || true)"
 fi
-_MAX_TASK_SEC="${_MAX_TASK_SEC:-5400}"
+if [[ -z "$_MAX_TASK_SEC" ]]; then
+  _MAX_TASK_SEC="$(config_wake_max_task_seconds_default)" || _MAX_TASK_SEC=""
+fi
+# An unreadable default leaves the flag off: scan_attention.py then applies
+# the same [wake] max_task_seconds default itself.
+_MAX_TASK_ARGS=()
+[[ -n "$_MAX_TASK_SEC" ]] && _MAX_TASK_ARGS=(--max-task-seconds "${_MAX_TASK_SEC}")
 
 if [[ "$USE_COLOR" == "true" ]]; then
   printf '\n%s%s⏰ STALE WORKING TASKS%s\n' "$C_YELLOW" "$C_BOLD" "$C_RESET"
@@ -338,10 +344,9 @@ fi
 printf '%s\n' "$DIVIDER"
 for _attn_root in "${_ATTN_TASK_ROOTS[@]}"; do
     PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
-      stale-working-tasks "$_attn_root" "$_COLOR_ARG" \
-      --max-task-seconds "${_MAX_TASK_SEC}"
+      stale-working-tasks "$_attn_root" "$_COLOR_ARG" ${_MAX_TASK_ARGS[@]+"${_MAX_TASK_ARGS[@]}"}
 done
-unset _MAX_TASK_SEC
+unset _MAX_TASK_SEC _MAX_TASK_ARGS
 
 # ---------------------------------------------------------------------------
 # Quarantined files: list files in each project's rejected/ directory with
@@ -361,9 +366,12 @@ else
 fi
 printf '%s\n' "$DIVIDER"
 
+# The threshold is discovery's own: environment first, then kanban.cfg
+# [discovery] reject_threshold (config_export_tunables, config_loader.sh).
+config_export_tunables "$KANBAN_ROOT/kanban.cfg"
 PYTHONPATH="$_ATTN_PYTHONPATH" python3 "$_SCAN_ATTENTION_PY" \
   quarantine "$KANBAN_ROOT" "$_COLOR_ARG" \
-  --threshold "${PGAI_DISCOVERY_REJECT_THRESHOLD:-3}"
+  --threshold "$PGAI_DISCOVERY_REJECT_THRESHOLD"
 
 # ---------------------------------------------------------------------------
 # HALTED section: enumerate all active halts and drains — GLOBAL entry when

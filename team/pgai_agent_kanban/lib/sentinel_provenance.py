@@ -133,7 +133,6 @@ import hashlib
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Union
 
 __all__ = [
     "ABSENT_DIGEST",
@@ -156,8 +155,17 @@ LOG_RELPATH = "logs/sentinel-writes.log"
 
 #: Field names, in the order every record line carries them.
 FIELDS = (
-    "time", "epoch", "op", "path", "sha256", "entry",
-    "pid", "ppid", "parent", "user", "test",
+    "time",
+    "epoch",
+    "op",
+    "path",
+    "sha256",
+    "entry",
+    "pid",
+    "ppid",
+    "parent",
+    "user",
+    "test",
 )
 
 #: Longest value a field keeps; longer values are cut to this many characters.
@@ -183,12 +191,12 @@ OPERATOR_OPS = frozenset({"halt", "halt_global", "halt_after", "drain_capture", 
 _HALT_NAME = "HALT"
 
 
-def log_path(kanban_root: Union[str, "os.PathLike[str]"]) -> Path:
+def log_path(kanban_root: str | os.PathLike[str]) -> Path:
     """Return the sentinel-write log path for *kanban_root*."""
     return Path(kanban_root) / LOG_RELPATH
 
 
-def kanban_root_for_scope(scope_root: Union[str, "os.PathLike[str]"]) -> Path:
+def kanban_root_for_scope(scope_root: str | os.PathLike[str]) -> Path:
     """Return the kanban root whose log records a write in *scope_root*.
 
     A project scope, ``<kanban_root>/projects/<name>``, maps to
@@ -212,7 +220,7 @@ def _clean(value: object) -> str:
     return text or _UNKNOWN
 
 
-def _cmdline(pid: int) -> Optional[str]:
+def _cmdline(pid: int) -> str | None:
     """The command line of process *pid* from /proc, or None when unreadable."""
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -266,8 +274,8 @@ def _record_line(sentinel_path: Path, op: str) -> str:
 
 
 def record_sentinel_write(
-    kanban_root: Union[str, "os.PathLike[str]"],
-    sentinel_path: Union[str, "os.PathLike[str]"],
+    kanban_root: str | os.PathLike[str],
+    sentinel_path: str | os.PathLike[str],
     op: str,
 ) -> bool:
     """Append one provenance record for a sentinel write that just happened.
@@ -316,7 +324,7 @@ def record_sentinel_write(
         return False
 
 
-def _epoch_of(value: Union[None, int, float, str, _dt.datetime]) -> Optional[float]:
+def _epoch_of(value: None | int | float | str | _dt.datetime) -> float | None:
     """*value* as Unix seconds: None stays None (no upper bound); a number
     is taken as epoch seconds; a datetime (naive read as local time, as
     the log's own ``time`` field is written) or an ISO-8601 string is
@@ -347,7 +355,7 @@ def _record_fields(line: str) -> dict:
     return fields
 
 
-def _record_epoch(fields: dict) -> Optional[float]:
+def _record_epoch(fields: dict) -> float | None:
     """A record's instant from ``epoch``, else ``time``; None when neither
     parses."""
     try:
@@ -361,10 +369,10 @@ def _record_epoch(fields: dict) -> Optional[float]:
 
 
 def sentinel_cause(
-    sentinel_path: Union[str, "os.PathLike[str]"],
-    at: Union[None, int, float, str, _dt.datetime] = None,
+    sentinel_path: str | os.PathLike[str],
+    at: None | int | float | str | _dt.datetime = None,
     *,
-    kanban_root: Union[None, str, "os.PathLike[str]"] = None,
+    kanban_root: None | str | os.PathLike[str] = None,
 ) -> str:
     """Return who caused the sentinel at *sentinel_path*: CAUSE_OPERATOR
     or CAUSE_CHAIN. See the module docstring's "Cause" section for the rule.
@@ -402,7 +410,7 @@ def sentinel_cause(
     return CAUSE_OPERATOR
 
 
-def _resolve_root(sentinel: Path, kanban_root: Union[None, str, "os.PathLike[str]"]) -> Path:
+def _resolve_root(sentinel: Path, kanban_root: None | str | os.PathLike[str]) -> Path:
     """The normalised kanban root: *kanban_root* when given, else derived
     from the sentinel's own directory (:func:`kanban_root_for_scope`)."""
     if kanban_root is not None:
@@ -411,11 +419,11 @@ def _resolve_root(sentinel: Path, kanban_root: Union[None, str, "os.PathLike[str
 
 
 def latest_sentinel_record(
-    sentinel_path: Union[str, "os.PathLike[str]"],
-    at: Union[None, int, float, str, _dt.datetime] = None,
+    sentinel_path: str | os.PathLike[str],
+    at: None | int | float | str | _dt.datetime = None,
     *,
-    kanban_root: Union[None, str, "os.PathLike[str]"] = None,
-) -> Optional[dict]:
+    kanban_root: None | str | os.PathLike[str] = None,
+) -> dict | None:
     """Return the latest sentinel-writes record for *sentinel_path*, or None.
 
     Records are matched on the normalised absolute path and ordered by
@@ -442,10 +450,10 @@ def latest_sentinel_record(
     sentinel = Path(os.path.normpath(os.path.abspath(sentinel_path)))
     root = _resolve_root(sentinel, kanban_root)
     wanted = str(sentinel)
-    latest_key: Optional[tuple] = None
-    latest: Optional[dict] = None
+    latest_key: tuple | None = None
+    latest: dict | None = None
     try:
-        with open(log_path(root), "r", encoding="utf-8", errors="replace") as handle:
+        with open(log_path(root), encoding="utf-8", errors="replace") as handle:
             for lineno, line in enumerate(handle):
                 fields = _record_fields(line)
                 path = fields.get("path")
@@ -463,7 +471,7 @@ def latest_sentinel_record(
     return latest
 
 
-def record_describes_sentinel(record: dict, sentinel_path: Union[str, "os.PathLike[str]"]) -> bool:
+def record_describes_sentinel(record: dict, sentinel_path: str | os.PathLike[str]) -> bool:
     """Whether *record*'s ``sha256`` still describes the file at *sentinel_path*.
 
     A record of a removal (``sha256=absent``) describes a sentinel that is
@@ -495,7 +503,7 @@ def _at_arg(value: str) -> str:
     return value
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the sentinel-provenance CLI: ``cause SENTINEL_PATH`` prints
     ``operator`` or ``chain`` (see the module docstring's "Cause" section).
     Exit codes: 0 answered; 2 usage error."""

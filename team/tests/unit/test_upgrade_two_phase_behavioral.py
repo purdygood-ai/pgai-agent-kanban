@@ -96,6 +96,8 @@ import textwrap
 
 import pytest
 
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
+
 # ---------------------------------------------------------------------------
 # Real script paths
 # ---------------------------------------------------------------------------
@@ -114,16 +116,23 @@ _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 _REAL_CONFIG_LOADER_SH = _TEAM_SCRIPTS_DIR / "lib" / "config_loader.sh"
+_REAL_DEV_TREE_SH = _TEAM_SCRIPTS_DIR / "lib" / "dev_tree.sh"
+_REAL_PP_RUN_OPS_SH = _TEAM_SCRIPTS_DIR / "lib" / "pp_run_ops.sh"
 
 _REAL_LIBS = [
     _REAL_ARGPARSE_SH,
     _REAL_ENV_BOOTSTRAP_SH,
     _REAL_INI_PARSER_SH,
-    _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+    _REAL_PROJECT_PATHS_SH,
+    _REAL_GIT_REMOTE_DEFAULT_SH,
     _REAL_ERROR_CONTRACT_SH,
     _REAL_TEMP_SH,
     _REAL_VERSION_STAMP_SH,
-    _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+    _REAL_SUBAGENT_DEPLOY_SH,
+    _REAL_SCRIPT_COMMON_SH,
+    _REAL_CONFIG_LOADER_SH,
+    _REAL_DEV_TREE_SH,
+    _REAL_PP_RUN_OPS_SH,
 ]
 
 # Version written into the dev-tree VERSION file for fixtures that need
@@ -206,12 +215,10 @@ def _build_two_phase_sandbox(
 
     # --- Kanban root: kanban.cfg pointing at the dev tree ---
     (kanban_root / "kanban.cfg").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             [paths]
             dev_tree_path = {dev_tree}
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -235,15 +242,19 @@ def _build_two_phase_sandbox(
     for lib_src in _REAL_LIBS:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_lib / lib_src.name)
+    seed_provider_home_rule(dev_tree / "team")
 
     # --- Dev tree: minimal stubs for the deposit loop ---
     for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
-        (dev_tree / "team" / doc_name).write_text(
-            f"# {doc_name} stub\n", encoding="utf-8"
-        )
+        (dev_tree / "team" / doc_name).write_text(f"# {doc_name} stub\n", encoding="utf-8")
     for sub_name in [
-        "roles", "pm-agent", "workflows", "pgai_agent_kanban",
-        "halt_after", "templates", "demos",
+        "roles",
+        "pm-agent",
+        "workflows",
+        "pgai_agent_kanban",
+        "halt_after",
+        "templates",
+        "demos",
     ]:
         sub = dev_tree / "team" / sub_name
         sub.mkdir(parents=True, exist_ok=True)
@@ -359,16 +370,12 @@ def _assert_no_orphan_phase1_process(
     ps_out = ps_result.stdout
     installed_path_str = str(installed_upgrade_path)
 
-    matching = [
-        line for line in ps_out.splitlines()
-        if installed_path_str in line and "bash" in line.lower()
-    ]
+    matching = [line for line in ps_out.splitlines() if installed_path_str in line and "bash" in line.lower()]
     assert not matching, (
         f"Orphan phase-1 process found after upgrade returned.  "
         f"exec should have replaced the phase-1 shell — lingering processes "
         f"indicate the exec did not fire or a child process was left running.\n"
-        f"Matching ps lines:\n"
-        + "\n".join(f"  {ln}" for ln in matching)
+        f"Matching ps lines:\n" + "\n".join(f"  {ln}" for ln in matching)
     )
 
 
@@ -412,8 +419,7 @@ def _build_sentinel_upgrade_sh(
     # That line reads: DEV_TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
     # We insert the sentinel immediately after the phase-2 info() lines so it
     # runs only in phase-2 mode (inside the if [[ "$_PHASE2_MODE" == "true" ]] block).
-    sentinel_code = textwrap.dedent(
-        f"""\
+    sentinel_code = textwrap.dedent(f"""\
 
   # SENTINEL: phase-2-only step — writes proof that the NEW script performed the upgrade.
   # This step is absent from the installed (old) upgrade.sh; its presence in the
@@ -421,8 +427,7 @@ def _build_sentinel_upgrade_sh(
   if [[ "$_PHASE2_MODE" == "true" ]]; then
     printf 'upgraded-by: {version_label}\\n' > {probe_path}
   fi
-"""
-    )
+""")
 
     # Find the anchor: the "Fall through to the upgrade body" comment inside the
     # phase-2 dispatch block.  Insert sentinel before that comment.
@@ -471,9 +476,7 @@ def test_version_skew_newer_script_performs_upgrade_and_writes_sentinel(
     - No orphan phase-1 process remains.
     """
     probe_path = tmp_path / "upgrade_probe.txt"
-    sentinel_script = _build_sentinel_upgrade_sh(
-        tmp_path, probe_path, _SANDBOX_NEW_VERSION
-    )
+    sentinel_script = _build_sentinel_upgrade_sh(tmp_path, probe_path, _SANDBOX_NEW_VERSION)
 
     sandbox = _build_two_phase_sandbox(
         tmp_path,
@@ -502,23 +505,19 @@ def test_version_skew_newer_script_performs_upgrade_and_writes_sentinel(
     probe_content = probe_path.read_text(encoding="utf-8").strip()
     expected_probe = f"upgraded-by: {_SANDBOX_NEW_VERSION}"
     assert probe_content == expected_probe, (
-        f"Probe file content mismatch.\n"
-        f"Expected: {expected_probe!r}\n"
-        f"Got:      {probe_content!r}"
+        f"Probe file content mismatch.\n" f"Expected: {expected_probe!r}\n" f"Got:      {probe_content!r}"
     )
 
     # VERSION file must contain the new version (written by phase-2 stamp).
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION file was not written by the upgrade."
     stamped = version_file.read_text(encoding="utf-8").strip()
-    assert stamped == _SANDBOX_NEW_VERSION, (
-        f"VERSION stamp mismatch.\nExpected: {_SANDBOX_NEW_VERSION!r}\nGot: {stamped!r}"
-    )
+    assert (
+        stamped == _SANDBOX_NEW_VERSION
+    ), f"VERSION stamp mismatch.\nExpected: {_SANDBOX_NEW_VERSION!r}\nGot: {stamped!r}"
 
     # Upgrade complete confirmation.
-    assert "Upgrade complete!" in result.stdout, (
-        f"'Upgrade complete!' not found in stdout.\nstdout:\n{result.stdout}"
-    )
+    assert "Upgrade complete!" in result.stdout, f"'Upgrade complete!' not found in stdout.\nstdout:\n{result.stdout}"
 
     # No orphan phase-1 process.
     _assert_no_orphan_phase1_process(kanban_root / "scripts" / "upgrade.sh")
@@ -557,16 +556,14 @@ def test_self_handoff_same_version_upgrade_completes(
         f"Self-handoff upgrade failed (exit {result.returncode}).\n"
         f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
-    assert "Upgrade complete!" in result.stdout, (
-        f"'Upgrade complete!' not found in stdout.\nstdout:\n{result.stdout}"
-    )
+    assert "Upgrade complete!" in result.stdout, f"'Upgrade complete!' not found in stdout.\nstdout:\n{result.stdout}"
 
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION file was not written."
     stamped = version_file.read_text(encoding="utf-8").strip()
-    assert stamped == _SANDBOX_NEW_VERSION, (
-        f"VERSION stamp mismatch.\nExpected: {_SANDBOX_NEW_VERSION!r}\nGot: {stamped!r}"
-    )
+    assert (
+        stamped == _SANDBOX_NEW_VERSION
+    ), f"VERSION stamp mismatch.\nExpected: {_SANDBOX_NEW_VERSION!r}\nGot: {stamped!r}"
 
     _assert_no_orphan_phase1_process(kanban_root / "scripts" / "upgrade.sh")
 
@@ -591,8 +588,7 @@ def test_broken_new_script_fails_at_bash_n_before_deposit(
     """
     broken_script = tmp_path / "broken_upgrade.sh"
     broken_script.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             # This script has an intentional syntax error for testing.
             _PHASE2_MODE=false
@@ -603,8 +599,7 @@ def test_broken_new_script_fails_at_bash_n_before_deposit(
             if [[ "$_PHASE2_MODE" == "true" ]]; then
               echo "phase 2"
             # missing 'fi' — bash -n must catch this
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     broken_script.chmod(0o755)
@@ -631,9 +626,9 @@ def test_broken_new_script_fails_at_bash_n_before_deposit(
     combined = result.stdout + result.stderr
 
     # Error message must mention the bash -n failure or the probe.
-    assert "bash -n" in combined or "syntax" in combined.lower(), (
-        f"Expected 'bash -n' or 'syntax' in error output; got:\n{combined}"
-    )
+    assert (
+        "bash -n" in combined or "syntax" in combined.lower()
+    ), f"Expected 'bash -n' or 'syntax' in error output; got:\n{combined}"
 
     # Nothing should have been deposited — installed scripts unchanged.
     files_after = set(p.name for p in (kanban_root / "scripts").iterdir())
@@ -644,9 +639,7 @@ def test_broken_new_script_fails_at_bash_n_before_deposit(
     )
 
     # Upgrade complete must NOT appear.
-    assert "Upgrade complete!" not in combined, (
-        f"'Upgrade complete!' appeared despite broken dev-tree script."
-    )
+    assert "Upgrade complete!" not in combined, f"'Upgrade complete!' appeared despite broken dev-tree script."
 
 
 @pytest.mark.skipif(
@@ -695,8 +688,10 @@ def test_protocol_mismatch_fails_loud_with_bootstrap_instruction(
             "bash",
             str(dev_upgrade),
             "--phase2",
-            "--phase2-protocol", "99",
-            "--kanban-root", str(kanban_root),
+            "--phase2-protocol",
+            "99",
+            "--kanban-root",
+            str(kanban_root),
         ],
         capture_output=True,
         text=True,
@@ -714,18 +709,15 @@ def test_protocol_mismatch_fails_loud_with_bootstrap_instruction(
 
     # Manual bootstrap instruction must appear.
     assert "cp" in combined and "retry" in combined, (
-        f"Expected manual-bootstrap instruction (cp ... retry) in error output; "
-        f"got:\n{combined}"
+        f"Expected manual-bootstrap instruction (cp ... retry) in error output; " f"got:\n{combined}"
     )
 
     # Protocol error message must be present.
-    assert "protocol" in combined.lower() or "unknown" in combined.lower(), (
-        f"Expected protocol error mention in output; got:\n{combined}"
-    )
+    assert (
+        "protocol" in combined.lower() or "unknown" in combined.lower()
+    ), f"Expected protocol error mention in output; got:\n{combined}"
 
-    assert "Upgrade complete!" not in combined, (
-        f"'Upgrade complete!' appeared despite protocol mismatch."
-    )
+    assert "Upgrade complete!" not in combined, f"'Upgrade complete!' appeared despite protocol mismatch."
 
 
 @pytest.mark.skipif(
@@ -749,15 +741,13 @@ def test_no_phase2_support_fails_loud_with_hand_copy_instruction(
     # its absence must cause the probe to fail loud.
     no_phase2_script = tmp_path / "old_upgrade.sh"
     no_phase2_script.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             # Simulated pre-v1.7 upgrade.sh.
             # This script does not implement the two-phase handoff protocol.
             echo "single-phase upgrade complete"
             exit 0
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     no_phase2_script.chmod(0o755)
@@ -781,13 +771,10 @@ def test_no_phase2_support_fails_loud_with_hand_copy_instruction(
 
     # Must mention manual bootstrap (cp ... retry).
     assert "cp" in combined and "retry" in combined, (
-        f"Expected hand-copy instruction (cp ... retry) in error output; "
-        f"got:\n{combined}"
+        f"Expected hand-copy instruction (cp ... retry) in error output; " f"got:\n{combined}"
     )
 
-    assert "Upgrade complete!" not in combined, (
-        f"'Upgrade complete!' appeared despite missing --phase2 support."
-    )
+    assert "Upgrade complete!" not in combined, f"'Upgrade complete!' appeared despite missing --phase2 support."
 
 
 # ---------------------------------------------------------------------------
@@ -838,16 +825,14 @@ def test_upgrade_completes_when_installed_copy_differs_from_dev_tree(
         f"Upgrade failed despite byte-different installed script (exit {result.returncode}).\n"
         f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
-    assert "Upgrade complete!" in result.stdout, (
-        f"'Upgrade complete!' not found.\nstdout:\n{result.stdout}"
-    )
+    assert "Upgrade complete!" in result.stdout, f"'Upgrade complete!' not found.\nstdout:\n{result.stdout}"
 
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION file was not written."
     stamped = version_file.read_text(encoding="utf-8").strip()
-    assert stamped == _SANDBOX_NEW_VERSION, (
-        f"VERSION stamp mismatch.\nExpected: {_SANDBOX_NEW_VERSION!r}\nGot: {stamped!r}"
-    )
+    assert (
+        stamped == _SANDBOX_NEW_VERSION
+    ), f"VERSION stamp mismatch.\nExpected: {_SANDBOX_NEW_VERSION!r}\nGot: {stamped!r}"
 
     _assert_no_orphan_phase1_process(kanban_root / "scripts" / "upgrade.sh")
 
@@ -881,9 +866,7 @@ def test_upgrade_completes_in_one_run(
         f"Upgrade failed in one-run test (exit {result.returncode}).\n"
         f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
-    assert "Upgrade complete!" in result.stdout, (
-        f"'Upgrade complete!' not found.\nstdout:\n{result.stdout}"
-    )
+    assert "Upgrade complete!" in result.stdout, f"'Upgrade complete!' not found.\nstdout:\n{result.stdout}"
 
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION file was not written."

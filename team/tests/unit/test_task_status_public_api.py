@@ -3,7 +3,7 @@ test_task_status_public_api.py
 ==============================
 Tests for the public status.md API in team/pgai_agent_kanban/task_status.py
 (read_section, section_value, read_state, replace_section, set_section,
-set_sections), its ``read`` / ``set-section`` subcommands, the
+set_sections, rewrite_status_file), its ``read`` / ``set-section`` subcommands, the
 ``task-status.sh read`` mode, and the ops/write callers that delegate to it.
 
 Every reader test runs over the variants the writers and hand-edits
@@ -21,7 +21,10 @@ Test coverage:
   3. set_section / set_sections change only the named section — every
      other byte of the file is preserved — keep the blank-line separator,
      canonicalise an inline heading, create a section only when asked to,
-     and write nothing when a section is absent.
+     and write nothing when a section is absent. rewrite_status_file
+     writes what its transform returns in one atomic write, ending in a
+     newline, and writes nothing when the file is missing or the transform
+     raises.
   4. ``task_status read`` prints the same State value as ``--read-state``
      on every variant fixture, and ``task-status.sh read`` does too.
   5. ``task-status.sh --help`` documents the read mode.
@@ -52,6 +55,7 @@ from pgai_agent_kanban.task_status import (
     read_section,
     read_state,
     replace_section,
+    rewrite_status_file,
     section_value,
     set_section,
     set_sections,
@@ -126,9 +130,7 @@ def _no_refusal_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("fixture_id,block,body,_state", _VARIANTS, ids=[v[0] for v in _VARIANTS])
-def test_read_section_reads_each_writer_variant(
-    fixture_id: str, block: str, body: str, _state: str
-) -> None:
+def test_read_section_reads_each_writer_variant(fixture_id: str, block: str, body: str, _state: str) -> None:
     assert read_section(_status(block), "State") == body
 
 
@@ -195,9 +197,7 @@ def test_set_section_changes_only_the_named_section(
     set_section(path, "Summary", "New summary.")
 
     after = path.read_text(encoding="utf-8")
-    assert after == before.replace(
-        "## Summary\nOriginal summary.\n", "## Summary\nNew summary.\n"
-    )
+    assert after == before.replace("## Summary\nOriginal summary.\n", "## Summary\nNew summary.\n")
 
 
 def test_set_section_keeps_the_blank_line_separator_and_is_idempotent(tmp_path: Path) -> None:
@@ -256,6 +256,43 @@ def test_set_sections_all_or_nothing(tmp_path: Path) -> None:
     assert "## State\nDONE\n\n## Summary\nOriginal summary.\n\n## Blockers\na blocker\n" in text
 
 
+def test_rewrite_status_file_writes_the_transform_result_atomically(tmp_path: Path) -> None:
+    path = tmp_path / "status.md"
+    path.write_text("## State\nWORKING\n\n## Summary\nx\n", encoding="utf-8")
+    inode = path.stat().st_ino
+    seen = []
+
+    def transform(text: str) -> str:
+        seen.append(text)
+        return text.replace("WORKING", "WONT-DO").rstrip("\n")
+
+    rewrite_status_file(path, transform)
+
+    assert seen == ["## State\nWORKING\n\n## Summary\nx\n"]
+    assert path.read_text(encoding="utf-8") == "## State\nWONT-DO\n\n## Summary\nx\n"
+    assert path.stat().st_ino != inode, "expected a rename over the file, not an in-place write"
+    assert not list(tmp_path.glob(".task_status_tmp_*")), "scratch file left behind"
+
+
+def test_rewrite_status_file_writes_nothing_on_a_missing_file_or_a_failed_transform(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(TaskStatusError) as exc_info:
+        rewrite_status_file(tmp_path / "status.md", lambda text: text)
+    assert exc_info.value.error_key == "task-status.missing-status-file"
+    assert not (tmp_path / "status.md").exists()
+
+    path = _variant_file(tmp_path, "plain", "## State\nWORKING\n")
+    before = path.read_bytes()
+
+    def refuse(_text: str) -> str:
+        raise TaskStatusError("example.refused", "refused", "retry")
+
+    with pytest.raises(TaskStatusError):
+        rewrite_status_file(path, refuse)
+    assert path.read_bytes() == before
+
+
 def test_replace_section_is_text_only() -> None:
     text = _status("## State\nWORKING\n")
     assert replace_section(text, "State", "  DONE  ") == text.replace("WORKING", "DONE")
@@ -301,17 +338,13 @@ def test_read_subcommand_by_project_and_key(
     assert capsys.readouterr().out == "Original summary.\n"
 
 
-def test_set_section_subcommand_writes_one_section(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_set_section_subcommand_writes_one_section(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = _variant_file(tmp_path, "plain", "## State\nWORKING\n")
     before = path.read_text(encoding="utf-8")
 
     assert main(["set-section", str(path), "--section", "Needs Human", "--body", "YES"]) == 0
 
-    assert path.read_text(encoding="utf-8") == before.replace(
-        "## Needs Human\nno\n", "## Needs Human\nyes\n"
-    )
+    assert path.read_text(encoding="utf-8") == before.replace("## Needs Human\nno\n", "## Needs Human\nyes\n")
     assert "status.md updated" in capsys.readouterr().out
 
 
@@ -319,7 +352,10 @@ def _run_task_status_sh(*args: str) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k != "PGAI_PROJECT_NAME"}
     return subprocess.run(
         ["bash", str(_TASK_STATUS_SH), *args],
-        capture_output=True, text=True, timeout=60, env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
     )
 
 
@@ -376,8 +412,7 @@ def test_subcommand_refusals_are_dual_channel_and_write_nothing(
     path = _variant_file(tmp_path, "plain", "## State\nWORKING\n")
     before = path.read_bytes()
     argv = [
-        a.replace("{path}", str(path)).replace("{missing}", str(tmp_path / "nope" / "status.md"))
-        for a in argv_tail
+        a.replace("{path}", str(path)).replace("{missing}", str(tmp_path / "nope" / "status.md")) for a in argv_tail
     ]
 
     assert main(argv) == 1
@@ -444,12 +479,12 @@ def test_section_span_gives_the_writers_bounds(text: str, expected: tuple) -> No
 
     span = section_span(text, "Queue")
     heading, through_body, rest = expected
-    assert text[span.start:].startswith(heading)
-    assert text[span.start:span.body_end] == through_body
+    assert text[span.start :].startswith(heading)
+    assert text[span.start : span.body_end] == through_body
     if rest is None:
         assert span.next_heading is None
     else:
-        assert text[span.next_heading:] == rest
+        assert text[span.next_heading :] == rest
 
 
 def test_section_span_is_none_for_an_absent_or_longer_heading() -> None:

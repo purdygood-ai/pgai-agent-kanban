@@ -36,6 +36,9 @@ from tests.unit.shell_harness import run_bash
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _INVOKE_LIB = _TEAM_DIR / "scripts" / "lib" / "wake_driver_invoke.sh"
 _PROTOCOL_LIB = _TEAM_DIR / "scripts" / "lib" / "overwatch_protocol.sh"
+# The watchdog block resolves the configured per-task limit through the
+# budget stage the driver sources ahead of it.
+_TASK_BUDGET_LIB = _TEAM_DIR / "scripts" / "lib" / "wake_task_budget.sh"
 _CHECK = _TEAM_DIR / "scripts" / "lib" / "overwatch-checks" / "check-transient-api-error.sh"
 
 _LEDGER_BEGIN = "# DISPATCH-LEDGER-BEGIN"
@@ -72,6 +75,7 @@ set -uo pipefail
 export PGAI_AGENT_KANBAN_TEMP_DIR={str(tmp_path / "kanban_tmp")!r}
 mkdir -p "$PGAI_AGENT_KANBAN_TEMP_DIR"
 source {str(_PROTOCOL_LIB)!r}
+source {str(_TASK_BUDGET_LIB)!r}
 log() {{ echo "[$(date -Iseconds)] wake(${{AGENT}}): $*" | tee -a "$LOG_FILE" >&2; }}
 
 LOG_FILE={str(log_file)!r}
@@ -102,11 +106,7 @@ echo "AGENT_EXIT=${{agent_exit}}"
 def _ledger_lines(task_dir: pathlib.Path) -> list[dict]:
     ledger = task_dir / "logs" / "dispatch.jsonl"
     assert ledger.is_file(), f"ledger not written at {ledger}"
-    return [
-        json.loads(line)
-        for line in ledger.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def test_dispatch_writes_open_and_closed_records_the_check_can_read(
@@ -130,9 +130,7 @@ def test_dispatch_writes_open_and_closed_records_the_check_can_read(
     result = run_bash(tmp_path, harness)
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert "AGENT_EXIT=1" in result.stdout, result.stdout
-    assert "dispatch ledger: batch log" in result.stderr, (
-        f"the open record should be narrated\nstderr={result.stderr}"
-    )
+    assert "dispatch ledger: batch log" in result.stderr, f"the open record should be narrated\nstderr={result.stderr}"
 
     lines = _ledger_lines(task_dir)
     assert [rec["event"] for rec in lines] == ["dispatched", "returned"], lines
@@ -157,9 +155,9 @@ _ctae_log_tail "TASK-LEDGER-TEST" {str(tmp_path / "tasks")!r}
     span = run_bash(tmp_path, probe)
     assert span.returncode == 0, span.stderr
     assert "claude: API Error: 529 overloaded_error" in span.stdout, span.stdout
-    assert "belongs to someone else" not in span.stdout, (
-        f"pre-dispatch content must be outside the span\nstdout={span.stdout}"
-    )
+    assert (
+        "belongs to someone else" not in span.stdout
+    ), f"pre-dispatch content must be outside the span\nstdout={span.stdout}"
 
 
 def test_second_dispatch_appends_and_latest_names_newer_batch_log(
@@ -178,8 +176,7 @@ def test_second_dispatch_appends_and_latest_names_newer_batch_log(
     for log_file, output in ((first, "first run: 529"), (second, "second run: clean")):
         result = run_bash(
             tmp_path,
-            _harness(tmp_path, provider_output=output, provider_exit=0,
-                     task_dir=task_dir, log_file=log_file),
+            _harness(tmp_path, provider_output=output, provider_exit=0, task_dir=task_dir, log_file=log_file),
         )
         assert result.returncode == 0, result.stderr
 
@@ -215,12 +212,8 @@ def test_ledger_write_failure_is_a_warning_and_provider_still_runs(
     )
     result = run_bash(tmp_path, harness)
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert "WARNING" in result.stderr and "dispatch ledger write failed" in result.stderr, (
-        result.stderr
-    )
+    assert "WARNING" in result.stderr and "dispatch ledger write failed" in result.stderr, result.stderr
     assert "dispatch ledger close failed" in result.stderr, result.stderr
-    assert "provider ran" in log_file.read_text(encoding="utf-8"), (
-        "the provider must still have been invoked"
-    )
+    assert "provider ran" in log_file.read_text(encoding="utf-8"), "the provider must still have been invoked"
     assert "AGENT_EXIT=0" in result.stdout, result.stdout
     assert not (task_dir / "logs" / "dispatch.jsonl").exists()

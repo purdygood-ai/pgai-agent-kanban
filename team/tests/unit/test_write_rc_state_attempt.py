@@ -34,9 +34,7 @@ from pgai_agent_kanban.cm.write_rc_state import (
 
 def test_write_open_with_attempt_emits_base_and_new_fields(capsys: pytest.CaptureFixture) -> None:
     """The payload carries rc/opened_at/closed_at/outcome plus the three new keys."""
-    write_open_with_attempt(
-        "v2.0.1", "2026-07-27T12:00:00Z", 2, "family-abc123", ["BUG-0001-foo.md"]
-    )
+    write_open_with_attempt("v2.0.1", "2026-07-27T12:00:00Z", 2, "family-abc123", ["BUG-0001-foo.md"])
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["rc"] == "v2.0.1"
@@ -71,9 +69,7 @@ def test_write_open_with_attempt_first_attempt_defaults_to_one(
     assert payload["attempt"] == 1
 
 
-def test_attempt_fields_survive_write_cancel_merge(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_attempt_fields_survive_write_cancel_merge(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """write_cancel only overwrites closed_at/outcome — attempt, family_key,
     and cargo must pass through untouched, proving the counter is preserved
     across the cancel step of the cancel -> rebundle cycle."""
@@ -91,14 +87,10 @@ def test_attempt_fields_survive_write_cancel_merge(
     assert cancelled["closed_at"] == "2026-07-27T18:00:00Z"
     assert cancelled["attempt"] == 2, "attempt must survive the cancel merge"
     assert cancelled["family_key"] == "family-abc123", "family_key must survive the cancel merge"
-    assert cancelled["cargo"] == ["BUG-0001-foo.md", "BUG-0002-bar.md"], (
-        "cargo must survive the cancel merge"
-    )
+    assert cancelled["cargo"] == ["BUG-0001-foo.md", "BUG-0002-bar.md"], "cargo must survive the cancel merge"
 
 
-def test_attempt_fields_survive_archive_to_history(
-    tmp_path: Path, capsys: pytest.CaptureFixture
-) -> None:
+def test_attempt_fields_survive_archive_to_history(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     """After write_cancel + archive_cancelled, the archived history record in
     history/ still carries the attempt/family_key/cargo fields — this is what
     lets the NEXT open (a new version, same cargo) find this record and

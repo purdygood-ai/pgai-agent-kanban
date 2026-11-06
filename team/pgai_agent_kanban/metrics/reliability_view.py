@@ -55,7 +55,8 @@ import math
 import os
 import pathlib
 import sys
-from typing import Any, Iterable, Iterator, Optional
+from typing import Any
+from collections.abc import Iterable, Iterator
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path. Put this file's own package root -- the
@@ -125,7 +126,7 @@ _HALT_SOURCE_PREFIX = "halt:"
 # ---------------------------------------------------------------------------
 
 
-def _reason_phrase(reason_code: Optional[str]) -> str:
+def _reason_phrase(reason_code: str | None) -> str:
     code = (reason_code or "").strip().lower()
     if code in _REASON_PHRASES:
         return _REASON_PHRASES[code]
@@ -153,7 +154,7 @@ def _halt_causes(block: dict) -> list[str]:
     return [f"HALT: {_reason_phrase(code)}", "HALT"]
 
 
-def cause_candidates(block: Optional[dict]) -> list[str]:
+def cause_candidates(block: dict | None) -> list[str]:
     """The cause for a ``last_block`` object of reliability.json, most
     detailed first, then its short form when it has one; the renderer
     shows the first that fits the line.
@@ -183,7 +184,7 @@ def cause_candidates(block: Optional[dict]) -> list[str]:
         )
         label = "Needs Human" if human else "BLOCKED"
         if not phrase:
-            task = str(block.get("task") or source[len(_TASK_SOURCE_PREFIX):]).strip()
+            task = str(block.get("task") or source[len(_TASK_SOURCE_PREFIX) :]).strip()
             role = task.split("-", 1)[0] if task else ""
             phrase = f"{role} task" if role else ""
         return [f"{label}: {phrase}", label] if phrase else [label]
@@ -192,7 +193,7 @@ def cause_candidates(block: Optional[dict]) -> list[str]:
     return [f"{source}: {phrase}", source] if phrase else [source]
 
 
-def cause_text(block: Optional[dict]) -> str:
+def cause_text(block: dict | None) -> str:
     """The most detailed cause for a ``last_block`` object (see
     :func:`cause_candidates`)."""
     return cause_candidates(block)[0]
@@ -203,7 +204,7 @@ def cause_text(block: Optional[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _whole(value: Any) -> Optional[int]:
+def _whole(value: Any) -> int | None:
     """*value* as a non-negative whole number (rounded down), or None when
     it is not a number."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -213,7 +214,7 @@ def _whole(value: Any) -> Optional[int]:
     return max(0, int(math.floor(value)))
 
 
-def _minute_text(value: Any) -> Optional[str]:
+def _minute_text(value: Any) -> str | None:
     """An ISO-8601 timestamp as UTC ``YYYY-MM-DD HH:MM``; None when it does
     not parse."""
     if not isinstance(value, str) or not value.strip():
@@ -222,20 +223,20 @@ def _minute_text(value: Any) -> Optional[str]:
     if parsed is None:
         return None
     if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(datetime.timezone.utc)
+        parsed = parsed.astimezone(datetime.UTC)
     return parsed.strftime("%Y-%m-%d %H:%M")
 
 
-def _now(now: Optional[datetime.datetime]) -> datetime.datetime:
+def _now(now: datetime.datetime | None) -> datetime.datetime:
     """*now* as an aware UTC datetime; the current time when None."""
     if now is None:
-        return datetime.datetime.now(datetime.timezone.utc)
+        return datetime.datetime.now(datetime.UTC)
     if now.tzinfo is None:
-        return now.replace(tzinfo=datetime.timezone.utc)
+        return now.replace(tzinfo=datetime.UTC)
     return now
 
 
-def _elapsed_hours(since: Any, now: Optional[datetime.datetime]) -> Optional[int]:
+def _elapsed_hours(since: Any, now: datetime.datetime | None) -> int | None:
     """Whole hours from the ISO-8601 *since* to *now*; None when *since*
     does not parse."""
     if not isinstance(since, str) or not since.strip():
@@ -244,13 +245,14 @@ def _elapsed_hours(since: Any, now: Optional[datetime.datetime]) -> Optional[int
     if parsed is None:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        parsed = parsed.replace(tzinfo=datetime.UTC)
     return _whole(hours_between(parsed, _now(now)))
 
 
 def _streak_parts(
-    streak: Any, now: Optional[datetime.datetime] = None,
-) -> Optional[tuple[int, int, str, list[str]]]:
+    streak: Any,
+    now: datetime.datetime | None = None,
+) -> tuple[int, int, str, list[str]] | None:
     """``(rcs, hours, prefix, causes)`` for one streak object, or None when
     a field the line needs is absent or of the wrong shape. *hours* is the
     time from the streak's ``since`` to *now* (default the current time);
@@ -288,7 +290,7 @@ def _streak_parts(
     return rcs, _elapsed_hours(streak.get("since"), now), f"since {since_text}", cause_candidates(block)
 
 
-def load_reliability(path: Optional[str]) -> tuple[Optional[dict], str]:
+def load_reliability(path: str | None) -> tuple[dict | None, str]:
     """Read one reliability.json.
 
     Returns ``(document, "")`` when the file holds a JSON object both
@@ -332,7 +334,9 @@ def _fit(head: str, prefix: str, causes: list[str], width: int) -> str:
 
 
 def streak_lines(
-    document: dict, width: int = PANE_WIDTH, now: Optional[datetime.datetime] = None,
+    document: dict,
+    width: int = PANE_WIDTH,
+    now: datetime.datetime | None = None,
 ) -> list[str]:
     """The two streak lines (Hands-off, then Clean) for a document
     :func:`load_reliability` accepted, each indented four spaces and at
@@ -348,23 +352,20 @@ def streak_lines(
     hours_width = max(len(str(part[2])) for part in parts)
     lines = []
     for label, rcs, hours, prefix, causes in parts:
-        head = (
-            f"{_LINE_INDENT}{label:<{_LABEL_WIDTH}}{rcs:>{rcs_width}} RCs / "
-            f"{hours:>{hours_width}}h   "
-        )
+        head = f"{_LINE_INDENT}{label:<{_LABEL_WIDTH}}{rcs:>{rcs_width}} RCs / " f"{hours:>{hours_width}}h   "
         lines.append(_fit(head, prefix, causes, width))
     return lines
 
 
 def project_entry_lines(
     name: str,
-    path: Optional[str],
+    path: str | None,
     *,
     bold: str = "",
     dim: str = "",
     reset: str = "",
     width: int = PANE_WIDTH,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> list[str]:
     """One project's entry: the name line (two-space indent, in *bold*),
     then its two streak lines (hours to *now*, default the current time),
@@ -387,7 +388,7 @@ def reliability_section_lines(
     dim: str = "",
     cyan: str = "",
     width: int = PANE_WIDTH,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> Iterator[str]:
     """The pane's ``=== Reliability ===`` section: the header, a blank
     line, then each project's entry followed by a blank line. *projects*
@@ -419,14 +420,11 @@ def reliability_section_lines(
 # ---------------------------------------------------------------------------
 
 
-def _print_text(kanban_root: str, projects: list[str], now: Optional[datetime.datetime] = None) -> int:
+def _print_text(kanban_root: str, projects: list[str], now: datetime.datetime | None = None) -> int:
     if not projects:
         print(f"{_ENTRY_INDENT}(no projects registered)")
         return 0
-    entries = [
-        project_entry_lines(name, reliability_path_for_project(kanban_root, name), now=now)
-        for name in projects
-    ]
+    entries = [project_entry_lines(name, reliability_path_for_project(kanban_root, name), now=now) for name in projects]
     print("\n\n".join("\n".join(entry) for entry in entries))
     return 0
 
@@ -459,7 +457,7 @@ def _iso_time(value: str) -> datetime.datetime:
     return _now(parsed)
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the reliability view CLI.
 
     ``text`` prints each named project's entry (name line and two streak

@@ -108,7 +108,8 @@ import ast
 import json
 import sys
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Iterator
 
 LINT_NAME = "docstring_coverage"
 SCAN_TREES = ("team/pgai_agent_kanban", "team/pm-agent", "team/scripts")
@@ -257,22 +258,14 @@ def _has_help(call: ast.Call) -> bool:
 
 def _option_label(call: ast.Call) -> str:
     """Return the call's option strings (``--project/-p``) or ``add_argument``."""
-    names = [
-        arg.value
-        for arg in call.args
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
-    ]
+    names = [arg.value for arg in call.args if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
     return "/".join(names) if names else "add_argument"
 
 
 def add_argument_calls(tree: ast.Module) -> Iterator[ast.Call]:
     """Yield every ``<expr>.add_argument(...)`` call in *tree*."""
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "add_argument"
-        ):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument":
             yield node
 
 
@@ -375,9 +368,7 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(args.findings_file)
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(
-                json.dumps([f.to_dict() for f in findings], indent=2) + "\n", encoding="utf-8"
-            )
+            out.write_text(json.dumps([f.to_dict() for f in findings], indent=2) + "\n", encoding="utf-8")
         except OSError as exc:
             print(f"lint_{LINT_NAME}: could not write findings file {out}: {exc}", file=sys.stderr)
     return 0

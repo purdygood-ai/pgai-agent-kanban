@@ -50,8 +50,8 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from datetime import timezone
-from typing import Callable, Optional
+from datetime import UTC
+from collections.abc import Callable
 
 from ..timeutil import try_parse_iso
 
@@ -86,9 +86,7 @@ def _show_metrics(args: list[str]) -> int:
     parser.add_argument(
         "--project",
         default="",
-        help=(
-            "render only this project (default: every project in projects.cfg, in priority order)"
-        ),
+        help=("render only this project (default: every project in projects.cfg, in priority order)"),
     )
     parser.add_argument(
         "--last",
@@ -113,10 +111,7 @@ def _show_metrics(args: list[str]) -> int:
     parser.add_argument(
         "--env-project",
         default="",
-        help=(
-            "fallback project (PGAI_PROJECT_NAME) for --history-csv and --per-agent (default: "
-            "empty)"
-        ),
+        help=("fallback project (PGAI_PROJECT_NAME) for --history-csv and --per-agent (default: " "empty)"),
     )
     opts = parser.parse_args(args)
     return _emit(
@@ -143,7 +138,7 @@ def _run_aggregator(aggregator: str, args: list[str]) -> None:
 def _cost_report(args: list[str]) -> int:
     if "--" in args:
         split = args.index("--")
-        own, report_args = args[:split], args[split + 1:]
+        own, report_args = args[:split], args[split + 1 :]
     else:
         own, report_args = args, []
     parser = argparse.ArgumentParser(prog="cost_report", allow_abbrev=False)
@@ -236,7 +231,7 @@ def _metrics_pane(args: list[str]) -> int:
             print(f"metrics_pane: NOW is not an ISO-8601 time: {args[9]!r}", file=sys.stderr)
             return EXIT_USAGE
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
+            now = now.replace(tzinfo=UTC)
     # Print each line as it is rendered, so a malformed roll-up that raises
     # part-way leaves the lines before it on the pane.
     for line in metrics_pane_lines(
@@ -252,12 +247,12 @@ _POSITIONAL_USAGE: dict[str, str] = {
     "history_csv": (
         "usage: history_csv CSV_PATH [PROJECT_FILTER]\n"
         "Print the history.csv at CSV_PATH as CSV, keeping only PROJECT_FILTER's rows\n"
-        "(\"\" or absent keeps every row); with no matching row, the header alone."
+        '("" or absent keeps every row); with no matching row, the header alone.'
     ),
     "rc_rollups_jsonl": (
         "usage: rc_rollups_jsonl PROJECT_FILTER FILE...\n"
         "Print each per-RC roll-up FILE as one compact, key-sorted JSON line, in the\n"
-        "order given, leaving out roll-ups of other projects (\"\" keeps every one);\n"
+        'order given, leaving out roll-ups of other projects ("" keeps every one);\n'
         "an unreadable FILE is skipped with a warning on stderr."
     ),
     "cost_block": (
@@ -277,8 +272,8 @@ _POSITIONAL_USAGE: dict[str, str] = {
     "metrics_pane": (
         "usage: metrics_pane USE_COLOR TODAY PROJECTS_JSON RESET BOLD DIM CYAN GREEN YELLOW [NOW]\n"
         "Print the dashboard Metrics pane line by line (metrics_pane.metrics_pane_lines),\n"
-        "as scripts/dashboard/metrics.sh shows it. USE_COLOR is \"true\" or \"false\";\n"
-        "each escape (RESET ... YELLOW) is \"\" when colour is off. NOW, an ISO-8601\n"
+        'as scripts/dashboard/metrics.sh shows it. USE_COLOR is "true" or "false";\n'
+        'each escape (RESET ... YELLOW) is "" when colour is off. NOW, an ISO-8601\n'
         "time, is the render time (empty or absent: the current time)."
     ),
 }
@@ -298,7 +293,7 @@ _VERBS: dict[str, Callable[[list[str]], int]] = {
 }
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run one metrics verb: ``VERB [ARGS...]`` (see the module docstring for each verb).
 
     Returns the verb's own exit code; 2 (``EXIT_USAGE``) for a missing or

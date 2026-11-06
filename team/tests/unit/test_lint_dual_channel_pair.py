@@ -110,14 +110,17 @@ def test_bash_call_missing_remedy_is_reported(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_two_args.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract "gate.example" "something stopped"\n',
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "gate.example" "something stopped"\n',
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     assert result == 0, "quality-class lint must never return non-zero"
 
@@ -138,10 +141,14 @@ def test_python_call_missing_remedy_is_reported(tmp_path: Path) -> None:
         '    emit_error_contract("gate.example", "something stopped")\n',
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(_empty_bash_dir(tmp_path)),
-        "--python-dir", str(python_dir),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(_empty_bash_dir(tmp_path)),
+            "--python-dir",
+            str(python_dir),
+        ]
+    )
 
     assert result == 0
 
@@ -179,8 +186,7 @@ def test_bash_call_with_blank_remedy_literal_is_reported(tmp_path: Path) -> None
     _write_bash_file(
         bash_dir,
         "fixture_blank_remedy.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_format_error_contract "gate.example" "something stopped" ""\n',
+        "#!/usr/bin/env bash\n" 'pgai_format_error_contract "gate.example" "something stopped" ""\n',
     )
 
     findings = _lint._scan_bash_file(bash_dir / "fixture_blank_remedy.sh")
@@ -216,8 +222,8 @@ def test_bash_call_with_all_three_fields_produces_no_finding(tmp_path: Path) -> 
     _write_bash_file(
         bash_dir,
         "fixture_complete.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract \\\n'
+        "#!/usr/bin/env bash\n"
+        "pgai_emit_error_contract \\\n"
         '  "gate.example" \\\n'
         '  "something stopped and why" \\\n'
         '  "run the fix command"\n',
@@ -281,9 +287,7 @@ def test_comment_mentioning_function_name_is_not_a_call_site(tmp_path: Path) -> 
     _write_bash_file(
         bash_dir,
         "fixture_comment_only.sh",
-        "#!/usr/bin/env bash\n"
-        "# Call pgai_emit_error_contract with the key, message, and remedy.\n"
-        "echo done\n",
+        "#!/usr/bin/env bash\n" "# Call pgai_emit_error_contract with the key, message, and remedy.\n" "echo done\n",
     )
 
     findings = _lint._scan_bash_file(bash_dir / "fixture_comment_only.sh")
@@ -314,10 +318,14 @@ def test_command_v_probe_guard_is_not_a_call_site(tmp_path: Path) -> None:
     findings = _lint._scan_bash_file(bash_dir / "fixture_probe_guard.sh")
     assert findings == []
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
     assert result == 0
 
 
@@ -407,14 +415,17 @@ def test_main_returns_zero_on_clean_tree(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_ok.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract "gate.example" "message text" "remedy text"\n',
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "gate.example" "message text" "remedy text"\n',
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
     assert result == 0
 
 
@@ -441,10 +452,14 @@ def test_main_returns_zero_even_with_multiple_findings(tmp_path: Path) -> None:
         '    format_error_contract("gate.three", "msg only")\n',
     )
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(python_dir),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(python_dir),
+        ]
+    )
 
     assert result == 0, (
         "lint_dual_channel_pair.main() must return 0 regardless of finding "
@@ -463,16 +478,20 @@ def test_findings_file_contains_machine_readable_json(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_missing_remedy.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract "gate.example" "something stopped and why"\n',
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "gate.example" "something stopped and why"\n',
     )
     findings_file = tmp_path / "findings" / "dual_channel_pair.json"
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     assert result == 0
     assert findings_file.is_file(), "findings file must be written when --findings-file is given"
@@ -499,17 +518,22 @@ def test_findings_file_holds_one_entry_per_call_site(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_two_sites.sh",
-        '#!/usr/bin/env bash\n'
+        "#!/usr/bin/env bash\n"
         'pgai_emit_error_contract "gate.first" "first message"\n'
         'pgai_emit_error_contract "gate.second" "" "remedy text"\n',
     )
     findings_file = tmp_path / "findings.json"
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     assert result == 0
     data = json.loads(findings_file.read_text(encoding="utf-8"))
@@ -523,16 +547,20 @@ def test_findings_file_is_empty_array_on_clean_tree(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_ok.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract "gate.example" "message text" "remedy text"\n',
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "gate.example" "message text" "remedy text"\n',
     )
     findings_file = tmp_path / "findings.json"
 
-    _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     data = json.loads(findings_file.read_text(encoding="utf-8"))
     assert data == []
@@ -545,14 +573,17 @@ def test_findings_json_printed_to_stdout(tmp_path: Path, capsys) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_missing_remedy.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract "gate.example" "something stopped"\n',
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "gate.example" "something stopped"\n',
     )
 
-    _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     captured = capsys.readouterr()
     assert "FINDINGS_JSON:" in captured.out
@@ -574,14 +605,17 @@ def test_remedy_block_names_location_and_rule(tmp_path: Path, capsys) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_missing_remedy.sh",
-        '#!/usr/bin/env bash\n'
-        'pgai_emit_error_contract "gate.example" "something stopped"\n',
+        "#!/usr/bin/env bash\n" 'pgai_emit_error_contract "gate.example" "something stopped"\n',
     )
 
-    _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
 
     captured = capsys.readouterr()
     assert "fixture_missing_remedy.sh:2" in captured.out

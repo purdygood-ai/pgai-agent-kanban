@@ -144,9 +144,7 @@ _INTERP = r"(?<![\w.-])(?:[\w./${}-]*/)?python3?(?:\.\d+)?(?![\w.-])"
 # a lone `-`, an explicit /dev/stdin or /dev/fd/0, or straight into a heredoc
 # opener.
 _STDIN_INVOCATION_RE = re.compile(
-    _INTERP
-    + r"(?:[ \t]+-(?![cm](?:\s|$))[A-Za-z]+)*"
-    + r"(?:[ \t]+(?:-|/dev/stdin|/dev/fd/0)(?=\s|$)|[ \t]*(?=<<))"
+    _INTERP + r"(?:[ \t]+-(?![cm](?:\s|$))[A-Za-z]+)*" + r"(?:[ \t]+(?:-|/dev/stdin|/dev/fd/0)(?=\s|$)|[ \t]*(?=<<))"
 )
 
 # Interpreter given its program inline with -c.
@@ -154,9 +152,7 @@ _DASH_C_RE = re.compile(_INTERP + r"(?:[ \t]+-(?![cm](?:\s|$))[A-Za-z]+)*[ \t]+-
 
 # Heredoc opener: `<<` or `<<-` (never the `<<<` here-string), then a
 # delimiter word that is bare, quoted, or backslash-escaped.
-_HEREDOC_RE = re.compile(
-    r"(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\([A-Za-z_][\w]*)|([A-Za-z_][\w]*))"
-)
+_HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\([A-Za-z_][\w]*)|([A-Za-z_][\w]*))")
 
 
 # ---------------------------------------------------------------------------
@@ -330,10 +326,7 @@ def scan_text(text: str) -> list[Block]:
             dash, sq, dq, esc, bare = hm.groups()
             delimiter = sq or dq or esc or bare
             quoted = bare is None
-            is_python = (
-                _STDIN_INVOCATION_RE.search(logical_joined, prev_opener_end, hm.start() + 2)
-                is not None
-            )
+            is_python = _STDIN_INVOCATION_RE.search(logical_joined, prev_opener_end, hm.start() + 2) is not None
             prev_opener_end = hm.end()
 
             # Walk the body to its closing delimiter line.
@@ -396,7 +389,11 @@ def _rel(path: Path, root: Path) -> str:
 
 
 def measure(
-    root: Path, scan_dir: Path, *, verbose: bool = False, scan_files: "list[Path] | None" = None,
+    root: Path,
+    scan_dir: Path,
+    *,
+    verbose: bool = False,
+    scan_files: list[Path] | None = None,
 ) -> list[FileCounts]:
     """Count inline Python in every scanned file: those under *scan_dir*, then
     each of *scan_files* that exists and is not already among them."""
@@ -436,10 +433,7 @@ def load_allowlist(path: Path) -> tuple[dict[str, tuple[int, int, int]], list[Fi
                 kind="allowlist-missing",
                 file=allow_rel,
                 line=0,
-                summary=(
-                    f"allowlist {allow_rel} not found; every file with inline Python "
-                    "is reported as unlisted"
-                ),
+                summary=(f"allowlist {allow_rel} not found; every file with inline Python " "is reported as unlisted"),
                 remedy=f"{RUN_COMMAND} --emit-allowlist",
             )
         )
@@ -455,10 +449,7 @@ def load_allowlist(path: Path) -> tuple[dict[str, tuple[int, int, int]], list[Fi
                     kind="allowlist-malformed",
                     file=allow_rel,
                     line=lineno,
-                    summary=(
-                        f"allowlist line is not '<path> <blocks> <python_lines>' "
-                        f"and was ignored: {raw!r}"
-                    ),
+                    summary=(f"allowlist line is not '<path> <blocks> <python_lines>' " f"and was ignored: {raw!r}"),
                     remedy=f"{RUN_COMMAND} --emit-allowlist",
                 )
             )
@@ -605,21 +596,41 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit codes:\n  0  Always (findings are narrated, never fatal).\n"
         ),
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--scan-dir", metavar="PATH", default=DEFAULT_SCAN_DIR,
-                        help=f"Directory to scan, relative to --root or absolute (default: {DEFAULT_SCAN_DIR}).")
-    parser.add_argument("--scan-file", metavar="PATH", action="append", default=None,
-                        help=("A bash file to scan as well; repeatable. Given at least once, it replaces "
-                              f"the default ({', '.join(DEFAULT_SCAN_FILES)})."))
-    parser.add_argument("--allowlist", metavar="PATH", default=DEFAULT_ALLOWLIST,
-                        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write findings as a JSON array to PATH (always written).")
-    parser.add_argument("--emit-allowlist", action="store_true",
-                        help="Print measured counts in allowlist format and exit 0.")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print each file's counts as it is scanned.")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--scan-dir",
+        metavar="PATH",
+        default=DEFAULT_SCAN_DIR,
+        help=f"Directory to scan, relative to --root or absolute (default: {DEFAULT_SCAN_DIR}).",
+    )
+    parser.add_argument(
+        "--scan-file",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help=(
+            "A bash file to scan as well; repeatable. Given at least once, it replaces "
+            f"the default ({', '.join(DEFAULT_SCAN_FILES)})."
+        ),
+    )
+    parser.add_argument(
+        "--allowlist",
+        metavar="PATH",
+        default=DEFAULT_ALLOWLIST,
+        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).",
+    )
+    parser.add_argument(
+        "--findings-file", metavar="PATH", default=None, help="Write findings as a JSON array to PATH (always written)."
+    )
+    parser.add_argument(
+        "--emit-allowlist", action="store_true", help="Print measured counts in allowlist format and exit 0."
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print each file's counts as it is scanned.")
     return parser
 
 
@@ -689,10 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if findings:
-        message = (
-            f"{len(findings)} inline-Python finding(s) against {allowlist_rel}; "
-            "see the lines printed above"
-        )
+        message = f"{len(findings)} inline-Python finding(s) against {allowlist_rel}; " "see the lines printed above"
         remedy = (
             "convert new inline Python to a module called via python3 -m or "
             "pp_run_ops, tighten any entry reported below its counts, then re-run: "

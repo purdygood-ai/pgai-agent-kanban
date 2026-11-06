@@ -191,9 +191,7 @@ def test_bash_reader_narrates_mismatches_ahead_of_the_values_when_streams_merge(
 
 
 def test_bash_reader_on_a_missing_tasks_directory_prints_not_found(tmp_path):
-    result = run_bash(
-        tmp_path, f"source {_LIB} && read_ship_policy_tester_lookup '{tmp_path / 'missing'}' 'v1.2.3'"
-    )
+    result = run_bash(tmp_path, f"source {_LIB} && read_ship_policy_tester_lookup '{tmp_path / 'missing'}' 'v1.2.3'")
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == _NOT_FOUND
 

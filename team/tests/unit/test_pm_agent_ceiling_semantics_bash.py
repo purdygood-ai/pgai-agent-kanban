@@ -41,7 +41,6 @@ import pathlib
 import shutil
 import textwrap
 
-import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -107,8 +106,7 @@ def _build_kanban_root_for_pm_agent(
 
     # projects.cfg — register the project
     (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\n"
-        f"priority=1\ndescription=pm-agent test fixture\nenabled=true\n",
+        f"[project:{project_name}]\n" f"priority=1\ndescription=pm-agent test fixture\nenabled=true\n",
         encoding="utf-8",
     )
 
@@ -129,8 +127,7 @@ def _build_kanban_root_for_pm_agent(
         f"git_repo_url = git@example.com:{project_name}.git\n"
         f"git_remote_name = origin\n"
         f"workflow_type = {workflow_type}\n"
-        f"is_self_build = false\n"
-        + versioning_block,
+        f"is_self_build = false\n" + versioning_block,
         encoding="utf-8",
     )
 
@@ -252,12 +249,8 @@ class TestLabelVersionProjectPassesThrough:
         requirements file whose Target Version is v20260712-fieldtest without
         crashing.  An unbound-variable error at the ceiling arithmetic exits non-zero.
         """
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "label-proj", "testing-only"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-label.md", "v20260712-fieldtest"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "label-proj", "testing-only")
+        req = _write_requirements_file(tmp_path, "req-label.md", "v20260712-fieldtest")
         result = _run_pm_agent(tmp_path, root, req, "label-proj")
 
         assert result.returncode == 0, (
@@ -266,56 +259,41 @@ class TestLabelVersionProjectPassesThrough:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_label_version_pm_agent_creates_task_folder(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_label_version_pm_agent_creates_task_folder(self, tmp_path: pathlib.Path) -> None:
         """pm-agent creates a task folder for a label-version requirements doc.
 
         After running pm-agent on a testing-only project with v20260712-fieldtest,
         a PM task folder must exist under the project's tasks/ directory.
         """
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "label-proj", "testing-only"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-label-folder.md", "v20260712-fieldtest"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "label-proj", "testing-only")
+        req = _write_requirements_file(tmp_path, "req-label-folder.md", "v20260712-fieldtest")
         result = _run_pm_agent(tmp_path, root, req, "label-proj")
 
-        assert result.returncode == 0, (
-            f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         tasks_dir = root / "projects" / "label-proj" / "tasks"
-        task_folders = [
-            d for d in tasks_dir.iterdir()
-            if d.is_dir() and d.name.startswith("PM-")
-        ]
+        task_folders = [d for d in tasks_dir.iterdir() if d.is_dir() and d.name.startswith("PM-")]
         assert task_folders, (
             f"Expected at least one PM task folder under {tasks_dir}.\n"
             f"tasks/ contents: {list(tasks_dir.iterdir())}\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_label_version_pm_agent_appends_pm_backlog_entry(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_label_version_pm_agent_appends_pm_backlog_entry(self, tmp_path: pathlib.Path) -> None:
         """pm-agent appends a pm_backlog entry for a label-version requirements doc.
 
         The pm_backlog.md file must receive a pending task entry so the PM
         agent's wake logic can pick it up.
         """
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "label-proj", "testing-only"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-label-backlog.md", "v20260712-fieldtest"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "label-proj", "testing-only")
+        req = _write_requirements_file(tmp_path, "req-label-backlog.md", "v20260712-fieldtest")
         result = _run_pm_agent(tmp_path, root, req, "label-proj")
 
-        assert result.returncode == 0, (
-            f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         pm_backlog = root / "projects" / "label-proj" / "tasks" / "queues" / "pm_backlog.md"
         assert pm_backlog.exists(), f"pm_backlog.md not found at {pm_backlog}"
@@ -326,26 +304,20 @@ class TestLabelVersionProjectPassesThrough:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_label_version_pm_agent_emits_folder_line(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_label_version_pm_agent_emits_folder_line(self, tmp_path: pathlib.Path) -> None:
         """pm-agent emits a 'Folder :' line parseable by discovery.
 
         The "Folder  : <path>" line in pm-agent's stdout is the handoff signal
         that discovery_step_requirements uses to locate the created PM task.
         It must appear in stdout when a label-version requirements file is processed.
         """
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "label-proj", "testing-only"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-label-folder-line.md", "v20260712-fieldtest"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "label-proj", "testing-only")
+        req = _write_requirements_file(tmp_path, "req-label-folder-line.md", "v20260712-fieldtest")
         result = _run_pm_agent(tmp_path, root, req, "label-proj")
 
-        assert result.returncode == 0, (
-            f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         assert "Folder" in result.stdout, (
             "Expected a 'Folder :' line in pm-agent stdout for discovery to parse.\n"
@@ -367,9 +339,7 @@ class TestSemverCeilingExceededProducesPreciseError:
     stderr and exit must be non-zero.
     """
 
-    def test_semver_ceiling_exceeded_exits_nonzero(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_semver_ceiling_exceeded_exits_nonzero(self, tmp_path: pathlib.Path) -> None:
         """pm-agent exits non-zero when Target Version exceeds the semver ceiling."""
         root = _build_kanban_root_for_pm_agent(
             tmp_path,
@@ -380,9 +350,7 @@ class TestSemverCeilingExceededProducesPreciseError:
             max_patch="99",
         )
         # v0.10.0 exceeds max_minor=9
-        req = _write_requirements_file(
-            tmp_path, "req-semver-ceil.md", "v0.10.0"
-        )
+        req = _write_requirements_file(tmp_path, "req-semver-ceil.md", "v0.10.0")
         result = _run_pm_agent(tmp_path, root, req, "semver-proj")
 
         assert result.returncode != 0, (
@@ -390,9 +358,7 @@ class TestSemverCeilingExceededProducesPreciseError:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_semver_ceiling_exceeded_error_names_component(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_semver_ceiling_exceeded_error_names_component(self, tmp_path: pathlib.Path) -> None:
         """Ceiling-exceeded error message names the violated component.
 
         The error must identify which ceiling was exceeded (major, minor, or patch)
@@ -407,23 +373,19 @@ class TestSemverCeilingExceededProducesPreciseError:
             max_patch="99",
         )
         # v0.10.0 exceeds max_minor=9
-        req = _write_requirements_file(
-            tmp_path, "req-semver-ceil-msg.md", "v0.10.0"
-        )
+        req = _write_requirements_file(tmp_path, "req-semver-ceil-msg.md", "v0.10.0")
         result = _run_pm_agent(tmp_path, root, req, "semver-proj")
 
-        assert result.returncode != 0, (
-            f"pm-agent.sh must exit non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode != 0
+        ), f"pm-agent.sh must exit non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         # Must name the component violation
         assert "minor" in result.stderr or "minor" in result.stdout, (
             "Expected the ceiling error to name the 'minor' component violation.\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_semver_within_ceiling_exits_zero(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_semver_within_ceiling_exits_zero(self, tmp_path: pathlib.Path) -> None:
         """pm-agent exits 0 for a semver project whose Target Version is within ceiling."""
         root = _build_kanban_root_for_pm_agent(
             tmp_path,
@@ -434,9 +396,7 @@ class TestSemverCeilingExceededProducesPreciseError:
             max_patch="99",
         )
         # v0.5.3 is within max_minor=9, max_patch=99
-        req = _write_requirements_file(
-            tmp_path, "req-semver-ok.md", "v0.5.3"
-        )
+        req = _write_requirements_file(tmp_path, "req-semver-ok.md", "v0.5.3")
         result = _run_pm_agent(tmp_path, root, req, "semver-proj-ok")
 
         assert result.returncode == 0, (
@@ -459,9 +419,7 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
     the version reaches the error-detail path with non-numeric components.
     """
 
-    def test_garbage_version_on_semver_project_exits_nonzero(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_garbage_version_on_semver_project_exits_nonzero(self, tmp_path: pathlib.Path) -> None:
         """pm-agent exits non-zero for a garbage version on a semver project.
 
         Version v1garbage-label is extracted by the requirements awk parser
@@ -470,14 +428,10 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
         check (not X.Y.Z).  This routes into the error-detail path; the
         arithmetic guard must produce a named error rather than a crash.
         """
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "semver-hardened", "release"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "semver-hardened", "release")
         # v1garbage-label: starts with v + digit (extracted by awk), but is not
         # valid semver (X.Y.Z), so pp_version_within_ceiling returns non-zero.
-        req = _write_requirements_file(
-            tmp_path, "req-garbage.md", "v1garbage-label"
-        )
+        req = _write_requirements_file(tmp_path, "req-garbage.md", "v1garbage-label")
         result = _run_pm_agent(tmp_path, root, req, "semver-hardened")
 
         assert result.returncode != 0, (
@@ -485,26 +439,20 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_garbage_version_on_semver_project_produces_named_error(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_garbage_version_on_semver_project_produces_named_error(self, tmp_path: pathlib.Path) -> None:
         """Garbage version string on a semver project produces a named parse error.
 
         The error output must contain a human-readable message (not just 'unbound
         variable' or a bash arithmetic crash) that names the problem: a named parse
         error, never a crash with 'unbound variable'.
         """
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "semver-hardened", "release"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-garbage-msg.md", "v1garbage-label"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "semver-hardened", "release")
+        req = _write_requirements_file(tmp_path, "req-garbage-msg.md", "v1garbage-label")
         result = _run_pm_agent(tmp_path, root, req, "semver-hardened")
 
-        assert result.returncode != 0, (
-            f"pm-agent.sh must exit non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode != 0
+        ), f"pm-agent.sh must exit non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         combined = result.stdout + result.stderr
         # Must NOT produce 'unbound variable' (the crash symptom)
@@ -519,26 +467,16 @@ class TestGarbageVersionOnSemverProjectYieldsNamedError:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-    def test_garbage_version_does_not_create_task_folder(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_garbage_version_does_not_create_task_folder(self, tmp_path: pathlib.Path) -> None:
         """No task folder is created when a garbage version fails the ceiling check."""
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "semver-hardened-no-folder", "release"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-garbage-no-folder.md", "v1garbage-label"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "semver-hardened-no-folder", "release")
+        req = _write_requirements_file(tmp_path, "req-garbage-no-folder.md", "v1garbage-label")
         _run_pm_agent(tmp_path, root, req, "semver-hardened-no-folder")
 
         tasks_dir = root / "projects" / "semver-hardened-no-folder" / "tasks"
-        task_folders = [
-            d for d in tasks_dir.iterdir()
-            if d.is_dir() and d.name.startswith("PM-")
-        ]
+        task_folders = [d for d in tasks_dir.iterdir() if d.is_dir() and d.name.startswith("PM-")]
         assert not task_folders, (
-            f"pm-agent.sh must not create a task folder when version parsing fails.\n"
-            f"Found folders: {task_folders}"
+            f"pm-agent.sh must not create a task folder when version parsing fails.\n" f"Found folders: {task_folders}"
         )
 
 
@@ -565,14 +503,12 @@ def _constraints_section(readme_text: str) -> str:
 
 def _assert_ceiling_wording(constraints: str, max_tasks: str, context: str) -> None:
     """Assert the constraint line names a ceiling, not a target, with its value."""
-    assert "Maximum tasks to generate" not in constraints, (
-        f"{context}: the constraint must not read as a target.\n{constraints}"
-    )
+    assert (
+        "Maximum tasks to generate" not in constraints
+    ), f"{context}: the constraint must not read as a target.\n{constraints}"
     assert "Hard ceiling" in constraints, f"{context}:\n{constraints}"
     assert "not a target" in constraints, f"{context}:\n{constraints}"
-    assert f"{max_tasks} tasks" in constraints, (
-        f"{context}: the ceiling value must be interpolated.\n{constraints}"
-    )
+    assert f"{max_tasks} tasks" in constraints, f"{context}: the ceiling value must be interpolated.\n{constraints}"
     assert "twelve-ticket cap" in constraints, f"{context}:\n{constraints}"
     assert "team/roles/PM.md" in constraints, f"{context}:\n{constraints}"
 
@@ -586,50 +522,41 @@ class TestPmTicketMaxTasksReadsAsCeiling:
 
     _MAX_TASKS = "21"
 
-    def test_written_ticket_states_max_tasks_as_ceiling(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_written_ticket_states_max_tasks_as_ceiling(self, tmp_path: pathlib.Path) -> None:
         """The written PM ticket README names a hard ceiling with the PM_MAX_TASKS value."""
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "label-proj", "testing-only"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-ceiling-written.md", "v20260712-fieldtest"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "label-proj", "testing-only")
+        req = _write_requirements_file(tmp_path, "req-ceiling-written.md", "v20260712-fieldtest")
         result = _run_pm_agent(
-            tmp_path, root, req, "label-proj",
+            tmp_path,
+            root,
+            req,
+            "label-proj",
             extra_env={"PM_MAX_TASKS": self._MAX_TASKS},
         )
-        assert result.returncode == 0, (
-            f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"pm-agent.sh exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         tasks_dir = root / "projects" / "label-proj" / "tasks"
-        readmes = [
-            d / "README.md" for d in tasks_dir.iterdir()
-            if d.is_dir() and d.name.startswith("PM-")
-        ]
+        readmes = [d / "README.md" for d in tasks_dir.iterdir() if d.is_dir() and d.name.startswith("PM-")]
         assert len(readmes) == 1, f"Expected one PM task folder, found: {readmes}"
         constraints = _constraints_section(readmes[0].read_text(encoding="utf-8"))
         _assert_ceiling_wording(constraints, self._MAX_TASKS, "written ticket")
 
-    def test_dry_run_preview_states_max_tasks_as_ceiling(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_dry_run_preview_states_max_tasks_as_ceiling(self, tmp_path: pathlib.Path) -> None:
         """The --dry-run preview names a hard ceiling with the --max-tasks value."""
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "label-proj", "testing-only"
-        )
-        req = _write_requirements_file(
-            tmp_path, "req-ceiling-dry-run.md", "v20260712-fieldtest"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "label-proj", "testing-only")
+        req = _write_requirements_file(tmp_path, "req-ceiling-dry-run.md", "v20260712-fieldtest")
         result = _run_pm_agent(
-            tmp_path, root, req, "label-proj",
+            tmp_path,
+            root,
+            req,
+            "label-proj",
             extra_args=f"--dry-run --max-tasks {self._MAX_TASKS}",
         )
-        assert result.returncode == 0, (
-            f"pm-agent.sh --dry-run exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"pm-agent.sh --dry-run exited non-zero.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert "DRY-RUN" in result.stdout, result.stdout
         constraints = _constraints_section(result.stdout)
         _assert_ceiling_wording(constraints, self._MAX_TASKS, "dry-run preview")
@@ -654,9 +581,7 @@ class TestCeilingBlockUsesVersionSemanticsAccessor:
 
     def test_pm_agent_sh_exists(self) -> None:
         """pm-agent.sh exists at the expected path."""
-        assert self._PM_AGENT_SH.exists(), (
-            f"Expected pm-agent.sh at {self._PM_AGENT_SH}."
-        )
+        assert self._PM_AGENT_SH.exists(), f"Expected pm-agent.sh at {self._PM_AGENT_SH}."
 
     def test_ceiling_block_references_wf_version_semantics(self) -> None:
         """pm-agent.sh's ceiling block references the wf_version_semantics accessor.
@@ -699,6 +624,7 @@ class TestCeilingBlockUsesVersionSemanticsAccessor:
         """
         source = self._PM_AGENT_SH.read_text(encoding="utf-8")
         import re
+
         # Detect: _pm_wf_type (or _wf_type) compared directly to "semver"
         # This would indicate a type-switch regression (comparing the workflow type
         # name string instead of the capability value).
@@ -727,9 +653,7 @@ class TestCeilingDefaultsNoneAndMalformed:
     """pm-agent's manual ceiling check applies the shared ceiling rule."""
 
     def test_absent_max_major_refuses_v1_on_the_default_zero(self, tmp_path: pathlib.Path) -> None:
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "no-versioning", "release", versioning_section=False
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "no-versioning", "release", versioning_section=False)
         req = _write_requirements_file(tmp_path, "req-v1-absent.md", "v1.0.0")
         result = _run_pm_agent(tmp_path, root, req, "no-versioning")
 
@@ -738,21 +662,15 @@ class TestCeilingDefaultsNoneAndMalformed:
         assert not _pm_task_folders(root, "no-versioning")
 
     def test_max_major_none_lets_v1_through(self, tmp_path: pathlib.Path) -> None:
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "major-none", "release", max_major="none"
-        )
+        root = _build_kanban_root_for_pm_agent(tmp_path, "major-none", "release", max_major="none")
         req = _write_requirements_file(tmp_path, "req-v1-none.md", "v1.0.0")
         result = _run_pm_agent(tmp_path, root, req, "major-none")
 
         assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert len(_pm_task_folders(root, "major-none")) == 1
 
-    def test_malformed_max_major_refuses_with_one_line_naming_key_and_value(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_for_pm_agent(
-            tmp_path, "major-letter-o", "release", max_major="O"
-        )
+    def test_malformed_max_major_refuses_with_one_line_naming_key_and_value(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_for_pm_agent(tmp_path, "major-letter-o", "release", max_major="O")
         req = _write_requirements_file(tmp_path, "req-v0-malformed.md", "v0.1.0")
         result = _run_pm_agent(tmp_path, root, req, "major-letter-o")
 

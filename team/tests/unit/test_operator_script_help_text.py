@@ -32,10 +32,7 @@ _HEADER_HELP_LIB = _SCRIPTS_DIR / "lib" / "header_help.sh"
 
 def _snapshot(root: pathlib.Path) -> dict[str, bytes]:
     """Map every file under *root* to its bytes (directories map to b'')."""
-    return {
-        str(p.relative_to(root)): (p.read_bytes() if p.is_file() else b"")
-        for p in sorted(root.rglob("*"))
-    }
+    return {str(p.relative_to(root)): (p.read_bytes() if p.is_file() else b"") for p in sorted(root.rglob("*"))}
 
 
 def _sandbox_root(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -70,8 +67,7 @@ def _run_script(tmp_path: pathlib.Path, script: str, *args: str):
     quoted = " ".join(f"'{a}'" for a in args)
     result = run_bash(
         tmp_path,
-        f"unset PGAI_PROJECT_NAME PGAI_PROJECT_ROOT PGAI_TASKS_DIR; "
-        f"bash scripts/{script} {quoted} </dev/null",
+        f"unset PGAI_PROJECT_NAME PGAI_PROJECT_ROOT PGAI_TASKS_DIR; " f"bash scripts/{script} {quoted} </dev/null",
         extra_env=_sandbox_env(root),
     )
     return result, root, before
@@ -81,8 +77,7 @@ def _help_text(tmp_path: pathlib.Path, script: str) -> str:
     """Return the ``--help`` output (stdout and stderr) of *script*; assert exit 0."""
     result, _root, _before = _run_script(tmp_path, script, "--help")
     assert result.returncode == 0, (
-        f"{script} --help exited {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"{script} --help exited {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     return result.stdout + result.stderr
 
@@ -94,7 +89,7 @@ def _section(text: str, heading: str) -> str:
     for index, line in enumerate(lines):
         if heading in line:
             block = []
-            for body in lines[index + 1:]:
+            for body in lines[index + 1 :]:
                 if not body.strip():
                     break
                 block.append(body)
@@ -200,6 +195,10 @@ def test_log_filter_refuses_an_unknown_option(tmp_path: pathlib.Path) -> None:
     [
         ("migrate/bug-status-done.sh", "--dry-run"),
         ("cleanup/test-cleanup.sh", "--delete"),
+        ("migrations/migrate_v2.22.5_to_v2.23.0.sh", "--dry-run"),
+        ("migrations/migrate_v2.24.7_to_v2.24.8.sh", "--dry-run"),
+        ("../verification/verify_quarantine_visibility.sh", "--dev-tree"),
+        ("../../docker/entrypoint.sh", "PGAI_AGENT_KANBAN_ROOT_PATH"),
     ],
 )
 def test_help_prints_usage_and_changes_nothing(
@@ -302,8 +301,7 @@ def _call_helper(tmp_path: pathlib.Path, body: str, pipe: str = "") -> object:
     script.write_text(body, encoding="utf-8")
     return run_bash(
         tmp_path,
-        f"set -euo pipefail; source '{_HEADER_HELP_LIB}'; "
-        f"header_help_print '{script}'{pipe}; echo \"rc=$?\" >&2",
+        f"set -euo pipefail; source '{_HEADER_HELP_LIB}'; " f"header_help_print '{script}'{pipe}; echo \"rc=$?\" >&2",
     )
 
 

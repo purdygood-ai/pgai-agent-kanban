@@ -55,8 +55,7 @@ def _call_helper(tmp_path: pathlib.Path, step_name: str, scan_output: str):
     scan_file.write_text(scan_output, encoding="utf-8")
     return run_bash(
         tmp_path,
-        _PRELUDE
-        + textwrap.dedent(f"""\
+        _PRELUDE + textwrap.dedent(f"""\
             _scan="$(cat '{scan_file}')"
             _disc_scan_output_has_item_paths '{step_name}' "$_scan"
             """),
@@ -69,9 +68,7 @@ class TestHelperNamesEveryRejectedLine:
 
         assert result.returncode == 1, _diagnostic(result)
         assert result.stdout == "", _diagnostic(result)
-        assert "discovery_step_bugs: no valid item paths after filtering" in result.stderr, (
-            _diagnostic(result)
-        )
+        assert "discovery_step_bugs: no valid item paths after filtering" in result.stderr, _diagnostic(result)
         assert "3 non-path line(s)" in result.stderr, _diagnostic(result)
         for line in _MIXED_NARRATION.splitlines():
             assert f"rejected non-path line: '{line}'" in result.stderr, _diagnostic(result)
@@ -89,9 +86,7 @@ class TestHelperNamesEveryRejectedLine:
         result = _call_helper(tmp_path, "discovery_step_priority", "stray line")
 
         assert result.returncode == 1, _diagnostic(result)
-        assert "discovery_step_priority: rejected non-path line: 'stray line'" in result.stderr, (
-            _diagnostic(result)
-        )
+        assert "discovery_step_priority: rejected non-path line: 'stray line'" in result.stderr, _diagnostic(result)
 
 
 def _step_script(root: pathlib.Path, step: str, scan_output_file: pathlib.Path) -> str:
@@ -129,9 +124,7 @@ class TestBugStepGuardSkipsBundleAndNamesRejectedLines:
         result = run_bash(tmp_path, _step_script(root, "discovery_step_bugs", scan_output_file))
 
         assert result.returncode == 1, _diagnostic(result)
-        assert "discovery_step_bugs: no valid item paths after filtering" in result.stderr, (
-            _diagnostic(result)
-        )
+        assert "discovery_step_bugs: no valid item paths after filtering" in result.stderr, _diagnostic(result)
         for line in _MIXED_NARRATION.splitlines():
             assert f"rejected non-path line: '{line}'" in result.stderr, _diagnostic(result)
         assert list((root / "requirements").iterdir()) == [], _diagnostic(result)
@@ -141,14 +134,10 @@ class TestPriorityStepGuardSkipsBundleAndNamesRejectedLines:
     def test_priority_step_returns_one_names_lines_and_writes_no_bundle(self, tmp_path):
         root, scan_output_file = _fixture_tree(tmp_path)
 
-        result = run_bash(
-            tmp_path, _step_script(root, "discovery_step_priority", scan_output_file)
-        )
+        result = run_bash(tmp_path, _step_script(root, "discovery_step_priority", scan_output_file))
 
         assert result.returncode == 1, _diagnostic(result)
-        assert "discovery_step_priority: no valid item paths after filtering" in result.stderr, (
-            _diagnostic(result)
-        )
+        assert "discovery_step_priority: no valid item paths after filtering" in result.stderr, _diagnostic(result)
         for line in _MIXED_NARRATION.splitlines():
             assert f"rejected non-path line: '{line}'" in result.stderr, _diagnostic(result)
         assert list((root / "requirements").iterdir()) == [], _diagnostic(result)

@@ -535,6 +535,33 @@ pp_dev_tree_path() {
 }
 
 # ---------------------------------------------------------------------------
+# pp_resolve_dev_tree [name]
+# The documented dev_tree_path chain (project.cfg_example): the project's own
+# value (pp_dev_tree_path), else PGAI_DEV_TREE_PATH, else the kanban root's
+# kanban.cfg [paths] dev_tree_path (resolve_global_dev_tree, lib/dev_tree.sh).
+# Echoes nothing when no tier names one. This is the repository the wake
+# makes the project's worktrees and feature branches in; a reader of state
+# only the project's own repository holds (release tags, RC branches) calls
+# pp_dev_tree_path instead. The Python twin is
+# pgai_agent_kanban.lib.dev_tree.resolve_dev_tree.
+#
+# Returns 1 when pp_dev_tree_path cannot resolve the project.
+# ---------------------------------------------------------------------------
+pp_resolve_dev_tree() {
+    local value root
+    value="$(pp_dev_tree_path "${1:-}")" || return 1
+    if [[ -z "$value" ]]; then
+        if ! declare -F resolve_global_dev_tree >/dev/null 2>&1; then
+            # shellcheck source=dev_tree.sh
+            source "${_PP_LIB_DIR}/dev_tree.sh"
+        fi
+        root="$(_pp_kanban_root)" || return 1
+        value="$(resolve_global_dev_tree "${root}/kanban.cfg")"
+    fi
+    printf '%s\n' "$value"
+}
+
+# ---------------------------------------------------------------------------
 # Project Name Resolution (prefix matching against the projects.cfg registry)
 # ---------------------------------------------------------------------------
 #
@@ -933,17 +960,21 @@ pp_agent_role_is_non_cm() {
 #      returns the highest.  This covers a repo that has real release tags but
 #      whose main branch is absent locally (e.g. a shallow clone or a
 #      re-registered project that was never pushed from this machine).
-#   7. Falls back to release-state.md '## Last Released' only when no git repo
-#      is available: document-workflow projects have no git repo, so the git-tag
-#      path always misses; finalize.sh writes '## Last Released' to
-#      release-state.md after publishing, and this resolver honours it.
-#      The release-state.md fallback is skipped for projects that have a
-#      working git repo — code projects prefer git tags.
-#   8. Falls back to "v0.0.0" sentinel when:
-#        - project.cfg/PROJECT.cfg missing or unreadable
-#        - dev_tree_path unset or not a git repo AND release-state.md absent
-#          or has no Last Released value (or it is 'none')
-#        - no matching tags found anywhere in the repo
+#   7. Falls back to release-state.md '## Last Released' (a well-formed
+#      vX.Y.Z only; read by _pp_read_last_released_from_state) when the git-tag
+#      path yields nothing:
+#        - no project.cfg/PROJECT.cfg, dev_tree_path unset, or dev_tree_path
+#          not a git repo (document-workflow projects have no repo at all;
+#          finalize.sh writes '## Last Released' after publishing); or
+#        - a git repo where steps 4-6 all found no tag matching the prefix
+#          (e.g. the release tags were deleted or never created locally); the
+#          release step writes '## Last Released' at every release.
+#      A matching tag always wins: the state file is consulted only when every
+#      tag scan is empty.
+#   8. Falls back to "v0.0.0" sentinel when neither a matching tag nor a valid
+#      '## Last Released' value exists (release-state.md absent, heading
+#      absent, or value 'none' / not vX.Y.Z), or the project root cannot be
+#      resolved.
 #
 # The function does NOT change the caller's CWD.  All git operations use
 # git -C "$dev_tree" rather than cd.
@@ -956,6 +987,7 @@ pp_agent_role_is_non_cm() {
 #   # -> v0.30.1  (from tag v0.30.1 when branch_prefix is empty)
 #   pp_last_released_version "pgai-three-bears"
 #   # -> v0.0.1   (from release-state.md ## Last Released when no git repo)
+#   # -> v3.5.0   (from release-state.md ## Last Released when the repo has no ai_v* tag)
 # ---------------------------------------------------------------------------
 pp_last_released_version() {
     local name
@@ -980,7 +1012,8 @@ pp_last_released_version() {
     # lib/cm/common.sh, loaded here on first use so callers on the git-tag
     # path never pay for it). Returns a valid bare vX.Y.Z semver, or empty
     # string when the file, heading or value is missing or not a version.
-    # Used as the fallback for document-workflow (no-git-repo) projects.
+    # The fallback for document-workflow (no-git-repo) projects and for git
+    # projects whose tag scans all come up empty.
     # ---------------------------------------------------------------------------
     _pp_read_last_released_from_state() {
         local _root="$1"
@@ -1044,12 +1077,11 @@ pp_last_released_version() {
         return 0
     fi
 
-    # Extract dev_tree_path from the project config.
-    # _pp_read_cfg_key handles both INI [project] section (project.cfg) and
-    # bare key=value lines (legacy PROJECT.cfg).
-    # Source: project.cfg [project] dev_tree_path
+    # The project's own dev_tree_path only (pp_dev_tree_path): a project that
+    # names no repository of its own must not read another project's tags as
+    # its release history, so the global fallback tiers are not consulted.
     local dev_tree
-    dev_tree="$(_pp_read_cfg_key "$cfg_file" project dev_tree_path "")"
+    dev_tree="$(pp_dev_tree_path "$name")"
 
     if [[ -z "$dev_tree" ]]; then
         # No dev_tree configured — this is a document-workflow (no-git) project.
@@ -1142,6 +1174,11 @@ pp_last_released_version() {
     # --- Tier 3: scan ALL local tags (covers repos with tags but no local main) ---
     if [[ -z "$highest" ]]; then
         highest="$(_pp_scan_tags_from_ref "$dev_tree" "" "$prefix")"
+    fi
+
+    # --- No matching tag anywhere: release-state.md '## Last Released' (step 7) ---
+    if [[ -z "$highest" ]]; then
+        highest="$(_pp_read_last_released_from_state "$project_root")"
     fi
 
     if [[ -z "$highest" ]]; then
@@ -2545,10 +2582,25 @@ pp_project_halted() {
 # For project.cfg (INI format), known fields are read explicitly from
 # [project] and [versioning] sections via read_ini and exported with PP_ prefix.
 #
-# For PROJECT.cfg (legacy), the file is sourced into a subshell and new
-# variables are re-exported with PP_ prefix (backward-compat path).
+# For PROJECT.cfg (legacy), the file is sourced in a subshell, never in the
+# caller's shell, with every known key below (and temp_dir) starting unset;
+# anything the file prints goes to stderr. Every known field is first unset
+# in the caller, then each known key the file assigns is exported as
+# PP_<key> with the value the file gave it. A known field the file does not
+# assign stays unset, so no earlier load's or inherited value stays in
+# effect. temp_dir is exported as PP_temp_dir when the file assigns it (and
+# unset otherwise) and resolved into PP_TEMP_DIR as below. Any other variable
+# name the file newly defines is exported as PP_<name> as well. None of the
+# file's bare variable names reaches the caller's shell, and none of
+# pp_load_config's own variables is exported. The file is sourced with
+# errexit and nounset off whatever the caller runs under (set -euo pipefail
+# included): a failing command or a reference to an unset variable does not
+# stop it, the unset name expands empty, and every field the file assigns is
+# exported exactly as for a non-strict caller. A file that stops its own
+# load (see Failure) exports none of its fields.
 #
-# Known fields exported (both paths):
+# Known fields (the INI path exports every one; the legacy path exports the
+# ones its file assigns, plus PP_TEMP_DIR):
 #   PP_project_name, PP_dev_tree_path, PP_git_repo_url, PP_git_remote_name,
 #   PP_workflow_type, PP_branch_prefix,
 #   PP_max_patch, PP_max_minor, PP_max_major, PP_max_priorities_per_run,
@@ -2564,12 +2616,94 @@ pp_project_halted() {
 #     $(pgai_temp_dir)/<temp_dir>
 #   This ensures all per-project transient files land under one predictable
 #   umbrella root, isolated by project, and cleanly sweepable per project.
+#
+# Failure:
+#   Returns 1 when no project name resolves, the project root cannot be
+#   resolved, or neither config file exists (the last prints a 'not found'
+#   message on stderr). Also returns 1, with a 'stopped before it finished
+#   loading' message on stderr, when a legacy PROJECT.cfg ends its sourcing
+#   before the end: an exit line, or a failing line after the file itself
+#   turned on set -e or set -u. It never returns 0 with that file's fields
+#   unset. Every known field above is then unset, so a value an
+#   earlier load exported in the same shell never stays in effect and a
+#   caller's empty-value fallback (e.g. ${PP_dev_tree_path:-...}) applies.
+#   Extra PP_<var> names a legacy PROJECT.cfg exported are not cleared, by a
+#   failed load or by a later load whose file does not define them.
 # ---------------------------------------------------------------------------
+_pp_unset_known_config_fields() {
+    unset PP_project_name PP_dev_tree_path PP_git_repo_url PP_git_remote_name \
+        PP_workflow_type PP_branch_prefix \
+        PP_max_patch PP_max_minor PP_max_major PP_max_priorities_per_run \
+        PP_cm_release_pre_squash_hook PP_cm_release_pre_tag_hook \
+        PP_cm_release_post_tag_hook \
+        PP_TEMP_DIR
+}
+
+# ---------------------------------------------------------------------------
+# Internal: _pp_legacy_cfg_records <PROJECT.cfg path>
+# Source a legacy bash key=value PROJECT.cfg and print one NUL-terminated
+# "<name>=<value>" record for each variable it assigned: every known key
+# (pp_load_config's known fields by bare name, plus temp_dir) the file
+# assigns, then every other name the file newly defines. Values may hold any
+# character, newlines included.
+#
+# Run it in a subshell (pp_load_config reads it through process
+# substitution), so the file's assignments never reach the caller. The known
+# keys are declared as unset locals before sourcing, so a value of the same
+# name in the caller's shell or an outer function cannot pass for one the
+# file assigned. Anything the file prints goes to stderr, keeping stdout for
+# the records.
+#
+# The file is sourced with errexit and nounset off, whatever the caller runs
+# under: a failing command or a reference to an unset variable (which
+# expands empty) does not stop the file, so it loads the same for a strict
+# and a non-strict caller. After the last variable record it prints one
+# empty record, the end-of-records marker (a variable record always holds
+# an '='). The marker is missing when the file ended this shell before
+# loading finished: an exit line, or a failing line after the file turned
+# errexit or nounset back on itself.
+# ---------------------------------------------------------------------------
+_pp_legacy_cfg_records() {
+    local _pp_cfg="$1"
+    local -a _pp_keys=(project_name dev_tree_path git_repo_url git_remote_name
+        workflow_type branch_prefix max_patch max_minor max_major
+        max_priorities_per_run cm_release_pre_squash_hook
+        cm_release_pre_tag_hook cm_release_post_tag_hook temp_dir)
+    local _pp_var="" _pp_known="" _pp_before=""
+    printf -v _pp_known ' %s' "${_pp_keys[@]}"
+    _pp_known+=" "
+    local "${_pp_keys[@]}"
+    _pp_before="$(compgen -v)"
+
+    # Option changes stay inside this function (local -).
+    local -
+    set +o errexit +o nounset
+    # shellcheck source=/dev/null
+    source "$_pp_cfg" >&2
+
+    for _pp_var in "${_pp_keys[@]}"; do
+        if [[ -v "$_pp_var" ]]; then
+            printf '%s=%s\0' "$_pp_var" "${!_pp_var}"
+        fi
+    done
+    while IFS= read -r _pp_var; do
+        case "$_pp_known" in
+            *" ${_pp_var} "*) continue ;;
+        esac
+        case "$_pp_var" in
+            PP_*|_pp_*|_|PIPESTATUS|BASH_*|FUNCNAME|LINENO|SECONDS|RANDOM|OLDPWD|REPLY)
+                continue ;;
+        esac
+        printf '%s=%s\0' "$_pp_var" "${!_pp_var-}"
+    done < <(comm -13 <(sort <<< "$_pp_before") <(compgen -v | sort))
+    printf '\0'
+}
+
 pp_load_config() {
     local name
-    name="$(pp_require_project_context "${1:-}")" || return 1
+    name="$(pp_require_project_context "${1:-}")" || { _pp_unset_known_config_fields; return 1; }
     local project_root
-    project_root="$(pp_project_root "$name")" || return 1
+    project_root="$(pp_project_root "$name")" || { _pp_unset_known_config_fields; return 1; }
 
     local new_cfg="${project_root}/project.cfg"   # INI format (preferred)
     local old_cfg="${project_root}/PROJECT.cfg"   # legacy bash key=value
@@ -2628,42 +2762,87 @@ pp_load_config() {
 
     elif [[ -f "$old_cfg" ]]; then
         # --- Legacy path (PROJECT.cfg bash key=value) ---
-        # Capture the set of variable names that exist before sourcing.
-        local before_vars
-        before_vars="$(compgen -v)"
+        # Clear every known field first, so a field this file does not assign
+        # ends unset rather than keeping an earlier load's or inherited value.
+        _pp_unset_known_config_fields
+        unset PP_temp_dir
 
-        # Source the legacy config file in the current shell context.
-        # shellcheck source=/dev/null
-        source "$old_cfg"
-
-        # Capture the set of variable names after sourcing and export new ones
-        # with the PP_* prefix.
-        local after_vars var value
-        after_vars="$(compgen -v)"
-
-        while IFS= read -r var; do
-            if grep -qx "$var" <<< "$before_vars"; then
-                continue
+        # The file is sourced in the subshell _pp_legacy_cfg_records runs in.
+        # Collect its "<name>=<value>" records up to the empty end-of-records
+        # marker; without the marker the file stopped its own load, so
+        # nothing is exported and the load fails.
+        local _legacy_record _legacy_key _legacy_td="" _legacy_complete=""
+        local -a _legacy_records=()
+        while IFS= read -r -d '' _legacy_record; do
+            if [[ -z "$_legacy_record" ]]; then
+                _legacy_complete=1
+                break
             fi
-            case "$var" in
-                PP_*|_|PIPESTATUS|BASH_*|FUNCNAME|LINENO|SECONDS|RANDOM|OLDPWD|REPLY)
-                    continue ;;
-            esac
-            value="${!var}"
-            export "PP_${var}=${value}"
-        done < <(comm -13 <(echo "$before_vars" | sort) <(echo "$after_vars" | sort))
+            _legacy_records+=("$_legacy_record")
+        done < <(_pp_legacy_cfg_records "$old_cfg")
+        if [[ -z "$_legacy_complete" ]]; then
+            echo "project_paths.sh: ${old_cfg} stopped before it finished loading" \
+                "(an exit line, or a failing line after the file turned on set -e or set -u);" \
+                "no field from it was loaded. Remove that line from ${old_cfg} or convert the" \
+                "project to project.cfg (INI)." >&2
+            _pp_unset_known_config_fields
+            return 1
+        fi
 
-        # PP_TEMP_DIR: apply the default when temp_dir was absent from PROJECT.cfg.
-        # When temp_dir was present, the loop above set PP_temp_dir (lowercase);
-        # promote it to PP_TEMP_DIR and apply framework-root resolution.
-        local _legacy_td="${PP_temp_dir:-}"
+        # Export each record as PP_<name>.
+        for _legacy_record in "${_legacy_records[@]}"; do
+            _legacy_key="${_legacy_record%%=*}"
+            export "PP_${_legacy_key}=${_legacy_record#*=}"
+            if [[ "$_legacy_key" == temp_dir ]]; then
+                _legacy_td="${_legacy_record#*=}"
+            fi
+        done
+
+        # PP_TEMP_DIR: the file's temp_dir under the framework root, or the
+        # projects/<name> default when the file leaves it absent or empty.
         export PP_TEMP_DIR="$(_pp_resolve_temp_dir "$_legacy_td" "$name")"
         return 0
 
     else
         echo "project_paths.sh: PROJECT.cfg not found at ${old_cfg} (and project.cfg not found at ${new_cfg})" >&2
+        _pp_unset_known_config_fields
         return 1
     fi
+}
+
+# ---------------------------------------------------------------------------
+# pp_load_project_repo_root <name>
+#
+# Load <name>'s configuration with pp_load_config, in the caller's own shell
+# so every PP_* value it sets stays set, and put the project's own
+# [project] dev_tree_path in PP_REPO_ROOT: the repository the release verbs
+# read the project's tags and RC branches from. No global tier stands in
+# for it, so one project never reads another's release history as its own
+# (pp_dev_tree_path, above).
+#
+# Returns 1 with PP_REPO_ROOT empty, naming the cause on stderr, when
+# project.cfg cannot be loaded or names no dev_tree_path. The caller owns
+# the refusal: its census class, anchor and exit.
+#
+# Example:
+#   pp_load_project_repo_root "$PROJECT_NAME" || exit 1
+#   REPO_ROOT="$PP_REPO_ROOT"
+# ---------------------------------------------------------------------------
+pp_load_project_repo_root() {
+    local name="${1:-}"
+    PP_REPO_ROOT=""
+    if ! pp_load_config "$name"; then
+        echo "ERROR: could not load project.cfg for project '$name'" >&2
+        echo "  Expected: $(pp_project_root "$name" 2>/dev/null || echo "<unresolvable>")/project.cfg" >&2
+        return 1
+    fi
+    PP_REPO_ROOT="${PP_dev_tree_path:-}"
+    if [[ -z "$PP_REPO_ROOT" ]]; then
+        echo "ERROR: dev_tree_path is not set in project.cfg for project '$name'" >&2
+        echo "  Add 'dev_tree_path=<path>' to $(pp_project_root "$name")/project.cfg" >&2
+        return 1
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------

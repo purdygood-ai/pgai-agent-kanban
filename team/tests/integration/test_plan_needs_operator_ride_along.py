@@ -100,7 +100,7 @@ def _bug(project_root: pathlib.Path, stem: str, status: str, severity: str = "lo
 def _status(path: pathlib.Path) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     index = next(i for i, line in enumerate(lines) if line.strip().lower() == "## status")
-    return next(line.strip() for line in lines[index + 1:] if line.strip())
+    return next(line.strip() for line in lines[index + 1 :] if line.strip())
 
 
 def _task(seq: int, slug: str, inputs: list, version: str) -> dict:
@@ -142,8 +142,16 @@ def _materialize(root, project_root, tmp_path, plan: dict, name: str = "plan") -
     plan_dir.mkdir()
     plan_file = plan_dir / "plan.json"
     plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
-    return _run(root, sys.executable, str(_MATERIALIZE), str(plan_file), "--team-root", str(project_root),
-                "--requirements-path", plan["requirements_path"])
+    return _run(
+        root,
+        sys.executable,
+        str(_MATERIALIZE),
+        str(plan_file),
+        "--team-root",
+        str(project_root),
+        "--requirements-path",
+        plan["requirements_path"],
+    )
 
 
 def _task_dirs(project_root: pathlib.Path) -> list[pathlib.Path]:
@@ -153,8 +161,9 @@ def _task_dirs(project_root: pathlib.Path) -> list[pathlib.Path]:
 def _mark_all_done(project_root: pathlib.Path) -> None:
     for task_dir in _task_dirs(project_root):
         status = task_dir / "status.md"
-        status.write_text(re.sub(r"(?m)^(## State\n)\S+", r"\1DONE", status.read_text(encoding="utf-8")),
-                          encoding="utf-8")
+        status.write_text(
+            re.sub(r"(?m)^(## State\n)\S+", r"\1DONE", status.read_text(encoding="utf-8")), encoding="utf-8"
+        )
 
 
 def _snapshot(project_root: pathlib.Path) -> dict[str, bytes]:
@@ -201,8 +210,12 @@ def test_a_needs_operator_entry_parks_the_bug_through_release_dedupe_and_answer(
         + "".join(f"- {b.name} (`{b}`)\n" for b in (fixed_a, waiting, fixed_b)),
         encoding="utf-8",
     )
-    plan = _plan("v9.9.1", bundle, [_task(1, "installer-fixes", [fixed_a, fixed_b], "v9.9.1")],
-                 needs_operator=[{"item": "BUG-9902", "question": _QUESTION}])
+    plan = _plan(
+        "v9.9.1",
+        bundle,
+        [_task(1, "installer-fixes", [fixed_a, fixed_b], "v9.9.1")],
+        needs_operator=[{"item": "BUG-9902", "question": _QUESTION}],
+    )
 
     result = _materialize(root, project_root, tmp_path, plan)
 
@@ -216,28 +229,51 @@ def test_a_needs_operator_entry_parks_the_bug_through_release_dedupe_and_answer(
     # Release Step 13c: the work ticket is DONE and names the other two items.
     _mark_all_done(project_root)
     waiting_before = waiting.read_bytes()
-    shipped = _run(root, sys.executable, str(_PROMOTE), str(bundle), "v9.9.1",
-                   str(project_root / "tasks"), str(project_root / "bugs"))
+    shipped = _run(
+        root,
+        sys.executable,
+        str(_PROMOTE),
+        str(bundle),
+        "v9.9.1",
+        str(project_root / "tasks"),
+        str(project_root / "bugs"),
+    )
     assert shipped.returncode == 0, shipped.stderr
     assert _status(fixed_a) == "done" and _status(fixed_b) == "done"
     assert waiting.read_bytes() == waiting_before
-    report = shipped.stdout[shipped.stdout.index("post-ship report"):]
+    report = shipped.stdout[shipped.stdout.index("post-ship report") :]
     assert "Carried (not closed): 0 item(s)" in report
     assert waiting.name not in report
     assert _status(bundle) == "done"
 
     # The TESTER's re-file of the same defect is refused, citing the parked bug.
     draft = tmp_path / "BUG-9950-installer-mirror-again.md"
-    draft.write_text("# BUG-9950-installer-mirror-again\n\n**Severity:** medium\n\n## Status\nopen\n\n"
-                     "## Symptom\nSame defect as BUG-9902: the installer still picks no mirror.\n", encoding="utf-8")
+    draft.write_text(
+        "# BUG-9950-installer-mirror-again\n\n**Severity:** medium\n\n## Status\nopen\n\n"
+        "## Symptom\nSame defect as BUG-9902: the installer still picks no mirror.\n",
+        encoding="utf-8",
+    )
     deposit = _run(root, sys.executable, "-m", "pgai_agent_kanban.ops", "deposit_intake", str(project_root), str(draft))
     assert deposit.returncode == 5, deposit.stdout + deposit.stderr
     assert "BUG-9902" in deposit.stderr
     assert not (project_root / "bugs" / draft.name).exists()
 
     # Answering the entry reopens the bug, and the next discovery pass bundles it.
-    answered = _run(root, sys.executable, "-m", "pgai_agent_kanban.overwatch.inbox", "answer", "--project", _PROJECT,
-                    "--kanban-root", str(root), "--id", entry.entry_id, "--answer", "Use the primary mirror.")
+    answered = _run(
+        root,
+        sys.executable,
+        "-m",
+        "pgai_agent_kanban.overwatch.inbox",
+        "answer",
+        "--project",
+        _PROJECT,
+        "--kanban-root",
+        str(root),
+        "--id",
+        entry.entry_id,
+        "--answer",
+        "Use the primary mirror.",
+    )
     assert answered.returncode == 0, answered.stderr
     assert _status(waiting) == "open"
     discovered = _run_discovery(root)
@@ -296,11 +332,18 @@ def test_three_eligible_ride_alongs_run_and_ship_as_bundle_items(tmp_path) -> No
 
     # Ship: the DONE ticket names two of the three.
     _mark_all_done(project_root)
-    shipped = _run(root, sys.executable, str(_PROMOTE), str(requirement), "v9.10.0",
-                   str(project_root / "tasks"), str(project_root / "bugs"))
+    shipped = _run(
+        root,
+        sys.executable,
+        str(_PROMOTE),
+        str(requirement),
+        "v9.10.0",
+        str(project_root / "tasks"),
+        str(project_root / "bugs"),
+    )
     assert shipped.returncode == 0, shipped.stderr
     assert [_status(b) for b in bugs] == ["done", "done", "running"]
-    report = shipped.stdout[shipped.stdout.index("post-ship report"):]
+    report = shipped.stdout[shipped.stdout.index("post-ship report") :]
     assert "Carried (not closed): 1 item(s)" in report and bugs[2].name in report
     assert _status(requirement) == "done"
 
@@ -308,10 +351,16 @@ def test_three_eligible_ride_alongs_run_and_ship_as_bundle_items(tmp_path) -> No
 @pytest.mark.parametrize(
     ("release_cfg", "extra", "names"),
     [
-        ("bundle_mixing = ride-along\nride_along_max = 4\n", ("BUG-9914-crash-on-start", "high", ""),
-         ["BUG-9914-crash-on-start.md", "high"]),
-        ("bundle_mixing = ride-along\n", ("BUG-9915-close-flag", "low", "close.sh rejects --note."),
-         ["BUG-9915-close-flag.md", "close.sh"]),
+        (
+            "bundle_mixing = ride-along\nride_along_max = 4\n",
+            ("BUG-9914-crash-on-start", "high", ""),
+            ["BUG-9914-crash-on-start.md", "high"],
+        ),
+        (
+            "bundle_mixing = ride-along\n",
+            ("BUG-9915-close-flag", "low", "close.sh rejects --note."),
+            ["BUG-9915-close-flag.md", "close.sh"],
+        ),
         ("bundle_mixing = ride-along\nride_along_max = 2\n", None, ["ride_along_max allows 2"]),
         ("", None, ["bundle_mixing resolves to 'separate'"]),
     ],
@@ -344,14 +393,19 @@ def test_a_plan_without_the_fields_writes_what_a_plan_with_them_empty_writes(tmp
         bugs = _eligible(project_root)
         intake_before = {k: v for k, v in _snapshot(project_root).items() if "/tasks/" not in k}
 
-        result = _materialize(root, project_root, tmp_path / name,
-                              _plan("v9.10.0", requirement, [_task(1, "convergence", bugs, "v9.10.0")], **fields))
+        result = _materialize(
+            root,
+            project_root,
+            tmp_path / name,
+            _plan("v9.10.0", requirement, [_task(1, "convergence", bugs, "v9.10.0")], **fields),
+        )
 
         assert result.returncode == 0, result.stderr
         assert "Plan intake fields" not in result.stderr
         assert {k: v for k, v in _snapshot(project_root).items() if "/tasks/" not in k} == intake_before
         trees[name] = {
             k.split(f"{name}/", 1)[1]: v.replace(str(tmp_path / name).encode(), b"ROOT")
-            for k, v in _snapshot(project_root).items() if "/tasks/" in k
+            for k, v in _snapshot(project_root).items()
+            if "/tasks/" in k
         }
     assert trees["absent"] == trees["empty"]

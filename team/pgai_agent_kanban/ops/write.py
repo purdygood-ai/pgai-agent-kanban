@@ -148,7 +148,7 @@ Functions:
         Terminal states: "done" and "wont-do" (case-insensitive; defined in
         lib.terminal_states).
 
-    reset_item(ctx, project, key, keep_artifacts=False, force=False)
+    reset_item(ctx, project, key, keep_artifacts=False, force=False, discard_branch=False)
         Reset a task or intake item to a re-pickable state.
         For agent tasks: refuses if state is WORKING (Refused exception, exit 2).
           Without --force, a stale worktree (registration or on-disk path) raises
@@ -159,7 +159,11 @@ Functions:
           closes the task's open blocked-ledger block with class human,
           clears artifacts/ and task logs/, flips queue marker to [ ], deletes
           the feature branch from the project dev tree, runs git worktree prune,
-          and appends one line to the operator reset log.
+          and appends one line to the operator reset log.  A feature branch
+          holding unmerged commits is kept instead (tip and commit count
+          printed), with logs/progress.log and a ## Resume Mode branch section
+          so the next dispatch resumes from it -- unless discard_branch
+          force-deletes it ("discarding N commits at <hash>").
         For bug/priority intake: resets ## Status to "open", flips backlog
           marker to [ ].
         For requirements intake: resets ## Status to "open", flips pm_backlog
@@ -206,12 +210,13 @@ CLI usage (bash delegation shim):
     python3 -m pgai_agent_kanban.ops set_needs_operator PROJECT_ROOT KEY QUESTION
     python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
     python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
-    python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
+    python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE] [DISCARD_BRANCH]
     python3 -m pgai_agent_kanban.ops set_marker    QUEUE_FILE KEY MARKER [IGNORE_CASE]
     python3 -m pgai_agent_kanban.ops remove_marker QUEUE_FILE KEY [IGNORE_CASE]
     python3 -m pgai_agent_kanban.ops render_marker QUEUE_FILE KEY MARKER [IGNORE_CASE]
     python3 -m pgai_agent_kanban.ops get_markers   QUEUE_FILE KEY [IGNORE_CASE]
     python3 -m pgai_agent_kanban.ops scan_queue    QUEUE_FILE TASKS_ROOT ID_PATTERN LIMIT RULE...
+    python3 -m pgai_agent_kanban.ops unmerged_branch_commits DEV_TREE BRANCH
 
 Note: the package-level entry point (python3 -m pgai_agent_kanban.ops) is the canonical
 CLI path.  Running this submodule directly via -m pgai_agent_kanban.ops.write triggers a
@@ -250,6 +255,11 @@ scan_queue prints the keys of lines a MARKERS=STATES rule selects (see parse_sca
     at most LIMIT (0 = all): 1 a bad argument or rule, 4 an unreadable queue file. A
     task whose status.md cannot be read (not valid UTF-8, or an OS error) is left out
     of the keys and named in one stderr line; the scan goes on and still exits 0.
+unmerged_branch_commits prints "COUNT SHORT_TIP" when BRANCH holds commits no other
+    branch, tag, remote-tracking ref or the dev tree's HEAD reaches (COUNT -1: the
+    branch exists but the count could not be computed -- treat it as work to keep),
+    and prints nothing when the branch is absent or holds nothing unique; exit 0
+    either way, 1 for a missing argument.
 """
 
 from __future__ import annotations
@@ -265,6 +275,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from pgai_agent_kanban import task_status as _task_status
+from pgai_agent_kanban.lib import dev_tree as _dev_tree
 from pgai_agent_kanban.lib.atomic_write import atomic_write
 from pgai_agent_kanban.lib import branch_prefix as _branch_prefix
 from pgai_agent_kanban.lib import defer_posture as _defer_posture
@@ -366,9 +377,7 @@ def halt(ctx: OpsContext, project: str) -> None:
     try:
         halt_path.touch()
     except OSError as exc:
-        raise OpsError(
-            f"halt: failed to create HALT sentinel at {halt_path}: {exc}"
-        ) from exc
+        raise OpsError(f"halt: failed to create HALT sentinel at {halt_path}: {exc}") from exc
     record_sentinel_write(ctx.kanban_root, halt_path, "halt")
 
 
@@ -409,20 +418,26 @@ def unhalt(ctx: OpsContext, project: str) -> None:
     try:
         halt_path.unlink()
     except OSError as exc:
-        raise OpsError(
-            f"unhalt: failed to remove HALT sentinel at {halt_path}: {exc}"
-        ) from exc
+        raise OpsError(f"unhalt: failed to remove HALT sentinel at {halt_path}: {exc}") from exc
     record_sentinel_write(ctx.kanban_root, halt_path, "unhalt")
 
     if cause == CAUSE_OPERATOR:
         _task_status.stamp_ledger_block_end(
-            ctx.kanban_root, project, _HALT_PROJECT_SOURCE,
-            block_class=_BLOCK_CLASS_ANY, cause=CAUSE_OPERATOR, reason_code="unhalt",
+            ctx.kanban_root,
+            project,
+            _HALT_PROJECT_SOURCE,
+            block_class=_BLOCK_CLASS_ANY,
+            cause=CAUSE_OPERATOR,
+            reason_code="unhalt",
         )
     else:
         _task_status.stamp_ledger_block_end(
-            ctx.kanban_root, project, _HALT_PROJECT_SOURCE,
-            block_class=_BLOCK_CLASS_HUMAN, cause=_BLOCK_CAUSE_CHAIN, reason_code="unhalt",
+            ctx.kanban_root,
+            project,
+            _HALT_PROJECT_SOURCE,
+            block_class=_BLOCK_CLASS_HUMAN,
+            cause=_BLOCK_CAUSE_CHAIN,
+            reason_code="unhalt",
         )
 
 
@@ -433,8 +448,9 @@ def halt_after(ctx: OpsContext, project: str, token: str = "rc") -> None:
     When the drain condition for TOKEN is satisfied, the module promotes the
     sentinel to a hard HALT.  The wake loop does NOT check HALT-AFTER directly.
 
-    Overwrites any existing HALT-AFTER file (the token may need updating when
-    re-arming with a different drain event).
+    Atomically replaces any existing HALT-AFTER file (the token may need
+    updating when re-arming with a different drain event), through the one
+    sentinel writer, ``pgai_agent_kanban.halt_after.sentinel.write_halt_after``.
 
     When the write changes the file (it was absent or held other bytes) a
     provenance record (op ``halt_after``) is appended to
@@ -464,26 +480,22 @@ def halt_after(ctx: OpsContext, project: str, token: str = "rc") -> None:
     project_root = ctx.project_root(project)
     _require_dir(project_root, "halt_after")
 
+    # Imported here: the halt_after package imports task_status, which
+    # imports this module, so a module-level import would be circular.
+    from pgai_agent_kanban.halt_after.rc_gate import clear_latch
+    from pgai_agent_kanban.halt_after.sentinel import write_halt_after
+
     halt_after_path = project_root / "HALT-AFTER"
-    content = f"{token}\n"
     try:
-        previous: "bytes | None" = halt_after_path.read_bytes()
-    except OSError:
-        previous = None
-    try:
-        halt_after_path.write_text(content, encoding="utf-8")
+        # The one HALT-AFTER writer, shared with the drain step: atomic, so
+        # a reader never sees a partial token.
+        changed = write_halt_after(project_root, token)
     except OSError as exc:
-        raise OpsError(
-            f"halt_after: failed to write HALT-AFTER sentinel at {halt_after_path}: {exc}"
-        ) from exc
-    if previous != content.encode("utf-8"):
+        raise OpsError(f"halt_after: failed to write HALT-AFTER sentinel at {halt_after_path}: {exc}") from exc
+    if changed:
         record_sentinel_write(ctx.kanban_root, halt_after_path, "halt_after")
         # A drain latched against the previous token belongs to that arm,
         # not this one: clear it so it can never promote on the new token.
-        # Imported here: the halt_after package imports task_status, which
-        # imports this module, so a module-level import would be circular.
-        from pgai_agent_kanban.halt_after.rc_gate import clear_latch
-
         clear_latch(project_root)
 
 
@@ -514,9 +526,7 @@ def halt_global(ctx: OpsContext) -> None:
     try:
         halt_path.touch()
     except OSError as exc:
-        raise OpsError(
-            f"halt_global: failed to create global HALT sentinel at {halt_path}: {exc}"
-        ) from exc
+        raise OpsError(f"halt_global: failed to create global HALT sentinel at {halt_path}: {exc}") from exc
     record_sentinel_write(kanban_root, halt_path, "halt_global")
 
 
@@ -542,9 +552,7 @@ def unhalt_global(ctx: OpsContext) -> None:
     try:
         halt_path.unlink()
     except OSError as exc:
-        raise OpsError(
-            f"unhalt_global: failed to remove global HALT sentinel at {halt_path}: {exc}"
-        ) from exc
+        raise OpsError(f"unhalt_global: failed to remove global HALT sentinel at {halt_path}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -597,14 +605,8 @@ class CampaignChange:
                 f"with until={self.until} ({self.campaign_file} unchanged; no change made)"
             )
         if self.changed:
-            return (
-                f"undefer: DEFER-LOW-BUGS cleared for project {self.project} "
-                f"({self.campaign_file} removed)"
-            )
-        return (
-            f"undefer: nothing to clear for project {self.project} "
-            f"(no campaign file at {self.campaign_file})"
-        )
+            return f"undefer: DEFER-LOW-BUGS cleared for project {self.project} " f"({self.campaign_file} removed)"
+        return f"undefer: nothing to clear for project {self.project} " f"(no campaign file at {self.campaign_file})"
 
 
 def _normalise_defer_until(kanban_root: Path, project: str, until: str) -> str:
@@ -624,12 +626,14 @@ def _normalise_defer_until(kanban_root: Path, project: str, until: str) -> str:
         # target is the malformed-by-omission state the resolver refuses to
         # read; refused rather than defaulted.
         # CENSUS-ANCHOR: defer-arm-until-required-01
-        raise Refused(format_error_contract(
-            "defer.until_required",
-            "defer.sh: --until is required -- a deferral campaign always names the release it runs until.",
-            "Re-run with --until set to a well-formed version, e.g. "
-            f"{installed_script_command(kanban_root, 'defer.sh', '--project', project, '--until', 'v1.2.3')}.",
-        ))
+        raise Refused(
+            format_error_contract(
+                "defer.until_required",
+                "defer.sh: --until is required -- a deferral campaign always names the release it runs until.",
+                "Re-run with --until set to a well-formed version, e.g. "
+                f"{installed_script_command(kanban_root, 'defer.sh', '--project', project, '--until', 'v1.2.3')}.",
+            )
+        )
     bare = until[1:] if until.startswith("v") else until
     bare = bare[1:] if bare.startswith("V") else bare
     normalised = f"v{bare}"
@@ -638,11 +642,13 @@ def _normalise_defer_until(kanban_root: Path, project: str, until: str) -> str:
         # resolver's own read-side refusal enforces, checked at write time
         # so a malformed target never reaches disk.
         # CENSUS-ANCHOR: defer-arm-until-malformed-01
-        raise Refused(format_error_contract(
-            "defer.until_malformed",
-            f"defer.sh: --until value '{until}' is not well-formed semver (expected vX.Y.Z).",
-            "Re-run with a well-formed version, e.g. --until v1.2.3.",
-        ))
+        raise Refused(
+            format_error_contract(
+                "defer.until_malformed",
+                f"defer.sh: --until value '{until}' is not well-formed semver (expected vX.Y.Z).",
+                "Re-run with a well-formed version, e.g. --until v1.2.3.",
+            )
+        )
     return normalised
 
 
@@ -661,11 +667,13 @@ def _require_project_dir(ctx: OpsContext, project: str, verb: str, remedy: str) 
         # directory that does not exist is a file nothing would ever read,
         # and there is nothing to clear in one.
         # CENSUS-ANCHOR: defer-project-not-found-01
-        raise NotFound(format_error_contract(
-            f"{verb}.project_not_found",
-            f"{verb}.sh: project '{project}' has no directory at {project_root}.",
-            remedy,
-        ))
+        raise NotFound(
+            format_error_contract(
+                f"{verb}.project_not_found",
+                f"{verb}.sh: project '{project}' has no directory at {project_root}.",
+                remedy,
+            )
+        )
     return project_root
 
 
@@ -707,7 +715,9 @@ def defer(ctx: OpsContext, project: str, until: str) -> CampaignChange:
     until_normalised = _normalise_defer_until(ctx.kanban_root, project, until)
     project = resolve_project_name(ctx, project)
     project_root = _require_project_dir(
-        ctx, project, "defer",
+        ctx,
+        project,
+        "defer",
         "Check the project name against projects.cfg, or register the project first.",
     )
 
@@ -750,9 +760,7 @@ def undefer(ctx: OpsContext, project: str) -> CampaignChange:
         IoError:   The campaign file could not be removed.
     """
     project = resolve_project_name(ctx, project)
-    project_root = _require_project_dir(
-        ctx, project, "undefer", "Check the project name against projects.cfg."
-    )
+    project_root = _require_project_dir(ctx, project, "undefer", "Check the project name against projects.cfg.")
 
     campaign_file = _defer_posture.campaign_file_path(project_root)
     if not campaign_file.is_file():
@@ -808,7 +816,7 @@ def set_version_ceiling_exit_code(exc: OpsError) -> int:
     return 2 if isinstance(exc, NotFound) else 1
 
 
-def _ceiling_value(value: "int | str | None") -> "str | None":
+def _ceiling_value(value: int | str | None) -> str | None:
     """Return the value asked for one ceiling as text, or None to leave it alone."""
     if value is None:
         return None
@@ -841,8 +849,8 @@ def set_version_ceiling(
     project: str,
     *,
     show: bool = False,
-    minor: "int | str | None" = None,
-    major: "int | str | None" = None,
+    minor: int | str | None = None,
+    major: int | str | None = None,
     no_minor: bool = False,
     no_major: bool = False,
     dry_run: bool = False,
@@ -902,12 +910,16 @@ def set_version_ceiling(
             # not a non-negative integer is a value discovery's version
             # gate cannot compare against, so it never reaches project.cfg.
             # CENSUS-ANCHOR: ceiling-invalid-value-01
-            raise Refused(format_error_contract(
-                "set_version_ceiling.invalid_ceiling",
-                f"set-version-ceiling.sh: {flag} requires a non-negative integer; got: '{change}'.",
-                "Re-run with a non-negative integer, e.g. "
-                + installed_script_command(ctx.kanban_root, "set-version-ceiling.sh", "--project", project, flag, "5"),
-            ))
+            raise Refused(
+                format_error_contract(
+                    "set_version_ceiling.invalid_ceiling",
+                    f"set-version-ceiling.sh: {flag} requires a non-negative integer; got: '{change}'.",
+                    "Re-run with a non-negative integer, e.g. "
+                    + installed_script_command(
+                        ctx.kanban_root, "set-version-ceiling.sh", "--project", project, flag, "5"
+                    ),
+                )
+            )
 
     cfg_file = ctx.project_root(project) / "project.cfg"
     if not cfg_file.is_file():
@@ -1036,13 +1048,15 @@ def switch_provider(ctx: OpsContext, provider: str) -> ProviderSwitch:
         # provider has no wake script, so writing it would leave every
         # wake firing with nothing to dispatch to.
         # CENSUS-ANCHOR: switch-provider-unknown-01
-        raise Refused(format_error_contract(
-            "switch_provider.unknown_provider",
-            f"switch-provider.sh: unrecognized provider '{provider}'; "
-            f"valid providers: {', '.join(PROVIDER_CLIS)}.",
-            "Re-run with a valid provider, e.g. "
-            + installed_script_command(ctx.kanban_root, "switch-provider.sh", "--provider", "claude"),
-        ))
+        raise Refused(
+            format_error_contract(
+                "switch_provider.unknown_provider",
+                f"switch-provider.sh: unrecognized provider '{provider}'; "
+                f"valid providers: {', '.join(PROVIDER_CLIS)}.",
+                "Re-run with a valid provider, e.g. "
+                + installed_script_command(ctx.kanban_root, "switch-provider.sh", "--provider", "claude"),
+            )
+        )
 
     if shutil.which(cli) is None:
         raise Refused(
@@ -1122,9 +1136,7 @@ def _bare_intake_example(name: str) -> str:
     return _BARE_EXAMPLE_DEFAULT
 
 
-def route_intake_name(
-    project: str, file_path: "Path | str", kanban_root: "Path | str"
-) -> str:
+def route_intake_name(project: str, file_path: Path | str, kanban_root: Path | str) -> str:
     """Return the project sub-directory the basename of *file_path* routes to.
 
     The intake name check deposit_intake runs before it copies anything, and
@@ -1200,9 +1212,7 @@ _INTAKE_TEMP_PREFIX = ".deposit_intake_tmp_"
 # BUG-NNNN, optionally followed by a date and a kebab slug.  Read liberally
 # (any letter case, any spacing); rewritten to the deposited name's stem.
 _BUG_ID_TOKEN = r"BUG-[0-9]{4}(?:-[A-Za-z0-9][A-Za-z0-9-]*)?"
-_BUG_TITLE_LINE_RE = re.compile(
-    rf"^([ \t]*#[ \t]+){_BUG_ID_TOKEN}", re.MULTILINE | re.IGNORECASE
-)
+_BUG_TITLE_LINE_RE = re.compile(rf"^([ \t]*#[ \t]+){_BUG_ID_TOKEN}", re.MULTILINE | re.IGNORECASE)
 _BUG_ID_LINE_RE = re.compile(
     rf"^([ \t]*\*\*[ \t]*Bug[ \t]+ID[ \t]*:[ \t]*\*\*[ \t]*){_BUG_ID_TOKEN}",
     re.MULTILINE | re.IGNORECASE,
@@ -1219,7 +1229,7 @@ def _suggest_bug_name(name: str, bugs_dir: Path) -> str:
     refusal's remedy runnable.
     """
     stem = name[:-3] if name.lower().endswith(".md") else name
-    rest = stem[len("BUG-"):]
+    rest = stem[len("BUG-") :]
     m = re.match(r"([0-9]{4})(?:-|$)", rest)
     number = int(m.group(1)) if m else 0
     if number == 0:
@@ -1229,9 +1239,7 @@ def _suggest_bug_name(name: str, bugs_dir: Path) -> str:
     return f"BUG-{number:04d}-{slug}.md"
 
 
-def _refuse_malformed_bug_name(
-    project: str, src: Path, bugs_dir: Path, kanban_root: "Path | str"
-) -> None:
+def _refuse_malformed_bug_name(project: str, src: Path, bugs_dir: Path, kanban_root: Path | str) -> None:
     """Refuse a BUG-* staged name that fails the ledger filename contract.
 
     The contract is ``ledger_filename_re("BUG")`` read case-sensitively, so
@@ -1261,8 +1269,7 @@ def _refuse_malformed_bug_name(
     # a BUG-* name off the contract carries no number the claim can take and
     # is one discovery would reject. Refused before any claim or write.
     # CENSUS-ANCHOR: write-intake-bug-name-malformed-01
-    raise Refused(format_error_contract(
-        INTAKE_BUG_NAME_MALFORMED, f"intake.sh: refusing {name}: {reason}", remedy))
+    raise Refused(format_error_contract(INTAKE_BUG_NAME_MALFORMED, f"intake.sh: refusing {name}: {reason}", remedy))
 
 
 def _refuse_same_defect(src: Path, bugs_dir: Path) -> None:
@@ -1300,9 +1307,8 @@ def _refuse_same_defect(src: Path, bugs_dir: Path) -> None:
         f"different defect, reword it so it does not cite {bug.bug_id} as its defect, "
         "or rename it so its slug names that defect, and re-run intake."
     )
-    remedy = (
-        f"Read {bug.bug_id}, the live record of this defect, and add new evidence there: "
-        + shlex.join(["cat", bug.path])
+    remedy = f"Read {bug.bug_id}, the live record of this defect, and add new evidence there: " + shlex.join(
+        ["cat", bug.path]
     )
     # AGENT-RESOLVABLE (docs/blocking-site-census.md): the defect already has
     # a live record, so the filer cites it -- or rewords a draft that reports
@@ -1326,7 +1332,7 @@ def _renumber_bug_text(data: bytes, stem: str) -> bytes:
     return text.encode("utf-8", "surrogateescape")
 
 
-def _unlink_quietly(path: "Path | None") -> None:
+def _unlink_quietly(path: Path | None) -> None:
     """Remove *path* when it exists; a failure to remove is ignored."""
     if path is None:
         return
@@ -1359,9 +1365,9 @@ def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
         IoError:  A filesystem error, or no number could be claimed.
     """
     name = src.name
-    original_stem = name[:-len(".md")]
-    number = int(name[len("BUG-"):len("BUG-NNNN")])
-    slug = name[len("BUG-NNNN-"):-len(".md")]
+    original_stem = name[: -len(".md")]
+    number = int(name[len("BUG-") : len("BUG-NNNN")])
+    slug = name[len("BUG-NNNN-") : -len(".md")]
     # Imported here, not at module level: lib.bug_filing imports
     # task_status, which imports this package while it initialises.
     from pgai_agent_kanban.lib.bug_filing import import_bug_scanner
@@ -1371,8 +1377,8 @@ def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
     except ImportError as exc:
         raise OpsError(f"deposit_intake: cannot load the BUG number claim: {exc}") from exc
 
-    preferred: "int | None" = number or None
-    tmp_path: "Path | None" = None
+    preferred: int | None = number or None
+    tmp_path: Path | None = None
     original: bytes = b""
     try:
         for _attempt in range(_BUG_PLACEMENT_ATTEMPTS):
@@ -1392,17 +1398,13 @@ def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
                         tmp_path.chmod(0o644)
                         original = tmp_path.read_bytes()
                     except OSError as exc:
-                        raise IoError(
-                            f"deposit_intake: failed to copy {src} to {bugs_dir}: {exc}"
-                        ) from exc
-                deposited_stem = bug_path.name[:-len(".md")]
+                        raise IoError(f"deposit_intake: failed to copy {src} to {bugs_dir}: {exc}") from exc
+                deposited_stem = bug_path.name[: -len(".md")]
                 if deposited_stem != original_stem:
                     try:
                         tmp_path.write_bytes(_renumber_bug_text(original, deposited_stem))
                     except OSError as exc:
-                        raise IoError(
-                            f"deposit_intake: failed to renumber {tmp_path}: {exc}"
-                        ) from exc
+                        raise IoError(f"deposit_intake: failed to renumber {tmp_path}: {exc}") from exc
                 try:
                     os.link(tmp_path, bug_path)
                 except FileExistsError:
@@ -1411,9 +1413,7 @@ def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
                     preferred = None
                     continue
                 except OSError as exc:
-                    raise IoError(
-                        f"deposit_intake: failed to link temp file to target {bug_path}: {exc}"
-                    ) from exc
+                    raise IoError(f"deposit_intake: failed to link temp file to target {bug_path}: {exc}") from exc
                 return bug_path
             finally:
                 release_bug_id_claim(lock_path)
@@ -1426,7 +1426,7 @@ def _deposit_bug(src: Path, bugs_dir: Path) -> Path:
         _unlink_quietly(tmp_path)
 
 
-def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Path:
+def deposit_intake(ctx: OpsContext, project: str, file_path: Path | str) -> Path:
     """Copy a staged intake file into the correct project intake directory.
 
     Routes purely by the basename of ``file_path`` (case-sensitive prefix
@@ -1519,19 +1519,13 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
 
     # --- Argument / precondition validation ---
     if not project_root.is_dir():
-        raise OpsError(
-            f"deposit_intake: project root does not exist or is not a directory: {project_root}"
-        )
+        raise OpsError(f"deposit_intake: project root does not exist or is not a directory: {project_root}")
 
     if not src.exists():
-        raise OpsError(
-            f"deposit_intake: source file does not exist: {src}"
-        )
+        raise OpsError(f"deposit_intake: source file does not exist: {src}")
 
     if not src.is_file():
-        raise OpsError(
-            f"deposit_intake: source is not a regular file: {src}"
-        )
+        raise OpsError(f"deposit_intake: source is not a regular file: {src}")
 
     # --- Route by filename prefix ---
     basename = src.name
@@ -1541,9 +1535,7 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
 
     # --- Guard: destination directory must exist ---
     if not dest_dir.is_dir():
-        raise OpsError(
-            f"deposit_intake: destination directory does not exist: {dest_dir}"
-        )
+        raise OpsError(f"deposit_intake: destination directory does not exist: {dest_dir}")
 
     # --- BUG-*: contract-checked name, atomically claimed number ---
     if dest_subdir == "bugs":
@@ -1555,9 +1547,7 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
 
     # --- Guard: no clobber ---
     if target.exists():
-        raise OpsError(
-            f"deposit_intake: target already exists (no clobber): {target}"
-        )
+        raise OpsError(f"deposit_intake: target already exists (no clobber): {target}")
 
     # --- Atomic copy: mktemp in dest dir → copy → chmod 644 → link → unlink ---
     # Using mktemp in the destination directory guarantees same-filesystem
@@ -1577,17 +1567,13 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
         try:
             shutil.copy2(src, tmp_path)
         except OSError as exc:
-            raise IoError(
-                f"deposit_intake: failed to copy {src} to {dest_dir}: {exc}"
-            ) from exc
+            raise IoError(f"deposit_intake: failed to copy {src} to {dest_dir}: {exc}") from exc
 
         # Set mode 644 on the temp file before it becomes visible as the target.
         try:
             tmp_path.chmod(0o644)
         except OSError as exc:
-            raise IoError(
-                f"deposit_intake: failed to set mode 0o644 on temp file {tmp_path}: {exc}"
-            ) from exc
+            raise IoError(f"deposit_intake: failed to set mode 0o644 on temp file {tmp_path}: {exc}") from exc
 
         # No-clobber placement: the target becomes a second name for the
         # temp file's inode, or the call fails because that name is taken.
@@ -1596,13 +1582,9 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
         except FileExistsError:
             # Same message shape as the pre-check refusal so the CLI maps
             # this path to the same no-clobber exit code.
-            raise OpsError(
-                f"deposit_intake: target already exists (no clobber): {target}"
-            )
+            raise OpsError(f"deposit_intake: target already exists (no clobber): {target}")
         except OSError as exc:
-            raise IoError(
-                f"deposit_intake: failed to link temp file to target {target}: {exc}"
-            ) from exc
+            raise IoError(f"deposit_intake: failed to link temp file to target {target}: {exc}") from exc
 
         # The target now holds the content; drop the temp name.  A failure
         # here leaves a stray temp file beside a correctly deposited target,
@@ -1628,9 +1610,7 @@ def deposit_intake(ctx: OpsContext, project: str, file_path: "Path | str") -> Pa
                 tmp_path.unlink()
             except OSError:
                 pass
-        raise IoError(
-            f"deposit_intake: filesystem error: {exc}"
-        ) from exc
+        raise IoError(f"deposit_intake: filesystem error: {exc}") from exc
 
     return target
 
@@ -1708,23 +1688,16 @@ def close_item(
         status_file = task_dir / "status.md"
 
         if not status_file.is_file():
-            raise OpsError(
-                f"close_item: status.md not found for task {key!r}: {status_file}"
-            )
+            raise OpsError(f"close_item: status.md not found for task {key!r}: {status_file}")
 
         if dry_run:
-            print(
-                f"close_item (dry-run): would set task {key!r} state: "
-                f"{result.state} -> DONE"
-            )
+            print(f"close_item (dry-run): would set task {key!r} state: " f"{result.state} -> DONE")
             return
 
         _write_task_terminal_state(status_file, "DONE", "close_item")
         _close_task_block(ctx, project, result.path.name, _BLOCK_CLASS_ANY, "done")
 
-        marker_file = _get_marker_file(
-            ctx.project_root(project), result.item_type, result.path
-        )
+        marker_file = _get_marker_file(ctx.project_root(project), result.item_type, result.path)
         marker_key = _get_item_key_in_marker(result.item_type, result.path)
         set_marker(marker_file, marker_key, "x")
         return
@@ -1736,19 +1709,14 @@ def close_item(
         _check_duplicate_pointer(ctx, project, key, item_path, note)
 
     if dry_run:
-        print(
-            f"close_item (dry-run): would set {result.item_type} {key!r} status: "
-            f"{result.state} -> {state}"
-        )
+        print(f"close_item (dry-run): would set {result.item_type} {key!r} status: " f"{result.state} -> {state}")
         if note:
             print(f"close_item (dry-run): would record note: {note}")
         return
 
     _write_intake_close(item_path, state, note)
 
-    marker_file = _get_marker_file(
-        ctx.project_root(project), result.item_type, result.path
-    )
+    marker_file = _get_marker_file(ctx.project_root(project), result.item_type, result.path)
     marker_key = _get_item_key_in_marker(result.item_type, result.path)
     set_marker(marker_file, marker_key, "x", ignore_case=True)
 
@@ -1774,10 +1742,7 @@ def _check_close_state(state: str, project: str, key: str) -> None:
             f"close.sh: '{state}' is not a kanban state (valid: {valid}); an item "
             f"another item subsumed closes as '{alias_of}' with a note saying why."
         )
-        remedy = (
-            f"close.sh {target} --state {alias_of} "
-            f"--note {shlex.quote('superseded by another item')}"
-        )
+        remedy = f"close.sh {target} --state {alias_of} " f"--note {shlex.quote('superseded by another item')}"
     else:
         message = f"close.sh: invalid --state value: {state} (valid: {valid})"
         remedy = f"close.sh {target} --state {CLOSED_STATES[0]}"
@@ -1794,9 +1759,7 @@ def _check_close_state(state: str, project: str, key: str) -> None:
 _POINTER_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
-def _duplicate_pointer(
-    ctx: OpsContext, project: str, item_path: Path, note: str
-) -> "Path | None":
+def _duplicate_pointer(ctx: OpsContext, project: str, item_path: Path, note: str) -> Path | None:
     """Return the surviving item *note* points at, or ``None`` when it names none.
 
     The pointer is the first token of *note* that resolves (``resolve_item``,
@@ -1817,9 +1780,7 @@ def _duplicate_pointer(
     return None
 
 
-def _check_duplicate_pointer(
-    ctx: OpsContext, project: str, key: str, item_path: Path, note: str
-) -> None:
+def _check_duplicate_pointer(ctx: OpsContext, project: str, key: str, item_path: Path, note: str) -> None:
     """Refuse a ``duplicate`` close whose *note* does not name the surviving item."""
     if _duplicate_pointer(ctx, project, item_path, note) is not None:
         return
@@ -1898,9 +1859,7 @@ def _ops_cli_command(kanban_root: Path, *args: str) -> str:
     return f"cd {shlex.quote(str(kanban_root))} && python3 -m pgai_agent_kanban.ops {quoted}"
 
 
-def _intake_item_for_source(
-    ctx: OpsContext, project: str, source: str
-) -> "ResolveResult | None":
+def _intake_item_for_source(ctx: OpsContext, project: str, source: str) -> ResolveResult | None:
     """Return the bug or priority item an inbox entry's *source* names, or ``None``.
 
     The source's first line, stripped, is resolved like any key (exact, then
@@ -1920,9 +1879,7 @@ def _intake_item_for_source(
     return found
 
 
-def _checked_needs_operator_item(
-    ctx: OpsContext, project: str, key: str, question: str
-) -> "tuple[ResolveResult, str]":
+def _checked_needs_operator_item(ctx: OpsContext, project: str, key: str, question: str) -> tuple[ResolveResult, str]:
     """Run every set_needs_operator check and return ``(item, stem)``.
 
     Reads only: a refusal (``_refuse_needs_operator``) leaves the item and
@@ -1946,8 +1903,7 @@ def _checked_needs_operator_item(
         _refuse_needs_operator(
             NeedsOperatorNotFound,
             "needs_operator.unknown_key",
-            f"no bug or priority item matches key {key!r} in project {project!r}; "
-            f"nothing was written.",
+            f"no bug or priority item matches key {key!r} in project {project!r}; " f"nothing was written.",
             listing,
         )
 
@@ -1970,9 +1926,11 @@ def _checked_needs_operator_item(
             f"{stem} has ## Status {result.state.strip() or '(none)'!r}; only an item at "
             f"{', '.join(ACTIVE_INTAKE_STATES)} can be set to {NEEDS_OPERATOR_STATE}. "
             f"Nothing was written.",
-            installed_script_command(ctx.kanban_root, "reset.sh", "--project", project, "--key", stem)
-            if closed
-            else f"cat {shlex.quote(str(result.path))}",
+            (
+                installed_script_command(ctx.kanban_root, "reset.sh", "--project", project, "--key", stem)
+                if closed
+                else f"cat {shlex.quote(str(result.path))}"
+            ),
         )
 
     if not question.strip():
@@ -1982,7 +1940,10 @@ def _checked_needs_operator_item(
             f"the question for {stem} is empty; the item is parked only together with the "
             f"question the operator must answer. Nothing was written.",
             _ops_cli_command(
-                ctx.kanban_root, "set_needs_operator", str(project_root), stem,
+                ctx.kanban_root,
+                "set_needs_operator",
+                str(project_root),
+                stem,
                 "Which value should this use?",
             ),
         )
@@ -2014,7 +1975,7 @@ def set_needs_operator(
     key: str,
     question: str,
     *,
-    now: "object | None" = None,
+    now: object | None = None,
 ):
     """Park a bug or priority item on an operator question.
 
@@ -2064,13 +2025,9 @@ def set_needs_operator(
             project,
             source=stem,
             question=question,
-            meanwhile=(
-                f"Set {stem} to {NEEDS_OPERATOR_STATE}; bundling leaves it out until "
-                f"the answer."
-            ),
+            meanwhile=(f"Set {stem} to {NEEDS_OPERATOR_STATE}; bundling leaves it out until " f"the answer."),
             how_to_answer=(
-                f"Answer this entry with the inbox answer command; answering sets {stem} "
-                f"back to {OPEN_STATE}."
+                f"Answer this entry with the inbox answer command; answering sets {stem} " f"back to {OPEN_STATE}."
             ),
             now=now,
             once=True,
@@ -2081,9 +2038,7 @@ def set_needs_operator(
         raise
 
 
-def reopen_needs_operator_item(
-    ctx: OpsContext, project: str, source: str
-) -> "Path | None":
+def reopen_needs_operator_item(ctx: OpsContext, project: str, source: str) -> Path | None:
     """Set the needs-operator item an inbox entry's *source* names back to ``open``.
 
     ``overwatch.inbox.answer_entry`` calls this after recording an answer,
@@ -2107,6 +2062,56 @@ def reopen_needs_operator_item(
         _get_item_key_in_marker(found.item_type, found.path),
         " ",
         ignore_case=True,
+    )
+    return found.path
+
+
+#: The bug and priority section an answered inbox entry is recorded in: one
+#: ``- <answered at> <entry ID>: <answer>`` line per answer, oldest first.
+OPERATOR_ANSWERS_HEADING = "Operator Answers"
+
+
+def recorded_operator_answers(item_path: Path) -> list[str]:
+    """The ``## Operator Answers`` lines of a bug or priority file, oldest first.
+
+    Each is ``- <answered at> <entry ID>: <answer>``; ``[]`` when the item
+    carries no answer or cannot be read.
+    """
+    try:
+        text = item_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return _task_status.section_lines(text, OPERATOR_ANSWERS_HEADING)
+
+
+def record_operator_answer(
+    ctx: OpsContext, project: str, source: str, entry_id: str, answer: str, answered_at: str
+) -> Path | None:
+    """Append an inbox answer to the bug or priority item its entry's *source* names.
+
+    ``overwatch.inbox.answer_entry`` calls this before reopening the item, so
+    the answer lives in the item a planner reads, not only in the inbox. The
+    line ``- <answered_at> <entry_id>: <answer>`` goes at the end of the
+    item's ``## Operator Answers`` section, which is created after
+    ``## Status`` when absent; earlier answers are kept. A source that names
+    no bug or priority item changes nothing.
+
+    Returns:
+        The item's path, or ``None`` when *source* names no item.
+
+    Raises:
+        OpsError / IoError: the item could not be rewritten.
+    """
+    found = _intake_item_for_source(ctx, project, source)
+    if found is None:
+        return None
+    one_line = " ".join(answer.split())
+    lines = recorded_operator_answers(found.path) + [f"- {answered_at} {entry_id}: {one_line}"]
+    _set_sections_or_raise(
+        found.path,
+        {OPERATOR_ANSWERS_HEADING: "\n".join(lines)},
+        "record_operator_answer",
+        insert_after="Status",
     )
     return found.path
 
@@ -2150,7 +2155,7 @@ def ride_along_listing_line(bug_path: Path) -> str:
     return f"- {bug_path.name} (`{bug_path}`) — {RIDE_ALONG_SUFFIX}"
 
 
-def _listed_names(requirement_text: str) -> "set[str]":
+def _listed_names(requirement_text: str) -> set[str]:
     """File names the requirement's ``## Bundled Items`` already lists."""
     # Imported here, as overwatch.inbox is above: a lib reader kept off this
     # module's import path.
@@ -2159,9 +2164,7 @@ def _listed_names(requirement_text: str) -> "set[str]":
     return {Path(path).name for path in parse_bundled_item_paths(requirement_text)}
 
 
-def ride_along_item(
-    ctx: OpsContext, project: str, key: str, requirement: "Path | str"
-) -> Path:
+def ride_along_item(ctx: OpsContext, project: str, key: str, requirement: Path | str) -> Path:
     """List an open bug in a requirement as a ride-along and set it ``running``.
 
     A ride-along is a bug ticketed inside a requirement RC. The bug is added
@@ -2202,10 +2205,7 @@ def ride_along_item(
     requirement_path = Path(requirement)
     listing = f"ls {shlex.quote(str(project_root / 'bugs'))}"
 
-    if (
-        not requirement_path.is_file()
-        or requirement_path.resolve().parent != requirements_dir.resolve()
-    ):
+    if not requirement_path.is_file() or requirement_path.resolve().parent != requirements_dir.resolve():
         _refuse_ride_along(
             RideAlongRefused,
             "ride_along.requirement_outside",
@@ -2319,16 +2319,12 @@ def wontdo_item(ctx: OpsContext, project: str, key: str) -> None:
     status_file = task_dir / "status.md"
 
     if not status_file.is_file():
-        raise OpsError(
-            f"wontdo_item: status.md not found for task {key!r}: {status_file}"
-        )
+        raise OpsError(f"wontdo_item: status.md not found for task {key!r}: {status_file}")
 
     _write_task_terminal_state(status_file, "WONT-DO", "wontdo_item")
     _close_task_block(ctx, project, task_dir.name, _BLOCK_CLASS_ANY, "wont-do")
 
-    marker_file = _get_marker_file(
-        ctx.project_root(project), result.item_type, result.path
-    )
+    marker_file = _get_marker_file(ctx.project_root(project), result.item_type, result.path)
     marker_key = _get_item_key_in_marker(result.item_type, result.path)
     set_marker(marker_file, marker_key, "x")
 
@@ -2393,13 +2389,12 @@ def delete_item(
     try:
         if result.item_type == "task":
             import shutil as _shutil
+
             _shutil.rmtree(result.path)
         else:
             result.path.unlink()
     except OSError as exc:
-        raise IoError(
-            f"delete_item: failed to remove {result.item_type} {result.path}: {exc}"
-        ) from exc
+        raise IoError(f"delete_item: failed to remove {result.item_type} {result.path}: {exc}") from exc
 
     # --- Remove marker line from the queue/backlog file ---
     if result.item_type == "task":
@@ -2419,6 +2414,7 @@ def reset_item(
     key: str,
     keep_artifacts: bool = False,
     force: bool = False,
+    discard_branch: bool = False,
 ) -> None:
     """Reset a task or intake item to a re-pickable state.
 
@@ -2430,7 +2426,12 @@ def reset_item(
         After a task reset, the task is indistinguishable from one the PM
         materializer created moments ago.  The next wake picks it up as if it
         had never run.  No prior summary, no prior artifacts, no repo residue
-        an agent could read as dirty knowledge.
+        an agent could read as dirty knowledge.  The one exception is
+        committed work: a feature branch holding commits no other branch
+        has is kept (unless discard_branch), together with the task's
+        logs/progress.log, and the regenerated status.md carries
+        ``## Resume Mode`` ``branch`` so the next dispatch attaches that
+        branch at its tip instead of re-creating it.
 
     For AGENT TASKS:
         - Raises Refused (exit 2) if state is WORKING (filesystem race guard).
@@ -2438,11 +2439,15 @@ def reset_item(
           not surgical edit — this is the amnesia guarantee).
         - Closes the task's open block on the blocked ledger with class
           human, reason_code ``reset`` (a human released it); best-effort.
-        - Clears artifacts/ and the task's logs/ directory (unless
-          keep_artifacts=True; logs are always cleared regardless).
+        - Clears artifacts/ (unless keep_artifacts=True) and the task's
+          logs/ directory (logs/progress.log survives when the feature
+          branch is kept).
         - Flips the agent queue marker to [ ] in <agent>_backlog.md.
         - Deletes feature/<task-id> branch from the project dev tree (if
-          configured in project.cfg).  Warns and proceeds if deletion fails.
+          configured in project.cfg) when every commit on it is on another
+          branch; keeps it, printing its tip and commit count, when it holds
+          unmerged commits, unless discard_branch force-deletes it.  Warns
+          and proceeds if deletion fails.
         - Runs git worktree prune on the dev tree.
         - Appends one line to <kanban_root>/logs/reset.log.
 
@@ -2465,6 +2470,10 @@ def reset_item(
                         proceeding to the normal reset.  Without force, a detected
                         stale worktree causes a Refused error and non-zero exit
                         with the removal recipe printed to stderr.
+        discard_branch: When True, an agent task's feature branch holding
+                        unmerged commits is force-deleted ("discarding N
+                        commits at <hash>") instead of kept for the next
+                        dispatch to resume from.  Ignored for intake resets.
 
     Raises:
         OpsError:     If the project root is missing or an argument is invalid.
@@ -2491,6 +2500,7 @@ def reset_item(
             current_state=result.state,
             keep_artifacts=keep_artifacts,
             force=force,
+            discard_branch=discard_branch,
         )
     elif result.item_type == "bug":
         _reset_intake_item(
@@ -2523,9 +2533,7 @@ def reset_item(
                 pm_task_id=pm_task_id,
             )
     else:
-        raise OpsError(
-            f"reset_item: unexpected resolved item type {result.item_type!r} for key {key!r}"
-        )
+        raise OpsError(f"reset_item: unexpected resolved item type {result.item_type!r} for key {key!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -2543,6 +2551,7 @@ def _reset_agent_task(
     current_state: str,
     keep_artifacts: bool,
     force: bool = False,
+    discard_branch: bool = False,
 ) -> None:
     """Execute the agent-task reset procedure.
 
@@ -2562,6 +2571,13 @@ def _reset_agent_task(
     logs/, flips the queue marker, deletes the feature branch,
     runs git worktree prune, and appends to the reset log.
 
+    A feature branch holding commits no other branch has is kept instead of
+    deleted (unless discard_branch): the regenerated status.md then carries
+    ``## Resume Mode`` ``branch`` -- the section the wake's worktree stage
+    reads for a task with no Block Record -- so the next dispatch attaches
+    the branch at its tip, and logs/progress.log is kept as the resume
+    evidence with one line appended naming the kept tip.
+
     Args:
         ctx:           OpsContext (used to construct dev-tree paths via config).
         project:       Project name.
@@ -2572,6 +2588,8 @@ def _reset_agent_task(
         current_state: Current ## State value from status.md.
         keep_artifacts: When True, skip clearing artifacts/ (logs always cleared).
         force:         When True, perform stale-worktree cleanup before reset.
+        discard_branch: When True, force-delete a feature branch holding
+                       unmerged commits instead of keeping it.
 
     Raises:
         Refused:      If current_state is "WORKING", or if a stale worktree
@@ -2596,6 +2614,10 @@ def _reset_agent_task(
     except _branch_prefix.InvalidBranchPrefixError:
         # A prefix pp_branch_prefix refuses reads as none, as an unreadable project.cfg does.
         branch_prefix = ""
+    feature_branch = f"{branch_prefix}feature/{task_id}"
+    # Branches the stale-worktree cleanup already deleted or kept; Step 4
+    # does not handle them a second time.
+    handled_branches: dict[str, str] = {}
     if dev_tree is not None and dev_tree.is_dir():
         stale_wt = _detect_stale_worktree(dev_tree, task_id, branch_prefix)
         if stale_wt.registration_exists or stale_wt.path_exists:
@@ -2609,7 +2631,16 @@ def _reset_agent_task(
                 )
             else:
                 # Force path: perform cleanup with narration, then fall through.
-                _cleanup_stale_worktree(dev_tree, task_id, stale_wt, branch_prefix)
+                handled_branches = _cleanup_stale_worktree(
+                    dev_tree, task_id, stale_wt, branch_prefix, discard_branch=discard_branch
+                )
+
+    # --- Committed work decides what the reset keeps ---
+    # A feature branch holding commits no other branch has is kept unless the
+    # operator discards it; the task then resumes from it on its next dispatch.
+    kept_branch: tuple[int, str] | None = None
+    if not discard_branch and dev_tree is not None and dev_tree.is_dir():
+        kept_branch = _unmerged_branch_commits(dev_tree, feature_branch)
 
     # --- Read Participant and Role from README.md ---
     readme = task_dir / "README.md"
@@ -2626,6 +2657,10 @@ def _reset_agent_task(
     # --- Step 1: Regenerate status.md (amnesia guarantee) ---
     status_file = task_dir / "status.md"
     fresh_status = _generate_status_md(task_id, participant, role)
+    if kept_branch is not None:
+        # The wake-owned section the worktree stage reads for a task with no
+        # Block Record: 'branch' attaches the existing feature branch.
+        fresh_status += "\n## Resume Mode\nbranch\n"
     _write_or_raise_io(status_file, fresh_status)
 
     # --- Step 1b: the operator released the task: close its open block on
@@ -2639,7 +2674,12 @@ def _reset_agent_task(
     if not keep_artifacts:
         _clear_directory_contents(artifacts_dir)
 
-    _clear_directory_contents(task_logs_dir)
+    if kept_branch is None:
+        _clear_directory_contents(task_logs_dir)
+    else:
+        # The progress log is the resume evidence that goes with the kept branch.
+        _clear_directory_contents(task_logs_dir, keep=(_PROGRESS_LOG_NAME,))
+        _append_progress_log_reset_line(task_logs_dir, feature_branch, kept_branch)
 
     # --- Step 3: Flip queue marker to [ ] ---
     marker_file = _get_marker_file(project_root, "task", task_dir)
@@ -2647,12 +2687,13 @@ def _reset_agent_task(
     set_marker(marker_file, marker_key, " ")
 
     # --- Step 4: Dev tree operations (feature branch + worktree prune) ---
-    # dev_tree and branch_prefix were resolved earlier for stale-worktree detection;
-    # reuse them here rather than calling the cfg readers a second time.
-    feature_branch = f"{branch_prefix}feature/{task_id}"
-
+    # dev_tree, branch_prefix and feature_branch were resolved earlier for
+    # stale-worktree detection; reuse them rather than reading the cfg again.
+    # An unmerged branch is kept here (its tip and count printed) unless the
+    # operator passed discard_branch.
     if dev_tree is not None and dev_tree.is_dir():
-        _git_delete_feature_branch(dev_tree, feature_branch, branch_prefix)
+        if feature_branch not in handled_branches:
+            _git_delete_feature_branch(dev_tree, feature_branch, branch_prefix, discard_unmerged=discard_branch)
         _git_worktree_prune(dev_tree)
 
     # --- Step 5: Log to ops reset record ---
@@ -2698,6 +2739,7 @@ def _reset_intake_item_status_only(item_path: Path, current_status: str) -> None
     """
     if current_status == "running":
         import sys as _sys
+
         print(
             f"WARNING: intake item has ## Status: running (bundle RC may be in flight).\n"
             f"  Resetting now may cause double-handling on the next discovery idle tick.\n"
@@ -2726,6 +2768,7 @@ def _write_requirement_reset(item_path: Path, current_status: str) -> None:
     """
     if current_status == "running":
         import sys as _sys
+
         print(
             f"WARNING: intake item has ## Status: running (bundle RC may be in flight).\n"
             f"  Resetting now may cause double-handling on the next discovery idle tick.\n"
@@ -2736,9 +2779,7 @@ def _write_requirement_reset(item_path: Path, current_status: str) -> None:
     try:
         text = item_path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise OpsError(
-            f"reset_item: failed to read {item_path}: {exc}"
-        ) from exc
+        raise OpsError(f"reset_item: failed to read {item_path}: {exc}") from exc
 
     new_text, n_status = re.subn(
         r"(## Status\n(?:[ \t]*\n)*)([^\n]+)",
@@ -2748,9 +2789,7 @@ def _write_requirement_reset(item_path: Path, current_status: str) -> None:
     )
 
     if n_status == 0:
-        raise OpsError(
-            f"reset_item: no ## Status heading found in {item_path}; left untouched"
-        )
+        raise OpsError(f"reset_item: no ## Status heading found in {item_path}; left untouched")
 
     # Clear ## PM Task to 'none' when the field exists.  If the field is
     # absent, leave the file as-is (discovery handles missing PM Task as
@@ -2807,9 +2846,7 @@ def _reset_requirement_extras(
             except OSError:
                 pass
     if cleared_count == 0:
-        print(
-            f"hash-marker: no .materialized.* marker found in {pm_artifacts} (already absent)"
-        )
+        print(f"hash-marker: no .materialized.* marker found in {pm_artifacts} (already absent)")
 
 
 def _generate_status_md(task_id: str, participant: str, role: str) -> str:
@@ -2861,18 +2898,22 @@ def _generate_status_md(task_id: str, participant: str, role: str) -> str:
     )
 
 
-def _clear_directory_contents(directory: Path) -> None:
+def _clear_directory_contents(directory: Path, keep: tuple[str, ...] = ()) -> None:
     """Remove all contents of directory (files and subdirectories).
 
     Idempotent: no error if directory is absent or already empty.
 
     Args:
         directory: Path to the directory to clear.
+        keep:      Entry names left in place (e.g. ``("progress.log",)``).
     """
     if not directory.is_dir():
         return
     import shutil as _shutil
+
     for entry in directory.iterdir():
+        if entry.name in keep:
+            continue
         if entry.is_dir():
             _shutil.rmtree(entry)
         else:
@@ -2880,6 +2921,38 @@ def _clear_directory_contents(directory: Path) -> None:
                 entry.unlink()
             except OSError:
                 pass
+
+
+_PROGRESS_LOG_NAME = "progress.log"
+
+
+def _append_progress_log_reset_line(task_logs_dir: Path, feature_branch: str, kept: tuple[int, str]) -> None:
+    """Append one line to the task's logs/progress.log recording a kept branch.
+
+    The line tells the next dispatch's agent the reset kept its committed
+    work: the branch, its tip, and how many commits only it holds.  Creates
+    the log when absent.  Best-effort: a write failure does not abort the
+    reset (the branch and the ``## Resume Mode`` section carry the resume).
+
+    Args:
+        task_logs_dir:  The task's logs/ directory.
+        feature_branch: The kept feature branch.
+        kept:           ``(count, short_tip)`` from :func:`_unmerged_branch_commits`.
+    """
+    import datetime as _dt
+
+    count, tip = kept
+    ts = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    try:
+        task_logs_dir.mkdir(parents=True, exist_ok=True)
+        with (task_logs_dir / _PROGRESS_LOG_NAME).open("a", encoding="utf-8") as fh:
+            fh.write(
+                f"{ts} reset by operator: feature branch {feature_branch} kept at {tip} "
+                f"({_commit_count_phrase(count)} not on any other branch); "
+                f"the next dispatch resumes from it\n"
+            )
+    except OSError:
+        pass  # Non-fatal: the kept branch and ## Resume Mode still carry the resume.
 
 
 def _read_project_cfg_value(project_root: Path, section: str, key: str) -> str:
@@ -2905,42 +2978,122 @@ def _read_project_cfg_value(project_root: Path, section: str, key: str) -> str:
     return ""
 
 
-def _read_dev_tree_path(project_root: Path) -> "Path | None":
-    """Return the dev_tree_path for the project, or None if not configured.
+def _read_dev_tree_path(project_root: Path) -> Path | None:
+    """Return the repository the wake makes this project's worktrees in, or None.
+
+    The documented dev_tree_path chain (:func:`pgai_agent_kanban.lib.dev_tree.resolve_dev_tree`):
+    the project's own value, else ``PGAI_DEV_TREE_PATH``, else kanban.cfg
+    ``[paths] dev_tree_path``.
 
     Args:
         project_root: Absolute path to the project root.
 
     Returns:
-        Absolute Path to the dev tree, or None when unset or empty.
+        The dev tree, or None when no tier names one.
     """
-    val = _read_project_cfg_value(project_root, "project", "dev_tree_path")
-    if val:
-        return Path(val)
-    return None
+    val = _dev_tree.resolve_dev_tree(_dev_tree.kanban_root_of(project_root), project_root)
+    return Path(val) if val else None
+
+
+def _commit_count_phrase(count: int) -> str:
+    """Return "1 commit", "N commits", or, for a negative (unknown) count,
+    "an unknown number of commits" -- the count as reset messages print it."""
+    if count < 0:
+        return "an unknown number of commits"
+    return f"{count} commit" if count == 1 else f"{count} commits"
+
+
+def _unmerged_branch_commits(dev_tree: Path, branch: str) -> tuple[int, str] | None:
+    """Return ``(count, short_tip)`` for the commits only *branch* holds, or None.
+
+    A commit counts when no other local branch, no tag, no remote-tracking
+    ref and not the dev tree's own HEAD reaches it: deleting the branch would
+    leave exactly those commits dangling.  This is wider than ``git branch
+    -d``'s merged-into-HEAD test on purpose -- a feature branch already merged
+    into the RC branch while the dev tree is parked elsewhere holds nothing
+    that a delete loses.
+
+    Returns None when git is not on PATH, the branch does not exist, or every
+    commit on it is reachable from elsewhere.  When the branch exists but the
+    count cannot be computed, returns ``(-1, short_tip)``: the caller treats
+    an unknown count as work to keep rather than guess it is safe to delete.
+
+    The ``unmerged_branch_commits`` CLI verb prints this result for bash
+    callers: the wake's stale-active sweep keeps the branch of an orphaned
+    task by the same test the operator reset applies.
+
+    Args:
+        dev_tree: Absolute path to the git repository.
+        branch:   Local branch name (without ``refs/heads/``).
+    """
+    import subprocess as _sp
+
+    if shutil.which("git") is None:
+        return None
+    git = ["git", "-C", str(dev_tree)]
+    tip = _sp.run(
+        [*git, "rev-parse", "--short", "--verify", "--quiet", f"refs/heads/{branch}"],
+        capture_output=True,
+        text=True,
+    )
+    if tip.returncode != 0 or not tip.stdout.strip():
+        return None
+    short_tip = tip.stdout.strip()
+
+    # The dev tree's HEAD joins the exclusion set only when it resolves (an
+    # unborn HEAD would make the whole walk fail).
+    has_head = _sp.run([*git, "rev-parse", "--verify", "--quiet", "HEAD"], capture_output=True).returncode == 0
+    walk = [*git, "rev-list", "--count", f"refs/heads/{branch}", "--not"]
+    if has_head:
+        walk.append("HEAD")
+    walk += [f"--exclude={branch}", "--branches", "--tags", "--remotes"]
+    r = _sp.run(walk, capture_output=True, text=True)
+    try:
+        count = int(r.stdout.strip()) if r.returncode == 0 else -1
+    except ValueError:
+        count = -1
+    if count == 0:
+        return None
+    return count, short_tip
 
 
 def _git_delete_feature_branch(
-    dev_tree: Path, feature_branch: str, branch_prefix: str = ""
-) -> None:
-    """Delete a feature branch from the dev tree, if it exists.
+    dev_tree: Path,
+    feature_branch: str,
+    branch_prefix: str = "",
+    discard_unmerged: bool = False,
+) -> str:
+    """Delete a feature branch from the dev tree, keeping unmerged work by default.
 
-    Tries -d (safe) first; falls back to -D (force) with a warning to stderr
-    if the branch is not fully merged.  Both outcomes are non-fatal — warns and
-    proceeds if deletion fails. A missing git binary is the same kind of
-    non-fatal outcome: it is checked before the first git invocation so a
-    reset on a gitless host degrades to a warning (the branch, if any, is
-    left in place for an operator with git to clean up later) instead of an
+    A branch whose every commit is reachable from another branch, a tag, a
+    remote-tracking ref or the dev tree's HEAD is deleted: ``-d`` first, then
+    ``-D`` (nothing is lost either way).  A branch holding commits nothing
+    else reaches (:func:`_unmerged_branch_commits`) is kept, and one stderr
+    line names its tip and commit count -- unless *discard_unmerged* is set,
+    in which case it is force-deleted with a warning that reads "discarding
+    N commits at <hash>".
+
+    Every outcome is non-fatal: a failed delete warns and the reset proceeds.
+    A missing git binary is checked before the first git invocation, so a
+    reset on a gitless host degrades to a warning (the branch, if any, is left
+    in place for an operator with git to clean up later) instead of an
     unhandled FileNotFoundError aborting the whole reset.
 
     Args:
-        dev_tree:       Absolute path to the git repository.
-        feature_branch: Branch name to delete (e.g. "feature/CODER-...").
-        branch_prefix:  The project's configured branch_prefix (e.g. "ai_"),
-                        or "" for an unprefixed project. Passed through to
-                        _warn_if_merged so its RC-branch scan looks for
-                        <branch_prefix>rc/* rather than a bare "rc/*" that
-                        would never match on a prefixed project.
+        dev_tree:         Absolute path to the git repository.
+        feature_branch:   Branch name to delete (e.g. "feature/CODER-...").
+        branch_prefix:    The project's configured branch_prefix (e.g. "ai_"),
+                          or "" for an unprefixed project. Passed through to
+                          _warn_if_merged so its RC-branch scan looks for
+                          <branch_prefix>rc/* rather than a bare "rc/*" that
+                          would never match on a prefixed project.
+        discard_unmerged: When True, a branch holding unmerged commits is
+                          force-deleted (reset.sh's ``--discard-branch``)
+                          instead of kept.
+
+    Returns:
+        ``"absent"`` (no such branch), ``"kept"`` (unmerged work kept),
+        ``"deleted"``, ``"failed"`` (git refused the delete) or ``"no-git"``.
     """
     import subprocess as _sp
     import sys as _sys
@@ -2951,16 +3104,27 @@ def _git_delete_feature_branch(
             f"cleanup for '{feature_branch}' (dev tree: {dev_tree}).",
             file=_sys.stderr,
         )
-        return
+        return "no-git"
 
     # Check if branch exists.
     check = _sp.run(
-        ["git", "-C", str(dev_tree), "rev-parse", "--verify",
-         f"refs/heads/{feature_branch}"],
+        ["git", "-C", str(dev_tree), "rev-parse", "--verify", f"refs/heads/{feature_branch}"],
         capture_output=True,
     )
     if check.returncode != 0:
-        return  # Branch does not exist; nothing to do.
+        return "absent"  # Branch does not exist; nothing to do.
+
+    unmerged = _unmerged_branch_commits(dev_tree, feature_branch)
+    if unmerged is not None and not discard_unmerged:
+        count, tip = unmerged
+        print(
+            f"reset: keeping feature branch '{feature_branch}': it holds "
+            f"{_commit_count_phrase(count)} at {tip} that no other branch has. "
+            f"The task resumes from this branch on its next dispatch; re-run the "
+            f"reset with --discard-branch to delete it instead.",
+            file=_sys.stderr,
+        )
+        return "kept"
 
     # Check if branch is merged into any RC branch before deleting.
     _warn_if_merged(dev_tree, feature_branch, branch_prefix)
@@ -2971,23 +3135,39 @@ def _git_delete_feature_branch(
         capture_output=True,
     )
     if r.returncode == 0:
-        return
+        return "deleted"
 
-    # Fall back to force-delete with warning.
-    print(
-        f"WARNING: feature branch '{feature_branch}' could not be deleted with -d "
-        f"(not fully merged); force-deleting with -D.",
-        file=_sys.stderr,
-    )
-    _sp.run(
+    # Fall back to force-delete with a warning naming what it costs.
+    if unmerged is None:
+        print(
+            f"WARNING: feature branch '{feature_branch}' is not merged into the "
+            f"dev tree's HEAD, but every commit on it is on another branch; "
+            f"deleting it with -D.",
+            file=_sys.stderr,
+        )
+    else:
+        count, tip = unmerged
+        print(
+            f"WARNING: feature branch '{feature_branch}' is not fully merged; "
+            f"discarding {_commit_count_phrase(count)} at {tip} (--discard-branch).",
+            file=_sys.stderr,
+        )
+    forced = _sp.run(
         ["git", "-C", str(dev_tree), "branch", "-D", feature_branch],
         capture_output=True,
+        text=True,
     )
+    if forced.returncode == 0:
+        return "deleted"
+    print(
+        f"WARNING: could not delete feature branch '{feature_branch}': "
+        f"{forced.stderr.strip() or 'git branch -D failed'}; the branch is left in place.",
+        file=_sys.stderr,
+    )
+    return "failed"
 
 
-def _warn_if_merged(
-    dev_tree: Path, feature_branch: str, branch_prefix: str = ""
-) -> None:
+def _warn_if_merged(dev_tree: Path, feature_branch: str, branch_prefix: str = "") -> None:
     """Print a warning to stderr if feature_branch is already merged into an RC branch.
 
     Non-fatal: warns and returns regardless.
@@ -3018,8 +3198,15 @@ def _warn_if_merged(
         if not candidate:
             continue
         is_ancestor = _sp.run(
-            ["git", "-C", str(dev_tree), "merge-base", "--is-ancestor",
-             f"refs/heads/{feature_branch}", f"refs/heads/{candidate}"],
+            [
+                "git",
+                "-C",
+                str(dev_tree),
+                "merge-base",
+                "--is-ancestor",
+                f"refs/heads/{feature_branch}",
+                f"refs/heads/{candidate}",
+            ],
             capture_output=True,
         )
         if is_ancestor.returncode == 0:
@@ -3045,6 +3232,7 @@ def _git_worktree_prune(dev_tree: Path) -> None:
         dev_tree: Absolute path to the git repository.
     """
     import subprocess as _sp
+
     if shutil.which("git") is None:
         return
     _sp.run(
@@ -3081,8 +3269,8 @@ class StaleWorktreeInfo:
 
     registration_exists: bool
     path_exists: bool
-    worktree_path: "str | None"
-    branch_pinned: "bool | None"
+    worktree_path: str | None
+    branch_pinned: bool | None
 
 
 def _detect_stale_worktree(
@@ -3148,7 +3336,7 @@ def _detect_stale_worktree(
         else:
             wt_base = os.path.join(temp_root, "worktrees")
 
-    worktree_path: "str | None" = os.path.join(wt_base, task_id) if wt_base else None
+    worktree_path: str | None = os.path.join(wt_base, task_id) if wt_base else None
 
     # --- Check on-disk path existence ---
     path_exists = worktree_path is not None and os.path.isdir(worktree_path)
@@ -3159,7 +3347,7 @@ def _detect_stale_worktree(
     registration_exists = worktrees_dir.is_dir()
 
     # --- Detect branch_pinned (reads HEAD from the registration dir) ---
-    branch_pinned: "bool | None" = None
+    branch_pinned: bool | None = None
     if registration_exists:
         head_file = worktrees_dir / "HEAD"
         if head_file.is_file():
@@ -3222,7 +3410,7 @@ def _warn_stale_worktree(task_id: str, stale: StaleWorktreeInfo) -> None:
     )
 
 
-def _probe_mount_pin(path: str) -> "str | None":
+def _probe_mount_pin(path: str) -> str | None:
     """Return the blocking mount description if path is itself a mount point, else None.
 
     Only returns a result when the exact path is listed as a mount point — a
@@ -3250,8 +3438,7 @@ def _probe_mount_pin(path: str) -> "str | None":
     # mount — that is too broad and would fire on /tmp under the root fs.
     try:
         r = _sp.run(
-            ["findmnt", "--mountpoint", path,
-             "--output", "SOURCE,TARGET,FSTYPE", "--noheadings"],
+            ["findmnt", "--mountpoint", path, "--output", "SOURCE,TARGET,FSTYPE", "--noheadings"],
             capture_output=True,
             text=True,
         )
@@ -3281,14 +3468,18 @@ def _cleanup_stale_worktree(
     task_id: str,
     stale: StaleWorktreeInfo,
     branch_prefix: str = "",
-) -> None:
+    discard_branch: bool = False,
+) -> dict[str, str]:
     """Perform stale-worktree cleanup when --force is given.
 
     Executes in order: git worktree remove --force, git worktree prune,
     rm -rf of the on-disk path (if it still exists after the git remove),
-    and deletion of the worktree-pinned feature branch.  Narrates each
-    action to stderr before running it.  Raises on unrecoverable failures
-    so the caller's amnesia procedure does not run if cleanup is incomplete.
+    and deletion of the worktree-pinned feature branch -- which, like the
+    reset's own feature-branch step, keeps a branch holding unmerged commits
+    unless *discard_branch* is set (:func:`_git_delete_feature_branch`).
+    Narrates each action to stderr before running it.  Raises on
+    unrecoverable failures so the caller's amnesia procedure does not run if
+    cleanup is incomplete.
 
     Before rm -rf, probes for an active mount at the path; raises MountPinned
     if one is found (no partial cleanup).
@@ -3300,6 +3491,14 @@ def _cleanup_stale_worktree(
         branch_prefix: The project's configured branch_prefix (e.g. "ai_"),
                   or "" for an unprefixed project. Passed through to the
                   feature-branch deletion step's already-merged check.
+        discard_branch: When True, a pinned feature branch holding unmerged
+                  commits is force-deleted instead of kept.
+
+    Returns:
+        ``{branch_name: outcome}`` for the feature branch this cleanup
+        handled (outcome as :func:`_git_delete_feature_branch` returns it),
+        or ``{}`` when it identified none -- so the reset's own
+        feature-branch step does not handle the same branch twice.
 
     Raises:
         MountPinned: If the on-disk path is an active mount target.
@@ -3344,6 +3543,7 @@ def _cleanup_stale_worktree(
             if r.returncode != 0:
                 # Check whether the directory is gone despite the non-zero exit.
                 import os as _os
+
                 if _os.path.isdir(wt_path):
                     raise OpsError(
                         f"reset: [worktree cleanup] 'git worktree remove --force' failed"
@@ -3388,6 +3588,7 @@ def _cleanup_stale_worktree(
     # Mount-pin check was done at pre-flight above; proceed directly to removal.
     if wt_path is not None:
         import os as _os
+
         if _os.path.isdir(wt_path):
             print(
                 f"reset: [worktree cleanup] rm -rf {wt_path}",
@@ -3396,9 +3597,7 @@ def _cleanup_stale_worktree(
             try:
                 shutil.rmtree(wt_path)
             except OSError as exc:
-                raise OpsError(
-                    f"reset: [worktree cleanup] rm -rf {wt_path!r} failed: {exc}"
-                ) from exc
+                raise OpsError(f"reset: [worktree cleanup] rm -rf {wt_path!r} failed: {exc}") from exc
             print(
                 f"reset: [worktree cleanup] rm -rf completed",
                 file=_sys.stderr,
@@ -3410,7 +3609,7 @@ def _cleanup_stale_worktree(
     # git branch --list for any branch that contains the task_id.
     # _git_delete_feature_branch is idempotent and warns-and-proceeds when the
     # branch does not exist, so we attempt deletion even when the name is inferred.
-    feature_branch_name: "str | None" = None
+    feature_branch_name: str | None = None
     if stale.branch_pinned and stale.registration_exists:
         # Read HEAD from registration to extract the exact branch name.
         head_file = dev_tree / ".git" / "worktrees" / task_id / "HEAD"
@@ -3420,7 +3619,7 @@ def _cleanup_stale_worktree(
                 # Format: "ref: refs/heads/<branch_name>"
                 prefix = "ref: refs/heads/"
                 if head_content.startswith(prefix):
-                    feature_branch_name = head_content[len(prefix):]
+                    feature_branch_name = head_content[len(prefix) :]
             except OSError:
                 pass
 
@@ -3433,28 +3632,33 @@ def _cleanup_stale_worktree(
             text=True,
         )
         if r2.returncode == 0:
-            candidates = [
-                line.strip().lstrip("* ").strip()
-                for line in r2.stdout.splitlines()
-                if line.strip()
-            ]
+            candidates = [line.strip().lstrip("* ").strip() for line in r2.stdout.splitlines() if line.strip()]
             # Prefer the one that ends with /feature/<task_id> or similar.
             for c in candidates:
                 if task_id in c:
                     feature_branch_name = c
                     break
 
+    handled: dict[str, str] = {}
     if feature_branch_name:
         print(
-            f"reset: [worktree cleanup] deleting pinned feature branch"
-            f" {feature_branch_name!r}",
+            f"reset: [worktree cleanup] deleting pinned feature branch" f" {feature_branch_name!r}",
             file=_sys.stderr,
         )
-        _git_delete_feature_branch(dev_tree, feature_branch_name, branch_prefix)
-        print(
-            f"reset: [worktree cleanup] feature branch deleted",
-            file=_sys.stderr,
+        outcome = _git_delete_feature_branch(
+            dev_tree, feature_branch_name, branch_prefix, discard_unmerged=discard_branch
         )
+        handled[feature_branch_name] = outcome
+        if outcome == "kept":
+            print(
+                f"reset: [worktree cleanup] feature branch kept (unmerged commits)",
+                file=_sys.stderr,
+            )
+        elif outcome == "deleted":
+            print(
+                f"reset: [worktree cleanup] feature branch deleted",
+                file=_sys.stderr,
+            )
     else:
         print(
             f"reset: [worktree cleanup] feature branch not identified;"
@@ -3466,11 +3670,10 @@ def _cleanup_stale_worktree(
         f"reset: [worktree cleanup] stale worktree cleanup complete for task {task_id!r}",
         file=_sys.stderr,
     )
+    return handled
 
 
-def _close_task_block(
-    ctx: OpsContext, project: str, task_id: str, block_class: str, reason_code: str
-) -> None:
+def _close_task_block(ctx: OpsContext, project: str, task_id: str, block_class: str, reason_code: str) -> None:
     """Close task *task_id*'s open block on the project's blocked ledger.
 
     *block_class* is the class of the resolution (``human`` for a reset,
@@ -3499,6 +3702,7 @@ def _append_reset_log(kanban_root: Path, task_id: str) -> None:
         task_id:     Task ID to record in the log.
     """
     import datetime as _dt
+
     ops_log = kanban_root / "logs" / "reset.log"
     try:
         ops_log.parent.mkdir(parents=True, exist_ok=True)
@@ -3538,9 +3742,7 @@ def _write_task_terminal_state(status_file: Path, state: str, op: str) -> None:
         raise OpsError(f"{op}: failed to read {status_file}: {exc}") from exc
 
     if _task_status.read_section(text, "State") is None:
-        raise OpsError(
-            f"{op}: no ## State heading found in {status_file}; left untouched"
-        )
+        raise OpsError(f"{op}: no ## State heading found in {status_file}; left untouched")
 
     updates = {"State": state}
     for heading, value in (("Blockers", "none"), ("Needs Human", "no")):
@@ -3574,10 +3776,10 @@ def _write_intake_close(item_path: Path, state: str, note: str) -> None:
 
 def _set_sections_or_raise(
     target: Path,
-    updates: "dict[str, str]",
+    updates: dict[str, str],
     op: str,
     *,
-    insert_after: "str | None" = None,
+    insert_after: str | None = None,
 ) -> None:
     """Call ``task_status.set_sections``, mapping its refusals onto ops errors.
 
@@ -3591,12 +3793,8 @@ def _set_sections_or_raise(
         if exc.error_key == "task-status.write-failed":
             raise IoError(f"_atomic_write: {exc.message}") from exc
         if exc.error_key == "task-status.missing-section":
-            heading = next(
-                (h for h in updates if f"'## {h}'" in exc.message), "section"
-            )
-            raise OpsError(
-                f"{op}: no ## {heading} heading found in {target}; left untouched"
-            ) from exc
+            heading = next((h for h in updates if f"'## {h}'" in exc.message), "section")
+            raise OpsError(f"{op}: no ## {heading} heading found in {target}; left untouched") from exc
         raise OpsError(f"{op}: {exc.message}") from exc
 
 
@@ -3618,9 +3816,7 @@ def _write_or_raise_io(target: Path, content: str) -> None:
     try:
         atomic_write(target, content, prefix=".write_tmp_")
     except OSError as exc:
-        raise IoError(
-            f"_atomic_write: failed writing {target}: {exc}"
-        ) from exc
+        raise IoError(f"_atomic_write: failed writing {target}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -3671,9 +3867,7 @@ def _get_marker_file(
     elif item_type == "requirement":
         return queues_dir / "pm_backlog.md"
     else:
-        raise OpsError(
-            f"_get_marker_file: unknown item type {item_type!r}"
-        )
+        raise OpsError(f"_get_marker_file: unknown item type {item_type!r}")
 
 
 def _get_item_key_in_marker(item_type: str, item_path: Path) -> str:
@@ -3721,14 +3915,11 @@ def _canonical_marker(marker: str) -> str:
     """
     value = marker.strip() or " "
     if value not in CANONICAL_MARKERS:
-        raise OpsError(
-            f"set_marker: marker {marker!r} is not one of the queue markers "
-            "' ', 'W', 'A', 'B', 'x'"
-        )
+        raise OpsError(f"set_marker: marker {marker!r} is not one of the queue markers " "' ', 'W', 'A', 'B', 'x'")
     return value
 
 
-def _marker_entry_re(item_key: str, ignore_case: bool) -> "re.Pattern[str]":
+def _marker_entry_re(item_key: str, ignore_case: bool) -> re.Pattern[str]:
     """Compile the queue-entry pattern for *item_key*.
 
     Groups: 1 = list prefix up to the opening bracket's left edge ("- "),
@@ -3743,7 +3934,7 @@ def _marker_entry_re(item_key: str, ignore_case: bool) -> "re.Pattern[str]":
     )
 
 
-def _read_queue_text(queue_file: Path, op: str) -> "str | None":
+def _read_queue_text(queue_file: Path, op: str) -> str | None:
     """Return *queue_file*'s text, None when it does not exist.
 
     Raises:
@@ -3758,7 +3949,7 @@ def _read_queue_text(queue_file: Path, op: str) -> "str | None":
 
 
 def set_marker(
-    queue_file: "Path | str",
+    queue_file: Path | str,
     item_key: str,
     marker: str,
     *,
@@ -3806,7 +3997,7 @@ def replace_marker(
     marker: str,
     *,
     ignore_case: bool = False,
-) -> "tuple[str, int]":
+) -> tuple[str, int]:
     """Return *text* with every queue line for *item_key* set to *marker*.
 
     The text-level half of :func:`set_marker`, with the same entry match and
@@ -3821,12 +4012,10 @@ def replace_marker(
         OpsError: *marker* is not a queue marker.
     """
     target = _canonical_marker(marker)
-    return _marker_entry_re(item_key, ignore_case).subn(
-        lambda m: f"{m.group(1)}[{target}]{m.group(2)}", text
-    )
+    return _marker_entry_re(item_key, ignore_case).subn(lambda m: f"{m.group(1)}[{target}]{m.group(2)}", text)
 
 
-def ensure_marker(text: "str | None", item_key: str, marker: str) -> str:
+def ensure_marker(text: str | None, item_key: str, marker: str) -> str:
     """Return queue-file text whose line for *item_key* carries *marker*.
 
     The text-level writer behind discovery's backlog-cache flip, for a
@@ -3882,12 +4071,12 @@ def _append_queue_entry(text: str, entry: str) -> str:
     """
     span = _task_status.section_span(text, "Queue")
     head = text[: span.body_end].rstrip()
-    later = "\n" + text[span.next_heading:] if span.next_heading is not None else ""
+    later = "\n" + text[span.next_heading :] if span.next_heading is not None else ""
     return f"{head}\n{entry}\n{later}"
 
 
 def queue_markers(
-    queue_file: "Path | str",
+    queue_file: Path | str,
     item_key: str,
     *,
     ignore_case: bool = False,
@@ -3971,7 +4160,7 @@ def _narrate_unreadable_status(key: str, status_file: Path, exc: IoError) -> Non
     )
 
 
-def parse_scan_rule(rule: str) -> "tuple[frozenset[str], frozenset[str] | None]":
+def parse_scan_rule(rule: str) -> tuple[frozenset[str], frozenset[str] | None]:
     """Parse a ``MARKERS=STATES`` scan rule for :func:`scan_queue`.
 
     MARKERS is one or more queue-marker characters (space for pending);
@@ -3993,10 +4182,7 @@ def parse_scan_rule(rule: str) -> "tuple[frozenset[str], frozenset[str] | None]"
     """
     marker_text, sep, states = rule.partition("=")
     if not sep or not marker_text:
-        raise OpsError(
-            f"scan_queue: rule {rule!r} is not MARKERS=STATES "
-            "(for example 'W=*' or ' B=,BACKLOG')"
-        )
+        raise OpsError(f"scan_queue: rule {rule!r} is not MARKERS=STATES " "(for example 'W=*' or ' B=,BACKLOG')")
     alias = "[]" in marker_text
     chars = marker_text.replace("[]", "")
     unknown = sorted({char for char in chars if char not in CANONICAL_MARKERS})
@@ -4012,13 +4198,13 @@ def parse_scan_rule(rule: str) -> "tuple[frozenset[str], frozenset[str] | None]"
 
 
 def scan_queue(
-    queue_file: "Path | str",
-    tasks_root: "Path | str",
-    rules: "list[tuple[frozenset[str], frozenset[str] | None]]",
+    queue_file: Path | str,
+    tasks_root: Path | str,
+    rules: list[tuple[frozenset[str], frozenset[str] | None]],
     *,
-    id_pattern: "str | None" = None,
+    id_pattern: str | None = None,
     limit: int = 0,
-    unreadable: "list[Path] | None" = None,
+    unreadable: list[Path] | None = None,
 ) -> list[str]:
     """Return the keys of queue lines selected by *rules*, in file order.
 
@@ -4085,7 +4271,7 @@ def scan_queue(
 
 
 def remove_marker(
-    queue_file: "Path | str",
+    queue_file: Path | str,
     item_key: str,
     *,
     ignore_case: bool = False,
@@ -4121,7 +4307,7 @@ def remove_marker(
 
 
 def queue_entries(
-    queue_file: "Path | str",
+    queue_file: Path | str,
     item_key: str,
     *,
     ignore_case: bool = False,
@@ -4149,7 +4335,7 @@ def queue_entries(
     return [m.group(0).rstrip("\r") for m in line_re.finditer(text)]
 
 
-def append_queue_lines(queue_file: "Path | str", lines: "list[str] | tuple[str, ...]") -> int:
+def append_queue_lines(queue_file: Path | str, lines: list[str] | tuple[str, ...]) -> int:
     """Append *lines* to the end of *queue_file*, each exactly as given.
 
     A line already present in the file, byte for byte, is not appended
@@ -4175,9 +4361,7 @@ def append_queue_lines(queue_file: "Path | str", lines: "list[str] | tuple[str, 
     path = Path(queue_file)
     for line in lines:
         if "\n" in line or "\r" in line:
-            raise OpsError(
-                f"append_queue_lines: a queue line must be one line, got {line!r}"
-            )
+            raise OpsError(f"append_queue_lines: a queue line must be one line, got {line!r}")
     text = _read_queue_text(path, "append_queue_lines") or ""
     present = set(text.splitlines())
     new_lines = []
@@ -4209,9 +4393,7 @@ def _require_dir(path: Path, op: str) -> None:
         OpsError: If path does not exist or is not a directory.
     """
     if not path.is_dir():
-        raise OpsError(
-            f"{op}: path does not exist or is not a directory: {path}"
-        )
+        raise OpsError(f"{op}: path does not exist or is not a directory: {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -4237,13 +4419,14 @@ def _cli_main(argv: list[str] | None = None) -> int:
         python3 -m pgai_agent_kanban.ops set_needs_operator PROJECT_ROOT KEY QUESTION
         python3 -m pgai_agent_kanban.ops wontdo_item PROJECT_ROOT KEY
         python3 -m pgai_agent_kanban.ops delete_item PROJECT_ROOT KEY [FORCE]
-        python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
+        python3 -m pgai_agent_kanban.ops reset_item  PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE] [DISCARD_BRANCH]
         python3 -m pgai_agent_kanban.ops set_marker    QUEUE_FILE KEY MARKER [IGNORE_CASE]
         python3 -m pgai_agent_kanban.ops remove_marker QUEUE_FILE KEY [IGNORE_CASE]
         python3 -m pgai_agent_kanban.ops render_marker QUEUE_FILE KEY MARKER [IGNORE_CASE]
         python3 -m pgai_agent_kanban.ops render_ensure_marker QUEUE_FILE KEY MARKER
         python3 -m pgai_agent_kanban.ops get_markers   QUEUE_FILE KEY [IGNORE_CASE]
         python3 -m pgai_agent_kanban.ops scan_queue    QUEUE_FILE TASKS_ROOT ID_PATTERN LIMIT RULE...
+        python3 -m pgai_agent_kanban.ops unmerged_branch_commits DEV_TREE BRANCH
 
     IGNORE_CASE, like the other trailing flags, is "1" to enable.
 
@@ -4406,8 +4589,16 @@ def _cli_main(argv: list[str] | None = None) -> int:
             key = rest[1]
             keep_artifacts = len(rest) > 2 and rest[2] == "1"
             force = len(rest) > 3 and rest[3] == "1"
+            discard_branch = len(rest) > 4 and rest[4] == "1"
             ctx, project = context_for_project(project_root)
-            reset_item(ctx, project, key, keep_artifacts=keep_artifacts, force=force)
+            reset_item(
+                ctx,
+                project,
+                key,
+                keep_artifacts=keep_artifacts,
+                force=force,
+                discard_branch=discard_branch,
+            )
 
         elif verb == "set_marker":
             if len(rest) < 3:
@@ -4497,10 +4688,21 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 )
                 return 1
             rules = [parse_scan_rule(rule) for rule in rest[4:]]
-            for key in scan_queue(
-                Path(rest[0]), Path(rest[1]), rules, id_pattern=rest[2] or None, limit=int(rest[3])
-            ):
+            for key in scan_queue(Path(rest[0]), Path(rest[1]), rules, id_pattern=rest[2] or None, limit=int(rest[3])):
                 print(key)
+
+        elif verb == "unmerged_branch_commits":
+            # The committed-work test the reset path applies, for a bash caller
+            # (the wake's stale-active sweep) deciding whether to keep a branch.
+            if len(rest) != 2:
+                print(
+                    "write unmerged_branch_commits: DEV_TREE and BRANCH arguments are required",
+                    file=sys.stderr,
+                )
+                return 1
+            unique = _unmerged_branch_commits(Path(rest[0]), rest[1])
+            if unique is not None:
+                print(f"{unique[0]} {unique[1]}")
 
         else:
             print(
@@ -4509,7 +4711,7 @@ def _cli_main(argv: list[str] | None = None) -> int:
                 " defer, undefer, set_version_ceiling, switch_provider, deposit_intake,"
                 " close_item, set_needs_operator, wontdo_item, delete_item, reset_item,"
                 " set_marker, remove_marker, render_marker, render_ensure_marker,"
-                " get_markers, scan_queue",
+                " get_markers, scan_queue, unmerged_branch_commits",
                 file=sys.stderr,
             )
             return 1
@@ -4609,9 +4811,13 @@ def _cli_set_version_ceiling(rest: list[str]) -> int:
     ctx = OpsContext(kanban_root=Path(kanban_root))
     try:
         report = set_version_ceiling(
-            ctx, project,
-            show=show == "true", minor=minor, major=major,
-            no_minor=no_minor == "true", no_major=no_major == "true",
+            ctx,
+            project,
+            show=show == "true",
+            minor=minor,
+            major=major,
+            no_minor=no_minor == "true",
+            no_major=no_major == "true",
             dry_run=dry_run == "true",
         )
     except OpsError as exc:

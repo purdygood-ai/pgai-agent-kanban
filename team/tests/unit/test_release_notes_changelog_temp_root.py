@@ -109,8 +109,13 @@ def _run_stage(tmp_path: pathlib.Path, stage: pathlib.Path, temp_root: pathlib.P
     )
     proc = subprocess.Popen(
         ["bash", "-c", _HARNESS],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(cwd), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         out, err = proc.communicate(timeout=_TIMEOUT_SECONDS)

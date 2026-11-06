@@ -84,7 +84,7 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # The whole report -- argument parsing, project and pricing resolution, the
@@ -96,7 +96,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
 # For a missing roll-up the report runs the aggregator beside this script
 # (../pm-agent/aggregate_tokens.py), else the kanban root's pm-agent/ copy.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/pp_run_ops.sh
 source "${SCRIPT_DIR}/lib/pp_run_ops.sh"
 

@@ -7,8 +7,9 @@
 # SOURCE THIS FILE; do not execute it directly:
 #   source "$(dirname "${BASH_SOURCE[0]}")/overwatch_protocol.sh"
 #
-# This file is side-effect-free on source: no commands run at the top level,
-# no files are created, no variables are set outside function definitions.
+# This file is side-effect-free on source: no commands run at the top level
+# beyond resolving this file's own directory, no files are created, and no
+# variables are set outside function definitions and that directory.
 #
 # Dependencies:
 #   - team/scripts/lib/overwatch_lib.sh should be sourced first when
@@ -50,6 +51,8 @@
 # Functions defined here:
 #   overwatch_backup_file   <src_path>                              — backup a file
 #   overwatch_log_action    <name> <target> <action> <backup_path> <reason>  — log
+#   overwatch_action_record <timestamp> <name> <target> <action> <backup_path> <reason>  — one record line
+#   overwatch_flatten_field <var_name> <value>                      — assign a value as one line
 #   overwatch_halt_first_fix [--ship-policy-resolution] <fn>       — HALT-first wrapper
 #   overwatch_load_module_runner                                   — load pp_run_ops/pgai_atomic_write/block_record.sh/provider_signatures.sh on first use
 #   transient_retry_limit                                          — resolve the ONE retry ceiling
@@ -96,6 +99,11 @@
 # operator. Survives BACKLOG promotion the same way ## Transient Retry does,
 # and shares transient_retry_limit's cfg-resolution precedence and
 # strictly-less-than-cap comparison (see zero_progress_cap below).
+
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_OVERWATCH_PROTOCOL_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _OVERWATCH_PROTOCOL_LIB_DIR=""
 
 # ---------------------------------------------------------------------------
 # _overwatch_protocol_check_env
@@ -219,6 +227,86 @@ overwatch_backup_file() {
 }
 
 # ---------------------------------------------------------------------------
+# overwatch_action_record <timestamp> <name> <target> <action> <backup_path> <reason>
+# Print one OVERWATCH action-log record to stdout: the six arguments joined
+# by tabs and ended by one LF. It is the one place a bash writer of
+# actions.log builds its line (overwatch_log_action here, _or_append_log in
+# overwatch-revert.sh, and the bare-/tmp litter report
+# wake_tmp_litter_check_and_report in temp.sh); the caller appends the
+# output with >>.
+#
+# One record, one line, six fields, whatever the arguments hold: every
+# field goes through overwatch_flatten_field (below) first, so a tab,
+# carriage return or newline in any of them cannot split the record. An
+# empty backup_path, before or after flattening, prints "none"; an empty
+# reason prints as an empty sixth field.
+#
+# Returns the status of the final printf (non-zero on a write failure).
+# ---------------------------------------------------------------------------
+overwatch_action_record() {
+    local -a fields=("$1" "$2" "$3" "$4" "$5" "$6")
+    local i value
+    for i in "${!fields[@]}"; do
+        overwatch_flatten_field value "${fields[i]}"
+        fields[i]="$value"
+    done
+    fields[4]="${fields[4]:-none}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${fields[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# overwatch_flatten_field <var_name> <value>
+# Assign <value> to the caller's variable <var_name> as one line. A value
+# holding a tab, carriage return or newline is flattened -- every whitespace
+# run becomes one space and the ends are trimmed -- producing the same bytes
+# as pgai_agent_kanban.lib.text.one_line for the same UTF-8 text. A value
+# without any of the three is assigned as-is, so ordinary spacing inside it
+# (a no-break space included) is kept.
+#
+# The whitespace set collapsed is exactly the one Python's str.split() uses
+# (the characters str.isspace() accepts):
+#   ASCII      U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
+#              U+001C..U+001F (file, group, record, unit separators),
+#              U+0020 space
+#   non-ASCII  U+0085, U+00A0, U+1680, U+2000..U+200A, U+2028, U+2029,
+#              U+202F, U+205F, U+3000
+# Both halves are matched as literal bytes (the non-ASCII ones as their
+# UTF-8 sequences), never through [[:space:]], so the result is the same
+# under LC_ALL=C and a UTF-8 locale alike.
+#
+# The one statement of this rule for bash writers of line-oriented records:
+# overwatch_action_record here and the bare-/tmp litter report
+# (wake_tmp_litter_check_and_report in temp.sh). Assigns through printf -v,
+# so no subshell is forked per field; <var_name> must not be one of this
+# function's own locals (_owff_value, _owff_seq, _owff_unicode_spaces).
+# ---------------------------------------------------------------------------
+overwatch_flatten_field() {
+    local _owff_value="$2"
+    if [[ "$_owff_value" == *[$'\t\r\n']* ]]; then
+        # The non-ASCII members of the set, as UTF-8 byte sequences.
+        local _owff_seq
+        local -a _owff_unicode_spaces=(
+            $'\xc2\x85' $'\xc2\xa0' $'\xe1\x9a\x80'
+            $'\xe2\x80\x80' $'\xe2\x80\x81' $'\xe2\x80\x82' $'\xe2\x80\x83'
+            $'\xe2\x80\x84' $'\xe2\x80\x85' $'\xe2\x80\x86' $'\xe2\x80\x87'
+            $'\xe2\x80\x88' $'\xe2\x80\x89' $'\xe2\x80\x8a'
+            $'\xe2\x80\xa8' $'\xe2\x80\xa9' $'\xe2\x80\xaf' $'\xe2\x81\x9f'
+            $'\xe3\x80\x80'
+        )
+        for _owff_seq in "${_owff_unicode_spaces[@]}"; do
+            _owff_value="${_owff_value//"$_owff_seq"/ }"
+        done
+        _owff_value="${_owff_value//[$'\t\n\v\f\r\x1c\x1d\x1e\x1f']/ }"
+        while [[ "$_owff_value" == *"  "* ]]; do
+            _owff_value="${_owff_value//  / }"
+        done
+        _owff_value="${_owff_value# }"
+        _owff_value="${_owff_value% }"
+    fi
+    printf -v "$1" '%s' "$_owff_value"
+}
+
+# ---------------------------------------------------------------------------
 # overwatch_log_action <name> <target> <action> <backup_path> <reason>
 # Append one structured plain-text record to the project's OVERWATCH action log:
 #   $KANBAN_ROOT/projects/<OVERWATCH_PROJECT>/overwatch/actions.log
@@ -229,7 +317,11 @@ overwatch_backup_file() {
 # Where <timestamp> is ISO 8601 UTC: YYYY-MM-DDTHH:MM:SSZ
 #
 # The log is append-only: this function never reads or rewrites existing
-# content. Each call produces exactly one new line.
+# content. Each call produces exactly one new LF-terminated line of exactly
+# six fields, whatever the arguments hold: the record is built by
+# overwatch_action_record (below), which flattens any field holding a tab,
+# carriage return or newline, so no field can split the record across
+# lines or add a field. A field without one is written as-is.
 #
 # Args:
 #   $1  name         — detection script name (e.g. "check-stale-working-tasks")
@@ -239,7 +331,9 @@ overwatch_backup_file() {
 #                      fix that backs up several files lists every backup
 #                      path, comma-separated, so overwatch-revert.sh restores
 #                      them all
-#   $5  reason       — human-readable explanation of why the action was taken
+#   $5  reason       — human-readable explanation of why the action was taken;
+#                      may span lines or be empty
+# Any argument may hold tabs or line breaks; each is flattened to one field.
 #
 # Returns:
 #   0  — record appended successfully
@@ -277,13 +371,7 @@ overwatch_log_action() {
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     # Append-only: use >> exclusively; never rewrite.
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$timestamp" \
-        "$name" \
-        "$target" \
-        "$action" \
-        "${backup_path:-none}" \
-        "${reason:-}" \
+    overwatch_action_record "$timestamp" "$name" "$target" "$action" "$backup_path" "$reason" \
         >> "$log_file" || {
         echo "overwatch_protocol.sh: overwatch_log_action: write failed to ${log_file}" >&2
         return 1
@@ -430,7 +518,8 @@ overwatch_halt_first_fix() {
     # when sourced standalone.
     if ! declare -f pp_repo_lock_path > /dev/null 2>&1; then
         local _ohff_lib_dir
-        _ohff_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || {
+        _ohff_lib_dir="${_OVERWATCH_PROTOCOL_LIB_DIR}"
+        [[ -n "${_ohff_lib_dir}" ]] || {
             echo "overwatch_protocol.sh: overwatch_halt_first_fix: cannot resolve lib dir to source project_paths.sh" >&2
             return 1
         }
@@ -448,7 +537,8 @@ overwatch_halt_first_fix() {
     # lock as part of taking it. Source defensively, same idiom as above.
     if ! declare -f pgai_lock_acquire_waiting > /dev/null 2>&1; then
         local _ohff_lock_lib_dir
-        _ohff_lock_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || {
+        _ohff_lock_lib_dir="${_OVERWATCH_PROTOCOL_LIB_DIR}"
+        [[ -n "${_ohff_lock_lib_dir}" ]] || {
             echo "overwatch_protocol.sh: overwatch_halt_first_fix: cannot resolve lib dir to source lock_provenance.sh" >&2
             return 1
         }
@@ -553,7 +643,12 @@ overwatch_halt_first_fix() {
         fi
         pgai_lock_release "$project_lock_file" "$project_lock_fd"
     }
-    trap '_overwatch_hff_cleanup' EXIT
+    # Chained, never replacing the sourcing script's own EXIT trap.
+    if ! declare -F exit_trap_add >/dev/null 2>&1; then
+        # shellcheck source=scripts/lib/exit_trap.sh
+        source "${_OVERWATCH_PROTOCOL_LIB_DIR}/exit_trap.sh"
+    fi
+    exit_trap_add _overwatch_hff_cleanup
 
     # Step 6: Run the wrapped function
     echo "overwatch_protocol: overwatch_halt_first_fix: invoking ${fn}" >&2
@@ -563,7 +658,7 @@ overwatch_halt_first_fix() {
 
     # Step 7: Clean up explicitly (trap also covers unexpected exits).
     _overwatch_hff_cleanup
-    trap - EXIT
+    exit_trap_remove _overwatch_hff_cleanup
 
     return "$fn_exit_code"
 }
@@ -676,7 +771,7 @@ _overwatch_hff_narrate_deferral() {
     local fn="$1" halt_path="$2"
     if ! declare -f pgai_emit_error_contract > /dev/null 2>&1; then
         local _ohff_ec_dir
-        _ohff_ec_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+        _ohff_ec_dir="${_OVERWATCH_PROTOCOL_LIB_DIR}"
         # shellcheck source=/dev/null
         [[ -n "$_ohff_ec_dir" && -f "${_ohff_ec_dir}/error_contract.sh" ]] && source "${_ohff_ec_dir}/error_contract.sh"
     fi
@@ -771,7 +866,8 @@ transient_retry_limit() {
 # ---------------------------------------------------------------------------
 overwatch_load_module_runner() {
     local _owp_lib_dir
-    _owp_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || {
+    _owp_lib_dir="${_OVERWATCH_PROTOCOL_LIB_DIR}"
+    [[ -n "${_owp_lib_dir}" ]] || {
         echo "overwatch_protocol.sh: overwatch_load_module_runner: cannot resolve lib dir" >&2
         return 1
     }

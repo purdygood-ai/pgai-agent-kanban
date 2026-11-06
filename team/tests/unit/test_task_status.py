@@ -144,9 +144,7 @@ def test_each_canonical_state_writes_and_reads_back(tmp_path: Path, state: str) 
 
 
 @pytest.mark.parametrize("state", CANONICAL_STATES)
-def test_each_canonical_state_accepted_case_insensitively(
-    tmp_path: Path, state: str
-) -> None:
+def test_each_canonical_state_accepted_case_insensitively(tmp_path: Path, state: str) -> None:
     status_file = _make_status_file(tmp_path)
     write_task_status(status_file, state=state.lower())
     text = status_file.read_text(encoding="utf-8")
@@ -385,9 +383,7 @@ def test_unrelated_sections_preserved_byte_for_byte(tmp_path: Path) -> None:
         pattern = rf"^## {re.escape(heading)}\s*\n(.*?)(\n+##|\Z)"
         m = re.search(pattern, text, flags=re.S | re.M)
         assert m is not None, f"section '## {heading}' missing after write"
-        assert m.group(1).strip() == expected_body, (
-            f"section '## {heading}' was disturbed: {m.group(1).strip()!r}"
-        )
+        assert m.group(1).strip() == expected_body, f"section '## {heading}' was disturbed: {m.group(1).strip()!r}"
 
 
 def test_writing_summary_does_not_disturb_blockers_or_needs_human(tmp_path: Path) -> None:
@@ -563,9 +559,7 @@ def test_help_exits_zero() -> None:
     # on PYTHONPATH -- the same resolution team/scripts/lib/pp_run_ops.sh
     # provides for the bash wrapper's real invocations.
     env = dict(**os.environ)
-    env["PYTHONPATH"] = str(_TEAM_DIR) + (
-        (":" + env["PYTHONPATH"]) if env.get("PYTHONPATH") else ""
-    )
+    env["PYTHONPATH"] = str(_TEAM_DIR) + ((":" + env["PYTHONPATH"]) if env.get("PYTHONPATH") else "")
     result = subprocess.run(
         [sys.executable, str(_TASK_STATUS_SCRIPT), "--help"],
         capture_output=True,
@@ -616,9 +610,7 @@ def test_atomic_write_replaces_target_contents(tmp_path: Path) -> None:
     ],
     ids=["empty-summary", "empty-state", "empty-no-blank-line", "empty-last-section"],
 )
-def test_set_section_body_fills_empty_section_and_keeps_the_rest(
-    fixture: str, heading: str, expected: str
-) -> None:
+def test_set_section_body_fills_empty_section_and_keeps_the_rest(fixture: str, heading: str, expected: str) -> None:
     once = _set_section_body(fixture, heading, "new")
     assert once == expected, f"filling an empty ## {heading} must leave every other section unchanged"
     assert _set_section_body(once, heading, "new") == expected, "a repeated write must not grow the file"
@@ -658,23 +650,17 @@ def test_read_task_state_reads_back_every_written_state(tmp_path: Path, state: s
     ],
     ids=["canonical", "blank-lines-and-padding", "trailing-heading-space", "empty-body", "no-heading"],
 )
-def test_read_task_state_takes_the_value_beneath_the_heading(
-    tmp_path: Path, text: str, expected: str
-) -> None:
+def test_read_task_state_takes_the_value_beneath_the_heading(tmp_path: Path, text: str, expected: str) -> None:
     status_file = tmp_path / "status.md"
     status_file.write_text(text, encoding="utf-8")
-    assert read_task_state(status_file) == expected, (
-        f"## State must read {expected!r} from:\n{text}"
-    )
+    assert read_task_state(status_file) == expected, f"## State must read {expected!r} from:\n{text}"
 
 
 def test_read_task_state_missing_file_reads_empty(tmp_path: Path) -> None:
     assert read_task_state(tmp_path / "absent" / "status.md") == ""
 
 
-def test_cli_read_state_prints_value_and_writes_nothing(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cli_read_state_prints_value_and_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     status_file = tmp_path / "status.md"
     status_file.write_text("# Status\n\n## State\nDONE\n\n## Summary\nx\n", encoding="utf-8")
     before = status_file.read_bytes()

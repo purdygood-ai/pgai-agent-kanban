@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -155,8 +155,7 @@ def _materialise_two_project_fixture(root: pathlib.Path) -> None:
     # project.cfg
     _write(
         alpha / "project.cfg",
-        f"[project]\nproject_name = {_PROJECT_ALPHA}\n"
-        f"dev_tree_path = {root}\ngit_repo_url = none\n",
+        f"[project]\nproject_name = {_PROJECT_ALPHA}\n" f"dev_tree_path = {root}\ngit_repo_url = none\n",
     )
 
     # Bugs: one open bug
@@ -214,8 +213,7 @@ def _materialise_two_project_fixture(root: pathlib.Path) -> None:
     # Task status.md files — confirms state reading from status.md.
     _write(
         alpha / "tasks" / _WORKING_TASK / "status.md",
-        f"# Status\n\n## Task\n{_WORKING_TASK}\n\n## State\nWORKING\n\n"
-        "## Summary\nIn progress.\n",
+        f"# Status\n\n## Task\n{_WORKING_TASK}\n\n## State\nWORKING\n\n" "## Summary\nIn progress.\n",
     )
     _write(
         alpha / "tasks" / _BLOCKED_TASK / "status.md",
@@ -224,8 +222,7 @@ def _materialise_two_project_fixture(root: pathlib.Path) -> None:
     )
     _write(
         alpha / "tasks" / _DONE_TASK / "status.md",
-        f"# Status\n\n## Task\n{_DONE_TASK}\n\n## State\nDONE\n\n"
-        "## Summary\nDone.\n",
+        f"# Status\n\n## Task\n{_DONE_TASK}\n\n## State\nDONE\n\n" "## Summary\nDone.\n",
     )
     # OPEN task: no status.md — falls back to marker ( = BACKLOG → "open").
 
@@ -247,8 +244,7 @@ def _materialise_two_project_fixture(root: pathlib.Path) -> None:
     )
     _write(
         beta / "project.cfg",
-        f"[project]\nproject_name = {_PROJECT_BETA}\n"
-        f"dev_tree_path = {root}\ngit_repo_url = none\n",
+        f"[project]\nproject_name = {_PROJECT_BETA}\n" f"dev_tree_path = {root}\ngit_repo_url = none\n",
     )
     _write(
         beta / "bugs" / "BUG-0001.md",
@@ -317,9 +313,7 @@ class TestBoardEndpoint:
         assert "columns" in body, "Response must have 'columns' key."
         column_names = [c["name"] for c in body["columns"]]
         assert column_names == COLUMN_ORDER, (
-            f"Column order mismatch.\n"
-            f"Expected: {COLUMN_ORDER}\n"
-            f"Got:      {column_names}"
+            f"Column order mismatch.\n" f"Expected: {COLUMN_ORDER}\n" f"Got:      {column_names}"
         )
 
     def test_both_projects_in_projects_list_with_distinct_colors(
@@ -338,9 +332,9 @@ class TestBoardEndpoint:
 
         # Colors must be distinct.
         colors = {p["name"]: p["color"] for p in projects}
-        assert colors[_PROJECT_ALPHA] != colors[_PROJECT_BETA], (
-            f"Projects must have distinct colors; both got {colors[_PROJECT_ALPHA]!r}."
-        )
+        assert (
+            colors[_PROJECT_ALPHA] != colors[_PROJECT_BETA]
+        ), f"Projects must have distinct colors; both got {colors[_PROJECT_ALPHA]!r}."
         # Colors must be non-empty strings.
         assert colors[_PROJECT_ALPHA], f"{_PROJECT_ALPHA} color is empty."
         assert colors[_PROJECT_BETA], f"{_PROJECT_BETA} color is empty."
@@ -354,17 +348,15 @@ class TestBoardEndpoint:
         body = resp.json()
         colors = {p["name"]: p["color"] for p in body["projects"]}
 
-        assert colors[_PROJECT_ALPHA] == _COLOR_ALPHA, (
-            f"alpha color: expected {_COLOR_ALPHA!r}, got {colors[_PROJECT_ALPHA]!r}."
-        )
-        assert colors[_PROJECT_BETA] == _COLOR_BETA, (
-            f"beta color: expected {_COLOR_BETA!r}, got {colors[_PROJECT_BETA]!r}."
-        )
+        assert (
+            colors[_PROJECT_ALPHA] == _COLOR_ALPHA
+        ), f"alpha color: expected {_COLOR_ALPHA!r}, got {colors[_PROJECT_ALPHA]!r}."
+        assert (
+            colors[_PROJECT_BETA] == _COLOR_BETA
+        ), f"beta color: expected {_COLOR_BETA!r}, got {colors[_PROJECT_BETA]!r}."
         # Colors must not contain 'rgb' or CSS syntax.
         for name, color in colors.items():
-            assert "rgb" not in color.lower(), (
-                f"Project {name!r} color contains CSS syntax: {color!r}."
-            )
+            assert "rgb" not in color.lower(), f"Project {name!r} color contains CSS syntax: {color!r}."
 
     def test_composite_ids_are_project_slash_kind_slash_key(
         self,
@@ -376,14 +368,12 @@ class TestBoardEndpoint:
         id_re = re.compile(r"^[^/]+/[^/]+/[^/]+$")
         for col in body["columns"]:
             for item in col["items"]:
-                assert id_re.match(item["id"]), (
-                    f"Item id {item['id']!r} does not match <project>/<kind>/<key> format."
-                )
+                assert id_re.match(item["id"]), f"Item id {item['id']!r} does not match <project>/<kind>/<key> format."
                 # The id prefix must equal item["project"].
                 prefix = item["id"].split("/")[0]
-                assert prefix == item["project"], (
-                    f"Id prefix {prefix!r} != project {item['project']!r} for id {item['id']!r}."
-                )
+                assert (
+                    prefix == item["project"]
+                ), f"Id prefix {prefix!r} != project {item['project']!r} for id {item['id']!r}."
 
     def test_at_least_one_active_rc_true_item(
         self,
@@ -395,8 +385,7 @@ class TestBoardEndpoint:
         all_items = [item for col in body["columns"] for item in col["items"]]
         active_rc_items = [i for i in all_items if i["active_rc"]]
         assert active_rc_items, (
-            "Expected at least one item with active_rc=True. "
-            f"Statuses found: {[i['status'] for i in all_items]}"
+            "Expected at least one item with active_rc=True. " f"Statuses found: {[i['status'] for i in all_items]}"
         )
 
     def test_at_least_one_item_classified_label(
@@ -443,8 +432,7 @@ class TestBoardEndpoint:
         # Quarantine items must have status=blocked.
         for qi in quarantine_items:
             assert qi["status"] == "blocked", (
-                f"Quarantine item {qi['id']!r} has status {qi['status']!r}; "
-                "expected 'blocked'."
+                f"Quarantine item {qi['id']!r} has status {qi['status']!r}; " "expected 'blocked'."
             )
 
     def test_quarantined_file_in_project_rejected_dir_shows_in_its_origin_column(
@@ -454,8 +442,7 @@ class TestBoardEndpoint:
         """A file in the project's rejected/ appears in the column its sidecar names."""
         body = board_client.get("/board").json()
         by_column = {
-            col["name"]: [i["title"] for i in col["items"] if i["kind"] == "quarantine"]
-            for col in body["columns"]
+            col["name"]: [i["title"] for i in col["items"] if i["kind"] == "quarantine"] for col in body["columns"]
         }
         assert by_column["PRIORITIES"] == ["held-intake"], by_column
         assert by_column["BUGS"] == ["BUG-9999"], by_column
@@ -466,9 +453,7 @@ class TestBoardEndpoint:
     ) -> None:
         """GET /board?project=x returns 422 (unfiltered aggregation view)."""
         resp = board_client.get("/board", params={"project": _PROJECT_ALPHA})
-        assert resp.status_code == 422, (
-            f"Expected 422 for ?project= query param, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for ?project= query param, got {resp.status_code}: {resp.text}"
 
     def test_truncated_field_present_on_all_columns(
         self,
@@ -478,16 +463,12 @@ class TestBoardEndpoint:
         resp = board_client.get("/board")
         body = resp.json()
         for col in body["columns"]:
-            assert "truncated" in col, (
-                f"Column {col['name']!r} missing 'truncated' field."
-            )
+            assert "truncated" in col, f"Column {col['name']!r} missing 'truncated' field."
             assert isinstance(col["truncated"], int), (
-                f"Column {col['name']!r} 'truncated' must be int, "
-                f"got {type(col['truncated']).__name__!r}."
+                f"Column {col['name']!r} 'truncated' must be int, " f"got {type(col['truncated']).__name__!r}."
             )
             assert col["truncated"] >= 0, (
-                f"Column {col['name']!r} 'truncated' must be >= 0, "
-                f"got {col['truncated']}."
+                f"Column {col['name']!r} 'truncated' must be >= 0, " f"got {col['truncated']}."
             )
 
     def test_truncated_nonzero_when_cap_exceeded(
@@ -505,19 +486,15 @@ class TestBoardEndpoint:
 
         _write(
             root / "projects.cfg",
-            "[project:trunc-proj]\npriority=1\ndashboard_color=#378ADD\n"
-            "dashboard_max_rows=5\n",
+            "[project:trunc-proj]\npriority=1\ndashboard_color=#378ADD\n" "dashboard_max_rows=5\n",
         )
         proj = root / "projects" / "trunc-proj"
-        _write(proj / "release-state.md",
-               "# Release State\n\n## Active RC\nnone\n\n## Last Released\nnone\n")
+        _write(proj / "release-state.md", "# Release State\n\n## Active RC\nnone\n\n## Last Released\nnone\n")
         for number in range(1, 7):
-            _write(proj / "bugs" / f"BUG-000{number}.md",
-                   f"# Bug: BUG-000{number}\n\n## Status\nopen\n")
+            _write(proj / "bugs" / f"BUG-000{number}.md", f"# Bug: BUG-000{number}\n\n## Status\nopen\n")
         # Empty queues.
         for agent in ("pm", "coder", "writer", "tester", "cm"):
-            _write(proj / "tasks" / "queues" / f"{agent}_backlog.md",
-                   f"# {agent.upper()} Backlog\n\n")
+            _write(proj / "tasks" / "queues" / f"{agent}_backlog.md", f"# {agent.upper()} Backlog\n\n")
 
         from pgai_agent_kanban.api.app import create_app
         from pgai_agent_kanban.api.config import ApiConfig
@@ -532,12 +509,8 @@ class TestBoardEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         bugs_col = next(c for c in body["columns"] if c["name"] == "BUGS")
-        assert len(bugs_col["items"]) <= 5, (
-            f"Expected at most 5 items (cap=5), got {len(bugs_col['items'])}."
-        )
-        assert bugs_col["truncated"] == 1, (
-            f"Expected truncated=1, got {bugs_col['truncated']}."
-        )
+        assert len(bugs_col["items"]) <= 5, f"Expected at most 5 items (cap=5), got {len(bugs_col['items'])}."
+        assert bugs_col["truncated"] == 1, f"Expected truncated=1, got {bugs_col['truncated']}."
 
     def test_response_structure_has_generated_at(
         self,
@@ -549,9 +522,7 @@ class TestBoardEndpoint:
         assert "generated_at" in body, "Response must have 'generated_at' key."
         # Verify it looks like an ISO-8601 timestamp.
         ts_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
-        assert ts_re.match(body["generated_at"]), (
-            f"generated_at {body['generated_at']!r} does not look like ISO-8601."
-        )
+        assert ts_re.match(body["generated_at"]), f"generated_at {body['generated_at']!r} does not look like ISO-8601."
 
     def test_cors_loopback_origin_receives_headers(
         self,
@@ -563,9 +534,9 @@ class TestBoardEndpoint:
             headers={"Origin": "http://localhost:3000"},
         )
         assert resp.status_code == 200
-        assert "access-control-allow-origin" in resp.headers, (
-            "Loopback origin must receive Access-Control-Allow-Origin header."
-        )
+        assert (
+            "access-control-allow-origin" in resp.headers
+        ), "Loopback origin must receive Access-Control-Allow-Origin header."
 
     def test_cors_non_loopback_origin_receives_no_cors_header(
         self,
@@ -579,9 +550,9 @@ class TestBoardEndpoint:
         # The endpoint still returns 200 (CORS is not an auth mechanism here);
         # the loopback binding is the real access control.  What matters is that
         # the Allow-Origin header is absent.
-        assert "access-control-allow-origin" not in resp.headers, (
-            "Non-loopback origin must NOT receive Access-Control-Allow-Origin header."
-        )
+        assert (
+            "access-control-allow-origin" not in resp.headers
+        ), "Non-loopback origin must NOT receive Access-Control-Allow-Origin header."
 
     def test_items_have_all_required_fields(
         self,
@@ -590,22 +561,16 @@ class TestBoardEndpoint:
         """Every item carries all required fields with correct types."""
         resp = board_client.get("/board")
         body = resp.json()
-        required = {"id", "project", "kind", "key", "title", "status",
-                    "version_label", "active_rc", "color"}
+        required = {"id", "project", "kind", "key", "title", "status", "version_label", "active_rc", "color"}
         valid_statuses = {"open", "working", "done", "wont-do", "blocked", "label"}
 
         for col in body["columns"]:
             for item in col["items"]:
                 missing = required - set(item.keys())
-                assert not missing, (
-                    f"Item {item.get('id', '<no id>')} missing fields: {missing}."
-                )
-                assert isinstance(item["active_rc"], bool), (
-                    f"active_rc must be bool for {item['id']!r}."
-                )
+                assert not missing, f"Item {item.get('id', '<no id>')} missing fields: {missing}."
+                assert isinstance(item["active_rc"], bool), f"active_rc must be bool for {item['id']!r}."
                 assert item["status"] in valid_statuses, (
-                    f"Item {item['id']!r} has invalid status {item['status']!r}. "
-                    f"Valid: {valid_statuses}"
+                    f"Item {item['id']!r} has invalid status {item['status']!r}. " f"Valid: {valid_statuses}"
                 )
 
 
@@ -668,23 +633,24 @@ class TestBoardClassifierParity:
                     # Match by compact key.
                     if kind == "requirement":
                         import re as _re
+
                         m = _re.match(r"^(v\d+\.\d+\.\d+)(?:-.+)?$", stem, _re.IGNORECASE)
                         cid = m.group(1) if m else stem
                     elif kind == "bug":
                         import re as _re
+
                         m = _re.match(r"^(BUG-\d+)", stem, _re.IGNORECASE)
                         cid = m.group(1) if m else stem
                     else:
                         import re as _re
+
                         m = _re.match(r"^(PRIORITY-\d+)", stem, _re.IGNORECASE)
                         cid = m.group(1) if m else stem
                     if cid == key:
                         found_path = entry
                         break
 
-            assert found_path is not None, (
-                f"Could not find file for item {item['id']!r} in {input_dir}."
-            )
+            assert found_path is not None, f"Could not find file for item {item['id']!r} in {input_dir}."
             return classify_input_item(found_path, column, active_rc, last_released)
 
         elif kind == "task":
@@ -741,21 +707,13 @@ class TestBoardClassifierParity:
                 try:
                     classifier_status = self._reclassify_item(item, two_project_root)
                 except AssertionError as exc:
-                    mismatches.append(
-                        f"  {item['id']!r}: classifier error — {exc}"
-                    )
+                    mismatches.append(f"  {item['id']!r}: classifier error — {exc}")
                     continue
 
                 if board_status != classifier_status:
-                    mismatches.append(
-                        f"  {item['id']!r}: board={board_status!r}, "
-                        f"classifier={classifier_status!r}"
-                    )
+                    mismatches.append(f"  {item['id']!r}: board={board_status!r}, " f"classifier={classifier_status!r}")
 
-        assert not mismatches, (
-            f"Classification parity failures ({len(mismatches)}):\n"
-            + "\n".join(mismatches)
-        )
+        assert not mismatches, f"Classification parity failures ({len(mismatches)}):\n" + "\n".join(mismatches)
 
     def test_parity_covers_all_status_classes_in_fixture(
         self,
@@ -780,8 +738,7 @@ class TestBoardClassifierParity:
         required_classes = {"open", "working", "done", "blocked", "label"}
         missing = required_classes - statuses_found
         assert not missing, (
-            f"Fixture does not exercise all required status classes. "
-            f"Missing: {missing}. Found: {statuses_found}"
+            f"Fixture does not exercise all required status classes. " f"Missing: {missing}. Found: {statuses_found}"
         )
 
 

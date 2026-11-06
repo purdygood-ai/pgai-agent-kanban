@@ -104,7 +104,6 @@ import dataclasses
 import pathlib
 import re
 import sys
-from typing import Optional
 
 # Run by file path (``python3 .../read_state_field.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -239,8 +238,7 @@ class FieldKind:
 _ACCEPTED_FORMS = {
     FieldKind.VERSION_OR_NONE: "'none' or vX.Y.Z",
     FieldKind.TIMESTAMP_OR_NONE: (
-        "'none' or an ISO-8601 timestamp "
-        "(YYYY-MM-DDThh:mm:ss, optionally followed by +HH:MM, -HH:MM, or Z)"
+        "'none' or an ISO-8601 timestamp " "(YYYY-MM-DDThh:mm:ss, optionally followed by +HH:MM, -HH:MM, or Z)"
     ),
     FieldKind.TEXT_OR_NONE: "'none' or non-empty text",
 }
@@ -249,9 +247,7 @@ _ACCEPTED_FORMS = {
 # format-only: version *comparison* stays in team/scripts/lib/semver.sh and
 # pgai_agent_kanban/lib/semver.py, which this module does not duplicate.
 _VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
-_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)?$"
-)
+_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)?$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -318,11 +314,11 @@ class FieldResult:
 
     heading: str
     ok: bool
-    value: Optional[str] = None
-    received: Optional[str] = None
-    error_key: Optional[str] = None
-    message: Optional[str] = None
-    remedy: Optional[str] = None
+    value: str | None = None
+    received: str | None = None
+    error_key: str | None = None
+    message: str | None = None
+    remedy: str | None = None
 
 
 def _validate_field(text: str, spec: FieldSpec) -> FieldResult:
@@ -339,14 +335,8 @@ def _validate_field(text: str, spec: FieldSpec) -> FieldResult:
             spec.heading,
             ok=False,
             error_key="release-state.missing-heading",
-            message=(
-                f"'## {spec.heading}' heading is missing from release-state.md "
-                f"(expected one of: {accepted})"
-            ),
-            remedy=(
-                f"add a '## {spec.heading}' heading to release-state.md with "
-                f"a value of {accepted}"
-            ),
+            message=(f"'## {spec.heading}' heading is missing from release-state.md " f"(expected one of: {accepted})"),
+            remedy=(f"add a '## {spec.heading}' heading to release-state.md with " f"a value of {accepted}"),
         )
 
     if raw is _EMPTY:
@@ -355,10 +345,7 @@ def _validate_field(text: str, spec: FieldSpec) -> FieldResult:
             spec.heading,
             ok=False,
             error_key="release-state.empty-value",
-            message=(
-                f"'## {spec.heading}' has no value in release-state.md "
-                f"(expected one of: {accepted})"
-            ),
+            message=(f"'## {spec.heading}' has no value in release-state.md " f"(expected one of: {accepted})"),
             remedy=f"set '## {spec.heading}' to one of: {accepted}",
         )
 
@@ -378,9 +365,7 @@ def _validate_field(text: str, spec: FieldSpec) -> FieldResult:
         ok=False,
         received=raw,
         error_key=error_key,
-        message=(
-            f"'## {spec.heading}' is {raw!r}, which is not one of: {accepted}"
-        ),
+        message=(f"'## {spec.heading}' is {raw!r}, which is not one of: {accepted}"),
         remedy=f"set '## {spec.heading}' to one of: {accepted}, then re-run",
     )
 
@@ -398,10 +383,7 @@ def _schema_subset(headings) -> tuple:
     unknown = [h for h in headings if h not in by_heading]
     if unknown:
         known = ", ".join(by_heading)
-        raise ValueError(
-            f"not a release-state.md schema heading: {', '.join(unknown)} "
-            f"(schema headings: {known})"
-        )
+        raise ValueError(f"not a release-state.md schema heading: {', '.join(unknown)} " f"(schema headings: {known})")
     return tuple(by_heading[h] for h in headings)
 
 
@@ -433,9 +415,7 @@ def validate_release_state_fields(filepath: str, headings=None) -> list:
                 ok=False,
                 error_key="release-state.file-missing",
                 message=f"release-state.md not found: {filepath}",
-                remedy=(
-                    f"create {filepath} with the schema headings: {headings}"
-                ),
+                remedy=(f"create {filepath} with the schema headings: {headings}"),
             )
         ]
     text = p.read_text(encoding="utf-8")
@@ -502,8 +482,7 @@ def load_release_state(filepath: str, headings=None) -> dict:
         remedy_bits = "; ".join(f"{r.heading}: {r.remedy}" for r in failures)
         contract = format_error_contract(
             "release-state.invalid-field",
-            f"release-state.md failed validation ({received_bits}) "
-            f"— file: {filepath}",
+            f"release-state.md failed validation ({received_bits}) " f"— file: {filepath}",
             remedy_bits,
         )
         # BLOCK-WORTHY: a malformed release-state.md field is a schema
@@ -612,10 +591,7 @@ def main() -> None:
     parser.add_argument(
         "--validate",
         action="store_true",
-        help=(
-            "Validate every RELEASE_STATE_SCHEMA field in filepath instead "
-            "of reading a single heading."
-        ),
+        help=("Validate every RELEASE_STATE_SCHEMA field in filepath instead " "of reading a single heading."),
     )
     args = parser.parse_args()
 

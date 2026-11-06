@@ -99,9 +99,18 @@ class Sandbox:
         self.trace = tmp_path / "git-trace.log"
         self.worktree_base = self.root / "tmp" / "worktrees"
         self.batch_log = self.root / "logs" / "agents" / "coder-batch-20260101-000000.log"
-        for d in (self.project_root / "overwatch" / "backups", self.task_dir / "artifacts", self.task_dir / "logs",
-                  self.queue.parent, self.root / "locks", self.batch_log.parent, self.root / "tmp",
-                  self.worktree_base, tmp_path / "home", self.bin_dir):
+        for d in (
+            self.project_root / "overwatch" / "backups",
+            self.task_dir / "artifacts",
+            self.task_dir / "logs",
+            self.queue.parent,
+            self.root / "locks",
+            self.batch_log.parent,
+            self.root / "tmp",
+            self.worktree_base,
+            tmp_path / "home",
+            self.bin_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         self.home = tmp_path / "home"
         (self.project_root / "overwatch" / "actions.log").write_text("", encoding="utf-8")
@@ -129,8 +138,8 @@ class Sandbox:
         wrapper.write_text(
             "#!/usr/bin/env bash\n"
             f"printf '%s\\n' \"$*\" >> {shlex.quote(str(self.trace))}\n"
-            f"PATH=\"${{PATH#{shlex.quote(str(self.bin_dir))}:}}\"\n"
-            "exec git \"$@\"\n",
+            f'PATH="${{PATH#{shlex.quote(str(self.bin_dir))}:}}"\n'
+            'exec git "$@"\n',
             encoding="utf-8",
         )
         wrapper.chmod(0o755)
@@ -163,8 +172,9 @@ class Sandbox:
             text = set_or_append_section(text, heading.replace("_", " "), body)
         self.status.write_text(text, encoding="utf-8")
 
-    def block(self, reason_code: str, evidence: list, *, now: "datetime.datetime | None" = None,
-              needs_human: str = "yes") -> None:
+    def block(
+        self, reason_code: str, evidence: list, *, now: datetime.datetime | None = None, needs_human: str = "yes"
+    ) -> None:
         """Block the task the way a block site does: State, Needs Human, the
         record (a re-block keeps the epoch) and the [B] marker."""
         self.set_sections(State="BLOCKED", Needs_Human=needs_human, Blockers=f"{reason_code} block")
@@ -203,10 +213,22 @@ class Sandbox:
         end = self.batch_log.stat().st_size
         minute, second = divmod(span_seconds, 60)
         rows = [
-            {"event": "dispatched", "batch_log": str(self.batch_log), "offset_start": start,
-             "offset_end": None, "exit_code": None, "recorded_at": "2026-01-01T10:00:00Z"},
-            {"event": "returned", "batch_log": str(self.batch_log), "offset_start": start,
-             "offset_end": end, "exit_code": 0, "recorded_at": f"2026-01-01T10:{minute:02d}:{second:02d}Z"},
+            {
+                "event": "dispatched",
+                "batch_log": str(self.batch_log),
+                "offset_start": start,
+                "offset_end": None,
+                "exit_code": None,
+                "recorded_at": "2026-01-01T10:00:00Z",
+            },
+            {
+                "event": "returned",
+                "batch_log": str(self.batch_log),
+                "offset_start": start,
+                "offset_end": end,
+                "exit_code": 0,
+                "recorded_at": f"2026-01-01T10:{minute:02d}:{second:02d}Z",
+            },
         ]
         (self.task_dir / "logs" / "dispatch.jsonl").write_text(
             "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8"
@@ -232,8 +254,10 @@ class Sandbox:
 
     def run_check(self) -> subprocess.CompletedProcess:
         self.trace.write_text("", encoding="utf-8")
-        result = self.bash(f"source {shlex.quote(str(_CHECK))}\nrc=0\noverwatch_check_block_triage || rc=$?\n"
-                           "echo \"CHECK_EXIT=$rc\"\n")
+        result = self.bash(
+            f"source {shlex.quote(str(_CHECK))}\nrc=0\noverwatch_check_block_triage || rc=$?\n"
+            'echo "CHECK_EXIT=$rc"\n'
+        )
         assert "CHECK_EXIT=0" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
         return result
 
@@ -359,9 +383,8 @@ def test_second_timeout_on_the_same_epoch_escalates_without_a_requeue(sandbox):
     _timeout_requeued(sandbox)
     epoch = load_block_record(sandbox.status).first_blocked_at
     note_before = _section(sandbox.readme.read_text(encoding="utf-8"), "Triage Note")
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)
-    sandbox.block("per_task_timeout", ["worktree=gone", f"branch={_FEATURE}", "ahead=3", "timeout_s=1800"],
-                  now=later)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
+    sandbox.block("per_task_timeout", ["worktree=gone", f"branch={_FEATURE}", "ahead=3", "timeout_s=1800"], now=later)
 
     sandbox.run_check()
 
@@ -447,7 +470,7 @@ def test_short_span_model_not_found_is_a_provider_refusal_not_requeued_before_it
 
 
 def test_provider_refusal_is_retried_with_a_growing_window_then_escalates_naming_a_fleet_cause(sandbox):
-    t0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    t0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
     evidence = ["worktree=gone", "branch=none", "span_s=12", "signature=auth"]
     zero_progress_at_cap = "reason_code: clean_exit_no_progress\ncount: 3\nlimit: 3\ndetail: refused"
     sandbox.set_sections(Zero_Progress=zero_progress_at_cap)
@@ -531,7 +554,7 @@ def test_normal_span_zero_progress_gets_one_requeue_then_escalates(sandbox):
 # 4. Block epochs
 # ---------------------------------------------------------------------------
 
-_T0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_T0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _STUB_HANDLERS = {"requeue_owner": lambda ctx: bt.HandlerResult()}
 
 
@@ -576,13 +599,17 @@ def test_block_already_acted_on_is_never_acted_on_again(sandbox):
 
 @pytest.mark.parametrize(("count", "outcome"), [(1, bt.OUTCOME_SKIP), (2, bt.OUTCOME_SKIP), (3, bt.OUTCOME_ESCALATE)])
 def test_transient_block_is_left_to_its_handler_below_the_ceiling_and_escalates_at_it(sandbox, count, outcome):
-    sandbox.set_sections(Transient_Retry=(
-        f"reason_code: transient_api_error\nretry_count: {count}\nretry_limit: 3\nprovider: claude\n"
-        "last_error: overloaded"))
+    sandbox.set_sections(
+        Transient_Retry=(
+            f"reason_code: transient_api_error\nretry_count: {count}\nretry_limit: 3\nprovider: claude\n"
+            "last_error: overloaded"
+        )
+    )
     sandbox.block("transient_api_error", ["batch_log=none"], now=_T0, needs_human="no" if count < 3 else "yes")
 
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root,
-                           now=_T0 + datetime.timedelta(hours=1))
+    result = bt.apply_task(
+        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_T0 + datetime.timedelta(hours=1)
+    )
 
     assert result.outcome == outcome and result.mutation == bt.MUTATION_NONE
     if outcome == bt.OUTCOME_SKIP:
@@ -599,8 +626,23 @@ def test_transient_block_is_left_to_its_handler_below_the_ceiling_and_escalates_
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("subcommand", ["commit", "checkout", "merge", "push", "branch", "reset", "worktree",
-                                        "switch", "rebase", "update-ref", "fetch", "gc"])
+@pytest.mark.parametrize(
+    "subcommand",
+    [
+        "commit",
+        "checkout",
+        "merge",
+        "push",
+        "branch",
+        "reset",
+        "worktree",
+        "switch",
+        "rebase",
+        "update-ref",
+        "fetch",
+        "gc",
+    ],
+)
 def test_read_only_git_runner_refuses_a_mutating_subcommand_before_running_it(sandbox, subcommand):
     sandbox.make_repo(feature_commits=1)
     refs_before = _git(sandbox.repo, "for-each-ref")

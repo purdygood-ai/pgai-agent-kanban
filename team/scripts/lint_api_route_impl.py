@@ -136,7 +136,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 LINT_NAME = "api_route_impl"
 RUN_COMMAND = "python3 team/scripts/lint_api_route_impl.py"
@@ -166,9 +166,7 @@ _BASELINE_LINE_RE = re.compile(rf"^\s*{BASELINE_KEY}\s*[\t =:]\s*(\d+)\s*$")
 # bare newline -- so a ``source .../pp_run_ops.sh`` line does not swallow the
 # call on the line after it.
 _ARG_SEP = r"""["']?(?:[ \t]|\\\n)+["']?"""
-_PP_RUN_OPS_CALL_RE = re.compile(
-    rf"""\bpp_run_ops(?:\.sh)?{_ARG_SEP}([A-Za-z_][\w.]*){_ARG_SEP}([A-Za-z_]\w*)"""
-)
+_PP_RUN_OPS_CALL_RE = re.compile(rf"""\bpp_run_ops(?:\.sh)?{_ARG_SEP}([A-Za-z_][\w.]*){_ARG_SEP}([A-Za-z_]\w*)""")
 _PY_IMPORT_RE = re.compile(r"\bfrom\s+([A-Za-z_][\w.]*)\s+import\s+(\([^)]*\)|[^\n]+)")
 
 
@@ -217,7 +215,7 @@ class RouteHandler(NamedTuple):
     file: Path
     rel: str  # repository-relative path of ``file``
     func: ast.FunctionDef | ast.AsyncFunctionDef
-    module: "RouterModule"
+    module: RouterModule
 
 
 class RouterModule(NamedTuple):
@@ -236,7 +234,7 @@ def _module_name(path: Path, team_dir: Path) -> str:
     return ".".join(parts)
 
 
-def _resolve_relative(module_name: str, level: int, target: Optional[str]) -> str:
+def _resolve_relative(module_name: str, level: int, target: str | None) -> str:
     """Resolve a ``from <dots><target> import`` against *module_name*'s package."""
     if level == 0:
         return target or ""
@@ -291,7 +289,7 @@ _MULTI_METHOD_DECORATOR = "api_route"
 _REGISTRATION_CALL = "add_api_route"
 
 
-def _call_path(call: ast.Call) -> Optional[str]:
+def _call_path(call: ast.Call) -> str | None:
     """The route path a registration call names: first argument or ``path=``."""
     if call.args and isinstance(call.args[0], ast.Constant) and isinstance(call.args[0].value, str):
         return call.args[0].value
@@ -316,8 +314,7 @@ def _call_methods(call: ast.Call) -> list[str]:
         if not isinstance(kw.value, (ast.List, ast.Tuple, ast.Set)):
             return []
         return [
-            elt.value.upper() for elt in kw.value.elts
-            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            elt.value.upper() for elt in kw.value.elts if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
         ]
     return ["GET"]
 
@@ -346,9 +343,13 @@ def _route_decorations(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tup
     out: list[tuple[str, str]] = []
     for dec in func.decorator_list:
         if isinstance(dec, ast.Call):
-            out.extend(_registration_routes(
-                dec, method_attrs=_METHOD_DECORATORS, multi_attr=_MULTI_METHOD_DECORATOR,
-            ))
+            out.extend(
+                _registration_routes(
+                    dec,
+                    method_attrs=_METHOD_DECORATORS,
+                    multi_attr=_MULTI_METHOD_DECORATOR,
+                )
+            )
     return out
 
 
@@ -383,15 +384,19 @@ def scan_routes(team_dir: Path, root: Path) -> tuple[dict[tuple[str, str], Route
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except (OSError, SyntaxError) as exc:
             findings.append(
-                Finding("parse-error", "", rel, 0, f"{rel} could not be parsed ({exc}); its routes were not checked",
-                        f"python3 -m py_compile {rel}")
+                Finding(
+                    "parse-error",
+                    "",
+                    rel,
+                    0,
+                    f"{rel} could not be parsed ({exc}); its routes were not checked",
+                    f"python3 -m py_compile {rel}",
+                )
             )
             continue
         module = RouterModule(
             bindings=_bindings(tree, _module_name(path, team_dir)),
-            functions={
-                n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-            },
+            functions={n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))},
         )
         prefix = _router_prefix(tree)
         for func in module.functions.values():
@@ -407,12 +412,13 @@ def scan_routes(team_dir: Path, root: Path) -> tuple[dict[tuple[str, str], Route
 
 class ResolvedCall(NamedTuple):
     """One call in a route or CLI body: its dotted callee (imports resolved), last segment and line."""
+
     dotted: str  # best-effort dotted path of the callee, imports resolved
     name: str  # the last segment of ``dotted`` (an import alias is resolved away)
     line: int
 
 
-def _dotted_expr(expr: ast.expr) -> Optional[str]:
+def _dotted_expr(expr: ast.expr) -> str | None:
     if isinstance(expr, ast.Name):
         return expr.id
     if isinstance(expr, ast.Attribute):
@@ -421,7 +427,7 @@ def _dotted_expr(expr: ast.expr) -> Optional[str]:
     return None
 
 
-def _resolve_call(node: ast.Call, bindings: dict[str, str]) -> Optional[ResolvedCall]:
+def _resolve_call(node: ast.Call, bindings: dict[str, str]) -> ResolvedCall | None:
     raw = _dotted_expr(node.func)
     if raw is None:
         return None
@@ -455,11 +461,7 @@ def handler_calls(handler: RouteHandler) -> list[ResolvedCall]:
 
 
 def _is_shell_out(call: ResolvedCall) -> bool:
-    return (
-        call.name == _SHELL_OUT_NAME
-        or call.dotted.startswith("subprocess.")
-        or call.dotted in _PROCESS_CALLS
-    )
+    return call.name == _SHELL_OUT_NAME or call.dotted.startswith("subprocess.") or call.dotted in _PROCESS_CALLS
 
 
 def _reaches_target(dotted: str, name: str, module: str, function: str) -> bool:
@@ -506,13 +508,18 @@ def script_reaches(script_text: str, module: str, function: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def load_baseline(path: Path, rel: str) -> tuple[Optional[int], list[Finding]]:
+def load_baseline(path: Path, rel: str) -> tuple[int | None, list[Finding]]:
     """Read the recorded shell-row count; a finding when it cannot be read."""
     if not path.is_file():
         return None, [
-            Finding("baseline-missing", "", rel, 0,
-                    f"baseline file {rel} does not exist; the shell-row ratchet was not checked",
-                    EMIT_BASELINE_COMMAND)
+            Finding(
+                "baseline-missing",
+                "",
+                rel,
+                0,
+                f"baseline file {rel} does not exist; the shell-row ratchet was not checked",
+                EMIT_BASELINE_COMMAND,
+            )
         ]
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
@@ -521,9 +528,14 @@ def load_baseline(path: Path, rel: str) -> tuple[Optional[int], list[Finding]]:
         if match:
             return int(match.group(1)), []
     return None, [
-        Finding("baseline-malformed", "", rel, 0,
-                f"baseline file {rel} has no '{BASELINE_KEY}<TAB>count' line; the shell-row ratchet was not checked",
-                EMIT_BASELINE_COMMAND)
+        Finding(
+            "baseline-malformed",
+            "",
+            rel,
+            0,
+            f"baseline file {rel} has no '{BASELINE_KEY}<TAB>count' line; the shell-row ratchet was not checked",
+            EMIT_BASELINE_COMMAND,
+        )
     ]
 
 
@@ -537,8 +549,8 @@ def format_baseline(shell_rows: int) -> str:
         "# team/config/api-route-impl-baseline.txt\n"
         "#\n"
         "# Baseline for team/scripts/lint_api_route_impl.py: the number of\n"
-        "# operator verb manifest rows whose impl column is \"shell\". The count\n"
-        "# may only fall. When a change flips rows to \"module:\", lower this\n"
+        '# operator verb manifest rows whose impl column is "shell". The count\n'
+        '# may only fall. When a change flips rows to "module:", lower this\n'
         "# number in the same change (the lint reports a baseline above the\n"
         "# measured count); never raise it. Documented launchers\n"
         f"# ({DEFAULT_LAUNCHERS}) are counted here too.\n"
@@ -589,18 +601,28 @@ def load_launchers(path: Path, rel: str) -> tuple[dict[str, Launcher], list[Find
         verb, reason = match.group(1), (match.group(2) or "").strip()
         if not reason:
             findings.append(
-                Finding("launcher-without-reason", verb, rel, number,
-                        f"launcher '{verb}' at {rel}:{number} has no reason; every launcher carries a written "
-                        f"reason, so '{verb}' is counted as a shell row to port",
-                        f"{RUN_COMMAND} --verbose")
+                Finding(
+                    "launcher-without-reason",
+                    verb,
+                    rel,
+                    number,
+                    f"launcher '{verb}' at {rel}:{number} has no reason; every launcher carries a written "
+                    f"reason, so '{verb}' is counted as a shell row to port",
+                    f"{RUN_COMMAND} --verbose",
+                )
             )
             continue
         if verb in launchers:
             findings.append(
-                Finding("launcher-duplicate", verb, rel, number,
-                        f"launcher '{verb}' is listed again at {rel}:{number} (first at line "
-                        f"{launchers[verb].line}); the first line is used",
-                        f"{RUN_COMMAND} --verbose")
+                Finding(
+                    "launcher-duplicate",
+                    verb,
+                    rel,
+                    number,
+                    f"launcher '{verb}' is listed again at {rel}:{number} (first at line "
+                    f"{launchers[verb].line}); the first line is used",
+                    f"{RUN_COMMAND} --verbose",
+                )
             )
             continue
         launchers[verb] = Launcher(verb, reason, number)
@@ -629,49 +651,74 @@ def check_module_row(
     handler = handlers.get(route_key)
     if handler is None:
         findings.append(
-            Finding("route-missing", verb.name, manifest_rel, 0,
-                    f"verb '{verb.name}' declares impl module:{impl.target} but no router declares "
-                    f"{verb.rest_method} {verb.rest_route}",
-                    "python3 team/scripts/lint_operator_verb_manifest.py")
+            Finding(
+                "route-missing",
+                verb.name,
+                manifest_rel,
+                0,
+                f"verb '{verb.name}' declares impl module:{impl.target} but no router declares "
+                f"{verb.rest_method} {verb.rest_route}",
+                "python3 team/scripts/lint_operator_verb_manifest.py",
+            )
         )
     else:
         calls = handler_calls(handler)
         if not any(_reaches_target(c.dotted, c.name, module, function) for c in calls):
             findings.append(
-                Finding("route-not-calling", verb.name, handler.rel, handler.func.lineno,
-                        f"verb '{verb.name}': {verb.rest_method} {verb.rest_route} ({handler.func.name}) "
-                        f"does not call {impl.target}",
-                        f"{RUN_COMMAND} --verbose")
+                Finding(
+                    "route-not-calling",
+                    verb.name,
+                    handler.rel,
+                    handler.func.lineno,
+                    f"verb '{verb.name}': {verb.rest_method} {verb.rest_route} ({handler.func.name}) "
+                    f"does not call {impl.target}",
+                    f"{RUN_COMMAND} --verbose",
+                )
             )
         for call in calls:
             if _is_shell_out(call):
                 findings.append(
-                    Finding("route-shells-out", verb.name, handler.rel, call.line,
-                            f"verb '{verb.name}': {verb.rest_method} {verb.rest_route} ({handler.func.name}) "
-                            f"calls {call.dotted} at {handler.rel}:{call.line}; a module: route starts no process",
-                            f"{RUN_COMMAND} --verbose")
+                    Finding(
+                        "route-shells-out",
+                        verb.name,
+                        handler.rel,
+                        call.line,
+                        f"verb '{verb.name}': {verb.rest_method} {verb.rest_route} ({handler.func.name}) "
+                        f"calls {call.dotted} at {handler.rel}:{call.line}; a module: route starts no process",
+                        f"{RUN_COMMAND} --verbose",
+                    )
                 )
 
     script_path = team_dir / (verb.script or "")
     script_rel = _rel(script_path, root)
     if not verb.script or not script_path.is_file():
         findings.append(
-            Finding("cli-script-missing", verb.name, script_rel, 0,
-                    f"verb '{verb.name}': script {script_rel} does not exist",
-                    "python3 team/scripts/lint_operator_verb_manifest.py")
+            Finding(
+                "cli-script-missing",
+                verb.name,
+                script_rel,
+                0,
+                f"verb '{verb.name}': script {script_rel} does not exist",
+                "python3 team/scripts/lint_operator_verb_manifest.py",
+            )
         )
     elif not script_reaches(script_path.read_text(encoding="utf-8", errors="replace"), module, function):
         findings.append(
-            Finding("cli-not-reaching", verb.name, script_rel, 0,
-                    f"verb '{verb.name}': {script_rel} does not reach {impl.target} through pp_run_ops "
-                    f"(expected 'pp_run_ops {module} {function}' or a pp_pythonpath import of {function})",
-                    f"{RUN_COMMAND} --verbose")
+            Finding(
+                "cli-not-reaching",
+                verb.name,
+                script_rel,
+                0,
+                f"verb '{verb.name}': {script_rel} does not reach {impl.target} through pp_run_ops "
+                f"(expected 'pp_run_ops {module} {function}' or a pp_pythonpath import of {function})",
+                f"{RUN_COMMAND} --verbose",
+            )
         )
     return findings
 
 
 def run_checks(
-    root: Path, manifest_path: Path, baseline_path: Path, ovm, launchers_path: Optional[Path] = None
+    root: Path, manifest_path: Path, baseline_path: Path, ovm, launchers_path: Path | None = None
 ) -> tuple[list[Finding], dict]:
     """Run every check; return the findings and the measured totals.
 
@@ -702,8 +749,14 @@ def run_checks(
             impl = ovm.parse_impl(verb.impl)
         except ValueError as exc:
             findings.append(
-                Finding("impl-malformed", verb.name, manifest_rel, 0, f"verb '{verb.name}': {exc}",
-                        "python3 team/scripts/lint_operator_verb_manifest.py")
+                Finding(
+                    "impl-malformed",
+                    verb.name,
+                    manifest_rel,
+                    0,
+                    f"verb '{verb.name}': {exc}",
+                    "python3 team/scripts/lint_operator_verb_manifest.py",
+                )
             )
             continue
         impl_kinds[verb.name] = impl.kind
@@ -722,17 +775,27 @@ def run_checks(
     for launcher in launchers.values():
         if launcher.verb not in verbs:
             findings.append(
-                Finding("launcher-unknown-verb", launcher.verb, launchers_rel, launcher.line,
-                        f"launcher '{launcher.verb}' at {launchers_rel}:{launcher.line} names no verb in "
-                        f"{manifest_rel}",
-                        "python3 team/scripts/lint_operator_verb_manifest.py")
+                Finding(
+                    "launcher-unknown-verb",
+                    launcher.verb,
+                    launchers_rel,
+                    launcher.line,
+                    f"launcher '{launcher.verb}' at {launchers_rel}:{launcher.line} names no verb in "
+                    f"{manifest_rel}",
+                    "python3 team/scripts/lint_operator_verb_manifest.py",
+                )
             )
         elif launcher.verb in impl_kinds and impl_kinds[launcher.verb] != "shell":
             findings.append(
-                Finding("launcher-not-shell", launcher.verb, launchers_rel, launcher.line,
-                        f"launcher '{launcher.verb}' at {launchers_rel}:{launcher.line} has impl "
-                        f"{impl_kinds[launcher.verb]} in {manifest_rel}; only an impl shell row is a launcher",
-                        f"{RUN_COMMAND} --verbose")
+                Finding(
+                    "launcher-not-shell",
+                    launcher.verb,
+                    launchers_rel,
+                    launcher.line,
+                    f"launcher '{launcher.verb}' at {launchers_rel}:{launcher.line} has impl "
+                    f"{impl_kinds[launcher.verb]} in {manifest_rel}; only an impl shell row is a launcher",
+                    f"{RUN_COMMAND} --verbose",
+                )
             )
 
     impl_shell_rows = shell_rows + len(launcher_rows)
@@ -742,17 +805,27 @@ def run_checks(
     if baseline is not None:
         if impl_shell_rows > baseline:
             findings.append(
-                Finding("shell-rows-above-baseline", "", manifest_rel, 0,
-                        f"{impl_shell_rows} manifest row(s) are impl shell ({split}), above the baseline of "
-                        f"{baseline} in {baseline_rel}; the count may only fall",
-                        f"{RUN_COMMAND} --verbose")
+                Finding(
+                    "shell-rows-above-baseline",
+                    "",
+                    manifest_rel,
+                    0,
+                    f"{impl_shell_rows} manifest row(s) are impl shell ({split}), above the baseline of "
+                    f"{baseline} in {baseline_rel}; the count may only fall",
+                    f"{RUN_COMMAND} --verbose",
+                )
             )
         elif impl_shell_rows < baseline:
             findings.append(
-                Finding("baseline-tighten", "", baseline_rel, 0,
-                        f"{impl_shell_rows} manifest row(s) are impl shell ({split}), below the baseline of "
-                        f"{baseline} in {baseline_rel}; lower the baseline to {impl_shell_rows} in the same change",
-                        EMIT_BASELINE_COMMAND)
+                Finding(
+                    "baseline-tighten",
+                    "",
+                    baseline_rel,
+                    0,
+                    f"{impl_shell_rows} manifest row(s) are impl shell ({split}), below the baseline of "
+                    f"{baseline} in {baseline_rel}; lower the baseline to {impl_shell_rows} in the same change",
+                    EMIT_BASELINE_COMMAND,
+                )
             )
     totals = {
         "verbs": len(verbs),
@@ -790,20 +863,37 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit codes:\n  0  Always (findings are narrated, never fatal).\n"
         ),
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--manifest", metavar="PATH", default=DEFAULT_MANIFEST,
-                        help=f"Manifest file, relative to --root or absolute (default: {DEFAULT_MANIFEST}).")
-    parser.add_argument("--baseline", metavar="PATH", default=DEFAULT_BASELINE,
-                        help=f"Baseline file, relative to --root or absolute (default: {DEFAULT_BASELINE}).")
-    parser.add_argument("--launchers", metavar="PATH", default=DEFAULT_LAUNCHERS,
-                        help=f"Launchers file, relative to --root or absolute (default: {DEFAULT_LAUNCHERS}).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write findings as a JSON array to PATH (always written).")
-    parser.add_argument("--emit-baseline", action="store_true",
-                        help="Print the measured baseline in file format and exit 0.")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print every row's verdict, clean or not.")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--manifest",
+        metavar="PATH",
+        default=DEFAULT_MANIFEST,
+        help=f"Manifest file, relative to --root or absolute (default: {DEFAULT_MANIFEST}).",
+    )
+    parser.add_argument(
+        "--baseline",
+        metavar="PATH",
+        default=DEFAULT_BASELINE,
+        help=f"Baseline file, relative to --root or absolute (default: {DEFAULT_BASELINE}).",
+    )
+    parser.add_argument(
+        "--launchers",
+        metavar="PATH",
+        default=DEFAULT_LAUNCHERS,
+        help=f"Launchers file, relative to --root or absolute (default: {DEFAULT_LAUNCHERS}).",
+    )
+    parser.add_argument(
+        "--findings-file", metavar="PATH", default=None, help="Write findings as a JSON array to PATH (always written)."
+    )
+    parser.add_argument(
+        "--emit-baseline", action="store_true", help="Print the measured baseline in file format and exit 0."
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print every row's verdict, clean or not.")
     return parser
 
 
@@ -812,7 +902,7 @@ def _resolve(root: Path, value: str) -> Path:
     return p if p.is_absolute() else root / p
 
 
-def _write_findings(path_str: Optional[str], findings: list[Finding]) -> None:
+def _write_findings(path_str: str | None, findings: list[Finding]) -> None:
     if not path_str:
         return
     path = Path(path_str)
@@ -826,7 +916,7 @@ def _write_findings(path_str: Optional[str], findings: list[Finding]) -> None:
         print(f"lint_api_route_impl: could not write findings file {path}: {exc}", file=sys.stderr)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the lint. Always returns 0."""
     args = _build_parser().parse_args(argv)
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent.parent
@@ -844,8 +934,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     except (FileNotFoundError, ovm.ManifestFormatError) as exc:
         rel = _rel(manifest_path, root)
         findings = [
-            Finding("manifest-unreadable", "", rel, 0, f"manifest could not be read: {exc}",
-                    "python3 team/scripts/lint_operator_verb_manifest.py")
+            Finding(
+                "manifest-unreadable",
+                "",
+                rel,
+                0,
+                f"manifest could not be read: {exc}",
+                "python3 team/scripts/lint_operator_verb_manifest.py",
+            )
         ]
         totals = None
 

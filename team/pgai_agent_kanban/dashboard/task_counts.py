@@ -132,7 +132,7 @@ class TaskCounts:
 
     totals: dict[str, int]
     queues: dict[str, dict[str, int]]
-    working: "WorkingTask | None"
+    working: WorkingTask | None
     last_done: tuple[tuple[str, str], ...]
 
 
@@ -167,7 +167,7 @@ def _task_role(task_dir: pathlib.Path) -> str:
     return role if role in QUEUE_ROLES else _DEFAULT_ROLE
 
 
-def scan_task_counts(tasks_root: "pathlib.Path | str") -> TaskCounts:
+def scan_task_counts(tasks_root: pathlib.Path | str) -> TaskCounts:
     """Count the tasks under *tasks_root* by state and by role.
 
     Args:
@@ -181,7 +181,7 @@ def scan_task_counts(tasks_root: "pathlib.Path | str") -> TaskCounts:
     root = pathlib.Path(tasks_root)
     totals = {key: 0 for key in ("TOTAL", "DONE", "WORKING", "BLOCKED", "WAITING", "BACKLOG")}
     queues = {role: {stat: 0 for stat in QUEUE_STATS} for role in QUEUE_ROLES}
-    working: "WorkingTask | None" = None
+    working: WorkingTask | None = None
     done_entries: list[tuple[int, str, str]] = []
 
     if root.is_dir():
@@ -229,7 +229,7 @@ def scan_task_counts(tasks_root: "pathlib.Path | str") -> TaskCounts:
     return TaskCounts(totals=totals, queues=queues, working=working, last_done=last_done)
 
 
-def agent_queue_counts(tasks_root: "pathlib.Path | str", agent: str) -> dict[str, int]:
+def agent_queue_counts(tasks_root: pathlib.Path | str, agent: str) -> dict[str, int]:
     """Count one agent's backlog lines as ``{open, working, done}``.
 
     Args:
@@ -285,7 +285,7 @@ def format_task_counts(counts: TaskCounts) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI entry point: print the counters for ``argv[0]`` (a tasks/ directory)."""
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:

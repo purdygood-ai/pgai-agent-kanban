@@ -64,7 +64,6 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-import sys
 from typing import NamedTuple
 
 import pytest
@@ -80,8 +79,8 @@ from tests.fixtures.docker_cli_pins import cli_pins_build_args
 # repo root:  team/../                = repo root
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent          # team/
-_REPO_ROOT = _TEAM_DIR.parent                        # repo root
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_REPO_ROOT = _TEAM_DIR.parent  # repo root
 _CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
 
 
@@ -89,8 +88,10 @@ _CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
 # Flavor configuration (mirrors test_docker_build_fixture.py)
 # ---------------------------------------------------------------------------
 
+
 class _FlavorConfig(NamedTuple):
     """Smoke parameters for one image flavor."""
+
     name: str
     dockerfile: pathlib.Path
     image_tag: str
@@ -129,12 +130,14 @@ def _narrate_skip(reason: str) -> None:
 
 
 @pytest.fixture(scope="module", params=_FLAVORS, ids=_FLAVOR_IDS)
-def smoke_image_tag(request: pytest.FixtureRequest) -> str:
+def smoke_image_tag(request: pytest.FixtureRequest, operator_container_tier: None) -> str:
     """
     Build docker/<flavor>/Dockerfile and return the image tag for use in smoke tests.
 
     Parametrized over all flavor configurations in _FLAVORS.
-    Skips (with narration) when Docker is unavailable.
+    Skips (with narration) without the operator's container-tier
+    authorization (operator_container_tier, tests/cold/conftest.py) -- checked
+    before any docker command -- or when Docker is unavailable.
     Builds once per flavor per module; tears down in finally.
     """
     flavor: _FlavorConfig = request.param
@@ -169,13 +172,11 @@ def smoke_image_tag(request: pytest.FixtureRequest) -> str:
 
     if build_result.returncode != 0:
         print(
-            f"\n[dashboard-smoke-fixture] [{flavor.name}] BUILD STDOUT:\n"
-            + build_result.stdout,
+            f"\n[dashboard-smoke-fixture] [{flavor.name}] BUILD STDOUT:\n" + build_result.stdout,
             flush=True,
         )
         print(
-            f"\n[dashboard-smoke-fixture] [{flavor.name}] BUILD STDERR:\n"
-            + build_result.stderr,
+            f"\n[dashboard-smoke-fixture] [{flavor.name}] BUILD STDERR:\n" + build_result.stderr,
             flush=True,
         )
         if flavor.name == "rocky9":
@@ -194,10 +195,7 @@ def smoke_image_tag(request: pytest.FixtureRequest) -> str:
                 "this environment — see BUILD STDERR above for the "
                 "underlying package-resolution error"
             )
-        pytest.fail(
-            f"docker build [{flavor.name}] exited {build_result.returncode}; "
-            "see output above"
-        )
+        pytest.fail(f"docker build [{flavor.name}] exited {build_result.returncode}; " "see output above")
 
     print(
         f"[dashboard-smoke-fixture] [{flavor.name}] Image built: {flavor.image_tag}",
@@ -289,7 +287,7 @@ def test_create_sh_no_tmux_produces_no_command_not_found(
     create.sh --no-tmux inside the built flavor image produces no 'command not found' output.
 
     This is the in-container dashboard smoke: it confirms that every external
-    command invoked by the dashboard scripts (tmux, tput, watch, git, python3,
+    command invoked by the dashboard scripts (tmux, tput, git, python3,
     awk, jq, etc.) is present and resolvable inside the image.  A single
     'command not found' line means the dependency audit in that flavor's
     Dockerfile is incomplete.
@@ -306,17 +304,12 @@ def test_create_sh_no_tmux_produces_no_command_not_found(
         "create.sh --no-tmux produced 'command not found' output inside the "
         "container — the Dockerfile dependency audit is incomplete.\n\n"
         "Relevant lines from combined output:\n"
-        + "\n".join(
-            line
-            for line in combined.splitlines()
-            if "command not found" in line
-        )
+        + "\n".join(line for line in combined.splitlines() if "command not found" in line)
     )
 
 
 def test_create_sh_script_exists_in_repo() -> None:
     """team/scripts/dashboard/create.sh must exist in the shipped tree."""
     assert _CREATE_SH.exists(), (
-        f"team/scripts/dashboard/create.sh not found at {_CREATE_SH}; "
-        "this file must be committed to the repository"
+        f"team/scripts/dashboard/create.sh not found at {_CREATE_SH}; " "this file must be committed to the repository"
     )

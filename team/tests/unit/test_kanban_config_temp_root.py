@@ -67,9 +67,9 @@ def _tar_shim(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     shim.write_text(
         "#!/bin/bash\n"
         "_prev=''\n"
-        "for _a in \"$@\"; do\n"
+        'for _a in "$@"; do\n'
         f"  [[ \"$_prev\" == -C ]] && printf '%s\\n' \"$_a\" >> '{log}'\n"
-        "  _prev=\"$_a\"\n"
+        '  _prev="$_a"\n'
         "done\n"
         f"exec '{real_tar}' \"$@\"\n",
         encoding="utf-8",
@@ -78,8 +78,14 @@ def _tar_shim(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     return bin_dir, log
 
 
-def _run(script: pathlib.Path, tmp_path: pathlib.Path, root: pathlib.Path, args: list[str],
-         env_extra: dict[str, str], shim_dir: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+def _run(
+    script: pathlib.Path,
+    tmp_path: pathlib.Path,
+    root: pathlib.Path,
+    args: list[str],
+    env_extra: dict[str, str],
+    shim_dir: pathlib.Path | None = None,
+) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     cwd = tmp_path / "elsewhere"
@@ -93,8 +99,13 @@ def _run(script: pathlib.Path, tmp_path: pathlib.Path, root: pathlib.Path, args:
     )
     proc = subprocess.Popen(
         ["bash", str(script), *args],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(cwd), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         out, err = proc.communicate(timeout=_TIMEOUT_SECONDS)
@@ -136,8 +147,14 @@ def test_export_stages_under_the_configured_temp_dir_override(tmp_path: pathlib.
     shim_dir, log = _tar_shim(tmp_path)
     out = tmp_path / "export.tar.gz"
 
-    result = _run(_EXPORT_SH, tmp_path, root, ["--file", str(out)],
-                  {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)}, shim_dir)
+    result = _run(
+        _EXPORT_SH,
+        tmp_path,
+        root,
+        ["--file", str(out)],
+        {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)},
+        shim_dir,
+    )
 
     assert result.returncode == 0, _diag(result)
     assert out.is_file()
@@ -148,8 +165,13 @@ def test_export_stages_under_the_configured_temp_dir_override(tmp_path: pathlib.
 def test_import_stages_under_the_configured_temp_dir_override(tmp_path: pathlib.Path) -> None:
     source_root = _kanban_root(tmp_path, "source_kanban")
     archive = tmp_path / "export.tar.gz"
-    exported = _run(_EXPORT_SH, tmp_path, source_root, ["--file", str(archive)],
-                    {"PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "export_tmp")})
+    exported = _run(
+        _EXPORT_SH,
+        tmp_path,
+        source_root,
+        ["--file", str(archive)],
+        {"PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "export_tmp")},
+    )
     assert exported.returncode == 0, _diag(exported)
 
     target_root = tmp_path / "target_kanban"
@@ -159,8 +181,14 @@ def test_import_stages_under_the_configured_temp_dir_override(tmp_path: pathlib.
     other_tmpdir.mkdir()
     shim_dir, log = _tar_shim(tmp_path)
 
-    result = _run(_IMPORT_SH, tmp_path, target_root, ["--file", str(archive)],
-                  {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)}, shim_dir)
+    result = _run(
+        _IMPORT_SH,
+        tmp_path,
+        target_root,
+        ["--file", str(archive)],
+        {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)},
+        shim_dir,
+    )
 
     assert result.returncode == 0, _diag(result)
     assert (target_root / "kanban.cfg").is_file(), "the archive was restored"
@@ -191,8 +219,9 @@ def test_export_without_override_stages_under_kanban_cfg_paths_not_tmpdir(tmp_pa
     ],
     ids=["export", "import"],
 )
-def test_missing_temp_sh_refuses_naming_its_path(tmp_path: pathlib.Path, script: pathlib.Path,
-                                                 error_key: str, args: list[str]) -> None:
+def test_missing_temp_sh_refuses_naming_its_path(
+    tmp_path: pathlib.Path, script: pathlib.Path, error_key: str, args: list[str]
+) -> None:
     root = _kanban_root(tmp_path, "kanban")
     broken = _without_temp_sh(tmp_path, script)
     sandbox = tmp_path / "sandbox_tmp"

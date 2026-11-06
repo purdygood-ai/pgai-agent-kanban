@@ -48,7 +48,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Callable, Iterator, Optional
+from collections.abc import Callable, Iterator
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 if str(_TEAM_DIR) not in sys.path:
@@ -75,10 +75,10 @@ _SCRIPTS = {"why": WHY_SCRIPT, "report": REPORT_SCRIPT}
 
 def stamp(epoch: float) -> str:
     """ISO-8601 UTC ``YYYY-MM-DDThh:mm:ssZ`` for *epoch*."""
-    return datetime.datetime.fromtimestamp(int(epoch), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.fromtimestamp(int(epoch), datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def write(path: pathlib.Path, text: str, mtime: Optional[int] = None) -> pathlib.Path:
+def write(path: pathlib.Path, text: str, mtime: int | None = None) -> pathlib.Path:
     """Write *text* (UTF-8, no newline translation) at *path*, optionally setting its mtime."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(text.encode("utf-8"))
@@ -105,17 +105,17 @@ def project(root: pathlib.Path, name: str) -> pathlib.Path:
     return path
 
 
-def task(proj: pathlib.Path, task_id: str, state: str, mtime: Optional[int] = None, *, body: Optional[str] = None) -> None:
+def task(proj: pathlib.Path, task_id: str, state: str, mtime: int | None = None, *, body: str | None = None) -> None:
     """A task folder whose status.md carries *state* under ``## State`` (or *body* verbatim)."""
     text = body if body is not None else f"# Status\n\n## State\n{state}\n\n## Summary\nfixture\n"
     write(proj / "tasks" / task_id / "status.md", text, mtime)
 
 
-def lock(root: pathlib.Path, name: str, record: str, mtime: Optional[int] = None) -> None:
+def lock(root: pathlib.Path, name: str, record: str, mtime: int | None = None) -> None:
     write(root / "locks" / f"{name}.lock", record, mtime)
 
 
-def record(holder: str, pid: str, op: str, task_id: str, acquired_at: Optional[str]) -> str:
+def record(holder: str, pid: str, op: str, task_id: str, acquired_at: str | None) -> str:
     text = f"holder={holder}\npid={pid}\nop={op}\ntask={task_id}\n"
     if acquired_at is not None:
         text += f"acquired_at={acquired_at}\n"
@@ -152,10 +152,22 @@ def _build_walk(root: pathlib.Path, tokens: Tokens) -> None:
     projects_cfg(
         root,
         [
-            ("alpha", 1, True), ("beta", 2, True), ("gamma", 3, False), ("delta", 4, True),
-            ("epsilon", 5, None), ("zeta", 6, True), ("eta", 7, True), ("theta", 8, True),
-            ("iota", 9, True), ("kappa", 10, True), ("lambda", 11, True), ("mu", 12, True),
-            ("nu", 13, True), ("xi", 14, True), ("omicron", 15, True), ("pi", 15, True),
+            ("alpha", 1, True),
+            ("beta", 2, True),
+            ("gamma", 3, False),
+            ("delta", 4, True),
+            ("epsilon", 5, None),
+            ("zeta", 6, True),
+            ("eta", 7, True),
+            ("theta", 8, True),
+            ("iota", 9, True),
+            ("kappa", 10, True),
+            ("lambda", 11, True),
+            ("mu", 12, True),
+            ("nu", 13, True),
+            ("xi", 14, True),
+            ("omicron", 15, True),
+            ("pi", 15, True),
         ],
     )
     alpha = project(root, "alpha")
@@ -184,7 +196,9 @@ def _build_walk(root: pathlib.Path, tokens: Tokens) -> None:
 
     eta = project(root, "eta")
     write(eta / "HALT", "rc\n")
-    write(eta / "overwatch" / "resolving.md", "lane: A\nattempt:   2\nversion: v1.2.3\nstarted_at: 2026-01-01T00:00:00Z\n")
+    write(
+        eta / "overwatch" / "resolving.md", "lane: A\nattempt:   2\nversion: v1.2.3\nstarted_at: 2026-01-01T00:00:00Z\n"
+    )
     release_state(eta, "v1.2.3")
 
     theta = project(root, "theta")
@@ -202,7 +216,12 @@ def _build_walk(root: pathlib.Path, tokens: Tokens) -> None:
 
     kappa = project(root, "kappa")
     task(kappa, "PM-20260101-050-queued", "BACKLOG", NOW - 9000)
-    lock(root, "repo-wake-kappa", record("wake-coder", DEAD_PID, "wake-chain:kappa", "none", stamp(NOW - 40000)), NOW - 30000)
+    lock(
+        root,
+        "repo-wake-kappa",
+        record("wake-coder", DEAD_PID, "wake-chain:kappa", "none", stamp(NOW - 40000)),
+        NOW - 30000,
+    )
 
     lam = project(root, "lambda")
     task(lam, "PM-20260101-060-waiting", "WAITING", NOW - 9000)
@@ -220,7 +239,12 @@ def _build_walk(root: pathlib.Path, tokens: Tokens) -> None:
 
     xi = project(root, "xi")
     task(xi, "CM-20260101-090-queued", "BACKLOG", NOW - 9000)
-    lock(root, "repo-wake-xi", record("wake-cm", tokens["LIVE"], "wake-chain:xi", "CM-9", stamp(NOW - 26000)), NOW - 25000)
+    lock(
+        root,
+        "repo-wake-xi",
+        record("wake-cm", tokens["LIVE"], "wake-chain:xi", "CM-9", stamp(NOW - 26000)),
+        NOW - 25000,
+    )
 
     omicron = project(root, "omicron")
     task(omicron, "T-crlf", "", NOW - 10, body="## State\r\nWORKING\r\n")
@@ -284,12 +308,20 @@ def _build_details_plain(root: pathlib.Path, tokens: Tokens) -> None:
 def _build_details_kanban_tier(root: pathlib.Path, tokens: Tokens) -> None:
     """Deferred from kanban.cfg, no release-state.md, an empty queues directory, a role HALT-AFTER."""
     projects_cfg(root, [("gamma", 1, True)])
-    write(root / "kanban.cfg", "[release]\ndeferred_bugs = true\ndeferred_bug_level = medium  # mid\ndefer_piggyback = false\n")
+    write(
+        root / "kanban.cfg",
+        "[release]\ndeferred_bugs = true\ndeferred_bug_level = medium  # mid\ndefer_piggyback = false\n",
+    )
     gamma = project(root, "gamma")
     (gamma / "tasks" / "queues").mkdir(parents=True)
     write(gamma / "HALT-AFTER", "pm\n")
     task(gamma, "WRITER-1", "BLOCKED", NOW - 60)
-    lock(root, "repo-wake-gamma", record("wake-writer", DEAD_PID, "wake-chain:gamma", "WRITER-1", tokens["AGO"]), NOW - 60)
+    lock(
+        root,
+        "repo-wake-gamma",
+        record("wake-writer", DEAD_PID, "wake-chain:gamma", "WRITER-1", tokens["AGO"]),
+        NOW - 60,
+    )
 
 
 def _build_details_root_campaign(root: pathlib.Path, tokens: Tokens) -> None:
@@ -299,7 +331,12 @@ def _build_details_root_campaign(root: pathlib.Path, tokens: Tokens) -> None:
     delta = project(root, "delta")
     write(delta / "release-state.md", "## Active RC\n  2.0  \n")
     task(delta, "PM-1", "WAITING", NOW - 60)
-    lock(root, "repo-wake-delta", record("wake-pm", DEAD_PID, "wake-chain:delta", "none", stamp(NOW - 50000)), NOW - 40000)
+    lock(
+        root,
+        "repo-wake-delta",
+        record("wake-pm", DEAD_PID, "wake-chain:delta", "none", stamp(NOW - 50000)),
+        NOW - 40000,
+    )
 
 
 def _build_details_malformed_campaign(root: pathlib.Path, tokens: Tokens) -> None:

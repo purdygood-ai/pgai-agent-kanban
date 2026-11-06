@@ -199,9 +199,7 @@ def _kill_recorded_group(scenario_dir: pathlib.Path) -> None:
 
 
 def _pgrep(marker: str) -> str:
-    return subprocess.run(
-        ["pgrep", "-af", marker], capture_output=True, text=True, timeout=10
-    ).stdout.strip()
+    return subprocess.run(["pgrep", "-af", marker], capture_output=True, text=True, timeout=10).stdout.strip()
 
 
 @pytest.fixture(scope="module")
@@ -266,8 +264,7 @@ def _deadline_to_empty_seconds(result: ScenarioResult) -> int:
         result.log_text,
     )
     assert match, (
-        "Expected the finalize drain to narrate the measured deadline-to-empty "
-        f"time; got:\n{result.describe()}"
+        "Expected the finalize drain to narrate the measured deadline-to-empty " f"time; got:\n{result.describe()}"
     )
     return int(match.group(1))
 
@@ -299,12 +296,9 @@ def test_sigterm_ignoring_provider_tree_is_sigkilled_and_gone_before_finalize(
         "still alive; sending SIGKILL to the group"
     ) in log_text, result.describe()
     assert result.value("MEMBERS_AFTER_DRAIN") == "0", (
-        "Expected no process left in the provider's group after the drain.\n"
-        + result.describe()
+        "Expected no process left in the provider's group after the drain.\n" + result.describe()
     )
-    assert result.stray_argv == "", (
-        f"Stub processes survived the group kill:\n{result.stray_argv}\n{result.describe()}"
-    )
+    assert result.stray_argv == "", f"Stub processes survived the group kill:\n{result.stray_argv}\n{result.describe()}"
     print(
         f"measured deadline-to-empty-group: {_deadline_to_empty_seconds(result)}s "
         f"(KILL_GRACE_SECONDS={_KILL_GRACE_SECONDS}, hostile provider)"
@@ -346,13 +340,9 @@ def test_sigterm_honouring_provider_tree_exits_without_sigkill(
 
     log_text = result.log_text
     assert f"sending SIGTERM to provider process group {pgid}" in log_text, result.describe()
-    assert "sending SIGKILL" not in log_text, (
-        f"Cooperative provider must never draw a SIGKILL:\n{result.describe()}"
-    )
+    assert "sending SIGKILL" not in log_text, f"Cooperative provider must never draw a SIGKILL:\n{result.describe()}"
     assert result.value("MEMBERS_AFTER_DRAIN") == "0", result.describe()
-    assert result.stray_argv == "", (
-        f"Stub processes survived SIGTERM:\n{result.stray_argv}\n{result.describe()}"
-    )
+    assert result.stray_argv == "", f"Stub processes survived SIGTERM:\n{result.stray_argv}\n{result.describe()}"
     elapsed = _deadline_to_empty_seconds(result)
     assert elapsed < _KILL_GRACE_SECONDS, (
         f"deadline-to-empty took {elapsed}s for a cooperative provider; expected "
@@ -389,23 +379,19 @@ def test_launch_site_uses_job_control_and_claims_no_setsid() -> None:
     and nothing in wake_driver_invoke.sh claims a setsid the code does not
     perform."""
     block = _extract_watchdog_block()
-    assert "setsid" not in _DRIVER_INVOKE.read_text(encoding="utf-8").lower(), (
-        "wake_driver_invoke.sh mentions setsid; the launch uses bash job control."
-    )
+    assert (
+        "setsid" not in _DRIVER_INVOKE.read_text(encoding="utf-8").lower()
+    ), "wake_driver_invoke.sh mentions setsid; the launch uses bash job control."
     on = block.index("set -m")
     launch = block.index(") &", on)
     off = block.index("set +m", launch)
-    assert on < launch < off, (
-        "Expected `set -m` before the background launch and `set +m` right after it."
-    )
-    assert "trap ':' TERM" in block, (
-        "Expected the wrapper subshell to install a no-op SIGTERM handler."
-    )
+    assert on < launch < off, "Expected `set -m` before the background launch and `set +m` right after it."
+    assert "trap ':' TERM" in block, "Expected the wrapper subshell to install a no-op SIGTERM handler."
     assert 'kill -TERM -- "-${_provider_pgid}"' in block
     assert 'kill -KILL -- "-${_provider_pgid}"' in block
-    assert 'kill -0 -- "-${_provider_pgid}"' in block, (
-        "Expected the grace check to probe the process group, not the wrapper pid."
-    )
+    assert (
+        'kill -0 -- "-${_provider_pgid}"' in block
+    ), "Expected the grace check to probe the process group, not the wrapper pid."
 
 
 def test_finalize_drains_the_group_before_any_state_write_or_teardown() -> None:
@@ -415,9 +401,9 @@ def test_finalize_drains_the_group_before_any_state_write_or_teardown() -> None:
     drain_at = body.index("wd_drain_provider_process_group")
     for later in ("block_task_with_record ", "mark_backlog ", "teardown_task_worktree "):
         assert later in body, f"{later!r} not found in wd_finalize_task"
-        assert drain_at < body.index(later), (
-            f"wd_drain_provider_process_group must run before {later!r} in wd_finalize_task."
-        )
+        assert drain_at < body.index(
+            later
+        ), f"wd_drain_provider_process_group must run before {later!r} in wd_finalize_task."
 
 
 def test_drain_is_a_noop_without_a_provider_group(tmp_path: pathlib.Path) -> None:
@@ -435,14 +421,18 @@ wd_drain_provider_process_group
 echo "RC=$?"
 """
     result = subprocess.run(
-        ["bash", "-c", harness], capture_output=True, text=True, timeout=30,
-        cwd=str(tmp_path), stdin=subprocess.DEVNULL,
+        ["bash", "-c", harness],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(tmp_path),
+        stdin=subprocess.DEVNULL,
     )
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "RC=0" in result.stdout, result.stdout
-    assert log_file.read_text(encoding="utf-8") == "", (
-        f"Expected no narration without a group; got:\n{log_file.read_text(encoding='utf-8')}"
-    )
+    assert (
+        log_file.read_text(encoding="utf-8") == ""
+    ), f"Expected no narration without a group; got:\n{log_file.read_text(encoding='utf-8')}"
 
 
 def test_drain_reaps_a_stray_left_behind_by_a_provider_that_exited(tmp_path: pathlib.Path) -> None:
@@ -472,8 +462,12 @@ echo "MEMBERS_AFTER_DRAIN=$(ps -eo pid=,pgid= | awk -v g="${{_provider_pgid}}" '
 """
     try:
         result = subprocess.run(
-            ["bash", "-c", harness], capture_output=True, text=True, timeout=60,
-            cwd=str(tmp_path), stdin=subprocess.DEVNULL,
+            ["bash", "-c", harness],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(tmp_path),
+            stdin=subprocess.DEVNULL,
         )
     finally:
         _kill_recorded_group(tmp_path)

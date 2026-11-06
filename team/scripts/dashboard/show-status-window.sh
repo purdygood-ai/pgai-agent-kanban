@@ -28,7 +28,7 @@
 # Usage:
 #   show-status-window.sh [--kanban-root <path>] [-h|--help]
 #
-# Auto-refresh is handled by the caller (dashboard/create.sh uses watch -n N).
+# Prints one snapshot and exits; refreshing it is the caller's job.
 #
 # Environment:
 #   NO_COLOR=1 — disables all ANSI codes
@@ -36,25 +36,17 @@
 #   PGAI_CRONTAB_CMD — command run as "<cmd> -l" to read the crontab;
 #                      unset or empty means 'crontab'
 
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve script dir ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
@@ -96,7 +88,7 @@ config_startup_prelude "$KANBAN_ROOT"
 # Source: kanban.cfg [paths/dashboard] — INI format replaces legacy config.cfg
 # read_ini available via project_paths.sh (sourced above).
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "${KANBAN_ROOT}/kanban.cfg")"
     export DASHBOARD_ROWS_PER_COLUMN
 fi
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
@@ -140,15 +132,8 @@ WORKING_MTIME="$(get_val WORKING_TASK_MTIME "")"
 # --- Version resolution via shared helper ---
 # Tier order: KANBAN_ROOT/VERSION > REPO_ROOT/VERSION > git tag --merged > Last Released > 'unknown'
 # Single decision point: get_kanban_version in lib/version.sh (do not add tier-order logic here).
-# Walk up from SCRIPT_DIR to find the dev-tree repo root (depth-independent .git-marker walk).
-REPO_ROOT="$SCRIPT_DIR"
-while [[ "$REPO_ROOT" != "/" ]] && [[ ! -d "$REPO_ROOT/.git" ]]; do
-  REPO_ROOT="$(dirname "$REPO_ROOT")"
-done
-if [[ "$REPO_ROOT" == "/" ]]; then
-  # Fallback if .git not found (e.g. shallow export or unusual layout)
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-fi
+# The checkout this script runs from (resolve_script_repo_root, lib/dev_tree.sh).
+REPO_ROOT="$(resolve_script_repo_root "$SCRIPT_DIR" "$SCRIPT_DIR/../../..")"
 KANBAN_VERSION="$(get_kanban_version "$KANBAN_ROOT_VAL" "$REPO_ROOT" "${LAST_RELEASED:-}")"
 
 # --- RC opened-time ---

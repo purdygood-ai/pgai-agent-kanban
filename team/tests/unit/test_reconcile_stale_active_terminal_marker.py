@@ -318,12 +318,12 @@ def test_done_task_with_absent_record_is_corrected_to_x(tmp_path: pathlib.Path) 
     assert _field(before_state_text, "Summary") == _field(status_text, "Summary"), "no other section may change"
 
     log_text = _read(log_file)
-    assert re.search(rf"stale-active: {re.escape(task_id)} is DONE .*corrected marker \[A\] -> \[x\]", log_text), (
-        f"the log must name the task and the correction\n{log_text}"
-    )
-    assert "has active process, keeping [A]" not in log_text, (
-        f"an absent record must never be reported as a live process for a terminal task\n{log_text}"
-    )
+    assert re.search(
+        rf"stale-active: {re.escape(task_id)} is DONE .*corrected marker \[A\] -> \[x\]", log_text
+    ), f"the log must name the task and the correction\n{log_text}"
+    assert (
+        "has active process, keeping [A]" not in log_text
+    ), f"an absent record must never be reported as a live process for a terminal task\n{log_text}"
     # Never escalated through the orphan path: no zero-progress record.
     assert _zp_count(status_text) is None, f"a terminal task must not enter the zero-progress path\n{status_text}"
 
@@ -354,7 +354,9 @@ def test_done_task_with_dead_pid_record_is_corrected_not_reset(tmp_path: pathlib
     assert _marker_for_task(queue_text, task_id) == "x", f"marker must read [x], not [ ]\n{queue_text}"
     assert _zp_count(status_text) is None, f"a DONE task must not be counted as a zero-progress cycle\n{status_text}"
     log_text = _read(log_file)
-    assert "resetting to [ ]/BACKLOG" not in log_text, f"the orphan-reset branch must not run for a DONE task\n{log_text}"
+    assert (
+        "resetting to [ ]/BACKLOG" not in log_text
+    ), f"the orphan-reset branch must not run for a DONE task\n{log_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -434,20 +436,20 @@ def test_working_task_with_absent_record_is_reset_through_zero_progress_path(tmp
 
     status_text = _read(status_file)
     queue_text = _read(backlog_file)
-    assert _field(status_text, "State") == "BACKLOG", (
-        f"an orphaned WORKING task with no record must be reset, never kept forever\n{status_text}"
-    )
+    assert (
+        _field(status_text, "State") == "BACKLOG"
+    ), f"an orphaned WORKING task with no record must be reset, never kept forever\n{status_text}"
     _assert_state_and_marker_agree(status_text, queue_text, task_id)
     assert _zp_count(status_text) == "1", f"the reset must be counted so the cap bounds repeats\n{status_text}"
     assert _field(status_text, "Needs Human").lower() == "no", "one reset below the cap must not escalate"
 
     log_text = _read(log_file)
-    assert re.search(rf"stale-active: {re.escape(task_id)} has no liveness record at \S+{re.escape(task_id)}\.record", log_text), (
-        f"the decision must be logged naming the absent record path\n{log_text}"
-    )
-    assert "has active process, keeping [A]" not in log_text, (
-        f"an absent record must not be reported as a live process\n{log_text}"
-    )
+    assert re.search(
+        rf"stale-active: {re.escape(task_id)} has no liveness record at \S+{re.escape(task_id)}\.record", log_text
+    ), f"the decision must be logged naming the absent record path\n{log_text}"
+    assert (
+        "has active process, keeping [A]" not in log_text
+    ), f"an absent record must not be reported as a live process\n{log_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -557,7 +559,7 @@ def _init_dev_tree(dev_tree: pathlib.Path, rc_branch: str) -> None:
 
 def _registered_worktree_paths(dev_tree: pathlib.Path) -> list[str]:
     result = _git(dev_tree, "worktree", "list", "--porcelain")
-    return [line[len("worktree "):] for line in result.stdout.splitlines() if line.startswith("worktree ")]
+    return [line[len("worktree ") :] for line in result.stdout.splitlines() if line.startswith("worktree ")]
 
 
 def test_terminal_worktree_sweep_corrects_marker_in_same_pass(tmp_path: pathlib.Path) -> None:
@@ -588,7 +590,9 @@ def test_terminal_worktree_sweep_corrects_marker_in_same_pass(tmp_path: pathlib.
 
     remaining = _registered_worktree_paths(dev_tree)
     assert not any(own_task in p for p in remaining), f"own task's worktree must be torn down; found {remaining}"
-    assert not any(other_task in p for p in remaining), f"other task's worktree must be torn down too; found {remaining}"
+    assert not any(
+        other_task in p for p in remaining
+    ), f"other task's worktree must be torn down too; found {remaining}"
 
     status_text = _read(own_status)
     queue_text = _read(backlog_file)
@@ -597,9 +601,11 @@ def test_terminal_worktree_sweep_corrects_marker_in_same_pass(tmp_path: pathlib.
     _assert_state_and_marker_agree(status_text, queue_text, own_task)
     assert other_task not in queue_text and queue_text != before_queue, "only the own-queue entry changes"
     log_text = _read(log_file)
-    assert re.search(rf"reconcile-terminal-worktrees: {re.escape(own_task)} is DONE .*\[A\] -> \[x\]", log_text), log_text
-    assert f"reconcile-terminal-worktrees: {other_task} is DONE in status.md; corrected" not in log_text, (
-        f"a task absent from this agent's queue must not be reported as corrected\n{log_text}"
-    )
+    assert re.search(
+        rf"reconcile-terminal-worktrees: {re.escape(own_task)} is DONE .*\[A\] -> \[x\]", log_text
+    ), log_text
+    assert (
+        f"reconcile-terminal-worktrees: {other_task} is DONE in status.md; corrected" not in log_text
+    ), f"a task absent from this agent's queue must not be reported as corrected\n{log_text}"
     # Housekeeping still happens after a successful teardown.
     assert not _record_path(tmp_path, own_task).exists()

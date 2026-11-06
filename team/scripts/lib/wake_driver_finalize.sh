@@ -94,8 +94,8 @@
 # the per-RC rollup when this task's tokens.json lands after that rollup
 # was written), log() (wake_bootstrap.sh) — all sourced before this file's
 # function is called. pp_run_ops.sh, atomic_write.sh, block_record.sh,
-# md_field.sh (read_md_field), wake_task_budget.sh (the budget-stop
-# requeue) and wake_agent_block_scan.sh (reclassify_agent_unclassified_block,
+# md_field.sh (read_md_field), wake_task_budget.sh (the budget-stop and
+# timeout requeues) and wake_agent_block_scan.sh (reclassify_agent_unclassified_block,
 # the transient check of an agent's own catch-all block) are self-sourced
 # when the caller has not loaded them: the ## Model
 # read and ## Summary append are pgai_agent_kanban.task_status calls (read --raw,
@@ -310,7 +310,8 @@ _wd_provider_group_wait() {
 #
 # Reads (dynamic scope): _provider_pgid _provider_deadline_epoch
 # _provider_group_sigkilled _task_killed task_id KILL_GRACE_SECONDS and
-# _provider_timeout_seconds (the armed limit; falls back to MAX_TASK_SECONDS).
+# _provider_timeout_seconds (the armed limit; falls back to
+# wd_configured_max_task_seconds, wake_task_budget.sh).
 # No-op when _provider_pgid is empty (armed limit 0: foreground, no group). Returns 0.
 # ---------------------------------------------------------------------------
 wd_drain_provider_process_group() {
@@ -320,7 +321,7 @@ wd_drain_provider_process_group() {
 
   _wd_provider_group_gone_line() {
     if [[ "${_task_killed:-false}" == "true" && -n "${_provider_deadline_epoch:-}" ]]; then
-      log "task ${task_id}: provider process group ${_pg} gone $(( $(date +%s) - _provider_deadline_epoch ))s after the ${_provider_timeout_seconds:-${MAX_TASK_SECONDS}}s deadline; finalizing"
+      log "task ${task_id}: provider process group ${_pg} gone $(( $(date +%s) - _provider_deadline_epoch ))s after the ${_provider_timeout_seconds:-$(wd_configured_max_task_seconds)}s deadline; finalizing"
     else
       log "task ${task_id}: provider process group ${_pg} gone; finalizing"
     fi
@@ -344,7 +345,7 @@ wd_drain_provider_process_group() {
 }
 
 wd_finalize_task() {
-  local final_state
+  local final_state _max_task_cfg; _max_task_cfg="$(wd_configured_max_task_seconds)"
 
   # --- Provider process-group drain: nothing below runs while the provider's
   # group has a live member (its header above); then the exit trap forgets it ---
@@ -352,14 +353,20 @@ wd_finalize_task() {
 
   # --- Per-task timeout kill detection (the watchdog fired) --- A kill at a
   # limit the remaining project/batch budget armed is requeued (wake_task_budget.sh);
-  # one at max_task_seconds gets a BLOCKED reason an operator tells from a crash.
+  # one at max_task_seconds (unset: its registry default) after committed work is requeued on its
+  # feature branch while the requeue budget allows; otherwise a BLOCKED reason an operator tells from a crash.
   if [[ "${_task_killed}" == "true" ]] \
-      && ! requeue_after_budget_stop "$task_id" "$task_status" "${LOG_FILE:-}" "${_provider_timeout_seconds:-}" "${MAX_TASK_SECONDS:-0}"; then
-    log "task ${task_id}: per-task timeout expired (${_provider_timeout_seconds:-${MAX_TASK_SECONDS}}s); process killed — marking BLOCKED"
-    block_task_with_record "$task_id" "$task_status" per_task_timeout "$(block_record_owner_role "$task_status" "${role:-}" "$SUBAGENT")" \
-      "exceeded max_task_seconds (${_provider_timeout_seconds:-${MAX_TASK_SECONDS}}s effective per-task limit; configured max_task_seconds=${MAX_TASK_SECONDS}s). Agent was still running after the hard timeout. See ${LOG_FILE} for execution log." \
-      "$(block_record_evidence --worktree "${_task_worktree_path:-}" --repo "${_canonical_dev_tree_path:-}" --branch "${_task_feature_branch:-}" \
-          --source "${_task_source_branch:-}" --task-dir "$task_dir" --diag-log "${LOG_FILE:-}")" "timeout_s=${_provider_timeout_seconds:-${MAX_TASK_SECONDS}}" || true
+      && ! requeue_after_budget_stop "$task_id" "$task_status" "${LOG_FILE:-}" "${_provider_timeout_seconds:-}" "${_max_task_cfg}"; then
+    local _killed_at="${_provider_timeout_seconds:-${_max_task_cfg}}" _timeout_owner="" _timeout_evidence=""
+    _timeout_owner="$(block_record_owner_role "$task_status" "${role:-}" "$SUBAGENT")" || true
+    _timeout_evidence="$(block_record_evidence --worktree "${_task_worktree_path:-}" --repo "${_canonical_dev_tree_path:-}" --branch "${_task_feature_branch:-}" \
+        --source "${_task_source_branch:-}" --task-dir "$task_dir" --diag-log "${LOG_FILE:-}")" || true
+    if ! requeue_after_timeout_with_commits "$task_id" "$task_status" "${LOG_FILE:-}" "$_killed_at" "$_timeout_owner" "$_timeout_evidence"; then
+      log "task ${task_id}: per-task timeout expired (${_killed_at}s); process killed — marking BLOCKED"
+      block_task_with_record "$task_id" "$task_status" per_task_timeout "$_timeout_owner" \
+        "exceeded max_task_seconds (${_killed_at}s effective per-task limit; configured max_task_seconds=${_max_task_cfg}s). Agent was still running after the hard timeout. See ${LOG_FILE} for execution log." \
+        "$_timeout_evidence" "timeout_s=${_killed_at}" || true
+    fi
   fi  # Either way, fall through to the post-task path (sweep, teardown, marker): nothing leaks.
 
   # --- Restore canonical PGAI_DEV_TREE_PATH after TESTER task ---

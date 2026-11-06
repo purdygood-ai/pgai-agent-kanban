@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from pgai_agent_kanban.lib.ledger_filename_contract import ledger_filename_re
 from pgai_agent_kanban.lib.palette import ansi_code

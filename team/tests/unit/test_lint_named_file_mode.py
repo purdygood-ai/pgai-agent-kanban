@@ -68,9 +68,7 @@ _SKIP_GATE_HANG_BACKSTOP_SECONDS = 900
 
 
 def _import_scan_module():
-    spec = importlib.util.spec_from_file_location(
-        "skip_bug_citation_scan_named_files_under_test", _SCAN_MODULE_PATH
-    )
+    spec = importlib.util.spec_from_file_location("skip_bug_citation_scan_named_files_under_test", _SCAN_MODULE_PATH)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_SCAN_MODULE_PATH}")
     mod = importlib.util.module_from_spec(spec)
@@ -98,9 +96,7 @@ AP7_SOURCE = (
     "import pathlib\n"
     "import subprocess\n"
     "\n"
-    "_HERE = pathlib.Path(__file__).parent\n"
-    + _GOLDEN_MARKER_LINE
-    + "\n"
+    "_HERE = pathlib.Path(__file__).parent\n" + _GOLDEN_MARKER_LINE + "\n"
     "\n"
     "def test_capture_matches_committed_surface():\n"
     + _INHERITED_ENV_LINE
@@ -108,10 +104,7 @@ AP7_SOURCE = (
 )
 AP7_ENV_LINENO = AP7_SOURCE.splitlines().index(_INHERITED_ENV_LINE.rstrip("\n")) + 1
 
-CLEAN_SOURCE = (
-    "def test_addition_is_commutative():\n"
-    "    assert 1 + 2 == 2 + 1\n"
-)
+CLEAN_SOURCE = "def test_addition_is_commutative():\n" "    assert 1 + 2 == 2 + 1\n"
 
 PLACEHOLDER_SKIP_SOURCE = (
     "import pytest\n"
@@ -132,17 +125,10 @@ UNFILED_CITATION_SOURCE = (
 )
 
 FILED_CITATION_SOURCE = (
-    "import pytest\n"
-    "\n"
-    "\n"
-    "def test_waits_on_filed_followup():\n"
-    '    pytest.skip("BUG-9872 pending fix")\n'
+    "import pytest\n" "\n" "\n" "def test_waits_on_filed_followup():\n" '    pytest.skip("BUG-9872 pending fix")\n'
 )
 
-SHELL_UNFILED_CITATION_SOURCE = (
-    "#!/usr/bin/env bash\n"
-    "# SKIP: BUG-9873 pending fix\n"
-)
+SHELL_UNFILED_CITATION_SOURCE = "#!/usr/bin/env bash\n" "# SKIP: BUG-9873 pending fix\n"
 
 
 def _write(path: Path, text: str) -> Path:
@@ -176,8 +162,7 @@ def _run_skip_gate(tmp_path: Path, bugs_dir: Path, *args: str, cwd: Path | None 
     assert result.returncode not in killed_for_cpu, (
         f"lint_skip_bug_gate.sh used more than {_SKIP_GATE_CPU_SECONDS} CPU "
         f"seconds (exit {result.returncode}, SIGXCPU) for args {list(args)}; "
-        "a --files run normally needs well under one.\n"
-        + result.stdout + result.stderr
+        "a --files run normally needs well under one.\n" + result.stdout + result.stderr
     )
     return result
 
@@ -230,11 +215,7 @@ def test_anti_pattern_lint_named_mode_walks_no_tree_and_scans_no_runtime_scripts
     result = _run_ap_lint(tmp_path, "--files", str(clean), "--verbose")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    scanned = [
-        line.split("scanning: ", 1)[1]
-        for line in result.stdout.splitlines()
-        if "scanning: " in line
-    ]
+    scanned = [line.split("scanning: ", 1)[1] for line in result.stdout.splitlines() if "scanning: " in line]
     assert scanned == [str(clean.resolve())]
     assert "scanning runtime scripts" not in result.stdout
     assert "scanning tests " not in result.stdout
@@ -276,9 +257,7 @@ def test_anti_pattern_lint_files_with_tests_dir_is_a_usage_error(
 ) -> None:
     clean = _write(tmp_path / "tests" / "test_clean.py", CLEAN_SOURCE)
 
-    result = _run_ap_lint(
-        tmp_path, "--files", str(clean), "--tests-dir", str(tmp_path / "tests")
-    )
+    result = _run_ap_lint(tmp_path, "--files", str(clean), "--tests-dir", str(tmp_path / "tests"))
 
     assert result.returncode == 2
     assert "--files cannot be combined" in result.stderr
@@ -344,8 +323,13 @@ def test_skip_gate_writes_one_finding_per_bad_citation_and_exits_zero(tmp_path: 
     findings_file = tmp_path / "out" / "skip_gate.json"
 
     result = _run_skip_gate(
-        tmp_path, bugs_dir, "--files", str(placeholder), str(unfiled),
-        "--findings-file", str(findings_file),
+        tmp_path,
+        bugs_dir,
+        "--files",
+        str(placeholder),
+        str(unfiled),
+        "--findings-file",
+        str(findings_file),
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
@@ -356,7 +340,8 @@ def test_skip_gate_writes_one_finding_per_bad_citation_and_exits_zero(tmp_path: 
     by_kind = {f["kind"]: f for f in findings}
     assert len(findings) == 2 and set(by_kind) == {"placeholder-citation", "unfiled-citation"}, findings
     assert (by_kind["placeholder-citation"]["file"], by_kind["placeholder-citation"]["line"]) == (
-        str(placeholder), 5,
+        str(placeholder),
+        5,
     )
     assert (by_kind["unfiled-citation"]["file"], by_kind["unfiled-citation"]["line"]) == (str(unfiled), 5)
     assert by_kind["unfiled-citation"]["bug_id"] == "BUG-9871"
@@ -371,14 +356,10 @@ def test_skip_gate_clean_named_file_writes_an_empty_findings_file(tmp_path: Path
     bugs_dir = _bugs_dir_with_filed_citation(tmp_path)
     findings_file = tmp_path / "out" / "skip_gate.json"
 
-    result = _run_skip_gate(
-        tmp_path, bugs_dir, "--files", str(filed), "--findings-file", str(findings_file)
-    )
+    result = _run_skip_gate(tmp_path, bugs_dir, "--files", str(filed), "--findings-file", str(findings_file))
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(findings_file.read_text(encoding="utf-8")) == []
-
-
 
 
 def test_skip_gate_reports_placeholder_in_named_file_only(tmp_path: Path) -> None:
@@ -438,9 +419,7 @@ def test_skip_gate_unfiled_citation_names_each_citing_file_and_line(tmp_path: Pa
     shell = _write(tests_dir / "skip_case.sh", SHELL_UNFILED_CITATION_SOURCE)
     bugs_dir = _bugs_dir_with_filed_citation(tmp_path)
 
-    result = _run_skip_gate(
-        tmp_path, bugs_dir, "--files", str(first), str(second), str(shell)
-    )
+    result = _run_skip_gate(tmp_path, bugs_dir, "--files", str(first), str(second), str(shell))
 
     assert result.returncode == 0, result.stdout + result.stderr
     # One finding per missing ID, each followed by every skip that cites it.
@@ -536,8 +515,7 @@ def test_citation_scan_cli_files_mode_rejects_missing_path(tmp_path: Path) -> No
 
     result = run_bash(
         tmp_path,
-        f"python3 {shlex.quote(str(_SCAN_MODULE_PATH))} --mode citation "
-        f"--files {shlex.quote(str(missing))}",
+        f"python3 {shlex.quote(str(_SCAN_MODULE_PATH))} --mode citation " f"--files {shlex.quote(str(missing))}",
     )
 
     assert result.returncode == 2

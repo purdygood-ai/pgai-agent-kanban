@@ -85,10 +85,9 @@ class TestGuardVerdictUnderStrictMode:
         result = run_bash(tmp_path, _PRELUDE + _guard_call(scan_file, "discovery_step_bugs"))
 
         assert result.returncode == 0, _diagnostic(result)
-        assert result.stdout.strip() == "accepted", (
-            "a scan output whose every line is an absolute path must pass the "
-            "guard\n" + _diagnostic(result)
-        )
+        assert (
+            result.stdout.strip() == "accepted"
+        ), "a scan output whose every line is an absolute path must pass the " "guard\n" + _diagnostic(result)
         assert "rejected non-path line" not in result.stderr, _diagnostic(result)
         assert "skipping bundle" not in result.stderr, _diagnostic(result)
 
@@ -96,23 +95,17 @@ class TestGuardVerdictUnderStrictMode:
         stray = "WARNING: something upstream echoed this"
         scan_file = _write_scan(tmp_path, stray)
 
-        result = run_bash(
-            tmp_path, _PRELUDE + _guard_call(scan_file, "discovery_step_priority")
-        )
+        result = run_bash(tmp_path, _PRELUDE + _guard_call(scan_file, "discovery_step_priority"))
 
         assert result.returncode == 0, _diagnostic(result)
-        assert result.stdout.strip() == "rejected", (
-            "a scan output with no line starting with '/' must be refused\n"
-            + _diagnostic(result)
-        )
         assert (
-            "discovery_step_priority: no valid item paths after filtering; skipping bundle"
-            in result.stderr
+            result.stdout.strip() == "rejected"
+        ), "a scan output with no line starting with '/' must be refused\n" + _diagnostic(result)
+        assert (
+            "discovery_step_priority: no valid item paths after filtering; skipping bundle" in result.stderr
         ), _diagnostic(result)
         assert "1 non-path line(s)" in result.stderr, _diagnostic(result)
-        assert f"discovery_step_priority: rejected non-path line: '{stray}'" in result.stderr, (
-            _diagnostic(result)
-        )
+        assert f"discovery_step_priority: rejected non-path line: '{stray}'" in result.stderr, _diagnostic(result)
 
     def test_guard_returns_one_when_called_bare_under_errexit(self, tmp_path):
         # Outside an `if`, errexit is live inside the function body: the
@@ -171,14 +164,10 @@ def _reader_exits_first_shims(fifo: pathlib.Path) -> str:
 
 
 class TestGuardVerdictIndependentOfWriteScheduling:
-    def test_all_path_input_is_accepted_when_the_reader_exits_before_the_writer_finishes(
-        self, tmp_path
-    ):
+    def test_all_path_input_is_accepted_when_the_reader_exits_before_the_writer_finishes(self, tmp_path):
         scan_file = _write_scan(tmp_path, _TWO_PATHS)
         fifo = tmp_path / "handshake.fifo"
-        script = _PRELUDE + _reader_exits_first_shims(fifo) + _guard_call(
-            scan_file, "discovery_step_bugs"
-        )
+        script = _PRELUDE + _reader_exits_first_shims(fifo) + _guard_call(scan_file, "discovery_step_bugs")
 
         result = run_bash(tmp_path, script)
 
@@ -198,10 +187,7 @@ class TestGuardVerdictIndependentOfWriteScheduling:
         # its match to SIGPIPE under them, every run.
         fifo = tmp_path / "handshake.fifo"
         two_paths_ansi_c = _TWO_PATHS.replace("\n", "\\n")
-        script = (
-            "set -euo pipefail\n"
-            + _reader_exits_first_shims(fifo)
-            + textwrap.dedent(f"""\
+        script = "set -euo pipefail\n" + _reader_exits_first_shims(fifo) + textwrap.dedent(f"""\
                 _scan=$'{two_paths_ansi_c}'
                 if printf '%s\\n' "$_scan" | grep -q '^/'; then
                     echo "matched"
@@ -209,7 +195,6 @@ class TestGuardVerdictIndependentOfWriteScheduling:
                     echo "lost PIPESTATUS=${{PIPESTATUS[*]}}"
                 fi
                 """)
-        )
 
         result = run_bash(tmp_path, script)
 

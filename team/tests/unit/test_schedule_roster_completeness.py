@@ -3,7 +3,7 @@ test_schedule_roster_completeness.py
 =====================================
 Regression coverage locking in a fixture-driven guarantee that the two
 next-fire schedule homes -- next-cron-firings.sh
-(the window-4 pane) and show-multi.sh --mode header's single-project
+(the drill-window CRON pane) and show-multi.sh --mode header's single-project
 delegate, show-header.sh (the window-0 header block) -- never lose a
 roster row without saying so.
 
@@ -56,8 +56,8 @@ FIXTURE STRATEGY
   straight through to the real binary. It exists so INT/STR
   classification and marker/budget arithmetic are reproducible for the
   presence- and count-based assertions elsewhere in this module -- it is
-  NOT how window-4's row order is verified (see next paragraph).
-- **Window-4 roster order is verified two ways, neither of them a clock
+  NOT how the drill-window CRON pane's row order is verified (see next paragraph).
+- **CRON-pane roster order is verified two ways, neither of them a clock
   trick that makes a soonest-first sort coincidentally look right**:
   `adversarial_now_bin` fixes "now" to a within-the-minute second (30)
   chosen to be as far as possible from every `--sleep=N` boundary
@@ -97,7 +97,7 @@ ACCEPTANCE CRITERIA COVERED
   1. TestFullRosterRendersEveryRow -- the current seven-entry roster
      (pm/coder/writer/tester/cm/overwatch/cleanup) renders every entry in
      both homes, pm first in both, at default (unqueryable) geometry --
-     never a "+N more" marker when the whole roster fits. Window-4's
+     never a "+N more" marker when the whole roster fits. The CRON pane's
      pm-first assertion is checked twice: once at an adversarial clock
      instant that would defeat a soonest-first sort (`adversarial_now_bin`),
      and once against the live wall clock across a real 2-second gap
@@ -234,9 +234,7 @@ _FULL_ROSTER_CRONTAB = (
     "0 3 * * 4 $KANBAN_ROOT/scripts/wake-batch.sh --agent=overwatch\n"
     "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
 )
-_EIGHT_ROW_CRONTAB = _FULL_ROSTER_CRONTAB + (
-    "0 5 * * 2 $KANBAN_ROOT/scripts/wake-batch.sh --agent=extra\n"
-)
+_EIGHT_ROW_CRONTAB = _FULL_ROSTER_CRONTAB + ("0 5 * * 2 $KANBAN_ROOT/scripts/wake-batch.sh --agent=extra\n")
 
 # Uppercase agent tokens, in fixed roster order (pm first, then crontab
 # order), independent of each entry's own remaining time or which clock
@@ -260,7 +258,7 @@ def _fixed_now_epoch() -> int:
     written; `epoch % 60` is timezone-independent (real-world UTC offsets
     are whole minutes), so this is reproducible on any host. Used only for
     the presence/count-based assertions in this module -- never to verify
-    window-4's row order (see `_adversarial_now_epoch`).
+    the drill-window CRON pane's row order (see `_adversarial_now_epoch`).
     """
     now = int(time.time())
     return now - (now % 60) + 59
@@ -364,7 +362,7 @@ def deterministic_now_bin(tmp_path: pathlib.Path, monkeypatch) -> int:
     Every renderer under test resolves "now" via exactly one `date +%s`
     call; fixing it makes the "in M:SS" / "now" labels and marker/budget
     arithmetic reproducible instead of a race against the wall clock. Not
-    used to verify window-4's row order -- see `adversarial_now_bin`.
+    used to verify the drill-window CRON pane's row order -- see `adversarial_now_bin`.
     """
     return _install_now_stub(tmp_path, monkeypatch, _fixed_now_epoch())
 
@@ -375,7 +373,7 @@ def adversarial_now_bin(tmp_path: pathlib.Path, monkeypatch) -> int:
     diverge sharply from roster order, and return that epoch.
 
     See `_adversarial_now_epoch` for the arithmetic. Used only by the
-    window-4 roster-order assertion, which must hold at a clock instant
+    drill-window CRON pane's roster-order assertion, which must hold at a clock instant
     that would defeat a soonest-first sort -- never at one tuned to agree
     with it.
     """
@@ -488,9 +486,7 @@ def _run(args: list) -> subprocess.CompletedProcess:
 
 
 def _run_next_cron_firings() -> subprocess.CompletedProcess:
-    return _run(
-        ["bash", str(_NEXT_CRON_FIRINGS_SH), "--kanban-root", str(_SYNTHETIC_KANBAN_ROOT)]
-    )
+    return _run(["bash", str(_NEXT_CRON_FIRINGS_SH), "--kanban-root", str(_SYNTHETIC_KANBAN_ROOT)])
 
 
 def _run_show_multi_header() -> subprocess.CompletedProcess:
@@ -506,7 +502,7 @@ def _run_show_multi_header() -> subprocess.CompletedProcess:
     )
 
 
-def _run_roster_count(cron_parser_lib: "str | pathlib.Path") -> subprocess.CompletedProcess:
+def _run_roster_count(cron_parser_lib: str | pathlib.Path) -> subprocess.CompletedProcess:
     """Source lib/dashboard_constants.sh and call
     dashboard_schedule_roster_count() directly with `cron_parser_lib` --
     exercised without any of create.sh's tmux/session machinery around
@@ -531,7 +527,7 @@ def _run_roster_count(cron_parser_lib: "str | pathlib.Path") -> subprocess.Compl
     )
 
 
-def _reserved_rows_constants() -> "tuple[int, int]":
+def _reserved_rows_constants() -> tuple[int, int]:
     """Read PGAI_SCHEDULE_HEADER_RESERVED_ROWS and
     PGAI_STATUS_BAND_RESERVED_ROWS directly from
     lib/dashboard_constants.sh -- never hardcoded here, so a future edit to
@@ -576,8 +572,8 @@ def _run_print_schedule_floors() -> subprocess.CompletedProcess:
     )
 
 
-def _parse_schedule_floors(stdout: str) -> "dict[str, int]":
-    values: "dict[str, int]" = {}
+def _parse_schedule_floors(stdout: str) -> dict[str, int]:
+    values: dict[str, int] = {}
     for line in stdout.splitlines():
         if "=" not in line:
             continue
@@ -593,7 +589,7 @@ def _parse_schedule_floors(stdout: str) -> "dict[str, int]":
 _MARKER_RE = re.compile(r"\+(\d+)\s+more")
 
 
-def _marker_count(stdout: str) -> "int | None":
+def _marker_count(stdout: str) -> int | None:
     m = _MARKER_RE.search(stdout)
     return int(m.group(1)) if m else None
 
@@ -687,9 +683,7 @@ _header_row_render_order = _entry_render_order
 
 
 class TestFullRosterRendersEveryRow:
-    def test_next_cron_firings_renders_seven_rows_pm_first(
-        self, adversarial_now_bin
-    ) -> None:
+    def test_next_cron_firings_renders_seven_rows_pm_first(self, adversarial_now_bin) -> None:
         """Roster order holds at a clock instant a soonest-first sort
         would render as [TESTER, CM, PM, CODER, WRITER] (see
         `_adversarial_now_epoch`) -- this only passes because the
@@ -705,9 +699,7 @@ class TestFullRosterRendersEveryRow:
             f"expected all seven rows to RENDER in fixed roster order "
             f"{_CRON_ROW_ORDER}, got {rendered}\n{_diagnostic(result)}"
         )
-        assert _marker_count(stdout) is None, (
-            f"no overflow marker expected when every row fits\n{_diagnostic(result)}"
-        )
+        assert _marker_count(stdout) is None, f"no overflow marker expected when every row fits\n{_diagnostic(result)}"
 
     def test_next_cron_firings_pm_first_stable_across_real_time(self) -> None:
         """The direct behavioral regression test: no clock stub at all
@@ -743,9 +735,7 @@ class TestFullRosterRendersEveryRow:
             f"{_diagnostic(first)}\nsecond run:\n{_diagnostic(second)}"
         )
 
-    def test_show_multi_header_renders_seven_entries_pm_first(
-        self, deterministic_now_bin
-    ) -> None:
+    def test_show_multi_header_renders_seven_entries_pm_first(self, deterministic_now_bin) -> None:
         _install_crontab(_FULL_ROSTER_CRONTAB)
         result = _run_show_multi_header()
         assert result.returncode == 0, _diagnostic(result)
@@ -756,9 +746,7 @@ class TestFullRosterRendersEveryRow:
             f"expected all seven roster entries to RENDER in crontab order "
             f"{_HEADER_ROW_ORDER}, got {rendered}\n{_diagnostic(result)}"
         )
-        assert _marker_count(stdout) is None, (
-            f"no overflow marker expected when every row fits\n{_diagnostic(result)}"
-        )
+        assert _marker_count(stdout) is None, f"no overflow marker expected when every row fits\n{_diagnostic(result)}"
 
 
 # ---------------------------------------------------------------------------
@@ -792,16 +780,13 @@ class TestBandPacksIntoTwoRows:
 
         shown = _shown_cron_rows(stdout, _CRON_ROW_ORDER)
         assert shown == _CRON_ROW_ORDER, (
-            f"expected every roster entry to render at a moderate pane width; "
-            f"got {shown}\n{_diagnostic(result)}"
+            f"expected every roster entry to render at a moderate pane width; " f"got {shown}\n{_diagnostic(result)}"
         )
         assert _marker_count(stdout) is None, (
             f"a roster that fits within the band's row ceiling must never show "
             f"an overflow marker\n{_diagnostic(result)}"
         )
-        roster_line_count = sum(
-            1 for line in stdout.splitlines() if line.strip() and "===" not in line
-        )
+        roster_line_count = sum(1 for line in stdout.splitlines() if line.strip() and "===" not in line)
         assert roster_line_count == 2, (
             f"expected the band to use exactly two rows at this width; got "
             f"{roster_line_count} non-empty roster line(s)\n{_diagnostic(result)}"
@@ -818,8 +803,7 @@ class TestBandPacksIntoTwoRows:
 
         shown = _shown_header_rows(stdout, _HEADER_ROW_ORDER)
         assert shown == _HEADER_ROW_ORDER, (
-            f"expected every roster entry to render at a moderate pane width; "
-            f"got {shown}\n{_diagnostic(result)}"
+            f"expected every roster entry to render at a moderate pane width; " f"got {shown}\n{_diagnostic(result)}"
         )
         assert _marker_count(stdout) is None, (
             f"a roster that fits within the band's row ceiling must never show "
@@ -835,9 +819,7 @@ class TestBandPacksIntoTwoRows:
 
 
 class TestEighthEntryNeverSilentlyLost:
-    def test_next_cron_firings_eighth_entry_rendered_when_it_fits(
-        self, deterministic_now_bin
-    ) -> None:
+    def test_next_cron_firings_eighth_entry_rendered_when_it_fits(self, deterministic_now_bin) -> None:
         _install_crontab(_EIGHT_ROW_CRONTAB)
         result = _run_next_cron_firings()
         assert result.returncode == 0, _diagnostic(result)
@@ -866,8 +848,7 @@ class TestEighthEntryNeverSilentlyLost:
         shown = _shown_cron_rows(stdout, _CRON_ROW_ORDER_EIGHT)
         dropped = _marker_count(stdout)
         assert dropped is not None, (
-            f"a roster too tall for the pane must narrate the drop with a "
-            f"'+N more' marker\n{_diagnostic(result)}"
+            f"a roster too tall for the pane must narrate the drop with a " f"'+N more' marker\n{_diagnostic(result)}"
         )
         assert "EXTRA" not in shown, (
             f"this scenario is only meaningful if EXTRA was actually dropped "
@@ -879,9 +860,7 @@ class TestEighthEntryNeverSilentlyLost:
             f"visible or counted, never silently lost\n{_diagnostic(result)}"
         )
 
-    def test_show_multi_header_eighth_entry_rendered_when_it_fits(
-        self, deterministic_now_bin
-    ) -> None:
+    def test_show_multi_header_eighth_entry_rendered_when_it_fits(self, deterministic_now_bin) -> None:
         _install_crontab(_EIGHT_ROW_CRONTAB)
         result = _run_show_multi_header()
         assert result.returncode == 0, _diagnostic(result)
@@ -909,8 +888,7 @@ class TestEighthEntryNeverSilentlyLost:
         shown = _shown_header_rows(stdout, _HEADER_ROW_ORDER_EIGHT)
         dropped = _marker_count(stdout)
         assert dropped is not None, (
-            f"a roster too tall for the pane must narrate the drop with a "
-            f"'+N more' marker\n{_diagnostic(result)}"
+            f"a roster too tall for the pane must narrate the drop with a " f"'+N more' marker\n{_diagnostic(result)}"
         )
         assert "EXTRA" not in shown, (
             f"this scenario is only meaningful if EXTRA was actually dropped "
@@ -948,9 +926,7 @@ class TestShortViewportStillNarratesOverflow:
         )
         shown = _shown_cron_rows(stdout, _CRON_ROW_ORDER)
         assert shown == ["PM"], f"expected exactly one shown row (PM); got {shown}"
-        assert _marker_count(stdout) == 6, (
-            f"expected '+6 more' (7-row roster, 1 shown)\n{_diagnostic(result)}"
-        )
+        assert _marker_count(stdout) == 6, f"expected '+6 more' (7-row roster, 1 shown)\n{_diagnostic(result)}"
 
     def test_show_multi_header_short_pane_shows_first_row_and_marker(
         self, deterministic_now_bin, pane_height_bin, pane_width_bin
@@ -970,9 +946,7 @@ class TestShortViewportStillNarratesOverflow:
         )
         shown = _shown_header_rows(stdout, _HEADER_ROW_ORDER)
         assert shown == ["PM"], f"expected exactly one shown entry (PM); got {shown}"
-        assert _marker_count(stdout) == 6, (
-            f"expected '+6 more' (7-entry roster, 1 shown)\n{_diagnostic(result)}"
-        )
+        assert _marker_count(stdout) == 6, f"expected '+6 more' (7-entry roster, 1 shown)\n{_diagnostic(result)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1017,9 +991,7 @@ class TestRosterCountDegradesToZero:
         caller hands in does not exist."""
         _install_crontab(_FULL_ROSTER_CRONTAB)
         missing_lib = _CRON_PARSER_LIB.parent / "cron_parser_missing_for_test.py"
-        assert not missing_lib.exists(), (
-            f"fixture setup error: {missing_lib} unexpectedly exists"
-        )
+        assert not missing_lib.exists(), f"fixture setup error: {missing_lib} unexpectedly exists"
         result = _run_roster_count(missing_lib)
         assert result.returncode == 0, _diagnostic(result)
         assert result.stdout.strip() == "0", _diagnostic(result)
@@ -1062,8 +1034,7 @@ def _assert_floors_track_roster(result: subprocess.CompletedProcess, expected_ro
     assert floors["SCHED_LIST_H"] == roster_count + status_reserved + 1, _diagnostic(result)
     assert floors["SCHED_EVENT_MIN_H"] >= 5, _diagnostic(result)
     assert "SCHED_FIRINGS_MIN_H" not in floors, (
-        "the schedule window has two bands; no next-cron-firings.sh floor "
-        f"should be printed\n{_diagnostic(result)}"
+        "the schedule window has two bands; no next-cron-firings.sh floor " f"should be printed\n{_diagnostic(result)}"
     )
 
 

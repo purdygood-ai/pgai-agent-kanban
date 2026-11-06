@@ -32,9 +32,7 @@ from tests.unit.shell_harness import run_bash
 
 # Path to docker/entrypoint.sh, resolved from this test file's location.
 # team/tests/unit/test_entrypoint_workspace.py -> repo root is three levels up.
-_ENTRYPOINT_ABS = (
-    pathlib.Path(__file__).parent.parent.parent.parent / "docker" / "entrypoint.sh"
-).resolve()
+_ENTRYPOINT_ABS = (pathlib.Path(__file__).parent.parent.parent.parent / "docker" / "entrypoint.sh").resolve()
 
 
 def _isolated_home(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -77,8 +75,7 @@ def _install_shaped_root(tmp_path: pathlib.Path, name: str = "kanban-root") -> p
 def test_entrypoint_file_exists_in_repo() -> None:
     """docker/entrypoint.sh must exist at the expected path in the repo."""
     assert _ENTRYPOINT_ABS.exists(), (
-        f"docker/entrypoint.sh not found at {_ENTRYPOINT_ABS!s}. "
-        "This file must be committed to the repository."
+        f"docker/entrypoint.sh not found at {_ENTRYPOINT_ABS!s}. " "This file must be committed to the repository."
     )
 
 
@@ -86,9 +83,7 @@ def test_entrypoint_is_executable() -> None:
     """docker/entrypoint.sh must have executable permission."""
     file_stat = _ENTRYPOINT_ABS.stat()
     is_executable = bool(file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
-    assert is_executable, (
-        f"docker/entrypoint.sh is not executable; current mode: {oct(file_stat.st_mode)}"
-    )
+    assert is_executable, f"docker/entrypoint.sh is not executable; current mode: {oct(file_stat.st_mode)}"
 
 
 # ---------------------------------------------------------------------------
@@ -104,16 +99,13 @@ def test_unset_root_path_exits_one_naming_the_variable(tmp_path: pathlib.Path) -
     """
     result = run_bash(
         tmp_path,
-        f'unset PGAI_AGENT_KANBAN_ROOT_PATH; bash {_ENTRYPOINT_ABS!s} < /dev/null',
+        f"unset PGAI_AGENT_KANBAN_ROOT_PATH; bash {_ENTRYPOINT_ABS!s} < /dev/null",
     )
 
     assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 1; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, (
-        f"variable name not named in stderr:\n{result.stderr!r}"
-    )
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, f"variable name not named in stderr:\n{result.stderr!r}"
 
 
 def test_root_path_set_to_nonexistent_directory_exits_one_naming_it(
@@ -129,12 +121,9 @@ def test_root_path_set_to_nonexistent_directory_exits_one_naming_it(
     )
 
     assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 1; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert str(missing_root) in result.stderr, (
-        f"missing root path not named in stderr:\n{result.stderr!r}"
-    )
+    assert str(missing_root) in result.stderr, f"missing root path not named in stderr:\n{result.stderr!r}"
 
 
 def test_root_path_set_to_a_file_not_a_directory_exits_one(tmp_path: pathlib.Path) -> None:
@@ -149,12 +138,9 @@ def test_root_path_set_to_a_file_not_a_directory_exits_one(tmp_path: pathlib.Pat
     )
 
     assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 1; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert str(not_a_dir) in result.stderr, (
-        f"root path not named in stderr:\n{result.stderr!r}"
-    )
+    assert str(not_a_dir) in result.stderr, f"root path not named in stderr:\n{result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +168,7 @@ def test_valid_root_lands_the_shell_in_that_directory(tmp_path: pathlib.Path) ->
     )
 
     assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     printed_cwd = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
     assert printed_cwd == str(root), (
@@ -208,16 +193,13 @@ def test_valid_root_execs_a_login_shell(tmp_path: pathlib.Path) -> None:
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
             "HOME": str(_isolated_home(tmp_path)),
         },
-        stdin='shopt -q login_shell && echo IS_LOGIN_SHELL || echo NOT_LOGIN_SHELL\n',
+        stdin="shopt -q login_shell && echo IS_LOGIN_SHELL || echo NOT_LOGIN_SHELL\n",
     )
 
     assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert "IS_LOGIN_SHELL" in result.stdout, (
-        f"exec'd shell is not a login shell:\nstdout: {result.stdout!r}"
-    )
+    assert "IS_LOGIN_SHELL" in result.stdout, f"exec'd shell is not a login shell:\nstdout: {result.stdout!r}"
 
 
 def test_valid_root_replaces_the_process_not_a_subshell(tmp_path: pathlib.Path) -> None:
@@ -240,15 +222,14 @@ def test_valid_root_replaces_the_process_not_a_subshell(tmp_path: pathlib.Path) 
     )
 
     assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     parent_pid = next((l for l in lines if l.startswith("PARENT_PID=")), None)
     child_pid = next((l for l in lines if l.startswith("CHILD_PID=")), None)
-    assert parent_pid is not None and child_pid is not None, (
-        f"expected PARENT_PID and CHILD_PID markers in stdout:\n{result.stdout!r}"
-    )
+    assert (
+        parent_pid is not None and child_pid is not None
+    ), f"expected PARENT_PID and CHILD_PID markers in stdout:\n{result.stdout!r}"
     assert parent_pid.split("=", 1)[1] == child_pid.split("=", 1)[1], (
         "exec did not replace the process — the login shell has a different "
         f"PID than the shell that called entrypoint.sh: {parent_pid!r} vs {child_pid!r}"

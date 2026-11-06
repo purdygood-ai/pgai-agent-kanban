@@ -55,11 +55,28 @@ _CM_TASK = "CM-20260101-001-publish-draft"
 _WAKE_TIMEOUT_SECONDS = 180
 
 _LEAK_PREFIXES = (
-    "PGAI_", "PP_", "KANBAN_ROOT", "TEAM_ROOT", "CLAUDE_", "AI_AGENT", "STOP_FILE",
-    "TMPDIR", "MAX_TASK_SECONDS", "MAX_RUNTIME_SECONDS", "MAX_TASKS_PER_WAKE",
-    "MAX_PROJECT_SECONDS", "KILL_GRACE_SECONDS", "PAUSE_BETWEEN_TASKS",
-    "STOP_ON_BLOCKED", "AI_AUTH_MODE", "BASH_MAX_TIMEOUT_MS", "DASHBOARD_",
-    "PM_MAX_TASKS", "LOCK_WAIT_SECONDS", "LOCK_STARVATION_FIRINGS", "FX_",
+    "PGAI_",
+    "PP_",
+    "KANBAN_ROOT",
+    "TEAM_ROOT",
+    "CLAUDE_",
+    "AI_AGENT",
+    "STOP_FILE",
+    "TMPDIR",
+    "MAX_TASK_SECONDS",
+    "MAX_RUNTIME_SECONDS",
+    "MAX_TASKS_PER_WAKE",
+    "MAX_PROJECT_SECONDS",
+    "KILL_GRACE_SECONDS",
+    "PAUSE_BETWEEN_TASKS",
+    "STOP_ON_BLOCKED",
+    "AI_AUTH_MODE",
+    "BASH_MAX_TIMEOUT_MS",
+    "DASHBOARD_",
+    "PM_MAX_TASKS",
+    "LOCK_WAIT_SECONDS",
+    "LOCK_STARVATION_FIRINGS",
+    "FX_",
 )
 
 # Appended to the fixture copy of scripts/lib/wake_driver.sh.
@@ -82,11 +99,7 @@ pgai_lock_wait_pause() {
 
 
 def _clean_base_env() -> dict[str, str]:
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)
-    }
+    return {k: v for k, v in os.environ.items() if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)}
 
 
 def _build_root(tmp_path: pathlib.Path) -> pathlib.Path:
@@ -105,9 +118,7 @@ def _build_root(tmp_path: pathlib.Path) -> pathlib.Path:
         "[wake]\nmax_tasks_per_wake = 1\n",
         encoding="utf-8",
     )
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     (proj / "project.cfg").write_text(
         f"[project]\nproject_name = {_PROJECT}\nworkflow_type = document\n", encoding="utf-8"
     )
@@ -126,9 +137,7 @@ def _build_root(tmp_path: pathlib.Path) -> pathlib.Path:
         f"# Status\n\n## Task\n{_CM_TASK}\n\n## State\nBACKLOG\n\n## Blockers\nnone\n",
         encoding="utf-8",
     )
-    (queues / "cm_backlog.md").write_text(
-        f"# cm backlog\n\n- [ ] {_CM_TASK} — publish the draft\n", encoding="utf-8"
-    )
+    (queues / "cm_backlog.md").write_text(f"# cm backlog\n\n- [ ] {_CM_TASK} — publish the draft\n", encoding="utf-8")
     (root / "logs").mkdir()
     (root / "locks").mkdir()
     for tree in ("scripts", "pgai_agent_kanban", "workflows", "pm-agent", "config"):
@@ -171,8 +180,14 @@ class _PmChainHolder:
             self.proc.wait(timeout=5)
 
 
-def _run_wake(tmp_path: pathlib.Path, root: pathlib.Path, agent: str, holder: _PmChainHolder | None,
-              *, release_after: int | None = None) -> str:
+def _run_wake(
+    tmp_path: pathlib.Path,
+    root: pathlib.Path,
+    agent: str,
+    holder: _PmChainHolder | None,
+    *,
+    release_after: int | None = None,
+) -> str:
     install_claude_provider_stub(tmp_path / "stub-bin", tmp_path / "stub-control")
     env = _clean_base_env()
     env["PATH"] = f"{tmp_path / 'stub-bin'}{os.pathsep}{env.get('PATH', '')}"

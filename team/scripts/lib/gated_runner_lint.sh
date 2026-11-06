@@ -169,6 +169,19 @@
 #       and leaves the findings file, its .runid claim and the green ledger
 #       byte-identical. See "Help invocations" at the bottom of this file.
 #
+#   gated_runner_reject_unknown_arg <script-path> <arg> <example-command>
+#       Prints the four runners' unrecognized-argument refusal on stderr,
+#       naming <arg>, --help, and <example-command> as a corrected run.
+#       The caller exits 1 after it.
+#
+#   gated_runner_pytest_available
+#       Returns 0 when pytest runs (on PATH, or as python3 -m pytest).
+#
+#   gated_runner_report_pytest_missing <rerun-command> <what-cannot-run>
+#       Prints the four runners' pytest-missing diagnosis on stderr, with
+#       `pip install pytest` and <rerun-command> as the fix. The caller
+#       records its own finding, carries the census anchor and exits 2.
+#
 #   gated_runner_quarantine_marker_expression <quarantined:true|false>
 #   gated_runner_quote_argv <arg...>
 #       The `quarantine` marker selection both runners share: the pytest -m
@@ -213,6 +226,11 @@
 # Consumers (TESTER's "Lint Findings (non-blocking)" report section, or any
 # other automated reader) should treat "lint" and "severity" as the only
 # guaranteed keys and read the rest defensively.
+
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_GATED_RUNNER_LINT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _GATED_RUNNER_LINT_LIB_DIR=""
 
 # The findings JSON is built, split and written by gated_findings.py beside
 # this file (stdlib only, run by path like gated_runner_lanes.py), so a
@@ -489,7 +507,7 @@ gated_runner_clear_run_evidence() {
   local suite="${2:-}"
   if [[ -z "$temp_root" || ! "$suite" =~ ^(unit|integration)$ ]]; then
     local scripts_dir
-    scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    scripts_dir="$(cd "${_GATED_RUNNER_LINT_LIB_DIR}/.." && pwd)"
     # CONVERT: deleting nothing leaves the earlier run's files where they
     # were -- a stale-evidence risk, never a runtime failure -- so the
     # caller's run goes on. Fails closed: an unexpected scope removes nothing.
@@ -764,7 +782,7 @@ gated_runner_pytest_basetemp_cleanup() {
 gated_runner_tmux_socket_sweep() {
   if ! declare -F pp_run_ops >/dev/null 2>&1; then
     # shellcheck source=pp_run_ops.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh" 2>/dev/null || {
+    source "${_GATED_RUNNER_LINT_LIB_DIR}/pp_run_ops.sh" 2>/dev/null || {
       echo "[gated-runner] tmux_socket_sweep: skipped (pp_run_ops.sh not found beside gated_runner_lint.sh)"
       return 0
     }
@@ -893,6 +911,58 @@ gated_runner_argv_requests_help() {
     [[ "$arg" == "--help" || "$arg" == "-h" ]] && return 0
   done
   return 1
+}
+
+# ---------------------------------------------------------------------------
+# Argument and pytest refusals shared by the four runners
+# ---------------------------------------------------------------------------
+# gated_runner_reject_unknown_arg <script-path> <arg> <example-command>
+#   Partial remedy (docs/coding-standards.md "Gates prescribe, not just
+#   diagnose"): the offending argument is named deterministically, but which
+#   valid flag the operator meant is intent the runner cannot resolve, so
+#   --help is the next step. Prints only; the caller exits 1.
+gated_runner_reject_unknown_arg() {
+  local script="${1:-}" arg="${2:-}" example="${3:-}"
+  echo "FAIL: unrecognized argument '${arg}'." >&2
+  echo "" >&2
+  echo "Cause(s):" >&2
+  echo "  - '${arg}' does not match any flag this runner accepts." >&2
+  echo "" >&2
+  echo "To fix:" >&2
+  echo "  1. bash \"${script}\" --help          # list every accepted flag" >&2
+  echo "  2. Re-run with the corrected flag, e.g.: ${example}" >&2
+  echo "" >&2
+  echo "Rule: this runner accepts only the flags listed in its --help output; an" >&2
+  echo "unrecognized argument is rejected rather than silently ignored." >&2
+}
+
+# gated_runner_pytest_available
+#   Returns 0 when pytest can run: a pytest executable on PATH, or
+#   `python3 -m pytest --version` succeeding. 1 otherwise.
+gated_runner_pytest_available() {
+  command -v pytest >/dev/null 2>&1 && return 0
+  python3 -m pytest --version >/dev/null 2>&1
+}
+
+# gated_runner_report_pytest_missing <rerun-command> <what-cannot-run>
+#   Full remedy: pytest's absence has one universal, verbatim-runnable fix.
+#   Prints the diagnosis naming <what-cannot-run> (e.g. "the test suite") and
+#   <rerun-command> as the second step. Prints only; the caller records its
+#   finding and exits 2.
+gated_runner_report_pytest_missing() {
+  local rerun="${1:-}" what="${2:-the test suite}"
+  echo "FAIL: pytest is not installed in this Python environment." >&2
+  echo "" >&2
+  echo "Cause(s):" >&2
+  echo "  - no 'pytest' executable found on PATH" >&2
+  echo "  - 'python3 -m pytest --version' also failed (pytest not importable)" >&2
+  echo "" >&2
+  echo "To fix:" >&2
+  echo "  1. pip install pytest" >&2
+  echo "  2. ${rerun}" >&2
+  echo "" >&2
+  echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
+  echo "${what} without it." >&2
 }
 
 # ---------------------------------------------------------------------------

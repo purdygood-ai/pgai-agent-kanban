@@ -32,20 +32,52 @@ HOW TO USE
     sandbox.write_crontab("15 3 * * * /usr/local/bin/nightly-backup.sh\\n")
     result = sandbox.run_upgrade_phase2()
     assert result.returncode == 0, diagnostic(result)
+
+A test that builds its own minimal dev tree and copies
+``scripts/lib/subagent_deploy.sh`` into it calls
+``seed_provider_home_rule(<dev_tree>/team)`` as well, so the tree's
+``provider_home_dir`` and ``deploy_tree_current`` can run the provider-home
+rule and the deployed-copy comparator they ask of the package.
 """
 
 from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent  # team/
 REPO_ROOT = TEAM_DIR.parent
+
+# What scripts/lib/subagent_deploy.sh runs from its own tree: the
+# pp_run_ops.sh beside it, the module holding the provider-home rule
+# (provider_home_dir) and the deployed-copy comparator (deploy_tree_current,
+# which upgrade.sh's deposit and deploy_drift call); paths relative to team/.
+PROVIDER_HOME_RULE_FILES = (
+    "scripts/lib/pp_run_ops.sh",
+    "pgai_agent_kanban/__init__.py",
+    "pgai_agent_kanban/lib/__init__.py",
+    "pgai_agent_kanban/lib/provider_home.py",
+    "pgai_agent_kanban/lib/tree_compare.py",
+)
+
+
+def seed_provider_home_rule(team_dir: pathlib.Path) -> None:
+    """Copy ``PROVIDER_HOME_RULE_FILES`` from this tree into the synthetic
+    ``team/`` directory *team_dir*, so a copied subagent_deploy.sh there
+    resolves provider agent and skill directories, and compares deployed
+    trees, as the real tree does."""
+    for rel in PROVIDER_HOME_RULE_FILES:
+        dest = team_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(TEAM_DIR / rel, dest)
+
+
 UPGRADE_SCRIPT = TEAM_DIR / "scripts" / "upgrade.sh"
 INSTALL_CRONTAB_SCRIPT = TEAM_DIR / "scripts" / "install-crontab.sh"
 INSTALL_PSEUDOCRON_SCRIPT = TEAM_DIR / "scripts" / "install-pseudocron.sh"
@@ -83,10 +115,7 @@ esac
 
 def diagnostic(result: subprocess.CompletedProcess) -> str:
     """Render a subprocess result's own words for an assertion message."""
-    return (
-        f"exit code: {result.returncode}\n"
-        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-    )
+    return f"exit code: {result.returncode}\n" f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
 
 
 class UpgradeSandbox:
@@ -125,13 +154,9 @@ class UpgradeSandbox:
         self.crontab_shim = shim
 
         (self.root / "kanban.cfg").write_text("[paths]\n\n[release]\n", encoding="utf-8")
-        (self.root / "projects.cfg").write_text(
-            f"[project:{project_name}]\npriority=1\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\n", encoding="utf-8")
         self.project_cfg.parent.mkdir(parents=True, exist_ok=True)
-        self.project_cfg.write_text(
-            self.PROJECT_CFG.format(name=project_name), encoding="utf-8"
-        )
+        self.project_cfg.write_text(self.PROJECT_CFG.format(name=project_name), encoding="utf-8")
 
     # -- paths ---------------------------------------------------------------
 
@@ -152,7 +177,7 @@ class UpgradeSandbox:
     def write_crontab(self, text: str) -> None:
         self.crontab_file.write_text(text, encoding="utf-8")
 
-    def crontab_bytes(self) -> Optional[bytes]:
+    def crontab_bytes(self) -> bytes | None:
         """The fake crontab's bytes, or None when no crontab is installed."""
         if not self.crontab_file.exists():
             return None
@@ -160,7 +185,7 @@ class UpgradeSandbox:
 
     # -- running -------------------------------------------------------------
 
-    def env(self, extra_env: Optional[dict] = None) -> dict:
+    def env(self, extra_env: dict | None = None) -> dict:
         values = {
             "KANBAN_ROOT": str(self.root),
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
@@ -170,9 +195,7 @@ class UpgradeSandbox:
         }
         if extra_env:
             values.update(extra_env)
-        return build_scrubbed_env(
-            home_dir=self.home, extra_path_dirs=[self.shim_dir], extra_env=values
-        )
+        return build_scrubbed_env(home_dir=self.home, extra_path_dirs=[self.shim_dir], extra_env=values)
 
     def run(self, argv: Iterable[str], *, timeout: int = 300) -> subprocess.CompletedProcess:
         """Run *argv* in its own session from a cwd outside the repository."""

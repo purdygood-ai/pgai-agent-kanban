@@ -71,7 +71,11 @@ def test_pattern_bug_names_the_pattern_and_quotes_the_releases(tmp_path):
 def test_second_detection_cites_the_open_pattern_bug(tmp_path):
     bugs_dir = tmp_path / "bugs"
     first = _file(bugs_dir)
-    second = _file(bugs_dir, version="v1.5.0", raw_value="v1.2.0.md=NON-FUNCTIONAL, v1.3.0.md=NON-FUNCTIONAL, v1.4.0.md=NON-FUNCTIONAL")
+    second = _file(
+        bugs_dir,
+        version="v1.5.0",
+        raw_value="v1.2.0.md=NON-FUNCTIONAL, v1.3.0.md=NON-FUNCTIONAL, v1.4.0.md=NON-FUNCTIONAL",
+    )
 
     assert second.outcome == "duplicate"
     assert second.bug_id == first.bug_id

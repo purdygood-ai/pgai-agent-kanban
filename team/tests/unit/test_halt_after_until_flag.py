@@ -78,7 +78,7 @@ def _run(args: list[str], kanban_root: pathlib.Path, timeout: int = 15) -> subpr
 def _remedy(stderr: str) -> str:
     """The value of the ``remedy:`` line of a dual-channel refusal block."""
     line = next(line for line in stderr.splitlines() if line.startswith("remedy:"))
-    return line[len("remedy:"):].strip()
+    return line[len("remedy:") :].strip()
 
 
 def _spaced_root(tmp_path: pathlib.Path) -> pathlib.Path:

@@ -53,12 +53,14 @@ Test names describe behaviour under test, never bug/task IDs
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import shlex
 import subprocess
 import uuid
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Iterator
 
 import pytest
 
@@ -71,6 +73,8 @@ from tests.fixtures.process_progress import (
     pane_process_death,
     proc_cpu_ticks,
     proc_start_time,
+    processes_carrying_env,
+    reap_processes_carrying_env,
     require_procfs,
     wait_while_progressing,
 )
@@ -101,6 +105,11 @@ _STALL_VERDICT = "it is hung, not slow; this is not a verdict on pane survival"
 # arming; the bound is left only as a backstop for a pane that never arms.
 _ARM_STALL_BACKSTOP_SECONDS = 600
 
+# Set to the private socket name in the env every test subprocess inherits,
+# so it reaches the tmux server, every pane, and the status-bottom loop
+# create.sh starts outside tmux; teardown reaps every live process carrying it.
+_SOCKET_MARKER_ENV = "TEST_TMUX_PRIVATE_SOCKET"
+
 
 class PrivateTmux(NamedTuple):
     """A private, isolated tmux server plus the env every subprocess this
@@ -120,13 +129,27 @@ class PrivateTmux(NamedTuple):
         )
 
 
-@pytest.fixture
-def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
+def _stop_private_tmux(real_tmux: str, socket_name: str) -> None:
+    """Stop the private server, then reap every process still carrying its
+    socket marker: a pane child that ignored the hangup, or the
+    status-bottom loop create.sh backgrounds outside tmux, which only
+    notices the session is gone on its next wake and would otherwise
+    outlive the test's tmp_path."""
+    try:
+        subprocess.run([real_tmux, "-L", socket_name, "kill-server"], capture_output=True, timeout=10)
+    finally:
+        reap_processes_carrying_env(_SOCKET_MARKER_ENV, socket_name)
+
+
+@contextlib.contextmanager
+def _private_tmux_server(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
     """Isolates every tmux invocation onto a private-socket tmux server
     (tmux -L <private>) with no pre-existing session, so no test touches
     a tmux server it did not start. create.sh and kill.sh always invoke
     the bare `tmux` word, so isolation is achieved with a PATH-prepended
-    wrapper resolving `tmux` to `<real-tmux-absolute-path> -L <private>`."""
+    wrapper resolving `tmux` to `<real-tmux-absolute-path> -L <private>`.
+    The env carries the socket marker, and leaving the block stops the
+    server and reaps every process that carries it (_stop_private_tmux)."""
     # Resolve without skipping yet: the skip decision below happens INSIDE
     # the try block so that, on a scrubbed PATH, this fixture's own finally
     # clause genuinely runs guard.teardown() as a real no-op (proving the
@@ -142,18 +165,25 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         wrapper = bin_dir / "tmux"
-        wrapper.write_text(
-            f"#!/usr/bin/env bash\nexec {shlex.quote(real_tmux)} -L {shlex.quote(socket_name)} \"$@\"\n"
-        )
+        wrapper.write_text(f'#!/usr/bin/env bash\nexec {shlex.quote(real_tmux)} -L {shlex.quote(socket_name)} "$@"\n')
         wrapper.chmod(0o755)
 
         env = os.environ.copy()
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env[_SOCKET_MARKER_ENV] = socket_name
 
         pt = PrivateTmux(real_tmux=real_tmux, socket_name=socket_name, env=env)
         yield pt
     finally:
-        teardown_private_tmux(guard, socket_name)
+        teardown_private_tmux(guard, socket_name, kill=lambda path: _stop_private_tmux(path, socket_name))
+
+
+@pytest.fixture
+def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
+    """A private tmux server for one test (_private_tmux_server); no process
+    started under it outlives the test's teardown."""
+    with _private_tmux_server(tmp_path) as server:
+        yield server
 
 
 def _count_panes(private_tmux: PrivateTmux) -> int | None:
@@ -166,9 +196,7 @@ def _count_panes(private_tmux: PrivateTmux) -> int | None:
     return len(listed.stdout.split()) if listed.returncode == 0 else None
 
 
-def _run_create_sh(
-    private_tmux: PrivateTmux, env: dict[str, str], session: str, work_dir: pathlib.Path
-) -> str:
+def _run_create_sh(private_tmux: PrivateTmux, env: dict[str, str], session: str, work_dir: pathlib.Path) -> str:
     """Run create.sh to completion and return its combined output. Waits
     for the process itself to exit -- however long a loaded host takes to
     build every window and arm every pane -- guarded only against a stall:
@@ -272,6 +300,7 @@ def _wait_for_session_senders_to_finish(session: str) -> None:
     so select-window returns while they are still in flight; reading pane
     state before they finish would pass without their signals having been
     sent at all."""
+
     def snapshot() -> tuple:
         return tuple((pid, proc_cpu_ticks(pid)) for pid in _session_sender_pids(session))
 
@@ -279,7 +308,6 @@ def _wait_for_session_senders_to_finish(session: str) -> None:
         lambda: not _session_sender_pids(session),
         snapshot,
         what=f"the activation-hook senders launched against session {session}",
-
         on_stall=_STALL_VERDICT,
     )
 
@@ -303,8 +331,7 @@ def test_thirty_immediate_window_switches_leave_every_pane_alive(
 
     try:
         assert private_tmux.run("has-session", "-t", session).returncode == 0, (
-            f"expected the dashboard session to exist after create.sh ran; "
-            f"create.sh output:\n{create_output}"
+            f"expected the dashboard session to exist after create.sh ran; " f"create.sh output:\n{create_output}"
         )
 
         # The hook must be installed and session-scoped by the time
@@ -317,9 +344,7 @@ def test_thirty_immediate_window_switches_leave_every_pane_alive(
             f"create.sh just returned from; show-hooks output: {hooks.stdout!r}"
         )
 
-        windows = private_tmux.run(
-            "list-windows", "-t", session, "-F", "#{window_name}"
-        ).stdout.split()
+        windows = private_tmux.run("list-windows", "-t", session, "-F", "#{window_name}").stdout.split()
         assert len(windows) >= 2, f"expected multiple windows to switch across; got: {windows}"
 
         before_processes = _pane_processes(private_tmux, session, all_windows=True)
@@ -333,8 +358,7 @@ def test_thirty_immediate_window_switches_leave_every_pane_alive(
             target = windows[i % len(windows)]
             select = private_tmux.run("select-window", "-t", f"{session}:{target}")
             assert select.returncode == 0, (
-                f"select-window failed on switch {i + 1}/{_SWITCH_COUNT} "
-                f"(target {target}): {select.stderr}"
+                f"select-window failed on switch {i + 1}/{_SWITCH_COUNT} " f"(target {target}): {select.stderr}"
             )
 
         # Every switch backgrounded a sender; the verdict is about what
@@ -342,9 +366,7 @@ def test_thirty_immediate_window_switches_leave_every_pane_alive(
         _wait_for_session_senders_to_finish(session)
         _assert_pane_processes_alive(before_processes, f"{_SWITCH_COUNT} immediate window switches")
 
-        after = sorted(
-            private_tmux.run("list-panes", "-a", "-t", session, "-F", "#{pane_id}").stdout.split()
-        )
+        after = sorted(private_tmux.run("list-panes", "-a", "-t", session, "-F", "#{pane_id}").stdout.split())
         assert after == before, (
             "zero pane deaths is the assertion -- compared by pane id, not "
             f"count alone.\nBefore ({len(before)}): {before}\n"
@@ -353,12 +375,9 @@ def test_thirty_immediate_window_switches_leave_every_pane_alive(
             f"New/unexpected: {sorted(set(after) - set(before))}"
         )
 
-        dead_flags = private_tmux.run(
-            "list-panes", "-a", "-t", session, "-F", "#{pane_dead}"
-        ).stdout.split()
+        dead_flags = private_tmux.run("list-panes", "-a", "-t", session, "-F", "#{pane_dead}").stdout.split()
         assert dead_flags and all(flag == "0" for flag in dead_flags), (
-            f"expected every pane to still be alive and rendering "
-            f"(pane_dead=0) after the storm; got: {dead_flags}"
+            f"expected every pane to still be alive and rendering " f"(pane_dead=0) after the storm; got: {dead_flags}"
         )
     finally:
         kill_result = subprocess.run(
@@ -420,8 +439,7 @@ def test_signaling_the_same_pane_twice_in_overlap_leaves_it_alive(
 
     try:
         assert private_tmux.run("has-session", "-t", session).returncode == 0, (
-            f"expected the dashboard session to exist after create.sh ran; "
-            f"create.sh output:\n{create_output}"
+            f"expected the dashboard session to exist after create.sh ran; " f"create.sh output:\n{create_output}"
         )
 
         before_processes = _pane_processes(private_tmux, f"{session}:main", all_windows=False)
@@ -463,19 +481,11 @@ def test_signaling_the_same_pane_twice_in_overlap_leaves_it_alive(
                     proc.kill()
                     proc.wait()
         for proc in procs:
-            assert proc.returncode == 0, (
-                f"activation-hook-sender.sh exited {proc.returncode} under overlap"
-            )
+            assert proc.returncode == 0, f"activation-hook-sender.sh exited {proc.returncode} under overlap"
 
-        _assert_pane_processes_alive(
-            before_processes, f"{_OVERLAP_SENDER_COUNT} overlapping sender invocations"
-        )
+        _assert_pane_processes_alive(before_processes, f"{_OVERLAP_SENDER_COUNT} overlapping sender invocations")
 
-        after = sorted(
-            private_tmux.run(
-                "list-panes", "-t", f"{session}:main", "-F", "#{pane_id}"
-            ).stdout.split()
-        )
+        after = sorted(private_tmux.run("list-panes", "-t", f"{session}:main", "-F", "#{pane_id}").stdout.split())
         assert after == before, (
             f"{_OVERLAP_SENDER_COUNT} overlapping sender invocations against "
             "the same window killed or replaced a pane -- zero pane deaths "
@@ -485,9 +495,7 @@ def test_signaling_the_same_pane_twice_in_overlap_leaves_it_alive(
             f"New/unexpected: {sorted(set(after) - set(before))}"
         )
 
-        dead_flags = private_tmux.run(
-            "list-panes", "-t", f"{session}:main", "-F", "#{pane_dead}"
-        ).stdout.split()
+        dead_flags = private_tmux.run("list-panes", "-t", f"{session}:main", "-F", "#{pane_dead}").stdout.split()
         assert dead_flags and all(flag == "0" for flag in dead_flags), (
             f"expected every window-main pane to still be alive after "
             f"{_OVERLAP_SENDER_COUNT} overlapping sender invocations; got: {dead_flags}"
@@ -501,3 +509,33 @@ def test_signaling_the_same_pane_twice_in_overlap_leaves_it_alive(
             env=env,
         )
         assert kill_result.returncode == 0, f"kill.sh failed: {kill_result.stdout}\n{kill_result.stderr}"
+
+
+def test_teardown_leaves_no_process_create_started_alive(tmp_path: pathlib.Path) -> None:
+    """create.sh starts processes inside the private tmux server (its panes)
+    and outside it (the status-bottom loop it backgrounds). While the
+    session runs, the marker scan sees both kinds; once the private
+    server's teardown completes, no process carrying the marker is alive."""
+    require_procfs(_TMUX_SKIP_LABEL)
+    with _private_tmux_server(tmp_path) as private_tmux:
+        session = f"reap-{uuid.uuid4().hex[:6]}"
+        kanban_temp = tmp_path / "kanban-temp"
+        kanban_temp.mkdir()
+        create_output = _run_create_sh(private_tmux, _dashboard_env(private_tmux, kanban_temp), session, tmp_path)
+        _assert_all_panes_armed(create_output)
+
+        running = processes_carrying_env(_SOCKET_MARKER_ENV, private_tmux.socket_name)
+        context = "\n".join(f"{pid} {cmdline}" for pid, cmdline in running) + f"\n{create_output}"
+        assert any(
+            "status-bottom-loop.sh" in cmdline for _pid, cmdline in running
+        ), f"expected the scan to see the status-bottom loop create.sh backgrounds outside tmux:\n{context}"
+        assert any(
+            f"-L {private_tmux.socket_name}" in cmdline for _pid, cmdline in running
+        ), f"expected the scan to see the private tmux server:\n{context}"
+
+    survivors = processes_carrying_env(_SOCKET_MARKER_ENV, private_tmux.socket_name)
+    assert (
+        survivors == []
+    ), "processes started under the private tmux socket are still alive after teardown:\n" + "\n".join(
+        f"{pid} {cmdline}" for pid, cmdline in survivors
+    )

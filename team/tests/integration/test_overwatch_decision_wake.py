@@ -74,19 +74,19 @@ def _section(text: str, heading: str) -> str:
 
 
 def _iso(moment: datetime.datetime) -> str:
-    return moment.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return moment.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 class _Project:
     """One registered project of a :class:`_Kanban` root."""
 
-    def __init__(self, kanban: "_Kanban", name: str) -> None:
+    def __init__(self, kanban: _Kanban, name: str) -> None:
         self.kanban = kanban
         self.name = name
         self.dir = kanban.root / "projects" / name
         self.queue = self.dir / "tasks" / "queues" / "coder_backlog.md"
 
-    def task(self, task_id: str, *, state: str, needs_human: str = "no", record: "str | None" = None) -> pathlib.Path:
+    def task(self, task_id: str, *, state: str, needs_human: str = "no", record: str | None = None) -> pathlib.Path:
         task_dir = self.dir / "tasks" / task_id
         (task_dir / "artifacts").mkdir(parents=True)
         (task_dir / "README.md").write_text(f"# Task: {task_id}\n\n## Role\nCODER\n", encoding="utf-8")
@@ -149,8 +149,11 @@ class _Kanban:
             tree = self.tmp_path / f"dev-tree-{name}"
             git = ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid"]
             subprocess.run([*git, "init", "-q", "-b", "main", str(tree)], check=True, capture_output=True)
-            subprocess.run([*git, "-C", str(tree), "commit", "-q", "--allow-empty", "-m", "initial"],
-                           check=True, capture_output=True)
+            subprocess.run(
+                [*git, "-C", str(tree), "commit", "-q", "--allow-empty", "-m", "initial"],
+                check=True,
+                capture_output=True,
+            )
             cfg += f"dev_tree_path = {tree}\npush_to_remote = false\n"
         (project.dir / "project.cfg").write_text(cfg, encoding="utf-8")
         if release_state:
@@ -176,7 +179,12 @@ class _Kanban:
 
     def run(self, argv: list, timeout: int = 300) -> subprocess.CompletedProcess:
         return subprocess.run(
-            argv, cwd=str(self.tmp_path), env=self.env(), capture_output=True, text=True, timeout=timeout,
+            argv,
+            cwd=str(self.tmp_path),
+            env=self.env(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
 
     def sweep(self, *args: str) -> subprocess.CompletedProcess:
@@ -222,8 +230,15 @@ def test_one_sweep_firing_decides_each_stop_once_and_carries_it_out(tmp_path):
     )
     (beta.dir / "release-state").mkdir()
     (beta.dir / "release-state" / "v1.1.0.json").write_text(
-        json.dumps({"rc": "v1.1.0", "outcome": "cancelled", "opened_at": "2026-01-01T09:00:00+00:00",
-                    "closed_at": "2026-01-01T11:00:00+00:00", "cargo": []}),
+        json.dumps(
+            {
+                "rc": "v1.1.0",
+                "outcome": "cancelled",
+                "opened_at": "2026-01-01T09:00:00+00:00",
+                "closed_at": "2026-01-01T11:00:00+00:00",
+                "cargo": [],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -259,10 +274,14 @@ def test_one_sweep_firing_decides_each_stop_once_and_carries_it_out(tmp_path):
     assert {e.source for e in alpha.open_entries()} == {human.parent.name, asks.parent.name}
 
     # One Decision event per carried-out decision.
-    assert sorted(alpha.decision_events()) == sorted([
-        ("halt:alpha", "executed"), (human.parent.name, "inbox"), (reset.parent.name, "executed"),
-        (asks.parent.name, "inbox"),
-    ])
+    assert sorted(alpha.decision_events()) == sorted(
+        [
+            ("halt:alpha", "executed"),
+            (human.parent.name, "inbox"),
+            (reset.parent.name, "executed"),
+            (asks.parent.name, "inbox"),
+        ]
+    )
     assert beta.decision_events() == [("halt:beta", "executed")]
 
     # A second firing decides the stop that is left and changes nothing.
@@ -347,7 +366,7 @@ def test_runaway_counter_stops_a_project_with_nothing_stopped(tmp_path):
     project = kanban.project("runner")
     shipped = project.dir / "release-state"
     shipped.mkdir()
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     for n in range(6):
         closed = now - datetime.timedelta(minutes=50 - n * 5)
         (shipped / f"v1.0.{n + 1}.json").write_text(
@@ -404,7 +423,9 @@ def test_dry_run_decides_and_writes_nothing(tmp_path):
     project = kanban.project("dry")
     status = project.task("CODER-20260101-001-dry-block", state="BLOCKED", record=_record("plugin_load_failed"))
     before = (status.read_bytes(), project.release_state.read_bytes())
-    script = f'source "{_CHECK}"\nOVERWATCH_PROJECT=dry OVERWATCH_DECISION_WAKE=1 overwatch_check_block_triage --dry-run\n'
+    script = (
+        f'source "{_CHECK}"\nOVERWATCH_PROJECT=dry OVERWATCH_DECISION_WAKE=1 overwatch_check_block_triage --dry-run\n'
+    )
     result = kanban.run(["bash", "-c", script], timeout=120)
     assert result.returncode == 0, result.stderr
     assert _decision_of(result.stderr, status.parent.name).startswith("block: inbox -> dry-run"), result.stderr

@@ -69,7 +69,8 @@ import dataclasses
 import os
 import pathlib
 import shlex
-from typing import Callable, Optional, Union
+from typing import Union
+from collections.abc import Callable
 
 from pgai_agent_kanban.archive.apply import (
     _RUN_ERRORS,
@@ -232,7 +233,7 @@ def _queue_entries(live: ProjectLayout, notes: list) -> list[_Entry]:
     return entries
 
 
-def plan_queue_reconcile(project: str, *, kanban_root: Optional[PathLike] = None) -> QueueReconcilePlan:
+def plan_queue_reconcile(project: str, *, kanban_root: PathLike | None = None) -> QueueReconcilePlan:
     """Return the live queue lines a reconciliation would move for *project*; move nothing.
 
     Args:
@@ -332,9 +333,9 @@ def render_queue_reconcile_plan(planned: QueueReconcilePlan) -> list[str]:
 def apply_queue_reconcile(
     project: str,
     *,
-    kanban_root: Optional[PathLike] = None,
+    kanban_root: PathLike | None = None,
     task: str = NO_TASK,
-    log: Optional[Callable[[str], None]] = None,
+    log: Callable[[str], None] | None = None,
     accept_chain_lock: bool = False,
 ) -> RunResult:
     """Move the live queue lines :func:`plan_queue_reconcile` selects into the archive.

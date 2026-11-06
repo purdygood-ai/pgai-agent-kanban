@@ -60,7 +60,7 @@ import pathlib
 import sys
 import time
 from datetime import datetime
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 # Run by file path (``python3 .../task_panes.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -154,11 +154,7 @@ def status_window_blocked_lines(
     found_any = False
     for task_id, _status_file, status_text in _blocked_status_files(tasks_root):
         found_any = True
-        reason = (
-            _first_line(status_text, "Blocked Reason")
-            or _first_line(status_text, "Blockers")
-            or "(see status.md)"
-        )
+        reason = _first_line(status_text, "Blocked Reason") or _first_line(status_text, "Blockers") or "(see status.md)"
         if len(reason) > 60:
             reason = reason[:57] + "..."
         yield f"  {red}{bold}{task_id}{reset}"
@@ -186,7 +182,7 @@ def attention_blocked_lines(
     dim: str = "",
     cyan: str = "",
     yellow: str = "",
-    now: Optional[int] = None,
+    now: int | None = None,
 ) -> Iterator[str]:
     """Yield the Attention pane's blocked-task blocks, one line per item.
 
@@ -250,7 +246,7 @@ def attention_blocked_lines(
         yield ""
 
 
-def _pipeline_role(role_raw: str) -> Optional[str]:
+def _pipeline_role(role_raw: str) -> str | None:
     """Return the pipeline role a README ``## Role`` names, or None.
 
     The value is lower-cased and cut at the first ``|``.
@@ -278,10 +274,7 @@ def _pipeline_counts(tasks_path: str) -> dict[str, dict[str, int]]:
     WAITING and BACKLOG both count as waiting.  An empty or blank
     *tasks_path* counts nothing.
     """
-    counts = {
-        role: {"total": 0, "done": 0, "working": 0, "blocked": 0, "waiting": 0}
-        for role in DOC_PIPELINE_ROLES
-    }
+    counts = {role: {"total": 0, "done": 0, "working": 0, "blocked": 0, "waiting": 0} for role in DOC_PIPELINE_ROLES}
     if not tasks_path.strip():
         return counts
     tasks_dir = pathlib.Path(tasks_path)
@@ -398,15 +391,22 @@ def _build_parser() -> argparse.ArgumentParser:
     verbs.required = True
 
     def escape(sub: argparse.ArgumentParser, name: str, what: str) -> None:
-        sub.add_argument(f"--{name}", default="", metavar="ESC",
-                         help=f"ANSI escape for {what}; default '' (no colour).")
+        sub.add_argument(
+            f"--{name}", default="", metavar="ESC", help=f"ANSI escape for {what}; default '' (no colour)."
+        )
 
     def common(sub: argparse.ArgumentParser, use_color: bool) -> None:
-        sub.add_argument("tasks_dir", help="The project's tasks directory, e.g. "
-                         "~/pgai_agent_kanban/projects/pgai-agent-kanban/tasks.")
+        sub.add_argument(
+            "tasks_dir",
+            help="The project's tasks directory, e.g. " "~/pgai_agent_kanban/projects/pgai-agent-kanban/tasks.",
+        )
         if use_color:
-            sub.add_argument("--use-color", default="false", metavar="true|false",
-                             help="'true' (any case) when the pane renders in colour; default false.")
+            sub.add_argument(
+                "--use-color",
+                default="false",
+                metavar="true|false",
+                help="'true' (any case) when the pane renders in colour; default false.",
+            )
 
     window = verbs.add_parser(
         "status-window-blocked",
@@ -418,8 +418,7 @@ def _build_parser() -> argparse.ArgumentParser:
     escape(window, "red", "the task ID")
     escape(window, "dim", "the reason line")
     escape(window, "bold", "the task ID")
-    window.set_defaults(func=lambda a: status_window_blocked_lines(
-        a.tasks_dir, a.reset, a.red, a.dim, a.bold))
+    window.set_defaults(func=lambda a: status_window_blocked_lines(a.tasks_dir, a.reset, a.red, a.dim, a.bold))
 
     attention = verbs.add_parser(
         "attention-blocked",
@@ -433,8 +432,11 @@ def _build_parser() -> argparse.ArgumentParser:
     escape(attention, "dim", "the blocked-since time and the empty state")
     escape(attention, "cyan", "the next-step label")
     escape(attention, "yellow", "the reason label")
-    attention.set_defaults(func=lambda a: attention_blocked_lines(
-        a.tasks_dir, _is_true(a.use_color), a.reset, a.red, a.bold, a.dim, a.cyan, a.yellow))
+    attention.set_defaults(
+        func=lambda a: attention_blocked_lines(
+            a.tasks_dir, _is_true(a.use_color), a.reset, a.red, a.bold, a.dim, a.cyan, a.yellow
+        )
+    )
 
     pipeline = verbs.add_parser(
         "document-pipeline",
@@ -448,13 +450,16 @@ def _build_parser() -> argparse.ArgumentParser:
     escape(pipeline, "blocked", "the blocked count")
     escape(pipeline, "dim", "the waiting count and 0/0")
     escape(pipeline, "reset", "resetting attributes")
-    pipeline.set_defaults(func=lambda a: document_pipeline_lines(
-        a.tasks_dir, _is_true(a.use_color), a.label, a.done, a.working, a.blocked, a.dim, a.reset))
+    pipeline.set_defaults(
+        func=lambda a: document_pipeline_lines(
+            a.tasks_dir, _is_true(a.use_color), a.label, a.done, a.working, a.blocked, a.dim, a.reset
+        )
+    )
 
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = _build_parser().parse_args(argv)
     for line in args.func(args):

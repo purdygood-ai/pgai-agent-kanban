@@ -28,6 +28,9 @@ Acceptance criteria exercised:
       unchanged.
   (6) Grep-zero: the only `flock` invocation left in the wake and overwatch
       libraries is the shared helper's own.
+  (7) Agreement: pgai_lock_pid_liveness_verdict and its Python form,
+      pgai_agent_kanban.ops.locks.pid_liveness_verdict, give the same
+      verdict for the same provenance records.
 
 All tests run against synthetic lock directories under tmp_path and never
 touch the live kanban root or its locks/ directory.
@@ -45,6 +48,7 @@ import time
 
 import pytest
 
+from pgai_agent_kanban.ops import locks as ops_locks
 from tests.unit.shell_harness import run_bash
 
 _LOCK_PROVENANCE_SH = "scripts/lib/lock_provenance.sh"
@@ -82,9 +86,9 @@ def test_acquire_writes_all_four_fields_and_release_clears_them(
     assert "op=wake-chain:demo" in result.stdout
     assert "task=TASK-1" in result.stdout
 
-    assert "AFTER_RELEASE:[]" in result.stdout, (
-        f"Expected the lock file to be empty after release.\nstdout: {result.stdout}"
-    )
+    assert (
+        "AFTER_RELEASE:[]" in result.stdout
+    ), f"Expected the lock file to be empty after release.\nstdout: {result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -182,17 +186,15 @@ def test_acquire_refuses_when_a_field_is_blank(
     """)
     result = run_bash(tmp_path, script)
     assert "RC=2" in result.stdout, (
-        f"Expected refusal (rc=2) with '{missing_name}' blank.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"Expected refusal (rc=2) with '{missing_name}' blank.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "FD_EMPTY=yes" in result.stdout, "No fd should be left open on refusal."
     assert missing_name in result.stderr, (
-        f"Expected the refusal message to name the missing field '{missing_name}'.\n"
-        f"stderr: {result.stderr}"
+        f"Expected the refusal message to name the missing field '{missing_name}'.\n" f"stderr: {result.stderr}"
     )
-    assert "error:" in result.stderr and "message:" in result.stderr and "remedy:" in result.stderr, (
-        f"Expected the dual-channel error contract shape.\nstderr: {result.stderr}"
-    )
+    assert (
+        "error:" in result.stderr and "message:" in result.stderr and "remedy:" in result.stderr
+    ), f"Expected the dual-channel error contract shape.\nstderr: {result.stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +228,7 @@ def test_stale_provenance_from_dead_pid_does_not_block_acquisition(
     assert "holder=fresh" in result.stdout
     assert "op=new-op" in result.stdout
     assert "task=NEW-TASK" in result.stdout
-    assert "99999999" in result.stderr, (
-        f"Expected a diagnostic naming the stale/dead pid.\nstderr: {result.stderr}"
-    )
+    assert "99999999" in result.stderr, f"Expected a diagnostic naming the stale/dead pid.\nstderr: {result.stderr}"
     assert "no longer running" in result.stderr
 
 
@@ -309,15 +309,15 @@ def test_flock_held_by_an_orphan_under_a_dead_recorded_pid_is_deferred_to(
             echo "RC=$?"
         """)
         result = run_bash(tmp_path, script)
-        assert "RC=1" in result.stdout, (
-            f"an orphan-held lock must return the contended exit.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            "RC=1" in result.stdout
+        ), f"an orphan-held lock must return the contended exit.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert lock_file.exists() and lock_file.stat().st_ino == inode_before, "the lock file must not be removed"
         assert lock_file.read_bytes() == before, "the record must be left byte-for-byte in place"
         assert "lock.provenance.orphan_holder" in result.stderr, result.stderr
-        assert child_pid in result.stderr, (
-            f"the narration must name the child that really holds the flock ({child_pid}).\nstderr: {result.stderr}"
-        )
+        assert (
+            child_pid in result.stderr
+        ), f"the narration must name the child that really holds the flock ({child_pid}).\nstderr: {result.stderr}"
     finally:
         try:
             os.killpg(wrapper.pid, signal.SIGKILL)
@@ -383,9 +383,7 @@ def test_contended_dual_channel_narration_fires_once_per_lock_per_process(
             echo "PROBE_COUNT=$(pgai_lock_contention_probe_count "{lock_file}")"
         """)
         result = run_bash(tmp_path, script)
-        assert result.returncode == 0, (
-            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
         rc_lines = [ln for ln in result.stdout.splitlines() if ln.startswith("RC=")]
         assert rc_lines == ["RC=1"] * probe_count, (
@@ -440,8 +438,7 @@ def test_no_direct_flock_calls_outside_the_shared_helper(relative_path: str) -> 
     assert not direct_flock_calls, (
         f"{relative_path} still calls flock directly outside comments -- "
         f"acquisition must go through pgai_lock_acquire "
-        f"(team/scripts/lib/lock_provenance.sh) instead:\n"
-        + "\n".join(direct_flock_calls)
+        f"(team/scripts/lib/lock_provenance.sh) instead:\n" + "\n".join(direct_flock_calls)
     )
     assert "pgai_lock_acquire" in text, (
         f"{relative_path} does not call pgai_lock_acquire -- expected it to "
@@ -467,3 +464,68 @@ def test_lock_provenance_sh_is_the_only_remaining_flock_caller() -> None:
         f"Expected at least one executable flock call in {_LOCK_PROVENANCE_SH}, "
         f"found {len(direct_flock_calls)}: {direct_flock_calls!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (7) The bash and Python liveness verdicts agree record for record.
+# ---------------------------------------------------------------------------
+
+# A pid far above any pid_max, so it never names a live process.
+_DEAD_PID = "999999999"
+_OTHER_BOOT = "00000000-0000-0000-0000-000000000000"
+
+# name -> record; {LIVE} is this test process's pid, {START} its start time
+# and {BOOT} this boot's id, filled in inside the test.
+_LIVENESS_RECORDS = {
+    "live": "holder=h\npid={LIVE}\n",
+    "live-zero-padded": "holder=h\npid=0{LIVE}\n",
+    "dead": f"holder=h\npid={_DEAD_PID}\n",
+    "zero": "holder=h\npid=0\n",
+    "all-zeros": "holder=h\npid=000\n",
+    "minus-one": "holder=h\npid=-1\n",
+    "negative": "holder=h\npid=-{LIVE}\n",
+    "plus-sign": "holder=h\npid=+{LIVE}\n",
+    "word": "holder=h\npid=abc\n",
+    "carriage-return": "holder=h\npid={LIVE}\r\n",
+    "huge": "holder=h\npid=99999999999999999999999\n",
+    "blank-pid": "holder=h\npid=\nop=o\n",
+    "no-pid": "holder=h\nop=o\n",
+    "no-provenance": "noise\n",
+    "empty": "",
+    "identity-matches": "holder=h\npid={LIVE}\nop=o\ntask=t\npid_start={START}\nboot_id={BOOT}\n",
+    "identity-blank": "holder=h\npid={LIVE}\nop=o\ntask=t\npid_start=\nboot_id=\n",
+    "other-start-time": "holder=h\npid={LIVE}\nop=o\ntask=t\npid_start=1{START}\nboot_id={BOOT}\n",
+    "other-boot": f"holder=h\npid={{LIVE}}\nop=o\ntask=t\npid_start={{START}}\nboot_id={_OTHER_BOOT}\n",
+    "dead-with-identity": f"holder=h\npid={_DEAD_PID}\nop=o\ntask=t\npid_start=1\nboot_id={{BOOT}}\n",
+}
+
+_LIVENESS_DRIVER = f"""
+source {_LOCK_PROVENANCE_SH}
+LC_ALL=C  # the glob lists the records in Python's sorted() order
+for record in "$RECORDS_DIR"/*; do
+    echo "$(basename "$record") $(pgai_lock_pid_liveness_verdict "$(< "$record")")"
+done
+"""
+
+
+def test_bash_and_python_liveness_verdicts_agree_on_every_record(tmp_path: pathlib.Path) -> None:
+    live = str(os.getpid())
+    tokens = {"LIVE": live, "START": ops_locks.proc_start_time(live), "BOOT": ops_locks.boot_id()}
+    records_dir = tmp_path / "records"
+    records_dir.mkdir()
+    expected = []
+    for name in sorted(_LIVENESS_RECORDS):
+        record = _LIVENESS_RECORDS[name]
+        for token, value in tokens.items():
+            record = record.replace("{" + token + "}", value)
+        (records_dir / name).write_text(record, encoding="utf-8")
+        expected.append(f"{name} {ops_locks.pid_liveness_verdict(record)}")
+
+    result = run_bash(tmp_path, _LIVENESS_DRIVER, extra_env={"RECORDS_DIR": str(records_dir)})
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == expected
+    verdicts = dict(line.split(" ", 1) for line in expected)
+    assert verdicts["live"] == verdicts["identity-matches"] == "held"
+    assert verdicts["zero"] == verdicts["minus-one"] == verdicts["other-boot"] == "stale"
+    assert verdicts["no-pid"] == verdicts["empty"] == "unparseable"

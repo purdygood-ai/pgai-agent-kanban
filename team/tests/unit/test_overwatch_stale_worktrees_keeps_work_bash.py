@@ -22,6 +22,10 @@ repository under pytest's tmp_path (no worktree outside them is touched):
      merged into xy_main is removable, while one held only by ai_main is
      not merged into any integration branch and is bug-filed, not removed.
   6. A HALT on the project defers the removal.
+  7. A branch-carrying worktree's bug report is deposited through intake:
+     BUG-NNNN-<slug>.md with a number past an archived bug's, no staged
+     draft left behind; a second sweep while that bug is live is refused as
+     the same defect and files nothing.
 """
 
 from __future__ import annotations
@@ -81,8 +85,19 @@ class Fixture:
 
     @staticmethod
     def commit(where: pathlib.Path, message: str) -> None:
-        _git("-C", str(where), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-             "commit", "-q", "--allow-empty", "-m", message)
+        _git(
+            "-C",
+            str(where),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            message,
+        )
 
     @property
     def status(self) -> pathlib.Path:
@@ -110,7 +125,7 @@ class Fixture:
             hooks += (
                 f"source {shlex.quote(str(_LIB / 'lock_provenance.sh'))}\n"
                 'eval "_real_acquire_waiting() $(declare -f pgai_lock_acquire_waiting | tail -n +2)"\n'
-                f"pgai_lock_acquire_waiting() {{ {before_lock}; _real_acquire_waiting \"$@\"; }}\n"
+                f'pgai_lock_acquire_waiting() {{ {before_lock}; _real_acquire_waiting "$@"; }}\n'
             )
         if at_removal:
             hooks += (
@@ -138,8 +153,9 @@ class Fixture:
             },
         )
         (self.tmp / "home").mkdir(exist_ok=True)
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=120,
-                                env=env, cwd=str(self.tmp))
+        result = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, timeout=120, env=env, cwd=str(self.tmp)
+        )
         assert "CHECK_EXIT=0" in result.stdout, _diagnostic(result)
         return result
 
@@ -172,7 +188,7 @@ def test_a_blocked_task_keeps_its_old_worktree_and_its_uncommitted_edit(tmp_path
 
 _LOCK_PROBE = (
     f'if flock -n "$KANBAN_ROOT/locks/repo-wake-{_PROJECT}.lock" true; '
-    'then echo LOCK_FREE_AT_REMOVAL >&2; else echo LOCK_HELD_AT_REMOVAL >&2; fi'
+    "then echo LOCK_FREE_AT_REMOVAL >&2; else echo LOCK_HELD_AT_REMOVAL >&2; fi"
 )
 
 
@@ -292,3 +308,67 @@ def test_a_project_halt_defers_the_removal(tmp_path):
     assert "fix deferred: HALT present" in result.stderr
     assert "\tfix-deferred\t" in fx.actions and "auto-fix:" not in fx.actions
     assert (fx.proj / "HALT").read_text(encoding="utf-8") == "operator halt\n"
+
+
+# ---------------------------------------------------------------------------
+# 7. A branch-carrying worktree is bug-filed through intake, once
+# ---------------------------------------------------------------------------
+
+_SLUG = "stale-worktree-coder-20260101-001-old-task-work-carries-commits"
+
+
+def _branch_carrying(tmp_path) -> Fixture:
+    fx = Fixture(tmp_path, state="DONE")
+    fx.commit(fx.worktree, "task work no integration branch holds")
+    fx.age()
+    return fx
+
+
+def _archive_bug(fx: Fixture, number: int) -> None:
+    """Put a closed bug holding *number* in the project's archive."""
+    archived = fx.root / "archive" / _PROJECT / "bugs"
+    archived.mkdir(parents=True, exist_ok=True)
+    (archived / f"BUG-{number:04d}-archived-defect.md").write_text(
+        f"# BUG-{number:04d}-archived-defect\n\n## Status\ndone\n", encoding="utf-8"
+    )
+
+
+def _filed(fx: Fixture) -> list[str]:
+    return sorted(p.name for p in (fx.proj / "bugs").glob("BUG-*.md"))
+
+
+def test_a_branch_carrying_worktree_is_bug_filed_through_intake_past_an_archived_number(tmp_path):
+    fx = _branch_carrying(tmp_path)
+    (fx.proj / "bugs" / "BUG-0001-earlier-defect.md").write_text(
+        "# BUG-0001-earlier-defect\n\n## Status\nopen\n", encoding="utf-8"
+    )
+    _archive_bug(fx, 2)
+
+    result = fx.run()
+
+    assert fx.worktree.is_dir() and fx.registered(), _diagnostic(result)
+    assert _filed(fx) == ["BUG-0001-earlier-defect.md", f"BUG-0003-{_SLUG}.md"], _diagnostic(result)
+    text = (fx.proj / "bugs" / f"BUG-0003-{_SLUG}.md").read_text(encoding="utf-8")
+    assert text.startswith(f"# BUG-0003-{_SLUG}: Stale worktree of finished task {_TASK} carries commits\n"), text
+    assert "## Status\nopen\n" in text and str(fx.worktree) in text, text
+    assert not list((fx.root / "tmp").glob("overwatch-bug-draft*")), "the staged draft is removed"
+    filed_at = fx.proj / "bugs" / f"BUG-0003-{_SLUG}.md"
+    assert f"bug filed at {filed_at}" in fx.actions, fx.actions
+    assert "bug-filed=1" in result.stderr, _diagnostic(result)
+
+
+def test_a_second_sweep_on_a_branch_carrying_worktree_with_a_live_bug_files_nothing(tmp_path):
+    fx = _branch_carrying(tmp_path)
+    _archive_bug(fx, 1)
+
+    first = fx.run()
+    filed = _filed(fx)
+    assert filed == [f"BUG-0002-{_SLUG}.md"], _diagnostic(first)
+
+    second = fx.run()
+
+    assert _filed(fx) == filed, "no second bug"
+    assert "same defect as BUG-0002" in second.stderr, _diagnostic(second)
+    assert f"already filed as {fx.proj / 'bugs' / filed[0]}" in second.stderr, _diagnostic(second)
+    assert "bug-filed=0" in second.stderr, _diagnostic(second)
+    assert fx.worktree.is_dir() and fx.registered(), _diagnostic(second)

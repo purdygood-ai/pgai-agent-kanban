@@ -50,27 +50,19 @@
 #
 # Glyph literals live exclusively in team/scripts/lib/status_glyphs.sh (sourced below).
 
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 KANBAN_ROOT="${1:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 
 # Source project_paths lib for pp_* helpers and shared halt scope helper
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${_SCRIPT_DIR}/../lib/project_paths.sh"
 # Source shared Python-helper resolver (live-install anchor first — D3 fix).
@@ -104,7 +96,7 @@ unset _SCRIPT_DIR
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env" 2>/dev/null || true
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
@@ -346,7 +338,8 @@ unset _sr_final_use_color
 # HALT/HALT-AFTER segment (GLOBAL first, then projects alphabetically),
 # APPROVAL, DEFER, timestamp last.
 #
-# Width budget: PGAI_DASHBOARD_STATUS_MAX_WIDTH (default 320 characters)
+# Width budget: PGAI_DASHBOARD_STATUS_MAX_WIDTH, else kanban.cfg [dashboard]
+# status_max_width (default 320 characters),
 # bounds the assembled line. When exceeded, DROPPABLE (informational)
 # segments are removed one at a time from the RIGHTMOST droppable segment
 # inward, re-measuring after each removal, until the line fits or none
@@ -392,7 +385,8 @@ _sr_assemble() {
     printf '%s' "$out"
 }
 
-_SR_MAX_WIDTH="${PGAI_DASHBOARD_STATUS_MAX_WIDTH:-320}"
+config_export_tunables "$KANBAN_ROOT/kanban.cfg"
+_SR_MAX_WIDTH="$PGAI_DASHBOARD_STATUS_MAX_WIDTH"
 _SR_OUT="$(_sr_assemble)"
 while [[ "${#_SR_OUT}" -gt "$_SR_MAX_WIDTH" ]]; do
     _sr_dropped=0

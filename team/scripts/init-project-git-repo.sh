@@ -51,7 +51,7 @@
 #   3  — git operations failed (push error, invalid dev_tree_path, etc.)
 
 # --- Source helpers and parse arguments (before strict mode for clean error messages) ---
-_INIT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_INIT_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/operator_args.sh
 source "${_INIT_SCRIPT_DIR}/lib/operator_args.sh"
 unset _INIT_SCRIPT_DIR
@@ -98,11 +98,11 @@ fi
 # script runs from a fresh shell without manual pre-sourcing.  Explicit
 # operator exports win via env_bootstrap.sh's idempotency guard.
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve script and kanban root ---
 # PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # --- Source optional config files (before strict mode) ---
@@ -146,21 +146,9 @@ PROJECT_NAME="$(pp_require_project_context "$PROJECT_ARG")" || {
 echo "Project: $PROJECT_NAME"
 echo ""
 
-# --- Load project config ---
-pp_load_config "$PROJECT_NAME" || {
-    echo "ERROR: could not load project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Expected: $(pp_project_root "$PROJECT_NAME" 2>/dev/null || echo "<unresolvable>")/project.cfg" >&2
-    exit 2
-}
-
-# --- Verify dev_tree_path ---
-DEV_TREE="${PP_dev_tree_path:-}"
-if [[ -z "$DEV_TREE" ]]; then
-    echo "ERROR: dev_tree_path is not set in project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Edit: $(pp_project_root "$PROJECT_NAME")/project.cfg" >&2
-    echo "  Add:  dev_tree_path = /path/to/your/git/repo" >&2
-    exit 2
-fi
+# --- Load project config and its dev_tree_path ---
+pp_load_project_repo_root "$PROJECT_NAME" || exit 2
+DEV_TREE="$PP_REPO_ROOT"
 
 if [[ ! -d "$DEV_TREE" ]]; then
     echo "ERROR: dev_tree_path does not exist: $DEV_TREE" >&2

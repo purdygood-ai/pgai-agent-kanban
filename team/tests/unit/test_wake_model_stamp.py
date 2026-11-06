@@ -58,9 +58,7 @@ _CODEX_SH = pathlib.Path("scripts/lib/wake_driver_invoke.sh")
 _WAKE_TASK_STATE_SH = pathlib.Path("scripts/lib/wake_task_state.sh")
 # Absolute path to the same lib, for sourcing it from a bash subprocess.  This
 # file lives at team/tests/unit/, so three parents up is team/.
-_WAKE_TASK_STATE_LIB = (
-    pathlib.Path(__file__).resolve().parent.parent.parent / "scripts" / "lib" / "wake_task_state.sh"
-)
+_WAKE_TASK_STATE_LIB = pathlib.Path(__file__).resolve().parent.parent.parent / "scripts" / "lib" / "wake_task_state.sh"
 
 # Anchor comment that begins the wake-stamp block in both siblings.
 _STAMP_ANCHOR = "# --- Wake-stamp resolved model into status.md ## Model section ---"
@@ -76,9 +74,8 @@ _STAMP_FUNC_DEF = "stamp_model_field()"
 # Helper: run the shipped stamp_model_field.
 # ---------------------------------------------------------------------------
 
-def _run_shipped_stamp(
-    tmp_path: pathlib.Path, status_path: pathlib.Path, model_value: str
-) -> None:
+
+def _run_shipped_stamp(tmp_path: pathlib.Path, status_path: pathlib.Path, model_value: str) -> None:
     """Run the shipped stamp_model_field from wake_task_state.sh on *status_path*.
 
     The real lib is sourced in a bash subprocess (it self-sources
@@ -109,18 +106,17 @@ def _run_shipped_stamp(
         timeout=60,
     )
     assert proc.returncode == 0, (
-        f"stamp_model_field exited {proc.returncode} on {status_path}\n"
-        f"stdout={proc.stdout}\nstderr={proc.stderr}"
+        f"stamp_model_field exited {proc.returncode} on {status_path}\n" f"stdout={proc.stdout}\nstderr={proc.stderr}"
     )
     assert "stamp_model_field failed" not in proc.stderr, (
-        f"stamp_model_field reported a failed rewrite of {status_path}\n"
-        f"stderr={proc.stderr}"
+        f"stamp_model_field reported a failed rewrite of {status_path}\n" f"stderr={proc.stderr}"
     )
 
 
 # ---------------------------------------------------------------------------
 # Helper: extract the stamp block from a wake sibling.
 # ---------------------------------------------------------------------------
+
 
 def _extract_stamp_block(path: pathlib.Path) -> list[str]:
     """Extract the model-stamp block from a wake provider sibling.
@@ -155,30 +151,26 @@ def _extract_stamp_block(path: pathlib.Path) -> list[str]:
 # (1) Functional: stamp_model_field upserts ## Model correctly
 # ---------------------------------------------------------------------------
 
+
 def test_stamp_inserts_model_section_when_absent(tmp_path: pathlib.Path) -> None:
     """Fixture (1a): ## Model is created after ## Role when absent."""
     status = tmp_path / "status.md"
     status.write_text(
-        "# Status\n\n## Task\nTEST-001\n\n## Participant\nClaude\n\n"
-        "## Role\nCODER\n\n## State\nBACKLOG\n"
+        "# Status\n\n## Task\nTEST-001\n\n## Participant\nClaude\n\n" "## Role\nCODER\n\n## State\nBACKLOG\n"
     )
 
     _run_shipped_stamp(tmp_path, status, "claude-fable-5")
 
     content = status.read_text()
-    assert "## Model\nclaude-fable-5\n" in content, (
-        f"## Model section not found or has wrong body.\nStatus file:\n{content}"
-    )
+    assert (
+        "## Model\nclaude-fable-5\n" in content
+    ), f"## Model section not found or has wrong body.\nStatus file:\n{content}"
     # Positioned after ## Role
     role_idx = content.find("## Role")
     model_idx = content.find("## Model")
-    assert role_idx < model_idx, (
-        f"## Model (pos {model_idx}) not after ## Role (pos {role_idx})"
-    )
+    assert role_idx < model_idx, f"## Model (pos {model_idx}) not after ## Role (pos {role_idx})"
     # State still present and unchanged
-    assert "## State\nBACKLOG" in content, (
-        f"## State section was disturbed by stamp.\nStatus file:\n{content}"
-    )
+    assert "## State\nBACKLOG" in content, f"## State section was disturbed by stamp.\nStatus file:\n{content}"
 
 
 def test_stamp_overwrites_model_body_only(tmp_path: pathlib.Path) -> None:
@@ -192,22 +184,12 @@ def test_stamp_overwrites_model_body_only(tmp_path: pathlib.Path) -> None:
     _run_shipped_stamp(tmp_path, status, "claude-sonnet-4-6")
 
     content = status.read_text()
-    assert "## Model\nclaude-sonnet-4-6\n" in content, (
-        f"## Model not updated to new value.\nStatus file:\n{content}"
-    )
-    assert "old-model-name" not in content, (
-        f"Old model value still present.\nStatus file:\n{content}"
-    )
+    assert "## Model\nclaude-sonnet-4-6\n" in content, f"## Model not updated to new value.\nStatus file:\n{content}"
+    assert "old-model-name" not in content, f"Old model value still present.\nStatus file:\n{content}"
     # Other sections preserved
-    assert "## State\nBACKLOG" in content, (
-        f"## State was disturbed.\nStatus file:\n{content}"
-    )
-    assert "## Summary\nTBD" in content, (
-        f"## Summary was disturbed.\nStatus file:\n{content}"
-    )
-    assert "## Task\nTEST-002" in content, (
-        f"## Task was disturbed.\nStatus file:\n{content}"
-    )
+    assert "## State\nBACKLOG" in content, f"## State was disturbed.\nStatus file:\n{content}"
+    assert "## Summary\nTBD" in content, f"## Summary was disturbed.\nStatus file:\n{content}"
+    assert "## Task\nTEST-002" in content, f"## Task was disturbed.\nStatus file:\n{content}"
 
 
 def test_stamp_preserves_all_other_fields(tmp_path: pathlib.Path) -> None:
@@ -252,9 +234,7 @@ def test_stamp_preserves_all_other_fields(tmp_path: pathlib.Path) -> None:
 
     content = status.read_text()
     # Model stamped
-    assert "## Model\nclaude-fable-5\n" in content, (
-        f"Model not stamped.\nStatus file:\n{content}"
-    )
+    assert "## Model\nclaude-fable-5\n" in content, f"Model not stamped.\nStatus file:\n{content}"
     # Spot-check all other sections
     for expected_fragment in [
         "## Task\nCODER-20260713-001-example",
@@ -269,8 +249,7 @@ def test_stamp_preserves_all_other_fields(tmp_path: pathlib.Path) -> None:
         "## Instruction Conflicts\nnone",
     ]:
         assert expected_fragment in content, (
-            f"Section disturbed: expected {expected_fragment!r} in status.\n"
-            f"Status file:\n{content}"
+            f"Section disturbed: expected {expected_fragment!r} in status.\n" f"Status file:\n{content}"
         )
 
 
@@ -288,21 +267,19 @@ def test_stamp_fills_empty_non_last_model_and_keeps_following_sections(
     _run_shipped_stamp(tmp_path, status, "X")
 
     content = status.read_text()
-    assert "## Model\nX\n" in content, (
-        f"Empty ## Model was not filled with the stamped value.\nStatus file:\n{content}"
-    )
+    assert "## Model\nX\n" in content, f"Empty ## Model was not filled with the stamped value.\nStatus file:\n{content}"
     assert "## State\nWORKING" in content, (
-        f"## State following an empty ## Model did not survive the stamp.\n"
-        f"Status file:\n{content}"
+        f"## State following an empty ## Model did not survive the stamp.\n" f"Status file:\n{content}"
     )
-    assert content == "## Role\nTESTER\n\n## Model\nX\n\n## State\nWORKING\n", (
-        f"Stamping an empty ## Model changed more than its body.\nStatus file:\n{content!r}"
-    )
+    assert (
+        content == "## Role\nTESTER\n\n## Model\nX\n\n## State\nWORKING\n"
+    ), f"Stamping an empty ## Model changed more than its body.\nStatus file:\n{content!r}"
 
 
 # ---------------------------------------------------------------------------
 # (2) Per-role override: stamped value equals the resolved model
 # ---------------------------------------------------------------------------
+
 
 def test_stamp_honors_per_role_model(tmp_path: pathlib.Path) -> None:
     """Fixture (2): the stamped value is the model the wake resolved for the role.
@@ -320,8 +297,7 @@ def test_stamp_honors_per_role_model(tmp_path: pathlib.Path) -> None:
 
     content = status.read_text()
     assert f"## Model\n{pm_model}\n" in content, (
-        f"Per-role model not stamped correctly.\n"
-        f"Expected: ## Model\\n{pm_model!r}\nStatus file:\n{content}"
+        f"Per-role model not stamped correctly.\n" f"Expected: ## Model\\n{pm_model!r}\nStatus file:\n{content}"
     )
 
 
@@ -329,21 +305,20 @@ def test_stamp_different_roles_get_different_models(tmp_path: pathlib.Path) -> N
     """Fixture (2b): coder and pm roles stamp different per-role models."""
     for role, model in [("CODER", "claude-opus-4-7"), ("PM", "claude-fable-5")]:
         status_path = tmp_path / f"status_{role.lower()}.md"
-        status_path.write_text(
-            f"# Status\n\n## Role\n{role}\n\n## State\nBACKLOG\n"
-        )
+        status_path.write_text(f"# Status\n\n## Role\n{role}\n\n## State\nBACKLOG\n")
 
         _run_shipped_stamp(tmp_path, status_path, model)
 
         content = status_path.read_text()
-        assert f"## Model\n{model}\n" in content, (
-            f"Role {role}: expected model {model!r} not found.\nStatus file:\n{content}"
-        )
+        assert (
+            f"## Model\n{model}\n" in content
+        ), f"Role {role}: expected model {model!r} not found.\nStatus file:\n{content}"
 
 
 # ---------------------------------------------------------------------------
 # (3) Sibling parity: stamp block is byte-identical in both siblings
 # ---------------------------------------------------------------------------
+
 
 def test_sibling_stamp_blocks_are_byte_identical() -> None:
     """Fixture (3): the model-stamp block must be byte-identical across both siblings.
@@ -355,12 +330,10 @@ def test_sibling_stamp_blocks_are_byte_identical() -> None:
     codex_block = _extract_stamp_block(_CODEX_SH)
 
     assert claude_block, (
-        f"Model-stamp block not found in {_CLAUDE_SH}. "
-        f"Expected a comment containing {_STAMP_ANCHOR!r}."
+        f"Model-stamp block not found in {_CLAUDE_SH}. " f"Expected a comment containing {_STAMP_ANCHOR!r}."
     )
     assert codex_block, (
-        f"Model-stamp block not found in {_CODEX_SH}. "
-        f"Expected a comment containing {_STAMP_ANCHOR!r}."
+        f"Model-stamp block not found in {_CODEX_SH}. " f"Expected a comment containing {_STAMP_ANCHOR!r}."
     )
     assert claude_block == codex_block, (
         "Model-stamp blocks differ between siblings.\n"
@@ -374,26 +347,19 @@ def test_sibling_stamp_blocks_are_byte_identical() -> None:
 #     function is defined in wake_common.sh; ordering is correct.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize(
-    "sibling", [_CLAUDE_SH, _CODEX_SH], ids=["claude", "codex"]
-)
+
+@pytest.mark.parametrize("sibling", [_CLAUDE_SH, _CODEX_SH], ids=["claude", "codex"])
 def test_stamp_anchor_present_in_sibling(sibling: pathlib.Path) -> None:
     """Structural: the stamp anchor comment is present in both wake provider scripts."""
     content = sibling.read_text(encoding="utf-8")
-    assert _STAMP_ANCHOR in content, (
-        f"Stamp anchor not found in {sibling}.\nExpected: {_STAMP_ANCHOR!r}"
-    )
+    assert _STAMP_ANCHOR in content, f"Stamp anchor not found in {sibling}.\nExpected: {_STAMP_ANCHOR!r}"
 
 
-@pytest.mark.parametrize(
-    "sibling", [_CLAUDE_SH, _CODEX_SH], ids=["claude", "codex"]
-)
+@pytest.mark.parametrize("sibling", [_CLAUDE_SH, _CODEX_SH], ids=["claude", "codex"])
 def test_stamp_call_present_in_sibling(sibling: pathlib.Path) -> None:
     """Structural: stamp_model_field is called in both wake provider scripts."""
     content = sibling.read_text(encoding="utf-8")
-    assert _STAMP_CALL in content, (
-        f"{_STAMP_CALL!r} call not found in {sibling}."
-    )
+    assert _STAMP_CALL in content, f"{_STAMP_CALL!r} call not found in {sibling}."
 
 
 def test_stamp_func_defined_in_wake_common() -> None:
@@ -422,12 +388,8 @@ def test_stamp_block_calls_stamp_before_stale_artifact_rotation() -> None:
         if "Stale-artifact preservation on re-run" in line and stale_idx is None:
             stale_idx = i
 
-    assert stamp_idx is not None, (
-        f"stamp_model_field call not found in {_CLAUDE_SH}."
-    )
-    assert stale_idx is not None, (
-        f"'Stale-artifact preservation on re-run' not found in {_CLAUDE_SH}."
-    )
+    assert stamp_idx is not None, f"stamp_model_field call not found in {_CLAUDE_SH}."
+    assert stale_idx is not None, f"'Stale-artifact preservation on re-run' not found in {_CLAUDE_SH}."
     assert stamp_idx < stale_idx, (
         f"stamp_model_field (line {stamp_idx + 1}) appears AFTER "
         f"stale-artifact rotation (line {stale_idx + 1}) in {_CLAUDE_SH}. "
@@ -446,12 +408,8 @@ def test_stamp_block_after_working_transition_in_claude() -> None:
         if _STAMP_CALL in line and "stamp_model_field" in line and stamp_idx is None:
             stamp_idx = i
 
-    assert working_idx is not None, (
-        f"set_state WORKING not found in {_CLAUDE_SH}."
-    )
-    assert stamp_idx is not None, (
-        f"stamp_model_field call not found in {_CLAUDE_SH}."
-    )
+    assert working_idx is not None, f"set_state WORKING not found in {_CLAUDE_SH}."
+    assert stamp_idx is not None, f"stamp_model_field call not found in {_CLAUDE_SH}."
     assert working_idx < stamp_idx, (
         f"stamp_model_field (line {stamp_idx + 1}) appears BEFORE "
         f"WORKING state transition (line {working_idx + 1}) in {_CLAUDE_SH}. "

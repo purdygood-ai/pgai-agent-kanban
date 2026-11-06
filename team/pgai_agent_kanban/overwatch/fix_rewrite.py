@@ -94,8 +94,8 @@ import pathlib
 import shutil
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional, Sequence
+from datetime import datetime, UTC
+from collections.abc import Sequence
 
 # Run by file path (``python3 .../fix_rewrite.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -153,7 +153,7 @@ class FixRewriteResult:
 # ---------------------------------------------------------------------------
 
 
-def find_bug_file(bugs_dir: str, bug_id: str) -> Optional[str]:
+def find_bug_file(bugs_dir: str, bug_id: str) -> str | None:
     """Return the path of the file in *bugs_dir* whose basename carries
     *bug_id* (e.g. "BUG-0042"), or None when *bugs_dir* does not exist, no
     file matches, or *bug_id* is empty. When more than one file matches
@@ -164,11 +164,7 @@ def find_bug_file(bugs_dir: str, bug_id: str) -> Optional[str]:
     if not bug_id or not os.path.isdir(bugs_dir):
         return None
     prefix = bug_id if bug_id.endswith("-") else f"{bug_id}-"
-    candidates = sorted(
-        name
-        for name in os.listdir(bugs_dir)
-        if name.startswith(prefix) or name == f"{bug_id}.md"
-    )
+    candidates = sorted(name for name in os.listdir(bugs_dir) if name.startswith(prefix) or name == f"{bug_id}.md")
     if not candidates:
         return None
     return os.path.join(bugs_dir, candidates[0])
@@ -186,7 +182,7 @@ def backup_bug_file(
     bug_path: str,
     kanban_root: str,
     project_name: str,
-    timestamp: Optional[str] = None,
+    timestamp: str | None = None,
 ) -> str:
     """Copy *bug_path* to the project's timestamped OVERWATCH backup
     directory and return the destination path.
@@ -204,7 +200,7 @@ def backup_bug_file(
     if not os.path.isfile(bug_path):
         raise FixRewriteError(f"cannot back up: source file does not exist: {bug_path}")
 
-    ts = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     backup_dir = os.path.join(kanban_root, "projects", project_name, "overwatch", "backups", ts)
     os.makedirs(backup_dir, exist_ok=True)
 
@@ -284,7 +280,7 @@ def _build_rewrite_block(
         "**Ground truth (verbatim — sourced from the record, not paraphrased):**\n"
         f"{_format_ground_truth(ground_truth_refs)}\n\n"
         "*This section was appended by OVERWATCH per the Lane A recovery "
-        "playbook (team/roles/OVERWATCH.md, \"Autonomous Block Resolution\"). "
+        'playbook (team/roles/OVERWATCH.md, "Autonomous Block Resolution"). '
         "The original `## Fix` section above is preserved unchanged; this "
         "rewrite is the single-reading direction the next fix must follow.*\n"
     )
@@ -313,7 +309,7 @@ def rewrite_bug_fix_section(
     ground_truth_refs: Sequence[str],
     kanban_root: str,
     project_name: str,
-    timestamp: Optional[str] = None,
+    timestamp: str | None = None,
 ) -> FixRewriteResult:
     """Append a single-reading, OVERWATCH-attributed ``## Fix`` rewrite to
     *bug_path*, after backing the file up. See this module's docstring for
@@ -355,7 +351,7 @@ def rewrite_bug_fix_section(
     if not os.path.isfile(bug_path):
         raise FixRewriteError(f"bug file does not exist: {bug_path}")
 
-    original = open(bug_path, "r", encoding="utf-8").read()
+    original = open(bug_path, encoding="utf-8").read()
     if not _has_fix_section(original):
         raise FixRewriteError(
             f"bug file has no '## Fix' section to rewrite: {bug_path} — this step "
@@ -373,7 +369,7 @@ def rewrite_bug_fix_section(
             "reader off to look it up"
         )
 
-    ts = timestamp or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = timestamp or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     backup_path = backup_bug_file(bug_path, kanban_root, project_name, timestamp=ts)
 
@@ -428,7 +424,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Attach OVERWATCH's Lane A Fix-rewrite (step (a) of the recovery "
-            "playbook, team/roles/OVERWATCH.md \"Lane A -- bad-fix regression\") "
+            'playbook, team/roles/OVERWATCH.md "Lane A -- bad-fix regression") '
             "to a bug file: appends a dated, OVERWATCH-attributed "
             "'## Fix (OVERWATCH rewrite)' block naming the failed approach as "
             "FORBIDDEN, stating the correct direction, and reproducing "
@@ -442,26 +438,33 @@ def main() -> int:
     parser.add_argument("--project", required=True, help="Project name as registered in projects.cfg.")
     parser.add_argument("--kanban-root", required=True, help="Kanban root path.")
     parser.add_argument(
-        "--bug-id", required=True,
+        "--bug-id",
+        required=True,
         help="Short bug id (e.g. BUG-0163) to resolve within the project's bugs/ directory.",
     )
     parser.add_argument(
-        "--forbidden-approach", required=True,
+        "--forbidden-approach",
+        required=True,
         help="Names, unambiguously, the approach that was implemented and produced the regression.",
     )
     parser.add_argument(
-        "--correct-direction", required=True,
+        "--correct-direction",
+        required=True,
         help="States the correct fix on its own terms, not merely the opposite of the forbidden approach.",
     )
     parser.add_argument(
-        "--ground-truth-ref", dest="ground_truth_refs", action="append", default=[],
+        "--ground-truth-ref",
+        dest="ground_truth_refs",
+        action="append",
+        default=[],
         help=(
             "A verbatim reference (a git ref, the exact shipped text being changed, ...) the "
             "correct direction depends on. Repeatable; at least one is required."
         ),
     )
     parser.add_argument(
-        "--timestamp", default=None,
+        "--timestamp",
+        default=None,
         help="ISO 8601 UTC timestamp override (tests only; defaults to the current time).",
     )
     args = parser.parse_args()
@@ -486,9 +489,7 @@ def main() -> int:
         sys.stderr.write(f"fix-rewrite: {exc}\n")
         return 1
 
-    sys.stdout.write(
-        f"fix-rewrite: appended OVERWATCH rewrite to {result.bug_path} (backup: {result.backup_path})\n"
-    )
+    sys.stdout.write(f"fix-rewrite: appended OVERWATCH rewrite to {result.bug_path} (backup: {result.backup_path})\n")
     return 0
 
 

@@ -46,11 +46,13 @@ _TIERS = ("small", "medium", "large")
 
 #: template -> the variables / fields whose comment block must state a default.
 _DOCUMENTED: dict[pathlib.Path, tuple[str, ...]] = {
-    _REPO / "projects.cfg_example": ("priority", "description", "dashboard_color", "dashboard_max_rows"),
+    _REPO / "projects.cfg_example": ("priority", "dashboard_color", "dashboard_max_rows"),
     _REPO / "shell-env_example": ("PGAI_AGENT_KANBAN_ROOT_PATH", "KANBAN_ROOT", "PATH"),
     _REPO / "claude-env_example": ("BASH_MAX_TIMEOUT_MS",),
     _REPO / "secrets_example": ("AI_AUTH_MODE", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
-    _TEAM_DIR / "scripts" / "pseudocron.env.example": ("PGAI_AGENT_KANBAN_ROOT_PATH", "PATH", "HOME", "PGAI_CODER_MODEL"),
+    _TEAM_DIR
+    / "scripts"
+    / "pseudocron.env.example": ("PGAI_AGENT_KANBAN_ROOT_PATH", "PATH", "HOME", "PGAI_CODER_MODEL"),
     _TEAM_DIR / "scripts" / "cron-suggested.template.txt": ("PGAI_AGENT_KANBAN_ROOT_PATH", "PATH"),
     **{_INSTALL / f"pseudocron-{t}.cfg.example": ("PATH", "HOME", "PGAI_CODER_MODEL") for t in _TIERS},
     **{_INSTALL / f"crontab-{t}.example": ("PGAI_AGENT_KANBAN_ROOT_PATH", "PATH") for t in _TIERS},
@@ -82,9 +84,9 @@ def test_each_template_variable_states_its_default(path: pathlib.Path, name: str
     pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
     blocks = [block for block in _comment_blocks(path) if pattern.search(block)]
     assert blocks, f"{path.name} has no comment describing {name}"
-    assert any("Default:" in block or "No default" in block for block in blocks), (
-        f"no comment block naming {name} in {path.name} states its default:\n\n" + "\n\n".join(blocks)
-    )
+    assert any(
+        "Default:" in block or "No default" in block for block in blocks
+    ), f"no comment block naming {name} in {path.name} states its default:\n\n" + "\n\n".join(blocks)
 
 
 _KEY_ASSIGNMENT = re.compile(r"^\s*#?\s*(?:export\s+)?(?:ANTHROPIC|OPENAI)_API_KEY=", re.M)
@@ -120,7 +122,10 @@ def _bash_project_order(root: pathlib.Path) -> list[str]:
     env.update(KANBAN_ROOT=str(root), PGAI_AGENT_KANBAN_ROOT_PATH=str(root))
     done = subprocess.run(
         ["bash", "-c", f'source "{_TEAM_DIR}/scripts/lib/projects.sh"; projects_cfg_list'],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
     assert done.returncode == 0, done.stderr
     return done.stdout.split()
@@ -146,13 +151,17 @@ def test_a_non_integer_priority_orders_last_in_bash_and_python_alike(tmp_path: p
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("field", "cfg", "expected"), [
-    ("dashboard_max_rows=2\n", "", 5),
-    ("dashboard_max_rows=500\n", "", 100),
-    ("dashboard_max_rows=25\n", "", 25),
-    ("", "[dashboard]\nmax_rows = 30\n", 30),
-    ("", "", 20),
-], ids=["below-min", "above-max", "in-range", "kanban-cfg-fallback", "built-in-default"])
+@pytest.mark.parametrize(
+    ("field", "cfg", "expected"),
+    [
+        ("dashboard_max_rows=2\n", "", 5),
+        ("dashboard_max_rows=500\n", "", 100),
+        ("dashboard_max_rows=25\n", "", 25),
+        ("", "[dashboard]\nmax_rows = 30\n", 30),
+        ("", "", 20),
+    ],
+    ids=["below-min", "above-max", "in-range", "kanban-cfg-fallback", "built-in-default"],
+)
 def test_rest_board_row_limit_matches_the_tmux_dashboard(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, field: str, cfg: str, expected: int
 ) -> None:
@@ -218,8 +227,11 @@ def test_cron_suggested_renders_completely_with_its_own_recipe() -> None:
 
 
 def test_cron_suggested_uses_the_agent_flag_and_schedules_only_the_overwatch_sweep() -> None:
-    jobs = [line for line in _CRON_SUGGESTED.read_text(encoding="utf-8").splitlines()
-            if line.strip() and not line.lstrip().startswith("#")]
+    jobs = [
+        line
+        for line in _CRON_SUGGESTED.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
     positional = [line for line in jobs if re.search(r"wake-batch\.sh\s+(?!-)\w", line)]
     assert not positional, f"deprecated positional wake-batch.sh calls: {positional}"
     assert any("overwatch-sweep.sh" in line for line in jobs)
@@ -229,7 +241,6 @@ def test_cron_suggested_uses_the_agent_flag_and_schedules_only_the_overwatch_swe
 @pytest.mark.parametrize("tier", _TIERS)
 def test_each_pseudocron_tier_schedules_the_sweep_and_no_overwatch_wake(tier: str) -> None:
     path = _INSTALL / f"pseudocron-{tier}.cfg.example"
-    jobs = [line for line in path.read_text(encoding="utf-8").splitlines()
-            if re.match(r"^\s*[0-9]+\s+\S", line)]
+    jobs = [line for line in path.read_text(encoding="utf-8").splitlines() if re.match(r"^\s*[0-9]+\s+\S", line)]
     assert any("scripts/overwatch-sweep.sh" in line for line in jobs), path.name
     assert not any("--agent=overwatch" in line for line in jobs), path.name

@@ -17,7 +17,6 @@ satisfied drain must not lose it" hold.
 
 from __future__ import annotations
 
-import pathlib
 from pathlib import Path
 
 import pytest
@@ -76,9 +75,7 @@ def test_evaluate_not_drained_when_condition_unsatisfied(tmp_path: Path) -> None
     """NOT_DRAINED when check_drain itself is False -- RC state is irrelevant."""
     root = _project_root(tmp_path, active_rc="v1.0.0")
     (root / "tasks" / "CODER-001").mkdir()
-    (root / "tasks" / "CODER-001" / "status.md").write_text(
-        "## State\nWORKING\n\n## Role\nCODER\n", encoding="utf-8"
-    )
+    (root / "tasks" / "CODER-001" / "status.md").write_text("## State\nWORKING\n\n## Role\nCODER\n", encoding="utf-8")
     result = evaluate(root, root, "coder")
     assert result.outcome is RcGateOutcome.NOT_DRAINED
     assert result.event == "coder"
@@ -178,9 +175,7 @@ def test_evaluate_latch_survives_a_later_unsatisfied_condition(tmp_path: Path) -
     # False and (incorrectly) report NOT_DRAINED, silently dropping the
     # promotion that was already earned.
     (root / "tasks" / "CODER-999").mkdir()
-    (root / "tasks" / "CODER-999" / "status.md").write_text(
-        "## State\nWORKING\n\n## Role\nCODER\n", encoding="utf-8"
-    )
+    (root / "tasks" / "CODER-999" / "status.md").write_text("## State\nWORKING\n\n## Role\nCODER\n", encoding="utf-8")
     result_2 = evaluate(root, root, "coder")
     assert result_2.outcome is RcGateOutcome.DEFERRED, "the latch, not a fresh check_drain, must decide"
 

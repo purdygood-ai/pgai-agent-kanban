@@ -51,10 +51,15 @@ def _summary(text: str, remote: str = "origin", prefix: str = "ai_") -> list:
 
 
 def test_the_events_own_rc_branch_is_a_delete() -> None:
-    text = _state(_event(
-        "v0.1.0", "origin",
-        "ai_main (push failed)", "refs/tags/ai_v0.1.0 (push failed)", "ai_rc/v0.1.0 (still on origin; deletion failed)",
-    ))
+    text = _state(
+        _event(
+            "v0.1.0",
+            "origin",
+            "ai_main (push failed)",
+            "refs/tags/ai_v0.1.0 (push failed)",
+            "ai_rc/v0.1.0 (still on origin; deletion failed)",
+        )
+    )
     assert _summary(text) == [("delete", "ai_rc/v0.1.0")]
 
 
@@ -64,13 +69,16 @@ def test_an_unprefixed_lane_deletes_its_bare_rc_branch() -> None:
 
 
 def test_no_other_branch_is_ever_a_delete() -> None:
-    text = _state(_event(
-        "v0.1.0", "origin",
-        "ai_main (still on origin; deletion failed)",
-        "ai_rc/v0.0.9 (still on origin; deletion failed)",
-        "rc/v0.1.0 (still on origin; deletion failed)",
-        "feature/keep (still on origin; deletion failed)",
-    ))
+    text = _state(
+        _event(
+            "v0.1.0",
+            "origin",
+            "ai_main (still on origin; deletion failed)",
+            "ai_rc/v0.0.9 (still on origin; deletion failed)",
+            "rc/v0.1.0 (still on origin; deletion failed)",
+            "feature/keep (still on origin; deletion failed)",
+        )
+    )
     decisions = rc_branch_decisions(text, "origin", "ai_")
     assert [d.action for d in decisions] == ["skip"] * 4, decisions
     assert all("is not this project's RC branch for v0.1.0 (ai_rc/v0.1.0)" in d.reason for d in decisions), decisions
@@ -115,14 +123,33 @@ def test_spacing_and_heading_case_are_read_liberally_and_duplicates_once() -> No
 
 def test_command_line_prints_one_tab_separated_line_per_decision(tmp_path: pathlib.Path) -> None:
     state = tmp_path / "release-state.md"
-    state.write_text(_state(_event(
-        "v0.1.0", "origin",
-        "ai_rc/v0.1.0 (still on origin; deletion failed)", "ai_main (still on origin; deletion failed)",
-    )), encoding="utf-8")
+    state.write_text(
+        _state(
+            _event(
+                "v0.1.0",
+                "origin",
+                "ai_rc/v0.1.0 (still on origin; deletion failed)",
+                "ai_main (still on origin; deletion failed)",
+            )
+        ),
+        encoding="utf-8",
+    )
     result = subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.cm.push_lag_events", "rc-branch-deletes", str(state),
-         "--remote", "origin", "--branch-prefix", "ai_"],
-        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.cm.push_lag_events",
+            "rc-branch-deletes",
+            str(state),
+            "--remote",
+            "origin",
+            "--branch-prefix",
+            "ai_",
+        ],
+        cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
@@ -135,9 +162,19 @@ def test_command_line_prints_one_tab_separated_line_per_decision(tmp_path: pathl
 
 def test_command_line_prints_nothing_for_a_missing_file(tmp_path: pathlib.Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.cm.push_lag_events", "rc-branch-deletes",
-         str(tmp_path / "absent.md"), "--remote", "origin"],
-        cwd=str(_TEAM_DIR), capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.cm.push_lag_events",
+            "rc-branch-deletes",
+            str(tmp_path / "absent.md"),
+            "--remote",
+            "origin",
+        ],
+        cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""

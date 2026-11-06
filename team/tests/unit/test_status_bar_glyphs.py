@@ -45,30 +45,30 @@ import os
 import pathlib
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Script paths
 # ---------------------------------------------------------------------------
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/tests/unit/ -> team/
-_STATUS_RIGHT  = _TEAM_DIR / "scripts" / "dashboard" / "status-right.sh"
+_STATUS_RIGHT = _TEAM_DIR / "scripts" / "dashboard" / "status-right.sh"
 _STATUS_BOTTOM = _TEAM_DIR / "scripts" / "dashboard" / "status-bottom.sh"
 
 # ---------------------------------------------------------------------------
 # Expected glyphs (must match team/scripts/lib/status_glyphs.sh)
 # ---------------------------------------------------------------------------
-GLYPH_VERSION    = "\U0001f4dd"   # 📝
-GLYPH_PM_AUTO    = "\U0001f7e2"   # 🟢
-GLYPH_PM_MANUAL  = "\U0001f7e1"   # 🟡
-GLYPH_APPROVAL   = "✋"       # ✋
-GLYPH_HALT       = "\U0001f6d1"   # 🛑
-GLYPH_HALT_AFTER = "⚠️" # ⚠️  (U+26A0 + U+FE0F variation selector)
-GLYPH_TIMESTAMP  = "\U0001f4c5"   # 📅
+GLYPH_VERSION = "\U0001f4dd"  # 📝
+GLYPH_PM_AUTO = "\U0001f7e2"  # 🟢
+GLYPH_PM_MANUAL = "\U0001f7e1"  # 🟡
+GLYPH_APPROVAL = "✋"  # ✋
+GLYPH_HALT = "\U0001f6d1"  # 🛑
+GLYPH_HALT_AFTER = "⚠️"  # ⚠️  (U+26A0 + U+FE0F variation selector)
+GLYPH_TIMESTAMP = "\U0001f4c5"  # 📅
 
 
 # ---------------------------------------------------------------------------
 # Fixture builders
 # ---------------------------------------------------------------------------
+
 
 def _make_root(tmp_path: pathlib.Path, *, version: str = "v1.12.0") -> pathlib.Path:
     """Create a minimal kanban root under tmp_path with a VERSION file."""
@@ -115,7 +115,10 @@ def _run_right(
         env.update(extra_env)
     return subprocess.run(
         ["bash", str(_STATUS_RIGHT), str(root)],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
 
 
@@ -140,7 +143,10 @@ def _run_bottom(
         env.update(extra_env)
     return subprocess.run(
         ["bash", str(_STATUS_BOTTOM), str(root)],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
 
 
@@ -158,8 +164,7 @@ class TestRichModeGlyphs:
         result = _run_right(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_VERSION in result.stdout, (
-            f"Expected GLYPH_VERSION ({GLYPH_VERSION!r}) in rich output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_VERSION ({GLYPH_VERSION!r}) in rich output; " f"stdout: {result.stdout!r}"
         )
 
     def test_right_pm_auto_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -168,8 +173,7 @@ class TestRichModeGlyphs:
         result = _run_right(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_PM_AUTO in result.stdout, (
-            f"Expected GLYPH_PM_AUTO ({GLYPH_PM_AUTO!r}) in rich output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_PM_AUTO ({GLYPH_PM_AUTO!r}) in rich output; " f"stdout: {result.stdout!r}"
         )
 
     def test_right_pm_manual_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -178,12 +182,9 @@ class TestRichModeGlyphs:
         result = _run_right(root, rich=True, extra_env={"PGAI_KANBAN_PM_MODE": "manual"})
         assert result.returncode == 0, result.stderr
         assert GLYPH_PM_MANUAL in result.stdout, (
-            f"Expected GLYPH_PM_MANUAL ({GLYPH_PM_MANUAL!r}) in rich output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_PM_MANUAL ({GLYPH_PM_MANUAL!r}) in rich output; " f"stdout: {result.stdout!r}"
         )
-        assert GLYPH_PM_AUTO not in result.stdout, (
-            "Auto glyph must not appear when PM mode is manual"
-        )
+        assert GLYPH_PM_AUTO not in result.stdout, "Auto glyph must not appear when PM mode is manual"
 
     def test_right_halt_glyph(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh emits GLYPH_HALT before HALT GLOBAL in rich mode."""
@@ -192,8 +193,7 @@ class TestRichModeGlyphs:
         result = _run_right(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_HALT in result.stdout, (
-            f"Expected GLYPH_HALT ({GLYPH_HALT!r}) in rich halt output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_HALT ({GLYPH_HALT!r}) in rich halt output; " f"stdout: {result.stdout!r}"
         )
 
     def test_right_halt_after_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -204,13 +204,10 @@ class TestRichModeGlyphs:
         assert result.returncode == 0, result.stderr
         # GLYPH_HALT_AFTER may be a two-codepoint sequence (⚠️); check for first codepoint
         assert "⚠" in result.stdout, (
-            f"Expected GLYPH_HALT_AFTER (⚠) in rich draining output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_HALT_AFTER (⚠) in rich draining output; " f"stdout: {result.stdout!r}"
         )
         # Must NOT show HALT stop glyph (red 🛑) for a draining state
-        assert GLYPH_HALT not in result.stdout, (
-            "HALT stop glyph must not appear for HALT-AFTER (draining) state"
-        )
+        assert GLYPH_HALT not in result.stdout, "HALT stop glyph must not appear for HALT-AFTER (draining) state"
 
     def test_right_approval_glyph(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh emits GLYPH_APPROVAL before APPROVAL(n) in rich mode."""
@@ -219,8 +216,7 @@ class TestRichModeGlyphs:
         result = _run_right(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_APPROVAL in result.stdout, (
-            f"Expected GLYPH_APPROVAL ({GLYPH_APPROVAL!r}) in rich approval output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_APPROVAL ({GLYPH_APPROVAL!r}) in rich approval output; " f"stdout: {result.stdout!r}"
         )
 
     def test_right_timestamp_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -229,8 +225,7 @@ class TestRichModeGlyphs:
         result = _run_right(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_TIMESTAMP in result.stdout, (
-            f"Expected GLYPH_TIMESTAMP ({GLYPH_TIMESTAMP!r}) in rich output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_TIMESTAMP ({GLYPH_TIMESTAMP!r}) in rich output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_version_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -239,8 +234,7 @@ class TestRichModeGlyphs:
         result = _run_bottom(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_VERSION in result.stdout, (
-            f"Expected GLYPH_VERSION ({GLYPH_VERSION!r}) in rich bottom output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_VERSION ({GLYPH_VERSION!r}) in rich bottom output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_pm_auto_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -249,8 +243,7 @@ class TestRichModeGlyphs:
         result = _run_bottom(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_PM_AUTO in result.stdout, (
-            f"Expected GLYPH_PM_AUTO ({GLYPH_PM_AUTO!r}) in rich bottom output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_PM_AUTO ({GLYPH_PM_AUTO!r}) in rich bottom output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_pm_manual_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -259,8 +252,7 @@ class TestRichModeGlyphs:
         result = _run_bottom(root, rich=True, extra_env={"PGAI_KANBAN_PM_MODE": "manual"})
         assert result.returncode == 0, result.stderr
         assert GLYPH_PM_MANUAL in result.stdout, (
-            f"Expected GLYPH_PM_MANUAL ({GLYPH_PM_MANUAL!r}) in rich bottom output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_PM_MANUAL ({GLYPH_PM_MANUAL!r}) in rich bottom output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_halt_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -270,8 +262,7 @@ class TestRichModeGlyphs:
         result = _run_bottom(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_HALT in result.stdout, (
-            f"Expected GLYPH_HALT ({GLYPH_HALT!r}) in rich halt bottom output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_HALT ({GLYPH_HALT!r}) in rich halt bottom output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_halt_after_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -281,8 +272,7 @@ class TestRichModeGlyphs:
         result = _run_bottom(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert "⚠" in result.stdout, (
-            f"Expected GLYPH_HALT_AFTER (⚠) in rich draining bottom output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_HALT_AFTER (⚠) in rich draining bottom output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_approval_glyph(self, tmp_path: pathlib.Path) -> None:
@@ -302,8 +292,7 @@ class TestRichModeGlyphs:
         result = _run_bottom(root, rich=True)
         assert result.returncode == 0, result.stderr
         assert GLYPH_TIMESTAMP in result.stdout, (
-            f"Expected GLYPH_TIMESTAMP ({GLYPH_TIMESTAMP!r}) in rich bottom output; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_TIMESTAMP ({GLYPH_TIMESTAMP!r}) in rich bottom output; " f"stdout: {result.stdout!r}"
         )
 
     def test_bottom_unknown_version_rich(self, tmp_path: pathlib.Path) -> None:
@@ -315,8 +304,7 @@ class TestRichModeGlyphs:
         assert result.returncode == 0, result.stderr
         # The fallback version string varies; the glyph prefix should be present
         assert GLYPH_VERSION in result.stdout, (
-            f"Expected GLYPH_VERSION prefix even for unknown version; "
-            f"stdout: {result.stdout!r}"
+            f"Expected GLYPH_VERSION prefix even for unknown version; " f"stdout: {result.stdout!r}"
         )
 
 
@@ -332,7 +320,7 @@ _ALL_GLYPH_CHARS = {
     GLYPH_PM_MANUAL,
     GLYPH_APPROVAL,
     GLYPH_HALT,
-    "⚠",   # ⚠️ first codepoint
+    "⚠",  # ⚠️ first codepoint
     GLYPH_TIMESTAMP,
 }
 
@@ -350,9 +338,9 @@ class TestNoColorRegressionLock:
         root = _make_root(tmp_path)
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR output (normal state); stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR output (normal state); stdout: {result.stdout!r}"
 
     def test_right_no_glyphs_halt(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode: no glyphs in halted state."""
@@ -360,9 +348,7 @@ class TestNoColorRegressionLock:
         (root / "HALT").touch()
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR halt output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(result.stdout), f"Glyph found in NO_COLOR halt output; stdout: {result.stdout!r}"
 
     def test_right_no_glyphs_halt_after(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode: no glyphs in draining state."""
@@ -370,9 +356,9 @@ class TestNoColorRegressionLock:
         (root / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR halt-after output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR halt-after output; stdout: {result.stdout!r}"
 
     def test_right_no_glyphs_approval(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode: no glyphs in approval-pending state."""
@@ -380,18 +366,18 @@ class TestNoColorRegressionLock:
         _write_human_approve_task(root, "proj", "HUMAN-APPROVE-v1-001", state="WAITING")
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR approval output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR approval output; stdout: {result.stdout!r}"
 
     def test_right_no_glyphs_pm_manual(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode: no glyphs in PM:manual state."""
         root = _make_root(tmp_path)
         result = _run_right(root, rich=False, extra_env={"PGAI_KANBAN_PM_MODE": "manual"})
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR PM:manual output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR PM:manual output; stdout: {result.stdout!r}"
 
     def test_right_dumb_halt_format_unchanged(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode halt format is byte-identical to pre-RC: '[HALT GLOBAL]'."""
@@ -399,9 +385,9 @@ class TestNoColorRegressionLock:
         (root / "HALT").touch()
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert "[HALT GLOBAL]" in result.stdout, (
-            f"Expected '[HALT GLOBAL]' in dumb-mode halt output; stdout: {result.stdout!r}"
-        )
+        assert (
+            "[HALT GLOBAL]" in result.stdout
+        ), f"Expected '[HALT GLOBAL]' in dumb-mode halt output; stdout: {result.stdout!r}"
 
     def test_right_dumb_halt_after_format_unchanged(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode draining format is byte-identical to pre-RC: '[HALT-AFTER:GLOBAL rc]'."""
@@ -409,9 +395,9 @@ class TestNoColorRegressionLock:
         (root / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert "[HALT-AFTER:GLOBAL rc]" in result.stdout, (
-            f"Expected '[HALT-AFTER:GLOBAL rc]' in dumb-mode output; stdout: {result.stdout!r}"
-        )
+        assert (
+            "[HALT-AFTER:GLOBAL rc]" in result.stdout
+        ), f"Expected '[HALT-AFTER:GLOBAL rc]' in dumb-mode output; stdout: {result.stdout!r}"
 
     def test_right_dumb_approval_format_unchanged(self, tmp_path: pathlib.Path) -> None:
         """status-right.sh dumb mode approval format is byte-identical to pre-RC: '[APPROVAL(1)]'."""
@@ -419,18 +405,18 @@ class TestNoColorRegressionLock:
         _write_human_approve_task(root, "proj", "HUMAN-APPROVE-v1-001", state="WAITING")
         result = _run_right(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert "[APPROVAL(1)]" in result.stdout, (
-            f"Expected '[APPROVAL(1)]' in dumb-mode output; stdout: {result.stdout!r}"
-        )
+        assert (
+            "[APPROVAL(1)]" in result.stdout
+        ), f"Expected '[APPROVAL(1)]' in dumb-mode output; stdout: {result.stdout!r}"
 
     def test_bottom_no_glyphs_normal(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode: no glyphs in normal state."""
         root = _make_root(tmp_path)
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR bottom output (normal); stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR bottom output (normal); stdout: {result.stdout!r}"
 
     def test_bottom_no_glyphs_halt(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode: no glyphs in halted state."""
@@ -438,9 +424,9 @@ class TestNoColorRegressionLock:
         (root / "HALT").touch()
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR bottom halt output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR bottom halt output; stdout: {result.stdout!r}"
 
     def test_bottom_no_glyphs_halt_after(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode: no glyphs in draining state."""
@@ -448,9 +434,9 @@ class TestNoColorRegressionLock:
         (root / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR bottom halt-after output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR bottom halt-after output; stdout: {result.stdout!r}"
 
     def test_bottom_no_glyphs_approval(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode: no glyphs in approval-pending state."""
@@ -458,18 +444,18 @@ class TestNoColorRegressionLock:
         _write_human_approve_task(root, "proj", "HUMAN-APPROVE-v1-001", state="WAITING")
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR bottom approval output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR bottom approval output; stdout: {result.stdout!r}"
 
     def test_bottom_no_glyphs_pm_manual(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode: no glyphs in PM:manual state."""
         root = _make_root(tmp_path)
         result = _run_bottom(root, rich=False, extra_env={"PGAI_KANBAN_PM_MODE": "manual"})
         assert result.returncode == 0, result.stderr
-        assert not _contains_any_glyph(result.stdout), (
-            f"Glyph found in NO_COLOR bottom PM:manual output; stdout: {result.stdout!r}"
-        )
+        assert not _contains_any_glyph(
+            result.stdout
+        ), f"Glyph found in NO_COLOR bottom PM:manual output; stdout: {result.stdout!r}"
 
     def test_bottom_dumb_halt_format_unchanged(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode halt format is byte-identical to pre-RC: '[HALT GLOBAL]'."""
@@ -477,9 +463,9 @@ class TestNoColorRegressionLock:
         (root / "HALT").touch()
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert "[HALT GLOBAL]" in result.stdout, (
-            f"Expected '[HALT GLOBAL]' in dumb bottom output; stdout: {result.stdout!r}"
-        )
+        assert (
+            "[HALT GLOBAL]" in result.stdout
+        ), f"Expected '[HALT GLOBAL]' in dumb bottom output; stdout: {result.stdout!r}"
 
     def test_bottom_dumb_halt_after_format_unchanged(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode draining format is byte-identical to pre-RC."""
@@ -487,9 +473,9 @@ class TestNoColorRegressionLock:
         (root / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert "[HALT-AFTER:GLOBAL rc]" in result.stdout, (
-            f"Expected '[HALT-AFTER:GLOBAL rc]' in dumb bottom output; stdout: {result.stdout!r}"
-        )
+        assert (
+            "[HALT-AFTER:GLOBAL rc]" in result.stdout
+        ), f"Expected '[HALT-AFTER:GLOBAL rc]' in dumb bottom output; stdout: {result.stdout!r}"
 
     def test_bottom_dumb_approval_format_unchanged(self, tmp_path: pathlib.Path) -> None:
         """status-bottom.sh dumb mode approval format is byte-identical to pre-RC: '[APPROVAL(1)]'."""
@@ -497,9 +483,9 @@ class TestNoColorRegressionLock:
         _write_human_approve_task(root, "proj", "HUMAN-APPROVE-v1-001", state="WAITING")
         result = _run_bottom(root, rich=False)
         assert result.returncode == 0, result.stderr
-        assert "[APPROVAL(1)]" in result.stdout, (
-            f"Expected '[APPROVAL(1)]' in dumb bottom output; stdout: {result.stdout!r}"
-        )
+        assert (
+            "[APPROVAL(1)]" in result.stdout
+        ), f"Expected '[APPROVAL(1)]' in dumb bottom output; stdout: {result.stdout!r}"
 
 
 # ===========================================================================
@@ -590,9 +576,5 @@ class TestSiblingGlyphEquality:
         root = _make_root(tmp_path)
         right = _run_right(root, rich=False)
         bottom = _run_bottom(root, rich=False)
-        assert not _contains_any_glyph(right.stdout), (
-            f"status-right: glyph in dumb output; stdout: {right.stdout!r}"
-        )
-        assert not _contains_any_glyph(bottom.stdout), (
-            f"status-bottom: glyph in dumb output; stdout: {bottom.stdout!r}"
-        )
+        assert not _contains_any_glyph(right.stdout), f"status-right: glyph in dumb output; stdout: {right.stdout!r}"
+        assert not _contains_any_glyph(bottom.stdout), f"status-bottom: glyph in dumb output; stdout: {bottom.stdout!r}"

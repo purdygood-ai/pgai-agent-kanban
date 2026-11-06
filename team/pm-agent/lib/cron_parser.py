@@ -18,19 +18,18 @@ cron fires.  Agents without a --sleep flag (small/medium tiers, integer-minute
 offsets) get +0 — unchanged behaviour.
 
 Note: seconds precision allows the dashboard to display MM:SS countdowns
-that change on every 5-second watch refresh tick.
+that change on every dashboard pane refresh.
 """
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Regex patterns
 # ---------------------------------------------------------------------------
 
 # Match variable-substituted paths like $KANBAN_ROOT, ${KANBAN_ROOT}, $HOME
-_VAR_RE = re.compile(r'\$\{?[A-Za-z_][A-Za-z0-9_]*\}?')
+_VAR_RE = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?")
 
 # Match a wake script invocation with an agent name.
 #
@@ -46,15 +45,14 @@ _VAR_RE = re.compile(r'\$\{?[A-Za-z_][A-Za-z0-9_]*\}?')
 _WAKE_SCRIPT_RE = re.compile(
     # The path prefix: $VAR or absolute path, then /scripts/, then one of the
     # known wake script names:
-    r'(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|[/~][^\s]*)/'
-    r'scripts/'
-    r'(?:'
-        r'wake-batch\.sh|'                      # batch dispatcher
-        r'wake/(?:claude|codex|gemini)\.sh'     # provider subdir layout
-    r')'
+    r"(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|[/~][^\s]*)/"
+    r"scripts/"
+    r"(?:"
+    r"wake-batch\.sh|"  # batch dispatcher
+    r"wake/(?:claude|codex|gemini)\.sh"  # provider subdir layout
+    r")"
     # The agent name: either --agent=NAME (preferred) or positional NAME
-    r'\s+'
-    r'(?:--agent=([A-Za-z0-9_-]+)|([A-Za-z0-9_-]+))',
+    r"\s+" r"(?:--agent=([A-Za-z0-9_-]+)|([A-Za-z0-9_-]+))",
     re.IGNORECASE,
 )
 
@@ -68,37 +66,37 @@ _WAKE_SCRIPT_RE = re.compile(
 # Group 1 captures the value for the --sleep=N form.
 # Group 2 captures the value for the positional --sleep N form.
 _SLEEP_RE = re.compile(
-    r'--sleep=(\d+)'          # --sleep=N  (equals form)
-    r'|'
-    r'--sleep\s+(\d+)',       # --sleep N  (positional / space-separated form)
+    r"--sleep=(\d+)"  # --sleep=N  (equals form)
+    r"|"
+    r"--sleep\s+(\d+)",  # --sleep N  (positional / space-separated form)
 )
 
 # Match a cleanup.sh invocation.
 # Recognizes both scripts/cleanup/cleanup.sh and scripts/cleanup.sh layouts.
 _CLEANUP_RE = re.compile(
-    r'(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|[/~][^\s]*)/'
-    r'scripts/(?:cleanup/)?cleanup\.sh',
+    r"(?:\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|[/~][^\s]*)/" r"scripts/(?:cleanup/)?cleanup\.sh",
     re.IGNORECASE,
 )
 
 # Match a cron line: 5 fields followed by the command
 # Allow any whitespace between fields
 _CRON_LINE_RE = re.compile(
-    r'^\s*'
-    r'(\S+)\s+'   # minute
-    r'(\S+)\s+'   # hour
-    r'(\S+)\s+'   # day-of-month
-    r'(\S+)\s+'   # month
-    r'(\S+)\s+'   # day-of-week
-    r'(.+)$',     # command (rest of line)
+    r"^\s*"
+    r"(\S+)\s+"  # minute
+    r"(\S+)\s+"  # hour
+    r"(\S+)\s+"  # day-of-month
+    r"(\S+)\s+"  # month
+    r"(\S+)\s+"  # day-of-week
+    r"(.+)$",  # command (rest of line)
 )
 
 # Day-of-week sentinel labels (used for weekly schedules)
-_DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+_DOW_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 # ---------------------------------------------------------------------------
 # Cron field evaluator
 # ---------------------------------------------------------------------------
+
 
 def _parse_field(field: str, min_val: int, max_val: int) -> list:
     """Parse a single cron field (e.g. '*/5', '0,15,30', '1-5') into a
@@ -108,27 +106,27 @@ def _parse_field(field: str, min_val: int, max_val: int) -> list:
     """
     values = set()
     try:
-        for part in field.split(','):
+        for part in field.split(","):
             part = part.strip()
-            if part == '*':
+            if part == "*":
                 values.update(range(min_val, max_val + 1))
-            elif '/' in part:
+            elif "/" in part:
                 # e.g. */5 or 0-59/5
-                base, step_str = part.split('/', 1)
+                base, step_str = part.split("/", 1)
                 step = int(step_str)
                 if step < 1:
                     return []
-                if base == '*':
+                if base == "*":
                     start, end = min_val, max_val
-                elif '-' in base:
-                    lo, hi = base.split('-', 1)
+                elif "-" in base:
+                    lo, hi = base.split("-", 1)
                     start, end = int(lo), int(hi)
                 else:
                     start = int(base)
                     end = max_val
                 values.update(range(start, end + 1, step))
-            elif '-' in part:
-                lo, hi = part.split('-', 1)
+            elif "-" in part:
+                lo, hi = part.split("-", 1)
                 values.update(range(int(lo), int(hi) + 1))
             else:
                 values.add(int(part))
@@ -138,8 +136,7 @@ def _parse_field(field: str, min_val: int, max_val: int) -> list:
     return sorted(v for v in values if min_val <= v <= max_val)
 
 
-def _next_minute_from_fields(minute_vals: list, hour_vals: list,
-                              dow_vals: list, now: datetime) -> Optional[int]:
+def _next_minute_from_fields(minute_vals: list, hour_vals: list, dow_vals: list, now: datetime) -> int | None:
     """Compute minutes until next firing given evaluated cron fields.
 
     Scans forward up to 8 days (to handle weekly schedules) looking for the
@@ -157,8 +154,7 @@ def _next_minute_from_fields(minute_vals: list, hour_vals: list,
     return int(secs // 60)
 
 
-def _next_seconds_from_fields(minute_vals: list, hour_vals: list,
-                               dow_vals: list, now: datetime) -> Optional[int]:
+def _next_seconds_from_fields(minute_vals: list, hour_vals: list, dow_vals: list, now: datetime) -> int | None:
     """Compute seconds until next firing given evaluated cron fields.
 
     Scans forward up to 8 days (to handle weekly schedules) looking for the
@@ -199,6 +195,7 @@ def _next_seconds_from_fields(minute_vals: list, hour_vals: list,
 # Weekly schedule detector & sentinel builder
 # ---------------------------------------------------------------------------
 
+
 def _is_every_minute(minute_vals: list, hour_vals: list, dow_vals: list) -> bool:
     """Return True when the schedule fires every minute of every hour of every day.
 
@@ -220,12 +217,12 @@ def _is_weekly(dow_field: str, dom_field: str, month_field: str) -> bool:
     """Return True when the schedule fires at most once per week."""
     # If month or day-of-month are restricted it may be less than weekly,
     # but for display purposes we treat any specific dow as 'weekly-like'.
-    if dom_field != '*' or month_field != '*':
+    if dom_field != "*" or month_field != "*":
         return False
     # A specific single day-of-week (no wildcards) = weekly
     dow_field = dow_field.strip()
     # Single numeric value or named day (0-7 where both 0 and 7 = Sunday)
-    if re.fullmatch(r'[0-7]', dow_field):
+    if re.fullmatch(r"[0-7]", dow_field):
         return True
     # Named abbreviated day
     dow_names_lower = [d.lower() for d in _DOW_NAMES]
@@ -238,28 +235,29 @@ def _weekly_sentinel(minute_vals: list, hour_vals: list, dow_vals: list) -> str:
     """Build a human-readable sentinel like 'Sun 4am' for weekly schedules."""
     try:
         if not dow_vals or not hour_vals:
-            return 'weekly'
+            return "weekly"
         dow = dow_vals[0]
         hour = hour_vals[0]
         dow_name = _DOW_NAMES[dow % 7]
         if hour == 0:
-            hour_str = '12am'
+            hour_str = "12am"
         elif hour < 12:
-            hour_str = f'{hour}am'
+            hour_str = f"{hour}am"
         elif hour == 12:
-            hour_str = '12pm'
+            hour_str = "12pm"
         else:
-            hour_str = f'{hour - 12}pm'
-        return f'{dow_name} {hour_str}'
+            hour_str = f"{hour - 12}pm"
+        return f"{dow_name} {hour_str}"
     except (IndexError, TypeError):
-        return 'weekly'
+        return "weekly"
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def next_firings(crontab_text: str, now: Optional[datetime] = None) -> dict:
+
+def next_firings(crontab_text: str, now: datetime | None = None) -> dict:
     """Parse crontab text and return next firing times for kanban agent entries.
 
     Parameters
@@ -277,7 +275,7 @@ def next_firings(crontab_text: str, now: Optional[datetime] = None) -> dict:
     display string (str) for infrequent (weekly) schedules.
 
     Returning seconds (rather than whole minutes) lets the dashboard display
-    MM:SS countdowns that change on every 5-second watch refresh tick.
+    MM:SS countdowns that change on every dashboard pane refresh.
 
     Examples
     --------
@@ -298,7 +296,7 @@ def next_firings(crontab_text: str, now: Optional[datetime] = None) -> dict:
         line = raw_line.strip()
 
         # Skip blank lines and comment lines
-        if not line or line.startswith('#'):
+        if not line or line.startswith("#"):
             continue
 
         # Strip trailing comment (heuristic: '#' not inside quotes)
@@ -311,7 +309,12 @@ def next_firings(crontab_text: str, now: Optional[datetime] = None) -> dict:
             continue
 
         min_field, hour_field, dom_field, month_field, dow_field, command = (
-            m.group(1), m.group(2), m.group(3), m.group(4), m.group(5), m.group(6)
+            m.group(1),
+            m.group(2),
+            m.group(3),
+            m.group(4),
+            m.group(5),
+            m.group(6),
         )
 
         # Parse cron fields
@@ -328,7 +331,7 @@ def next_firings(crontab_text: str, now: Optional[datetime] = None) -> dict:
 
         # Detect cleanup entries
         if _CLEANUP_RE.search(command):
-            key = 'cleanup'
+            key = "cleanup"
             if _is_weekly(dow_field, dom_field, month_field):
                 result[key] = _weekly_sentinel(minute_vals, hour_vals, dow_vals)
             else:
@@ -384,6 +387,7 @@ def next_firings(crontab_text: str, now: Optional[datetime] = None) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _sleep_seconds(command: str) -> int:
     """Extract the --sleep=N (or --sleep N) value from a cron command string.
 
@@ -429,6 +433,6 @@ def _find_comment_pos(line: str) -> int:
             in_single = not in_single
         elif ch == '"' and not in_single:
             in_double = not in_double
-        elif ch == '#' and not in_single and not in_double:
+        elif ch == "#" and not in_single and not in_double:
             return i
     return -1

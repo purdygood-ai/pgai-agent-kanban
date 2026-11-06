@@ -104,10 +104,13 @@ def test_bash_reader_agrees_with_python_reader(tmp_path: pathlib.Path) -> None:
 @pytest.mark.parametrize("name", sorted(SAMPLES))
 def test_overwatch_transient_check_matches_only_transient_tails(tmp_path: pathlib.Path, name: str) -> None:
     line, expected = SAMPLES[name]
-    lines = _bash_lines(tmp_path, textwrap.dedent(f"""\
+    lines = _bash_lines(
+        tmp_path,
+        textwrap.dedent(f"""\
         source {_CHECK_TRANSIENT}
         if _ctae_matches_transient_signature {shlex.quote(_tail(line))}; then echo match; else echo miss; fi
-    """))
+    """),
+    )
     assert lines == ["match" if expected == "transient" else "miss"], name
 
 
@@ -121,7 +124,9 @@ def _wake_post_exit(tmp_path: pathlib.Path, text: str) -> list[str]:
     """
     agent_log = tmp_path / "agent.log"
     agent_log.write_text(text, encoding="utf-8")
-    return _bash_lines(tmp_path, textwrap.dedent(f"""\
+    return _bash_lines(
+        tmp_path,
+        textwrap.dedent(f"""\
         source scripts/lib/overwatch_protocol.sh
         source scripts/lib/wake_lifecycle.sh
         log() {{ echo "log: $*" >&2; }}
@@ -138,7 +143,8 @@ def _wake_post_exit(tmp_path: pathlib.Path, text: str) -> list[str]:
         exec 3>&1
         state="$(handle_working_after_exit CODER-20260101-001-example "{tmp_path}/status.md" "{agent_log}" 1)"
         echo "state=$state"
-    """))
+    """),
+    )
 
 
 @pytest.mark.parametrize("name", sorted(SAMPLES))
@@ -181,10 +187,20 @@ def test_block_evidence_zero_progress_verdict_follows_the_class(tmp_path: pathli
     batch.write_text(_tail(line), encoding="utf-8")
     end = batch.stat().st_size
     rows = [
-        {"event": "dispatched", "batch_log": str(batch), "recorded_at": "2026-01-01T10:00:00Z",
-         "offset_start": 0, "offset_end": None},
-        {"event": "returned", "batch_log": str(batch), "recorded_at": "2026-01-01T10:10:00Z",
-         "offset_start": 0, "offset_end": end},
+        {
+            "event": "dispatched",
+            "batch_log": str(batch),
+            "recorded_at": "2026-01-01T10:00:00Z",
+            "offset_start": 0,
+            "offset_end": None,
+        },
+        {
+            "event": "returned",
+            "batch_log": str(batch),
+            "recorded_at": "2026-01-01T10:10:00Z",
+            "offset_start": 0,
+            "offset_end": end,
+        },
     ]
     (task / "logs" / "dispatch.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     verdict = be.classify_zero_progress(task)
@@ -243,9 +259,17 @@ def test_bash_reader_reads_the_table_of_its_own_install(tmp_path: pathlib.Path, 
     elsewhere.mkdir()
     env = build_scrubbed_env(home_dir=tmp_path / "home")
     proc = subprocess.run(
-        ["bash", "-c", f'source "{root}/scripts/lib/provider_signatures.sh"; '
-                       f'provider_signature_class {shlex.quote(SAMPLES["safeguard"][0])}'],
-        cwd=elsewhere, env=env, capture_output=True, text=True, timeout=60,
+        [
+            "bash",
+            "-c",
+            f'source "{root}/scripts/lib/provider_signatures.sh"; '
+            f'provider_signature_class {shlex.quote(SAMPLES["safeguard"][0])}',
+        ],
+        cwd=elsewhere,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     if with_table:
         assert (proc.returncode, proc.stdout) == (0, "transient\n"), proc.stderr

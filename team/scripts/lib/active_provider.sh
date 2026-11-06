@@ -31,6 +31,11 @@
 #       Echo the active provider name (claude|codex|gemini).
 #       kanban_root: path to the kanban root directory (required).
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_ACTIVE_PROVIDER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _ACTIVE_PROVIDER_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # read_active_provider <kanban_root>
 # Echo the active provider: 'claude' | 'codex' | 'gemini'.
@@ -56,7 +61,7 @@ read_active_provider() {
     # callers already have it sourced via project_paths.sh).
     if ! command -v read_ini >/dev/null 2>&1; then
         local ini_parser
-        ini_parser="$(dirname "${BASH_SOURCE[0]}")/ini_parser.sh"
+        ini_parser="${_ACTIVE_PROVIDER_LIB_DIR}/ini_parser.sh"
         if [[ -f "$ini_parser" ]]; then
             # shellcheck source=/dev/null
             source "$ini_parser"

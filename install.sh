@@ -2,7 +2,8 @@
 # install.sh
 # Install pgai-agent-kanban into the user's home directory and, on request
 # (--add-claude-agents / --add-codex-agents), copy the subagents into each
-# provider's agents directory.
+# provider's agents directory and (--add-claude-skills / --add-codex-skills)
+# install the staged skills into each provider's skills directory.
 #
 # This is the FRESH-INSTALL path only. It lays down a complete kanban tree
 # from the team/ source directory, seeds default configs, ensures runtime
@@ -29,6 +30,25 @@
 #   ~/.claude/agents/) and ~/.codex/agents/ for Codex. Non-kanban agent files
 #   in those directories are NEVER deleted — only agents that this installer
 #   previously wrote (as recorded in .installed-subagents).
+#
+# Skill staging:
+#   Every skill the repository ships under skills/<provider>/<name>/ is
+#   deposited into the staging directory $KANBAN_ROOT/skills/<provider>/<name>/
+#   (created for each provider the repository ships skills for), file by file
+#   with the same overwrite rules as every other installed file. What was
+#   shipped is recorded in $KANBAN_ROOT/.installed-skills, one
+#   "<sha256>  skills/<provider>/<name>/<file>" line per shipped file, so an
+#   upgrade can tell shipped skills from operator-added ones and prove a
+#   formerly-shipped copy unedited. Skills in the staging directory that the
+#   repository does not ship belong to the operator and are never touched.
+#   Nothing is written to a provider skill home unless --add-<provider>-skills
+#   is passed; then scripts/install-skills.sh --provider <provider> --force
+#   installs the staged skills there, exactly as upgrade.sh does.
+#
+# Provider rule (shared with upgrade.sh through team/scripts/lib/
+# subagent_deploy.sh): each deploy step walks kanban.cfg [providers]
+# available, and an --add-<provider>-agents / --add-<provider>-skills flag
+# for a provider that list does not name adds it, with a notice naming it.
 #
 # Prerequisites:
 #   - bash 4+          (macOS ships bash 3; install bash via Homebrew if needed)
@@ -72,28 +92,24 @@ _err_handler() {
 }
 trap '_err_handler $LINENO' ERR
 
-# --- Color helpers ---
-if [[ -t 1 ]]; then
-  C_RED=$'\033[0;31m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BLUE=$'\033[0;34m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-else
-  C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_BOLD=""; C_RESET=""
-fi
+_INSTALL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-info()  { echo "${C_BLUE}[install]${C_RESET} $*"; }
-ok()    { echo "${C_GREEN}[install]${C_RESET} $*"; }
-warn()  { echo "${C_YELLOW}[install]${C_RESET} $*"; }
-err()   { echo "${C_RED}[install]${C_RESET} $*" >&2; }
+# --- Colour table and status-line logger (info/ok/warn/err) ---
+# install.sh lives at the repo root; script_common.sh is at team/scripts/lib/.
+_SCRIPT_COMMON_LIB="${_INSTALL_SCRIPT_DIR}/team/scripts/lib/script_common.sh"
+if [[ ! -f "$_SCRIPT_COMMON_LIB" ]]; then
+  echo "[install] ERROR: script_common.sh not found: $_SCRIPT_COMMON_LIB" >&2
+  exit 1
+fi
+# shellcheck source=team/scripts/lib/script_common.sh
+source "$_SCRIPT_COMMON_LIB"
+unset _SCRIPT_COMMON_LIB
+script_log_init install
 
 # ---------------------------------------------------------------------------
 # Source the shared argparse library.
 # install.sh lives at the repo root; argparse.sh is at team/scripts/lib/.
 # ---------------------------------------------------------------------------
-_INSTALL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _ARGPARSE_LIB="${_INSTALL_SCRIPT_DIR}/team/scripts/lib/argparse.sh"
 if [[ ! -f "$_ARGPARSE_LIB" ]]; then
   echo "[install] ERROR: argparse.sh not found: $_ARGPARSE_LIB" >&2
@@ -121,6 +137,11 @@ NO_SYSTEM_CRON=false
 # Both flags together reproduce the pre-change default both-providers behavior.
 ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
+# --add-claude-skills / --add-codex-skills: opt-in provider skill install, after
+# the skill staging deposit. When absent, nothing is written to that provider's
+# skills directory (the staging deposit under $KANBAN_ROOT/skills still runs).
+ADD_CLAUDE_SKILLS=false
+ADD_CODEX_SKILLS=false
 STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
 REQUESTED_VERSION=""  # non-empty = optional positional VERSION argument (e.g. "v2.1.0"):
                        # lay the install down from THAT tag's tree instead of whatever is
@@ -131,7 +152,9 @@ Usage: ./install.sh [VERSION] [--force] [--dry-run] [--wake-tier small|medium|la
 
 Installs pgai-agent-kanban into your home directory and, with
 --add-claude-agents / --add-codex-agents, copies the subagents into each
-provider's agents directory (see those options below).
+provider's agents directory; with --add-claude-skills / --add-codex-skills,
+installs the staged skills into each provider's skills directory (see those
+options below).
 
 This is the FRESH-INSTALL path only.  If the install target already exists,
 install.sh refuses with a "use upgrade.sh" message.  Use --force to bypass
@@ -185,6 +208,18 @@ Subagent installation:
   If the state file is missing, the installer treats the run as a fresh install
   and deletes nothing existing.
 
+Skill staging:
+  Every skill shipped under the repository's skills/<provider>/<name>/ is
+  deposited into \$KANBAN_ROOT/skills/<provider>/<name>/ (the directory is
+  made for each provider the repository ships skills for), with the same
+  overwrite rules as every other installed file (identical files skipped,
+  --force overwrites a changed one). The shipped files and their SHA-256
+  digests are recorded in \$KANBAN_ROOT/.installed-skills (not written under
+  --dry-run). Skills you add yourself under \$KANBAN_ROOT/skills/<provider>/
+  are never written, renamed or deleted. install.sh writes nothing to a
+  provider's own skills directory unless --add-claude-skills /
+  --add-codex-skills is passed (see those options below).
+
 Wake cadence tier:
   Pass --wake-tier small|medium|large to select the wake schedule at install time.
   Also accepted as --wake-tier=small|medium|large.
@@ -232,7 +267,16 @@ Options:
                          creation, no prompts). Use on machines where the Codex CLI is installed.
                          Note: pass --add-claude-agents --add-codex-agents together to deploy wrappers
                          to both providers. A re-run refreshes agents only for the provider flag(s)
-                         it is given.
+                         it is given. A flag deploys its provider even when kanban.cfg
+                         [providers] available does not list it, with a notice naming it.
+  --add-claude-skills    After the skill staging deposit, install every skill in the staging
+                         directory into \$CLAUDE_CONFIG_DIR/skills/ (default ~/.claude/skills/) by
+                         running scripts/install-skills.sh --provider claude --force.
+  --add-codex-skills     The same for ~/.codex/skills/ (--provider codex).
+                         Without these flags NOTHING is written to a provider's skills directory;
+                         the shipped skills are still staged under \$KANBAN_ROOT/skills/. Like the
+                         agent flags, a flag installs its provider even when kanban.cfg
+                         [providers] available does not list it, with a notice naming it.
   --wake-tier <tier>     Select wake cadence tier: small (default), medium, large, or none.
                          Applies to both OS crontab and pseudocron. none installs no OS
                          crontab, as --no-system-cron does. See "Wake cadence tier" above.
@@ -251,7 +295,8 @@ Environment variables:
   PGAI_AGENT_KANBAN_ROOT_PATH          Where to install — canonical name
                                         Default: \$HOME/pgai_agent_kanban
   CLAUDE_CONFIG_DIR                     Claude Code config dir (default: \$HOME/.claude);
-                                        --add-claude-agents deploys to its agents/ subdirectory
+                                        --add-claude-agents deploys to its agents/ subdirectory,
+                                        --add-claude-skills to its skills/ subdirectory
 EOF
 }
 
@@ -297,7 +342,7 @@ unset _pos
 # Reject unknown flags.
 for _flag in "${!ARGPARSE_FLAGS[@]}"; do
   case "$_flag" in
-    force|dry-run|no-system-cron|add-claude-agents|add-codex-agents|stamp-version|wake-tier|help|no-crontab|crontab-tier) ;;
+    force|dry-run|no-system-cron|add-claude-agents|add-codex-agents|add-claude-skills|add-codex-skills|stamp-version|wake-tier|help|no-crontab|crontab-tier) ;;
     upgrade)
       err "--upgrade is not supported by install.sh."
       err "To upgrade an existing installation, use upgrade.sh instead."
@@ -322,6 +367,8 @@ if argparse_has "dry-run";           then DRY_RUN=true; fi
 if argparse_has "no-system-cron";    then NO_SYSTEM_CRON=true; fi
 if argparse_has "add-claude-agents"; then ADD_CLAUDE_AGENTS=true; fi
 if argparse_has "add-codex-agents";  then ADD_CODEX_AGENTS=true; fi
+if argparse_has "add-claude-skills"; then ADD_CLAUDE_SKILLS=true; fi
+if argparse_has "add-codex-skills";  then ADD_CODEX_SKILLS=true; fi
 
 # Handle deprecated --no-crontab.
 if argparse_has "no-crontab"; then
@@ -827,7 +874,9 @@ info "Installing kanban tree to $KANBAN_ROOT..."
 # NOTE: release state is per-project; no top-level release-state.md is
 # installed. Runtime release state lives exclusively at:
 #   $KANBAN_ROOT/projects/<name>/release-state.md
-# That file tracks only in-flight RC state; Last Released is derived from git tags.
+# That file tracks in-flight RC state and ## Last Released. pp_last_released_version
+# answers from a matching branch-prefixed release tag first, then that
+# ## Last Released when no tag matches or there is no git dev tree, then v0.0.0.
 for item in README.md DIRECTIVES.md OVERVIEW.md SOP-core.md roles scripts pm-agent workflows pgai_agent_kanban halt_after templates demos config read-order; do
   src="$SCRIPT_DIR/team/$item"
   dst="$KANBAN_ROOT/$item"
@@ -1240,14 +1289,19 @@ info ""
 #   1. kanban.cfg [providers] available — INI config, when present on this install
 #   2. Hardcoded fallback: "claude codex"
 #
-# Per-provider behavior:
+# Provider rule (deploy_flagged_providers): the step walks the provider list;
+# an --add-<provider>-agents flag for a provider the list does not name adds
+# it for this run, with a notice naming it, exactly as upgrade.sh does.
+#
+# Per-provider behavior (deploy_provider_wrappers in
+# team/scripts/lib/subagent_deploy.sh, the deploy upgrade.sh runs too):
+#   - No --add-<provider>-agents flag: skipped; nothing is written.
 #   - CLI detection: provider binary not on PATH → skip with warning.
 #   - Directory creation: the agents directory absent → always created via
-#     mkdir -p (ensure_provider_agents_dir in
-#     team/scripts/lib/subagent_deploy.sh) before any wrapper is copied;
-#     --dry-run reports the pending creation without writing; creation
-#     failure (permissions, read-only HOME) fails loud naming the path and
-#     exits non-zero.
+#     mkdir -p (ensure_deploy_dir) before any wrapper is copied; --dry-run
+#     reports the pending creation without writing; creation failure
+#     (permissions, read-only HOME) fails loud naming the path and exits
+#     non-zero.
 #   - Per-file write via safe_overwrite_file from safe_overwrite.sh:
 #       Target does not exist:     prompt to install, default Y.
 #       Target exists, identical:  silent no-op (cmp -s check).
@@ -1261,24 +1315,11 @@ info ""
 # State tracking:
 #   $KANBAN_ROOT/.installed-subagents records the manifest set this install
 #   wrote. On subsequent runs, any name in the state file but absent from the
-#   current manifest is removed from every provider's agents directory.
-#   Files we did NOT previously install (operator's own agents, other tools)
-#   are never touched.
+#   current manifest is removed from every deployed provider's agents
+#   directory (deploy_remove_obsolete_wrappers). Files we did NOT previously
+#   install (operator's own agents, other tools) are never touched.
 
-# --- Source safe_overwrite helpers ---
-_SUBAGENT_SAFE_OVERWRITE_LIB="$SCRIPT_DIR/team/scripts/lib/safe_overwrite.sh"
-_subagent_safe_overwrite_available=false
-if [[ -f "$_SUBAGENT_SAFE_OVERWRITE_LIB" ]]; then
-  # shellcheck source=team/scripts/lib/safe_overwrite.sh
-  source "$_SUBAGENT_SAFE_OVERWRITE_LIB"
-  _subagent_safe_overwrite_available=true
-else
-  warn "safe_overwrite.sh not found at $_SUBAGENT_SAFE_OVERWRITE_LIB"
-  warn "Subagent installation will use basic copy without interactive prompts."
-fi
-unset _SUBAGENT_SAFE_OVERWRITE_LIB
-
-# --- Source shared provider-agent deploy helpers ---
+# --- Source shared provider deploy helpers (agent wrappers and skills) ---
 _SUBAGENT_DEPLOY_LIB="$SCRIPT_DIR/team/scripts/lib/subagent_deploy.sh"
 if [[ -f "$_SUBAGENT_DEPLOY_LIB" ]]; then
   # shellcheck source=team/scripts/lib/subagent_deploy.sh
@@ -1293,23 +1334,22 @@ unset _SUBAGENT_DEPLOY_LIB
 # --- Determine providers list ---
 # Try kanban.cfg [providers] available first; fall back to hardcoded list.
 _SUBAGENT_INI_PARSER_LIB="$SCRIPT_DIR/team/scripts/lib/ini_parser.sh"
-_subagent_providers=""
+_configured_providers=""
 if [[ -f "$_SUBAGENT_INI_PARSER_LIB" ]] && [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
   # shellcheck source=team/scripts/lib/ini_parser.sh
   source "$_SUBAGENT_INI_PARSER_LIB"
-  _subagent_providers="$(read_ini "$KANBAN_ROOT/kanban.cfg" providers available "")"
+  _configured_providers="$(read_ini "$KANBAN_ROOT/kanban.cfg" providers available "")"
 fi
-if [[ -z "$_subagent_providers" ]]; then
-  # TODO: Replace this hardcoded fallback with INI lookup once
-  # kanban.cfg [providers] available is consistently present in all installs.
-  _subagent_providers="claude codex"
-fi
+[[ -z "$_configured_providers" ]] && _configured_providers="claude codex"
 unset _SUBAGENT_INI_PARSER_LIB
 
-info "Provider-agent wrapper deployment: providers = $_subagent_providers"
+info "Provider-agent wrapper deployment: providers = $_configured_providers"
 if [[ "$ADD_CLAUDE_AGENTS" == "false" && "$ADD_CODEX_AGENTS" == "false" ]]; then
   info "Provider-agent wrapper deployment: skipped (neither --add-claude-agents nor --add-codex-agents was passed)"
 fi
+deploy_flagged_providers "Provider-agent wrappers" agents "$_configured_providers" \
+  "$ADD_CLAUDE_AGENTS" "$ADD_CODEX_AGENTS"
+_subagent_providers="$DEPLOY_STEP_PROVIDERS"
 
 # --- Load subagent manifest (provider-agnostic; same agents go to every provider) ---
 SUBAGENT_MANIFEST="$SCRIPT_DIR/subagents/MANIFEST.txt"
@@ -1321,13 +1361,8 @@ fi
 
 CURRENT_SUBAGENTS=()
 while IFS= read -r line; do
-  # Strip comments and trim whitespace
-  line="${line%%#*}"
-  line="${line#"${line%%[![:space:]]*}"}"
-  line="${line%"${line##*[![:space:]]}"}"
-  [[ -z "$line" ]] && continue
   CURRENT_SUBAGENTS+=("$line")
-done < "$SUBAGENT_MANIFEST"
+done < <(deploy_read_names "$SUBAGENT_MANIFEST")
 
 if [[ ${#CURRENT_SUBAGENTS[@]} -eq 0 ]]; then
   err "Subagent manifest at $SUBAGENT_MANIFEST is empty or contains only comments"
@@ -1337,19 +1372,7 @@ fi
 
 info "Loaded ${#CURRENT_SUBAGENTS[@]} subagent(s) from manifest: ${CURRENT_SUBAGENTS[*]}"
 
-# --- State file (read once, then per-provider cleanup loop uses it) ---
 INSTALLED_AGENTS_STATE="$KANBAN_ROOT/.installed-subagents"
-
-PREVIOUSLY_INSTALLED=()
-if [[ -f "$INSTALLED_AGENTS_STATE" ]]; then
-  while IFS= read -r prev_line; do
-    prev_line="${prev_line%%#*}"
-    prev_line="${prev_line#"${prev_line%%[![:space:]]*}"}"
-    prev_line="${prev_line%"${prev_line##*[![:space:]]}"}"
-    [[ -z "$prev_line" ]] && continue
-    PREVIOUSLY_INSTALLED+=("$prev_line")
-  done < "$INSTALLED_AGENTS_STATE"
-fi
 
 # Tracks whether at least one provider's deployment block actually ran.
 # Used to gate the .installed-subagents state file write below.
@@ -1359,112 +1382,31 @@ _ANY_PROVIDER_FLAG_SET=false
 for _provider in $_subagent_providers; do
   # --- Opt-in gate: skip this provider entirely if its flag was not passed ---
   # Absent the flag: write NOTHING for this provider — no file writes, no directory
-  # creation, no CLI detection, no prompts, no state-file removal (Option A).
+  # creation, no CLI detection, no prompts, no state-file removal.
   case "$_provider" in
-    claude)
-      if [[ "$ADD_CLAUDE_AGENTS" != "true" ]]; then
-        info "Provider-agent wrapper deployment: skipping claude (--add-claude-agents not set)"
-        continue
-      fi
-      ;;
-    codex)
-      if [[ "$ADD_CODEX_AGENTS" != "true" ]]; then
-        info "Provider-agent wrapper deployment: skipping codex (--add-codex-agents not set)"
-        continue
-      fi
-      ;;
+    claude) _provider_flag="$ADD_CLAUDE_AGENTS" ;;
+    codex)  _provider_flag="$ADD_CODEX_AGENTS" ;;
     *)
-      # Unknown / future providers: skip unless both flags are set (conservative default).
-      # Operators using custom providers should extend this list.
+      # Unknown / future providers have no opt-in flag, so they are skipped.
       info "Provider-agent wrapper deployment: skipping unknown provider '$_provider' (no explicit opt-in flag)"
       continue
       ;;
   esac
+  if [[ "$_provider_flag" != "true" ]]; then
+    info "Provider-agent wrapper deployment: skipping $_provider (--add-${_provider}-agents not set)"
+    continue
+  fi
   _ANY_PROVIDER_FLAG_SET=true
 
   info ""
-  info "Provider-agent wrapper deployment: provider=$_provider"
-
-  # CLI detection: skip providers whose binary is not installed.
-  # (Codex CLI may be absent on hosts running claude-only; vice versa.)
-  if ! command -v "$_provider" >/dev/null 2>&1; then
-    warn "Skipping $_provider: CLI binary not found on PATH"
-    continue
-  fi
-
-  _provider_agents_dir="$(provider_agents_dir "$_provider")"
-
-  # Directory creation: always ensured before deploying wrappers — a missing
-  # target directory must never silently no-op the deploy. See
-  # ensure_provider_agents_dir() in team/scripts/lib/subagent_deploy.sh for
-  # the fail-loud contract on creation failure.
-  if ! ensure_provider_agents_dir "$_provider_agents_dir" "$DRY_RUN"; then
+  _deploy_rc=0
+  deploy_provider_wrappers "$_provider" "$SCRIPT_DIR/subagents" "$INSTALLED_AGENTS_STATE" \
+    "$FORCE" "$DRY_RUN" "${CURRENT_SUBAGENTS[@]}" || _deploy_rc=$?
+  # 1: the agents directory could not be created (named above); 3: the
+  # provider's CLI binary is not on PATH (warned above; skipped).
+  if [[ "$_deploy_rc" -eq 1 ]]; then
     exit 1
   fi
-
-  # Deploy each manifest agent into this provider's agents directory.
-  _provider_deployed_count=0
-  for agent in "${CURRENT_SUBAGENTS[@]}"; do
-    src="$SCRIPT_DIR/subagents/${agent}.md"
-    dst="${_provider_agents_dir}/${agent}.md"
-
-    if [[ ! -f "$src" ]]; then
-      warn "Subagent source missing: $src"
-      continue
-    fi
-
-    _provider_deployed_count=$((_provider_deployed_count + 1))
-
-    if [[ "$DRY_RUN" == "true" ]]; then
-      if [[ -f "$dst" ]]; then
-        if cmp -s "$src" "$dst" 2>/dev/null; then
-          info "[dry-run] subagent unchanged (identical): $_provider/$agent"
-        else
-          info "[dry-run] would prompt to overwrite subagent: $_provider/$agent"
-        fi
-      else
-        info "[dry-run] would prompt to install subagent: $_provider/$agent"
-      fi
-    elif [[ "$FORCE" == "true" ]]; then
-      # Force: copy directly without interactive prompt.
-      cp "$src" "$dst"
-      ok "Installed/upgraded: $_provider/$agent"
-    elif [[ "$_subagent_safe_overwrite_available" == "true" ]]; then
-      # Interactive: use safe_overwrite_file for prompt-on-overwrite with backup.
-      safe_overwrite_file "$src" "$dst" || true
-    else
-      # Fallback: safe_overwrite.sh not available; use install_path.
-      install_path "$src" "$dst" "subagent: $_provider/$agent"
-    fi
-  done
-  ok "deployed ${_provider_deployed_count} wrapper(s)"
-
-  # --- Remove obsolete subagents (state-file aware, per-provider) ---
-  # Only deletes subagent files that were INSTALLED BY A PREVIOUS RUN and
-  # are NO LONGER in the current manifest. Files we did not previously
-  # install are never touched.
-  if [[ ${#PREVIOUSLY_INSTALLED[@]} -gt 0 ]]; then
-    for prev in "${PREVIOUSLY_INSTALLED[@]}"; do
-      still_shipped=false
-      for current in "${CURRENT_SUBAGENTS[@]}"; do
-        [[ "$prev" == "$current" ]] && still_shipped=true && break
-      done
-
-      if [[ "$still_shipped" == "false" ]]; then
-        obsolete_file="${_provider_agents_dir}/${prev}.md"
-        if [[ -f "$obsolete_file" ]]; then
-          if [[ "$DRY_RUN" == "true" ]]; then
-            info "[dry-run] would remove obsolete subagent (no longer in manifest): $_provider/$prev"
-          else
-            info "Removing obsolete subagent (no longer in manifest): $_provider/$prev"
-            rm -f "$obsolete_file"
-          fi
-        fi
-      fi
-    done
-  fi
-
-  ok "Provider-agent wrapper deployment complete for: $_provider"
 done
 
 # --- Write state file: record what THIS install copied (for next-run cleanup) ---
@@ -1472,26 +1414,134 @@ done
 # most recent install.sh wrote. It is provider-agnostic (the same agent names
 # are deployed to every configured provider), so one state file suffices.
 #
-# Option A (strict opt-in): only update the state file when at least one
-# provider's deployment block actually ran.  If neither --add-claude-agents nor
+# Strict opt-in: only update the state file when at least one provider's
+# deployment block actually ran.  If neither --add-claude-agents nor
 # --add-codex-agents was passed, the state file is left exactly as-is — this
 # avoids silently erasing the record of previously-deployed agents from a run
 # that didn't touch any provider directory.
 if [[ "$DRY_RUN" != "true" && "$_ANY_PROVIDER_FLAG_SET" == "true" ]]; then
-  {
-    echo "# pgai-agent-kanban: subagents installed by install.sh"
-    echo "# This file is managed automatically. Deleting it is safe — the next"
-    echo "# install will rebuild it (and will NOT delete any existing agents,"
-    echo "# because it cannot prove ownership). Do not edit by hand."
-    echo "# Last updated: $(date -Iseconds)"
-    printf '%s\n' "${CURRENT_SUBAGENTS[@]}"
-  } > "$INSTALLED_AGENTS_STATE"
-  info "Updated installed-subagents state file: $INSTALLED_AGENTS_STATE"
+  if deploy_wrapper_record_write "$INSTALLED_AGENTS_STATE" install.sh "${CURRENT_SUBAGENTS[@]}"; then
+    info "Updated installed-subagents state file: $INSTALLED_AGENTS_STATE"
+  fi
 fi
 
-unset _provider _provider_agents_dir _provider_deployed_count _subagent_providers
-unset PREVIOUSLY_INSTALLED prev still_shipped current obsolete_file
-unset _subagent_safe_overwrite_available _ANY_PROVIDER_FLAG_SET
+unset _provider _provider_flag _deploy_rc _subagent_providers _ANY_PROVIDER_FLAG_SET
+
+# --- Deposit shipped skills into the staging directory ---
+# skills/ is a repository-root directory like docs/, so the team/ item loop
+# never reaches it. Each shipped skill (skills/<provider>/<name>/ holding a
+# SKILL.md, as list_shipped_skills in team/scripts/lib/subagent_deploy.sh
+# enumerates them) is deposited file by file through install_path into
+# $KANBAN_ROOT/skills/<provider>/<name>/: identical files are skipped,
+# --force overwrites a changed one, and without --force a changed one is
+# prompted for (or left, with a warning, when there is no TTY). The staging
+# directory of each provider the repository ships skills for is made first;
+# failing to make it stops the install, naming the path.
+#
+# Only shipped names are visited, so a skill the operator added under the
+# staging directory is never written, renamed or deleted, even with --force.
+# Nothing is removed here: retiring a formerly-shipped skill is the upgrade's
+# job, and only when deploy_record_unedited proves the staged copy is the one
+# last shipped.
+#
+# State: $KANBAN_ROOT/.installed-skills (deploy_record_write) records each
+# shipped file as "<sha256>  skills/<provider>/<name>/<file>", the digest of
+# the repository copy, on every run that is not --dry-run. It is left as it
+# is when this tree ships no skills (an earlier record stays usable) or when
+# no SHA-256 tool is available (warned; with no record nothing is provably
+# unedited, so nothing is ever removed on its strength).
+INSTALLED_SKILLS_STATE="$KANBAN_ROOT/.installed-skills"
+_skills_source="$SCRIPT_DIR/skills"
+_shipped_skills=()
+while IFS= read -r _skill; do
+  if [[ -n "$_skill" ]]; then
+    _shipped_skills+=("$_skill")
+  fi
+done < <(list_shipped_skills "$_skills_source")
+
+if [[ ${#_shipped_skills[@]} -eq 0 ]]; then
+  info "Skill staging: this tree ships no skills under $_skills_source; nothing deposited"
+else
+  info "Skill staging: depositing ${#_shipped_skills[@]} shipped skill(s) into $KANBAN_ROOT/skills"
+  _staged_providers=" "
+  _skill_record_paths=()
+  for _skill in "${_shipped_skills[@]}"; do
+    _skill_provider="${_skill%%/*}"
+    _skill_staging_dir="$KANBAN_ROOT/skills/$_skill_provider"
+    if [[ "$_staged_providers" != *" $_skill_provider "* ]]; then
+      _staged_providers+="$_skill_provider "
+      if [[ -d "$_skill_staging_dir" ]]; then
+        :
+      elif [[ "$DRY_RUN" == "true" ]]; then
+        info "[dry-run] would make skill staging directory: $_skill_staging_dir"
+      elif mkdir -p "$_skill_staging_dir" 2>/dev/null; then
+        ok "Skill staging directory ready: $_skill_staging_dir"
+      else
+        # shellcheck source=team/scripts/lib/error_contract.sh
+        source "${_INSTALL_SCRIPT_DIR}/team/scripts/lib/error_contract.sh"
+        # BLOCK-WORTHY (docs/blocking-site-census.md): without the staging
+        # directory the shipped skills cannot be laid down, leaving an
+        # install that is missing files this tree ships.
+        pgai_emit_error_contract \
+          "install.skill-staging-unwritable" \
+          "Could not make the skill staging directory ${_skill_staging_dir}; the shipped ${_skill_provider} skills were not deposited. Check write permissions on ${KANBAN_ROOT}." \
+          "mkdir -p '${_skill_staging_dir}' && '${SCRIPT_DIR}/install.sh' --force"
+        # CENSUS-ANCHOR: install-skill-staging-unwritable-01
+        exit 1
+      fi
+    fi
+    while IFS= read -r -d '' _skill_file; do
+      _skill_file="${_skill_file#./}"
+      install_path "$_skills_source/$_skill/$_skill_file" \
+        "$KANBAN_ROOT/skills/$_skill/$_skill_file" "skills/$_skill/$_skill_file"
+    done < <(cd "$_skills_source/$_skill" && find . -type f -print0 | LC_ALL=C sort -z)
+    _skill_record_paths+=("skills/$_skill")
+  done
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    info "[dry-run] would record ${#_shipped_skills[@]} shipped skill(s) in $INSTALLED_SKILLS_STATE"
+  elif deploy_record_write "$INSTALLED_SKILLS_STATE" "$SCRIPT_DIR" \
+      "skills shipped to the staging directory by install.sh" "${_skill_record_paths[@]}"; then
+    info "Updated installed-skills state file: $INSTALLED_SKILLS_STATE"
+  else
+    warn "Skill staging: $INSTALLED_SKILLS_STATE was not updated; an upgrade will remove no formerly-shipped skill on its strength."
+  fi
+  ok "Skill staging complete: ${_shipped_skills[*]}"
+fi
+unset _skills_source _shipped_skills _skill _skill_provider _skill_staging_dir
+unset _staged_providers _skill_record_paths _skill_file
+
+# --- Provider skills (opt-in: --add-claude-skills / --add-codex-skills) ---
+# After the staging deposit, each flagged provider gets every skill in the
+# staging directory installed into its skills directory (provider_skills_dir:
+# $CLAUDE_CONFIG_DIR/skills/, default ~/.claude/skills/, and ~/.codex/skills/)
+# by the installed scripts/install-skills.sh --provider <provider> --force —
+# deploy_provider_skills in team/scripts/lib/subagent_deploy.sh, the step
+# upgrade.sh runs for the same flags. Without a provider's flag nothing is
+# written under its skills directory. The provider rule is the agent step's:
+# a flag for a provider kanban.cfg [providers] available does not list adds
+# it, with a notice naming it. A provider whose CLI binary is not on PATH is
+# skipped with a warning, and a failed install is warned with the re-run
+# command: the kanban root itself is complete either way.
+info ""
+deploy_flagged_providers "Provider skills" skills "$_configured_providers" \
+  "$ADD_CLAUDE_SKILLS" "$ADD_CODEX_SKILLS"
+for _provider in $DEPLOY_STEP_PROVIDERS; do
+  case "$_provider" in
+    claude) _provider_flag="$ADD_CLAUDE_SKILLS" ;;
+    codex)  _provider_flag="$ADD_CODEX_SKILLS" ;;
+    *)
+      info "Provider skills: skipping unknown provider '$_provider' (no explicit opt-in flag)"
+      continue
+      ;;
+  esac
+  if [[ "$_provider_flag" != "true" ]]; then
+    info "Provider skills: skipping $_provider (--add-${_provider}-skills not set)"
+    continue
+  fi
+  deploy_provider_skills "$_provider" "$KANBAN_ROOT" "$DRY_RUN" || true
+done
+unset _provider _provider_flag _configured_providers
 
 info ""
 

@@ -65,9 +65,7 @@ _HEREDOC_RE = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
 #: The script reading its own source: "$0" or "${BASH_SOURCE[0]}", double-quoted.
 _SELF_SOURCE = r'"\$(?:0|\{BASH_SOURCE\[0\]\})"'
 #: ``grep '^#'`` over the script itself: column-0 comment lines are printed.
-_WHOLE_FILE_COMMENT_HELP_RE = re.compile(
-    r"""grep\s+(?:-(?![A-Za-z]*v)\S+\s+)*['"]\^#['"]\s+""" + _SELF_SOURCE + r".*"
-)
+_WHOLE_FILE_COMMENT_HELP_RE = re.compile(r"""grep\s+(?:-(?![A-Za-z]*v)\S+\s+)*['"]\^#['"]\s+""" + _SELF_SOURCE + r".*")
 #: Bounds a renderer may put on that grep's output, 1-based where sed/head count.
 _SED_RANGE_RE = re.compile(r"""sed\s+-n\s+['"]?(\d+)\s*,\s*(\d+)\s*p""")
 _HEAD_COUNT_RE = re.compile(r"head\s+(?:-n\s*)?-?(\d+)")
@@ -80,12 +78,37 @@ _HEADER_COMMENT_HELP_LINE_RE = re.compile(r"\^#.*" + _SELF_SOURCE + "|" + _SELF_
 _HEADER_COMMENT_HELP_AWK_RE = re.compile(r"awk\s+'[^']*\^#[^']*'\s*" + _SELF_SOURCE)
 
 #: Callees whose string arguments are printed output.
-_PRINTING_CALLS = frozenset({
-    "print", "write", "say", "log", "_log", "warn", "_warn", "warning", "error", "info",
-    "debug", "critical", "exception", "emit_error_contract", "format_error_contract",
-    "add_argument", "add_parser", "ArgumentParser", "exit", "fail", "die", "_die", "echo",
-    "append", "extend", "_print_line", "format",
-})
+_PRINTING_CALLS = frozenset(
+    {
+        "print",
+        "write",
+        "say",
+        "log",
+        "_log",
+        "warn",
+        "_warn",
+        "warning",
+        "error",
+        "info",
+        "debug",
+        "critical",
+        "exception",
+        "emit_error_contract",
+        "format_error_contract",
+        "add_argument",
+        "add_parser",
+        "ArgumentParser",
+        "exit",
+        "fail",
+        "die",
+        "_die",
+        "echo",
+        "append",
+        "extend",
+        "_print_line",
+        "format",
+    }
+)
 
 #: Names of files the kanban writes into other trees, so absent here by design.
 _GENERATED_NAMES = {
@@ -96,8 +119,10 @@ _GENERATED_NAMES = {
 
 #: (file, token) pairs that are labelled examples of a path, not a reference.
 _EXAMPLE_REFERENCES = {
-    ("team/scripts/cleanup/test-stale-artifact-branches.sh", "team/scripts/some-script.sh"):
-        "fixture task README text for the smoke test",
+    (
+        "team/scripts/cleanup/test-stale-artifact-branches.sh",
+        "team/scripts/some-script.sh",
+    ): "fixture task README text for the smoke test",
 }
 
 _RETIRED_NAMES_RE = re.compile(
@@ -140,12 +165,12 @@ def _comment_help_lines(text: str) -> list[tuple[int, str]]:
         head_count = _HEAD_COUNT_RE.search(whole.group(0))
         array_slice = _ARRAY_SLICE_RE.search(code)
         if sed_range:
-            printed = printed[int(sed_range.group(1)) - 1:int(sed_range.group(2))]
+            printed = printed[int(sed_range.group(1)) - 1 : int(sed_range.group(2))]
         elif head_count:
-            printed = printed[:int(head_count.group(1))]
+            printed = printed[: int(head_count.group(1))]
         elif array_slice:
             start = int(array_slice.group(1))
-            printed = printed[start:start + int(array_slice.group(2))]
+            printed = printed[start : start + int(array_slice.group(2))]
     elif _HEADER_COMMENT_HELP_LINE_RE.search(code) or _HEADER_COMMENT_HELP_AWK_RE.search(code):
         printed = []
         for number, line in enumerate(lines, 1):
@@ -281,8 +306,7 @@ def test_printed_text_names_only_scripts_that_exist():
     assert findings == [], (
         "printed text names script(s) that do not exist in the tree -- point each at the "
         "script's real path (e.g. scripts/cm/release.sh), or, for a file the kanban writes "
-        "into another tree, add it to _GENERATED_NAMES with the writer named:\n  "
-        + "\n  ".join(findings)
+        "into another tree, add it to _GENERATED_NAMES with the writer named:\n  " + "\n  ".join(findings)
     )
 
 
@@ -355,9 +379,9 @@ def test_a_seeded_comment_rendered_help_naming_a_missing_script_is_reported(tmp_
         "# body-comment-only.sh is not in the leading block\n"
         "mapfile -t lines < <(awk '\n"
         "  /^#!/ { next }\n"
-        "  /^#/ { sub(/^# ?/, \"\"); print; next }\n"
+        '  /^#/ { sub(/^# ?/, ""); print; next }\n'
         "  { exit }\n"
-        "' \"$0\")\n",
+        '\' "$0")\n',
         encoding="utf-8",
     )
     (scripts / "unrendered.sh").write_text(
@@ -410,7 +434,11 @@ def test_cancel_rc_help_points_at_unwind_rc(tmp_path):
     }
     result = subprocess.run(
         ["bash", str(_TEAM_DIR / "scripts" / "cm" / "cancel-rc.sh"), "--help"],
-        capture_output=True, text=True, timeout=30, env=env, cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=env,
+        cwd=tmp_path,
     )
 
     assert result.returncode == 0, result.stderr

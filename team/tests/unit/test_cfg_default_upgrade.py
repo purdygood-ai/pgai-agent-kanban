@@ -187,7 +187,9 @@ class TestProjectValuesAreReportedNeverWritten:
             _write(root / "projects" / name / "project.cfg", text)
         (root / "projects" / "project-d").mkdir(parents=True)
 
-        values = cdu.project_values(root, ["project-a", "project-b", "project-c", "project-d"], "release", "ship_posture")
+        values = cdu.project_values(
+            root, ["project-a", "project-b", "project-c", "project-d"], "release", "ship_posture"
+        )
 
         assert [(v.project, v.value) for v in values] == [
             ("project-a", "matrix"),
@@ -246,15 +248,31 @@ class TestRenderedOutputStatesEachChange:
 class TestCommandLine:
     def _argv(self, root: pathlib.Path, *extra: str) -> list[str]:
         return [
-            "--kanban-root", str(root),
-            "--change", "release", "ship_posture", "matrix", "always", "ships instead of halting",
-            "--change", "wake", "stop_on_blocked", "true", "false", "the batch carries on",
-            "--project-key", "release", "ship_posture",
-            "--project", "project-a",
+            "--kanban-root",
+            str(root),
+            "--change",
+            "release",
+            "ship_posture",
+            "matrix",
+            "always",
+            "ships instead of halting",
+            "--change",
+            "wake",
+            "stop_on_blocked",
+            "true",
+            "false",
+            "the batch carries on",
+            "--project-key",
+            "release",
+            "ship_posture",
+            "--project",
+            "project-a",
             *extra,
         ]
 
-    def test_main_migrates_and_reports_projects(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_main_migrates_and_reports_projects(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         root = tmp_path / "root"
         cfg = _write(root / "kanban.cfg", _OLD_KANBAN_CFG)
         _write(root / "projects" / "project-a" / "project.cfg", "[release]\nship_posture = matrix\n")

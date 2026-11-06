@@ -41,9 +41,7 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _PP_RUN_OPS_SH = _TEAM_DIR / "scripts" / "lib" / "pp_run_ops.sh"
 _RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
 
-_FIXED_IN_TEMPLATE = (
-    "## Fixed In\n<!-- Written by the release engine at the fixing release. -->\n"
-)
+_FIXED_IN_TEMPLATE = "## Fixed In\n<!-- Written by the release engine at the fixing release. -->\n"
 
 
 def _bug_text(name: str, status: str, fixed_in: str = "") -> str:
@@ -83,9 +81,7 @@ def _fixed_in_value(path: pathlib.Path) -> str:
 class TestStampScope:
     """Which bug files a stamp run may touch."""
 
-    def test_only_named_done_bug_is_stamped_and_earlier_done_bug_is_untouched(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_only_named_done_bug_is_stamped_and_earlier_done_bug_is_untouched(self, tmp_path: pathlib.Path) -> None:
         bugs = tmp_path / "bugs"
         current = _write_bug(bugs, "BUG-0002-current-release", "done")
         earlier = _write_bug(bugs, "BUG-0001-earlier-release", "done")
@@ -121,9 +117,7 @@ class TestStampScope:
         assert bug.read_bytes() == before
         assert (result.stamped, result.not_done) == (0, 1), result
 
-    def test_name_with_directory_part_cannot_reach_outside_bugs_dir(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_name_with_directory_part_cannot_reach_outside_bugs_dir(self, tmp_path: pathlib.Path) -> None:
         bugs = tmp_path / "bugs"
         outside = _write_bug(tmp_path / "elsewhere", "BUG-0005-outside", "done")
         before = outside.read_bytes()
@@ -178,18 +172,14 @@ def _shadowing_cwd(tmp_path: pathlib.Path) -> pathlib.Path:
     return parent
 
 
-def _run_helpers(
-    tmp_path: pathlib.Path, bugs_dir: pathlib.Path, promote: list[str], *, prelude: str = ""
-):
+def _run_helpers(tmp_path: pathlib.Path, bugs_dir: pathlib.Path, promote: list[str], *, prelude: str = ""):
     """Source the helpers, snapshot, promote *promote* to done, stamp, print outcome.
 
     Runs from a shadowing cwd with PYTHONPATH cleared, so nothing but the
     helpers' own path composition can make the package importable.
     """
     cwd = _shadowing_cwd(tmp_path)
-    promote_cmds = "\n".join(
-        f"sed -i 's/^running$/done/' {bugs_dir / name}" for name in promote
-    )
+    promote_cmds = "\n".join(f"sed -i 's/^running$/done/' {bugs_dir / name}" for name in promote)
     script = f"""
 set -euo pipefail
 unset PYTHONPATH
@@ -224,17 +214,15 @@ class TestReleaseFinalizeHelpers:
         assert _fixed_in_value(current) == "v1.4.0", current.read_text()
         assert earlier.read_bytes() == earlier_before, earlier.read_text()
 
-    def test_failed_writeback_is_reported_as_failed_and_does_not_stop_the_release(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_failed_writeback_is_reported_as_failed_and_does_not_stop_the_release(self, tmp_path: pathlib.Path) -> None:
         bugs = tmp_path / "ledger" / "bugs"
         current = _write_bug(bugs, "BUG-0002-current-release", "running")
         before = current.read_bytes()
         # The stamp invocation fails the way an unimportable package would.
         prelude = (
-            "pp_run_ops() { if [[ \"$2\" == stamp ]]; then "
+            'pp_run_ops() { if [[ "$2" == stamp ]]; then '
             "echo 'ImportError: simulated' >&2; return 1; fi; "
-            "PYTHONPATH=\"$(pp_pythonpath)\" python3 -m \"$@\"; }"
+            'PYTHONPATH="$(pp_pythonpath)" python3 -m "$@"; }'
         )
 
         result = _run_helpers(tmp_path, bugs, [current.name], prelude=prelude)
@@ -290,18 +278,14 @@ def _installed_layout(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Pat
     root = parent / "pgai_agent_kanban"
     (root / "projects").mkdir(parents=True)
     (root / "scripts").symlink_to(_TEAM_DIR / "scripts", target_is_directory=True)
-    (root / "pgai_agent_kanban").symlink_to(
-        _TEAM_DIR / "pgai_agent_kanban", target_is_directory=True
-    )
+    (root / "pgai_agent_kanban").symlink_to(_TEAM_DIR / "pgai_agent_kanban", target_is_directory=True)
     return parent, root
 
 
 class TestStep16bFromKanbanRootParent:
     """Step 16b stamps this release's bugs when the caller's cwd shadows the package."""
 
-    def test_step_16b_stamps_from_parent_of_kanban_root_without_traceback(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_step_16b_stamps_from_parent_of_kanban_root_without_traceback(self, tmp_path: pathlib.Path) -> None:
         parent, root = _installed_layout(tmp_path)
         bugs = root / "projects" / "demo" / "bugs"
         current = _write_bug(bugs, "BUG-0002-current-release", "running")
@@ -329,10 +313,7 @@ echo "OUTCOME: ${{_CM_FIXED_IN_OUTCOME:-unset}}"
             "Step 16b must import the package from its own tree, not the "
             f"same-named directory in the caller's cwd:\n{output}"
         )
-        assert (
-            "[Step 16b] Fixed-In writeback: 1 stamped, 0 already set, 0 not done, 1 earlier"
-            in result.stdout
-        ), output
+        assert "[Step 16b] Fixed-In writeback: 1 stamped, 0 already set, 0 not done, 1 earlier" in result.stdout, output
         assert "OUTCOME: ## Fixed In: v1.4.0 — 1 stamped," in result.stdout, output
         assert _fixed_in_value(current) == "v1.4.0", current.read_text()
         assert earlier.read_bytes() == earlier_before, (
@@ -366,9 +347,7 @@ class TestMissingFixedInNarration:
         assert done_bugs_without_fixed_in(bugs) == [ledger["missing"].name]
         assert done_bugs_without_fixed_in(tmp_path / "absent") == []
 
-    def test_stamp_command_narrates_before_result_line_and_writes_nothing(
-        self, tmp_path: pathlib.Path, capsys
-    ) -> None:
+    def test_stamp_command_narrates_before_result_line_and_writes_nothing(self, tmp_path: pathlib.Path, capsys) -> None:
         bugs = tmp_path / "bugs"
         ledger = _ledger_with_one_missing_stamp(bugs)
         before = {key: path.read_bytes() for key, path in ledger.items()}
@@ -382,14 +361,12 @@ class TestMissingFixedInNarration:
         assert ledger["missing"].name in narration[0], lines
         assert lines[-1].startswith("Fixed-In writeback: 0 stamped, 0 already set, 1 not done, 1 earlier"), lines
         for key, path in ledger.items():
-            assert path.read_bytes() == before[key], (
-                f"the narration must not write bug files; {path.name} now reads:\n{path.read_text()}"
-            )
+            assert (
+                path.read_bytes() == before[key]
+            ), f"the narration must not write bug files; {path.name} now reads:\n{path.read_text()}"
 
 
-def _run_step_16b(
-    tmp_path: pathlib.Path, bugs: pathlib.Path, promote: list[pathlib.Path]
-):
+def _run_step_16b(tmp_path: pathlib.Path, bugs: pathlib.Path, promote: list[pathlib.Path]):
     """Run Step 16b as the finalizer carries it, promoting *promote* after the snapshot."""
     parent, root = _installed_layout(tmp_path)
     promote_cmds = "\n".join(f"sed -i 's/^running$/done/' {path}" for path in promote)
@@ -426,10 +403,7 @@ class TestStep16bMissingFixedInNarration:
         output = result.stdout + result.stderr
 
         assert result.returncode == 0, output
-        narration = [
-            line for line in result.stdout.splitlines()
-            if line.startswith(f"[Step 16b] {_NARRATION_PREFIX}")
-        ]
+        narration = [line for line in result.stdout.splitlines() if line.startswith(f"[Step 16b] {_NARRATION_PREFIX}")]
         assert len(narration) == 1, output
         assert ledger["missing"].name in narration[0], output
         assert result.stdout.splitlines().index(narration[0]) < result.stdout.splitlines().index(
@@ -438,9 +412,7 @@ class TestStep16bMissingFixedInNarration:
         ), output
         assert "OUTCOME: ## Fixed In: v1.4.0 — 1 stamped," in result.stdout, output
         for key, path in ledger.items():
-            assert path.read_bytes() == ledger_before[key], (
-                f"Step 16b changed {path.name}:\n{path.read_text()}"
-            )
+            assert path.read_bytes() == ledger_before[key], f"Step 16b changed {path.name}:\n{path.read_text()}"
         # The closing bug carries exactly the promotion plus Step 16b's own stamp.
         expected = tmp_path / "expected" / closing.name
         expected.parent.mkdir()
@@ -448,9 +420,7 @@ class TestStep16bMissingFixedInNarration:
         write_fixed_in(expected, "v1.4.0")
         assert closing.read_bytes() == expected.read_bytes(), closing.read_text()
 
-    def test_step_16b_output_is_unchanged_when_every_done_bug_has_fixed_in(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_step_16b_output_is_unchanged_when_every_done_bug_has_fixed_in(self, tmp_path: pathlib.Path) -> None:
         bugs = tmp_path / "ledger" / "bugs"
         _write_bug(bugs, "BUG-0041-done-stamped", "done", fixed_in="v1.3.0")
         closing = _write_bug(bugs, "BUG-0042-closed-by-this-release", "running")

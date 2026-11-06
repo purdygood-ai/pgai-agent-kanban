@@ -66,19 +66,20 @@ def _import_generator():
     render_window_tour_block() and _describe_window_tour_drift() can be
     exercised directly, without a subprocess round trip.
     """
-    spec = importlib.util.spec_from_file_location(
-        "generate_window_docs", _GENERATOR
-    )
+    spec = importlib.util.spec_from_file_location("generate_window_docs", _GENERATOR)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_GENERATOR}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
 
+
 # The exact window names create.sh builds, in creation order (tmux_index
-# 0..13), plus the dynamic per-project drill-N template at index 14.
+# 0..13), plus the dynamic per-project drill-N template at index 14. The
+# operator window and drill-N each carry two variants, one W record each.
 _EXPECTED_WINDOW_NAMES = [
     "main",
+    "operator",
     "operator",
     "visibility",
     "attention",
@@ -114,25 +115,63 @@ def test_checked_in_census_declares_every_window_create_sh_builds() -> None:
     assert names == _EXPECTED_WINDOW_NAMES
 
 
-def test_checked_in_census_includes_operator_window() -> None:
+def test_checked_in_census_includes_both_operator_variants() -> None:
+    """Window 1 is declared once per [dashboard] operator_board_agents value:
+    merged (4 board columns) and split (8), each plus the cmdline shell,
+    the workbench shell and the legend."""
     windows = load_census()
-    operator_windows = [w for w in windows if w.name == "operator"]
-    assert len(operator_windows) == 1
-    assert operator_windows[0].tmux_index == 1
-    # board (8 columns) + cmdline shell + legend
-    assert operator_windows[0].pane_count == 10
-    assert len(operator_windows[0].panes) == 10
+    operator_windows = {w.variant: w for w in windows if w.name == "operator"}
+    assert sorted(operator_windows) == ["merged", "split"]
+    for window in operator_windows.values():
+        assert window.tmux_index == 1
+        assert len(window.panes) == window.pane_count
+    assert operator_windows["merged"].pane_count == 7
+    assert operator_windows["split"].pane_count == 11
+
+
+def _window(name: str, variant: str = "-"):
+    (window,) = [w for w in load_census() if w.name == name and w.variant == variant]
+    return window
+
+
+def test_merged_operator_window_is_three_inputs_and_one_agents_column() -> None:
+    """Window 1's merged variant declares window 2's three input columns,
+    then one AGENTS column rendered by column-render.sh's agents column
+    type, then the cmdline shell, the workbench shell and window 2's
+    legend -- and no other pane."""
+    operator = _window("operator", "merged").panes
+    visibility = _window("visibility").panes
+
+    assert [p.pane_seq for p in operator] == list(range(7))
+    assert [(p.script, p.standalone_cmd) for p in operator[:3]] == [
+        (p.script, p.standalone_cmd) for p in visibility[:3]
+    ], "merged operator panes 0-2 must run the visibility window's three input commands"
+
+    agents = operator[3]
+    assert agents.script == "column-render.sh", agents
+    words = agents.standalone_cmd.split()
+    assert words[:3] == ["column-render.sh", "queue", "none"], agents
+    assert words[words.index("--label") + 1] == "AGENTS", agents
+    assert words[words.index("--column-type") + 1] == "agents", agents
+    assert "--all-projects" in words, agents
+
+    assert operator[4].script.startswith("(interactive bash"), operator[4]
+    assert operator[5].script == "none (interactive shell)", operator[5]
+    assert (operator[6].script, operator[6].standalone_cmd) == (
+        visibility[8].script,
+        visibility[8].standalone_cmd,
+    ), "the merged operator window's last pane must be the visibility window's legend bar"
 
 
 def test_operator_window_is_the_visibility_board_plus_a_shell_row() -> None:
-    """Window 1 declares window 2's eight columns and legend, in the same
-    order and with the same commands, with one interactive shell pane
-    between the board and the legend -- and no other pane."""
-    windows = {w.name: w for w in load_census()}
-    operator = windows["operator"].panes
-    visibility = windows["visibility"].panes
+    """Window 1's split variant declares window 2's eight columns and
+    legend, in the same order and with the same commands, with one
+    interactive shell pane between the board and the legend and one
+    interactive workbench pane before the legend -- and no other pane."""
+    operator = _window("operator", "split").panes
+    visibility = _window("visibility").panes
 
-    assert [p.pane_seq for p in operator] == list(range(10))
+    assert [p.pane_seq for p in operator] == list(range(11))
     assert [(p.script, p.standalone_cmd) for p in operator[:8]] == [
         (p.script, p.standalone_cmd) for p in visibility[:8]
     ], "operator panes 0-7 must run the visibility window's eight column commands"
@@ -141,15 +180,21 @@ def test_operator_window_is_the_visibility_board_plus_a_shell_row() -> None:
     assert shell.script.startswith("(interactive bash"), shell
     assert shell.standalone_cmd.startswith("N/A"), shell
 
-    legend = operator[9]
+    workbench = operator[9]
+    assert workbench.script == "none (interactive shell)", workbench
+    assert workbench.standalone_cmd.startswith("N/A"), workbench
+
+    legend = operator[10]
     assert (legend.script, legend.standalone_cmd) == (
         visibility[8].script,
         visibility[8].standalone_cmd,
     ), "operator's last pane must be the visibility window's legend bar"
 
-    assert all(p.script != "suggested-commands.sh" for p in operator), (
-        "the operator window carries no suggested-commands pane"
-    )
+    assert all(
+        p.script != "suggested-commands.sh"
+        for variant in ("merged", "split")
+        for p in _window("operator", variant).panes
+    ), "the operator window carries no suggested-commands pane"
 
 
 def test_checked_in_census_includes_schedule_window() -> None:
@@ -188,12 +233,8 @@ def test_checked_in_census_splits_agent_metrics_into_live_and_full_history_panes
     assert len(window.panes) == 2
     assert [p.script for p in window.panes] == ["agent-metrics.sh", "agent-metrics.sh"]
     live, full = window.panes
-    assert live.standalone_cmd == (
-        "agent-metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH"
-    )
-    assert full.standalone_cmd == (
-        "agent-metrics.sh --all --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH"
-    )
+    assert live.standalone_cmd == ("agent-metrics.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH")
+    assert full.standalone_cmd == ("agent-metrics.sh --all --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH")
 
 
 def test_checked_in_census_includes_both_drill_variants() -> None:
@@ -247,8 +288,7 @@ def test_check_mode_passes_against_checked_in_tree() -> None:
 def test_pane_count_mismatch_raises_census_format_error(tmp_path: pathlib.Path) -> None:
     bad_census = tmp_path / "bad.census"
     bad_census.write_text(
-        "W\t0\tmain\t-\t2\n"
-        "P\t0\t-\t0\tsingle\tfoo.sh\tfoo.sh\n",
+        "W\t0\tmain\t-\t2\n" "P\t0\t-\t0\tsingle\tfoo.sh\tfoo.sh\n",
         # declares pane_count=2 but only one P record follows
         encoding="utf-8",
     )
@@ -366,9 +406,9 @@ def test_check_reports_missing_marker_pair_as_usage_error(tmp_path: pathlib.Path
 
 
 def test_window_tour_covers_every_census_window_in_census_order() -> None:
-    """One tour entry per census W row, in census order -- the same 16 rows
-    (15 window ids, drill-N carrying two variants) that back
-    _EXPECTED_WINDOW_NAMES above.
+    """One tour entry per census W row, in census order -- the same 17 rows
+    (15 window ids, operator and drill-N carrying two variants each) that
+    back _EXPECTED_WINDOW_NAMES above.
     """
     generator = _import_generator()
     windows = load_census()
@@ -377,14 +417,10 @@ def test_window_tour_covers_every_census_window_in_census_order() -> None:
     assert block.startswith(generator._WINDOW_TOUR_BEGIN)
     assert block.rstrip().endswith(generator._WINDOW_TOUR_END)
 
-    rows = [
-        line
-        for line in block.splitlines()
-        if line.startswith("|") and not line.startswith("|---")
-    ]
+    rows = [line for line in block.splitlines() if line.startswith("|") and not line.startswith("|---")]
     # Drop the header row ("| Window | Name | Panes | Variant |").
     data_rows = rows[1:]
-    assert len(data_rows) == len(windows) == 16
+    assert len(data_rows) == len(windows) == 17
 
     for window, row in zip(windows, data_rows):
         assert f"| {window.tmux_index} |" in row
@@ -415,9 +451,7 @@ def test_checked_in_dashboard_md_window_tour_matches_a_fresh_render() -> None:
     windows = load_census()
     expected_block = generator.render_window_tour_block(windows)
     current = _REAL_DASHBOARD_MD.read_text(encoding="utf-8")
-    actual_block = generator._extract_between_markers(
-        current, generator._WINDOW_TOUR_BEGIN, generator._WINDOW_TOUR_END
-    )
+    actual_block = generator._extract_between_markers(current, generator._WINDOW_TOUR_BEGIN, generator._WINDOW_TOUR_END)
     assert actual_block == expected_block
 
 
@@ -452,9 +486,7 @@ def test_check_catches_hand_edited_tour_entry_and_clears_on_revert(
     create_sh = tmp_path / "create.sh"
     create_sh.write_text(_REAL_CREATE_SH.read_text(encoding="utf-8"), encoding="utf-8")
     dashboard_panes = tmp_path / "DASHBOARD-PANES.md"
-    dashboard_panes.write_text(
-        _REAL_DASHBOARD_PANES.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    dashboard_panes.write_text(_REAL_DASHBOARD_PANES.read_text(encoding="utf-8"), encoding="utf-8")
     original_dashboard_md_text = _REAL_DASHBOARD_MD.read_text(encoding="utf-8")
     dashboard_md = tmp_path / "dashboard.md"
     dashboard_md.write_text(original_dashboard_md_text, encoding="utf-8")
@@ -468,9 +500,7 @@ def test_check_catches_hand_edited_tour_entry_and_clears_on_revert(
         "| 7 | `rc-metrics` | 2 | - |",
         "| 7 | `rc-metrics-BROKEN` | 2 | - |",
     )
-    assert corrupted != original_dashboard_md_text, (
-        "fixture row not found -- update this test's literal"
-    )
+    assert corrupted != original_dashboard_md_text, "fixture row not found -- update this test's literal"
     dashboard_md.write_text(corrupted, encoding="utf-8")
 
     dirty_result = _run_check(tmp_path, census, create_sh, dashboard_panes, dashboard_md)
@@ -506,8 +536,7 @@ def test_check_reports_missing_tour_entry_when_census_window_added(
 
     census = tmp_path / "dashboard_windows.census"
     extended_census_text = (
-        default_census_path().read_text(encoding="utf-8")
-        + "\nW\t15\textra-window\t-\t1\n"
+        default_census_path().read_text(encoding="utf-8") + "\nW\t15\textra-window\t-\t1\n"
         "P\t15\t-\t0\tsingle\textra.sh\textra.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH\n"
     )
     census.write_text(extended_census_text, encoding="utf-8")
@@ -517,8 +546,7 @@ def test_check_reports_missing_tour_entry_when_census_window_added(
 
     dashboard_panes = tmp_path / "DASHBOARD-PANES.md"
     dashboard_panes.write_text(
-        _REAL_DASHBOARD_PANES.read_text(encoding="utf-8")
-        + "\n<!-- CENSUS-GENERATED:BEGIN window=15 variant=- -->\n"
+        _REAL_DASHBOARD_PANES.read_text(encoding="utf-8") + "\n<!-- CENSUS-GENERATED:BEGIN window=15 variant=- -->\n"
         "<!-- CENSUS-GENERATED:END window=15 variant=- -->\n",
         encoding="utf-8",
     )

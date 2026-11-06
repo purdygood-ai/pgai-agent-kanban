@@ -63,6 +63,15 @@ its verdict from the ``missing-help`` findings it writes with
      pattern-match exploit), and the lint re-run against the fixture records
      no finding.
 
+ 14. **Tree scan**: with ``--root``, executable scripts at any depth are
+     checked (a ``#!`` file without a suffix too), a non-executable file is
+     not, sourced libraries (``lib/``) and workflow plugins are exempt by
+     rule, hidden directories are not entered, entry points directly in the
+     tree's scripts directory are checked whatever their mode, and an
+     exempt-list entry matches by trailing path. The real tree's default
+     scan reports zero offenders and includes the scripts outside
+     ``team/scripts/``.
+
 All tests use pytest's ``tmp_path`` and importlib for isolation — no bare /tmp
 paths, no live kanban state mutations.
 """
@@ -85,16 +94,14 @@ from tests.fixtures.lint_findings import run_main
 # Path: team/tests/unit/ → team/ (three levels up from unit/) → team/scripts/
 # ---------------------------------------------------------------------------
 _THIS_FILE = Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent   # team/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_help_presence.py"
 
 
 def _import_lint_module():
     """Import lint_help_presence as a module."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_help_presence", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_help_presence", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -111,6 +118,7 @@ def _missing_help(argv: list[str], findings_path: Path) -> tuple[int, list[dict]
     are left out: these cases are about the presence check)."""
     rc, findings = run_main(_lint.main, argv, findings_path)
     return rc, [f for f in findings if f["kind"] == "missing-help"]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -163,10 +171,15 @@ def test_missing_help_triggers_violation(tmp_path: Path) -> None:
     # Empty exempt list.
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing, (
         "lint_help_presence.main() must return 0 and record a missing-help "
@@ -181,9 +194,7 @@ def test_direct_run_prints_writes_and_exits_zero(tmp_path: Path) -> None:
     printed, clears it."""
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
-    script = _write_shell_script(
-        scripts_dir, "fixture_no_help_script.sh", _NO_HELP_FIXTURE.read_text(encoding="utf-8")
-    )
+    script = _write_shell_script(scripts_dir, "fixture_no_help_script.sh", _NO_HELP_FIXTURE.read_text(encoding="utf-8"))
     exempt_path = _write_exempt_list(tmp_path, [])
     findings_path = tmp_path / "out" / "findings.json"
     argv = ["--scripts-dir", str(scripts_dir), "--exempt-list", str(exempt_path)]
@@ -228,10 +239,15 @@ def test_exempt_list_suppresses_violation(tmp_path: Path) -> None:
     # List the offending script in the exempt list.
     exempt_path = _write_exempt_list(tmp_path, ["fixture_no_help_script.sh"])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing == [], (
         "lint_help_presence.main() must return 0 when the only script "
@@ -270,10 +286,15 @@ echo "running"
     _write_shell_script(scripts_dir, "test_case_help.sh", script_content)
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing == [], (
         "A script using 'case \"$1\" in --help|-h)' must be recognized as "
@@ -305,10 +326,15 @@ echo "running"
     _write_shell_script(scripts_dir, "test_argparse_help.sh", script_content)
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing == [], (
         "A script using 'argparse_has help' (operator_args.sh framework) "
@@ -335,10 +361,15 @@ exec "$(dirname "${BASH_SOURCE[0]}")/real-script.sh" --max-tasks=1 "$@"
     _write_shell_script(scripts_dir, "test_exec_passthrough.sh", script_content)
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing == [], (
         "A script that uses 'exec ... \"$@\"' to pass --help through to a "
@@ -381,10 +412,15 @@ if __name__ == "__main__":
     _write_python_script(scripts_dir, "test_argparse_entry_point.py", script_content)
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing == [], (
         "A .py entry point built on argparse.ArgumentParser() (default "
@@ -425,10 +461,15 @@ if __name__ == "__main__":
     _write_python_script(scripts_dir, "test_no_help_entry_point.py", script_content)
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing, (
         "A .py entry point with no argparse and no --help handling must be "
@@ -475,10 +516,15 @@ if __name__ == "__main__":
     _write_python_script(scripts_dir, "test_no_manual_help_entry_point.py", script_content)
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing, (
         "A .py entry point that sets add_help=False and adds no manual "
@@ -497,14 +543,17 @@ def test_missing_scripts_directory_returns_exit_2(tmp_path: Path) -> None:
     nonexistent = tmp_path / "no_such_dir"
     exempt_path = _write_exempt_list(tmp_path, [])
 
-    result = _lint.main([
-        "--scripts-dir", str(nonexistent),
-        "--exempt-list", str(exempt_path),
-    ])
+    result = _lint.main(
+        [
+            "--scripts-dir",
+            str(nonexistent),
+            "--exempt-list",
+            str(exempt_path),
+        ]
+    )
 
     assert result == 2, (
-        "lint_help_presence.main() must return 2 when the scripts directory "
-        "does not exist.  Got {result!r}."
+        "lint_help_presence.main() must return 2 when the scripts directory " "does not exist.  Got {result!r}."
     )
 
 
@@ -513,24 +562,26 @@ def test_missing_scripts_directory_returns_exit_2(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_missing_exempt_list_is_a_finding_and_returns_0(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_missing_exempt_list_is_a_finding_and_returns_0(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A non-existent exempt list is recorded as the run's one finding
     (``exempt-list-missing``), narrated dual-channel, and main() returns 0:
     the presence check could not classify scripts, which is a quality
     finding, not a failure of the run."""
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
-    _write_shell_script(
-        scripts_dir, "fixture_no_help_script.sh", _NO_HELP_FIXTURE.read_text(encoding="utf-8")
-    )
+    _write_shell_script(scripts_dir, "fixture_no_help_script.sh", _NO_HELP_FIXTURE.read_text(encoding="utf-8"))
     nonexistent_exempt = tmp_path / "no_exempt.txt"
 
-    rc, findings = run_main(_lint.main, [
-        "--scripts-dir", str(scripts_dir),
-        "--exempt-list", str(nonexistent_exempt),
-    ], tmp_path / "findings.json")
+    rc, findings = run_main(
+        _lint.main,
+        [
+            "--scripts-dir",
+            str(scripts_dir),
+            "--exempt-list",
+            str(nonexistent_exempt),
+        ],
+        tmp_path / "findings.json",
+    )
 
     assert rc == 0, f"a missing exempt list must not exit non-zero; got {rc!r}"
     assert [f["kind"] for f in findings] == ["exempt-list-missing"], (
@@ -561,10 +612,15 @@ def test_real_tree_produces_zero_offenders(tmp_path: Path) -> None:
     # Deliberately exercises the real team/scripts/ tree (not a fixture):
     # this is the proof that the current codebase satisfies the lint, not
     # an isolated behavior a fixture could stand in for.
-    result, result_missing = _missing_help([
-        "--scripts-dir", str(_SCRIPTS_DIR),
-        "--exempt-list", str(real_exempt_list),
-    ], tmp_path / "result.json")
+    result, result_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(_SCRIPTS_DIR),
+            "--exempt-list",
+            str(real_exempt_list),
+        ],
+        tmp_path / "result.json",
+    )
 
     assert result == 0 and result_missing == [], (
         "lint_help_presence.main() returned non-zero on the real team/scripts/ "
@@ -596,11 +652,16 @@ def test_real_tree_scan_includes_pseudocron_py(tmp_path: Path) -> None:
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        result, result_missing = _missing_help([
-            "--scripts-dir", str(_SCRIPTS_DIR),
-            "--exempt-list", str(real_exempt_list),
-            "--verbose",
-        ], tmp_path / "result.json")
+        result, result_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(_SCRIPTS_DIR),
+                "--exempt-list",
+                str(real_exempt_list),
+                "--verbose",
+            ],
+            tmp_path / "result.json",
+        )
 
     assert result == 0 and result_missing == [], (
         "Real-tree scan (including pseudocron.py) must produce zero "
@@ -621,9 +682,9 @@ def test_real_tree_scan_includes_pseudocron_py(tmp_path: Path) -> None:
 def test_cm_missing_help_triggers_violation(tmp_path: Path) -> None:
     """A script in a synthetic cm/ subdirectory without --help is flagged.
 
-    When the default two-directory scan runs (no --scripts-dir), a script
-    placed in the cm/ subdirectory that lacks --help must appear in the
-    offender list with the 'cm/' prefix and be recorded as a finding.
+    Scanning the cm/ directory, a script there that lacks --help must be
+    recorded as a finding (the tree scan's own coverage of a scripts
+    directory's cm/ entry points is the tree-scan cases below).
     """
     # Build a synthetic scripts root with an empty top-level and a cm/ subdir.
     scripts_dir = tmp_path / "scripts"
@@ -638,15 +699,17 @@ def test_cm_missing_help_triggers_violation(tmp_path: Path) -> None:
     # Empty exempt list in the scripts root.
     exempt_path = _write_exempt_list(scripts_dir, [])
 
-    # Invoke with --scripts-dir pointing at our synthetic top (which has no
-    # top-level scripts), then re-invoke without --scripts-dir to test the
-    # two-directory default.  We test the default path by monkey-patching
-    # __file__ is not practical; instead we pass --scripts-dir to the cm_dir
-    # directly to prove the detection mechanism works for that directory.
-    result_cm_only, result_cm_only_missing = _missing_help([
-        "--scripts-dir", str(cm_dir),
-        "--exempt-list", str(exempt_path),
-    ], tmp_path / "result_cm_only.json")
+    # Pass --scripts-dir to the cm_dir directly to prove the detection
+    # mechanism works for that directory.
+    result_cm_only, result_cm_only_missing = _missing_help(
+        [
+            "--scripts-dir",
+            str(cm_dir),
+            "--exempt-list",
+            str(exempt_path),
+        ],
+        tmp_path / "result_cm_only.json",
+    )
 
     assert result_cm_only == 0 and result_cm_only_missing, (
         "lint_help_presence.main() must record a finding when a script in cm/ is "
@@ -664,9 +727,8 @@ def test_cm_missing_help_triggers_violation(tmp_path: Path) -> None:
 def test_cm_exempt_list_entry_suppresses_violation(tmp_path: Path) -> None:
     """A 'cm/<name>.sh' exempt-list entry suppresses a cm/ script in _scan_directory.
 
-    The _scan_directory helper used by the default two-directory scan checks
-    both the label form ('cm/<name>.sh') and the bare basename against the
-    exempt set.  When a script in a cm/ directory is listed in the exempt file
+    The _scan_directory helper checks both the label form ('cm/<name>.sh')
+    and the bare basename against the exempt set.  When a script in a cm/ directory is listed in the exempt file
     as 'cm/<name>.sh', it must be skipped and the scan of that directory must
     report no offenders.
 
@@ -699,9 +761,7 @@ def test_cm_exempt_list_entry_suppresses_violation(tmp_path: Path) -> None:
         "The script listed as 'cm/fixture_no_help_script.sh' in the exempt set "
         "must be counted as exempt (exempt_count should be 1)."
     )
-    assert checked_count == 0, (
-        "No scripts should have been checked (only the exempted one was present)."
-    )
+    assert checked_count == 0, "No scripts should have been checked (only the exempted one was present)."
 
 
 # ---------------------------------------------------------------------------
@@ -733,10 +793,15 @@ def test_real_tree_cm_offenders_match_expected(tmp_path: Path) -> None:
     # fixture could stand in for.
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        result, result_missing = _missing_help([
-            "--scripts-dir", str(real_cm_dir),
-            "--exempt-list", str(real_exempt_list),
-        ], tmp_path / "result.json")
+        result, result_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(real_cm_dir),
+                "--exempt-list",
+                str(real_exempt_list),
+            ],
+            tmp_path / "result.json",
+        )
 
     output = buf.getvalue()
 
@@ -798,16 +863,12 @@ class TestHelpPresenceRemedyBlock:
         script = _write_shell_script(
             scripts_dir,
             "no_help_target.sh",
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            'echo "running with args: $*"\n',
+            "#!/usr/bin/env bash\n" "set -euo pipefail\n" 'echo "running with args: $*"\n',
         )
         exempt_path = _write_exempt_list(tmp_path, [])
         return scripts_dir, exempt_path, script
 
-    def test_remedy_block_contains_all_required_parts(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_remedy_block_contains_all_required_parts(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Forcing a missing-``--help`` failure prints the full three-part
         remedy block.
 
@@ -821,24 +882,23 @@ class TestHelpPresenceRemedyBlock:
         """
         scripts_dir, exempt_path, script = self._write_no_help_fixture(tmp_path)
 
-        result, result_missing = _missing_help([
-            "--scripts-dir", str(scripts_dir),
-            "--exempt-list", str(exempt_path),
-        ], tmp_path / "result.json")
+        result, result_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(scripts_dir),
+                "--exempt-list",
+                str(exempt_path),
+            ],
+            tmp_path / "result.json",
+        )
         assert result == 0 and result_missing, "Forced no-help fixture was not recorded as a finding."
 
         out = capsys.readouterr().out
 
-        assert "Cause(s):" in out, (
-            f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
-        )
-        assert str(script) in out, (
-            f"Remedy block does not name the actual offending script path.\nstdout: {out!r}"
-        )
+        assert "Cause(s):" in out, f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
+        assert str(script) in out, f"Remedy block does not name the actual offending script path.\nstdout: {out!r}"
 
-        assert "To fix:" in out, (
-            f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
-        )
+        assert "To fix:" in out, f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
         commands = _NUMBERED_COMMAND_RE.findall(out)
         assert len(commands) >= 2, (
             "Remedy block's numbered fix block has fewer than 2 commands "
@@ -853,9 +913,7 @@ class TestHelpPresenceRemedyBlock:
 
         assert (
             "must implement a --help/-h handler" in out
-        ), (
-            f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
-        )
+        ), f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
 
         placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
         assert placeholder_hits == [], (
@@ -864,9 +922,7 @@ class TestHelpPresenceRemedyBlock:
             f"Placeholders found: {placeholder_hits!r}\nstdout: {out!r}"
         )
 
-    def test_remedy_block_commands_clear_the_gate(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_remedy_block_commands_clear_the_gate(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Executing the remedy block's printed commands verbatim clears the
         gate — the motivating end-to-end proof: a stranger reading only
         the gate's failure output, with no other guidance, can clear it.
@@ -879,17 +935,20 @@ class TestHelpPresenceRemedyBlock:
         """
         scripts_dir, exempt_path, script = self._write_no_help_fixture(tmp_path)
 
-        result, result_missing = _missing_help([
-            "--scripts-dir", str(scripts_dir),
-            "--exempt-list", str(exempt_path),
-        ], tmp_path / "result.json")
+        result, result_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(scripts_dir),
+                "--exempt-list",
+                str(exempt_path),
+            ],
+            tmp_path / "result.json",
+        )
         assert result == 0 and result_missing, "Forced no-help fixture was not recorded as a finding."
 
         out = capsys.readouterr().out
         commands = _NUMBERED_COMMAND_RE.findall(out)
-        assert len(commands) >= 2, (
-            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
-        )
+        assert len(commands) >= 2, f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
 
         for _, command_text in commands:
             proc = subprocess.run(
@@ -906,10 +965,15 @@ class TestHelpPresenceRemedyBlock:
         # The last command IS the re-lint verification command and already
         # asserted returncode == 0 above. Confirm independently via a direct
         # main() call for belt-and-braces.
-        recheck, recheck_missing = _missing_help([
-            "--scripts-dir", str(scripts_dir),
-            "--exempt-list", str(exempt_path),
-        ], tmp_path / "recheck.json")
+        recheck, recheck_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(scripts_dir),
+                "--exempt-list",
+                str(exempt_path),
+            ],
+            tmp_path / "recheck.json",
+        )
         assert recheck == 0 and recheck_missing == [], (
             "lint_help_presence still fails against the fixture directory "
             "after running every printed remedy command verbatim."
@@ -922,12 +986,9 @@ class TestHelpPresenceRemedyBlock:
             capture_output=True,
             text=True,
         )
-        assert help_proc.returncode == 0, (
-            f"Patched script exited non-zero on --help: {help_proc.stderr!r}"
-        )
+        assert help_proc.returncode == 0, f"Patched script exited non-zero on --help: {help_proc.stderr!r}"
         assert "Usage:" in help_proc.stdout, (
-            f"Patched script did not print a usage line on --help.\n"
-            f"stdout: {help_proc.stdout!r}"
+            f"Patched script did not print a usage line on --help.\n" f"stdout: {help_proc.stdout!r}"
         )
 
 
@@ -982,17 +1043,20 @@ class TestHelpPresenceRemedyBlockPython:
         """
         scripts_dir, exempt_path, script = self._write_no_help_python_fixture(tmp_path)
 
-        result, result_missing = _missing_help([
-            "--scripts-dir", str(scripts_dir),
-            "--exempt-list", str(exempt_path),
-        ], tmp_path / "result.json")
+        result, result_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(scripts_dir),
+                "--exempt-list",
+                str(exempt_path),
+            ],
+            tmp_path / "result.json",
+        )
         assert result == 0 and result_missing, "Forced no-help Python fixture was not recorded as a finding."
 
         out = capsys.readouterr().out
         commands = _NUMBERED_COMMAND_RE.findall(out)
-        assert len(commands) >= 2, (
-            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
-        )
+        assert len(commands) >= 2, f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
 
         placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
         assert placeholder_hits == [], (
@@ -1019,10 +1083,15 @@ class TestHelpPresenceRemedyBlockPython:
                 f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
             )
 
-        recheck, recheck_missing = _missing_help([
-            "--scripts-dir", str(scripts_dir),
-            "--exempt-list", str(exempt_path),
-        ], tmp_path / "recheck.json")
+        recheck, recheck_missing = _missing_help(
+            [
+                "--scripts-dir",
+                str(scripts_dir),
+                "--exempt-list",
+                str(exempt_path),
+            ],
+            tmp_path / "recheck.json",
+        )
         assert recheck == 0 and recheck_missing == [], (
             "lint_help_presence still fails against the Python fixture "
             "directory after running every printed remedy command verbatim."
@@ -1034,12 +1103,9 @@ class TestHelpPresenceRemedyBlockPython:
             capture_output=True,
             text=True,
         )
-        assert help_proc.returncode == 0, (
-            f"Patched .py script exited non-zero on --help: {help_proc.stderr!r}"
-        )
+        assert help_proc.returncode == 0, f"Patched .py script exited non-zero on --help: {help_proc.stderr!r}"
         assert "Usage:" in help_proc.stdout, (
-            f"Patched .py script did not print a usage line on --help.\n"
-            f"stdout: {help_proc.stdout!r}"
+            f"Patched .py script did not print a usage line on --help.\n" f"stdout: {help_proc.stdout!r}"
         )
 
         # ... while its original no-argument behavior is undisturbed.
@@ -1049,12 +1115,10 @@ class TestHelpPresenceRemedyBlockPython:
             text=True,
         )
         assert plain_proc.returncode == 0, (
-            f"Patched .py script exited non-zero with no arguments: "
-            f"{plain_proc.stderr!r}"
+            f"Patched .py script exited non-zero with no arguments: " f"{plain_proc.stderr!r}"
         )
         assert "doing real work" in plain_proc.stdout, (
-            "Patched .py script's original no-argument behavior changed.\n"
-            f"stdout: {plain_proc.stdout!r}"
+            "Patched .py script's original no-argument behavior changed.\n" f"stdout: {plain_proc.stdout!r}"
         )
 
 
@@ -1100,9 +1164,7 @@ def _quality_findings(scripts_dir: Path) -> list:
     return findings
 
 
-def test_quality_scan_reports_an_undocumented_case_arm_flag(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_quality_scan_reports_an_undocumented_case_arm_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A script whose case arm parses --secret, never named in its help, is
     reported by name; the documented --verbose is not; the lint still
     exits 0 because the check is quality class."""
@@ -1228,7 +1290,7 @@ def test_quality_scan_passes_documented_flags_and_skips_lib_and_comments(
         "helper.sh",
         "#!/usr/bin/env bash\n"
         "# helper.sh\n"
-        "x() { case \"$1\" in --help) sed -n '2,3p' \"$0\" ;; --hidden) ;; esac; }\n",
+        'x() { case "$1" in --help) sed -n \'2,3p\' "$0" ;; --hidden) ;; esac; }\n',
     )
 
     assert _quality_findings(scripts_dir) == []
@@ -1243,3 +1305,138 @@ def test_quality_scan_is_clean_on_the_real_scripts_tree() -> None:
     assert findings == [], "help-quality findings on the real tree:\n" + "\n".join(
         f"  [{f.check}] {f.label}: {f.detail}" for f in findings
     )
+
+
+# ---------------------------------------------------------------------------
+# Tree scan (--root, and the default scan of the real tree)
+# ---------------------------------------------------------------------------
+
+_NO_HELP_TEXT = "#!/usr/bin/env bash\nset -euo pipefail\necho working\n"
+
+
+def _write_executable(path: Path, content: str = _NO_HELP_TEXT) -> Path:
+    """Write *content* to *path* (parents created) with mode 0755."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def _tree_missing_labels(root: Path, exempt: list[str], findings_path: Path) -> set[str]:
+    """Run the tree scan over *root* with an exempt list of *exempt*; return
+    the labels (paths relative to *root*) of its ``missing-help`` findings."""
+    findings_path.parent.mkdir(parents=True, exist_ok=True)
+    exempt_path = _write_exempt_list(findings_path.parent, exempt)
+    rc, missing = _missing_help(["--root", str(root), "--exempt-list", str(exempt_path)], findings_path)
+    assert rc == 0
+    labels = set()
+    for finding in missing:
+        match = re.search(r"\(label: ([^)]+)\)", finding["cause"])
+        assert match, finding
+        labels.add(match.group(1))
+    return labels
+
+
+def test_tree_scan_checks_executable_scripts_at_any_depth(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    _write_executable(root / "deploy.sh")
+    _write_executable(root / "tools" / "nested" / "deeper" / "sync.sh")
+    _write_executable(root / "tools" / "runner", "#!/usr/bin/env bash\necho no help here\n")
+    _write_executable(root / "tools" / "with_help.sh", '#!/usr/bin/env bash\ncase "$1" in --help|-h) exit 0 ;; esac\n')
+    plain = root / "tools" / "not_executable.sh"
+    plain.write_text(_NO_HELP_TEXT, encoding="utf-8")
+    plain.chmod(0o644)
+    _write_executable(root / "tools" / "data.txt", "not a script\n")
+
+    labels = _tree_missing_labels(root, [], tmp_path / "out" / "findings.json")
+
+    assert labels == {"deploy.sh", "tools/nested/deeper/sync.sh", "tools/runner"}, labels
+
+
+def test_tree_scan_exempts_sourced_libraries_plugins_and_hidden_dirs(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    _write_executable(root / "team" / "scripts" / "lib" / "helpers.sh")
+    _write_executable(root / "team" / "scripts" / "dashboard" / "lib" / "render.sh")
+    _write_executable(root / "team" / "workflows" / "release" / "workflow.sh")
+    _write_executable(root / ".git" / "hooks" / "pre-commit")
+    _write_executable(root / "team" / "workflows" / "release" / "tools" / "check.sh")
+
+    labels = _tree_missing_labels(root, [], tmp_path / "out" / "findings.json")
+
+    # Only the script that is neither a library, a plugin nor hidden is checked.
+    assert labels == {"team/workflows/release/tools/check.sh"}, labels
+
+
+def test_tree_scan_checks_scripts_dir_entry_points_whatever_their_mode(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    top = root / "team" / "scripts" / "report.py"
+    cm = root / "team" / "scripts" / "cm" / "ship.sh"
+    deeper = root / "team" / "scripts" / "harness" / "probe.sh"
+    for path in (top, cm, deeper):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_NO_HELP_TEXT, encoding="utf-8")
+        path.chmod(0o644)
+
+    labels = _tree_missing_labels(root, [], tmp_path / "out" / "findings.json")
+
+    assert labels == {"team/scripts/report.py", "team/scripts/cm/ship.sh"}, labels
+
+
+def test_tree_scan_exempt_entry_matches_by_trailing_path(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    _write_executable(root / "team" / "scripts" / "wake" / "shim.sh")
+    _write_executable(root / "team" / "scripts" / "other" / "shim.sh")
+    _write_executable(root / "docker" / "start.sh")
+
+    labels = _tree_missing_labels(root, ["wake/shim.sh", "start.sh"], tmp_path / "out" / "findings.json")
+
+    assert labels == {"team/scripts/other/shim.sh"}, labels
+
+
+def test_header_help_helper_call_counts_as_a_handler(tmp_path: Path) -> None:
+    root = tmp_path / "tree"
+    _write_executable(
+        root / "uses_prelude.sh",
+        "#!/usr/bin/env bash\n# uses_prelude.sh [--help]\n\n"
+        'source "$(dirname "${BASH_SOURCE[0]}")/lib/header_help.sh"\n'
+        'header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"\n',
+    )
+    _write_executable(
+        root / "prints_header.sh",
+        '#!/usr/bin/env bash\n# prints_header.sh\n\n[[ "${1:-}" == --usage ]] && header_help_print "$0"\n',
+    )
+    _write_executable(
+        root / "mentions_it.sh",
+        "#!/usr/bin/env bash\n# mentions_it.sh\n\n# header_help_exit_if_requested is not called here.\necho hi\n",
+    )
+
+    labels = _tree_missing_labels(root, [], tmp_path / "out" / "findings.json")
+
+    assert labels == {"mentions_it.sh"}, labels
+
+
+def test_real_tree_default_scan_reports_zero_offenders(tmp_path: Path) -> None:
+    """The default scan (no --root, no --scripts-dir) walks the real tree,
+    reaches executable scripts outside team/scripts/, and finds every one
+    answering --help or exempt."""
+    import contextlib
+    import io
+
+    # Deliberately the real tree: this is the proof the shipped scripts
+    # satisfy the recursive scan.
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc, missing = _missing_help(["--verbose"], tmp_path / "result.json")
+    out = buf.getvalue()
+
+    assert rc == 0 and missing == [], "\n".join(f["cause"] for f in missing)
+    for label in (
+        "docker/entrypoint.sh",
+        "team/verification/verify_quarantine_visibility.sh",
+        "team/scripts/migrations/migrate_v2.22.5_to_v2.23.0.sh",
+        "team/scripts/migrations/migrate_v2.24.7_to_v2.24.8.sh",
+        "team/scripts/dashboard/attach.sh",
+    ):
+        assert f"scanning: {label}" in out, f"{label} was not scanned:\n{out}"
+    assert "scanning: team/scripts/lib/" not in out, "a sourced library was scanned"
+    assert "scanning: team/workflows/" not in out, "a workflow plugin was scanned"

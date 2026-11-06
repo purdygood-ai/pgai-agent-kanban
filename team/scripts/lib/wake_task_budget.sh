@@ -10,10 +10,15 @@
 #
 # The three ceilings, all from kanban.cfg [wake] via config_loader.sh:
 #
-#   MAX_TASK_SECONDS     — per-task watchdog limit (0 = no per-task bound)
+#   MAX_TASK_SECONDS     — per-task watchdog limit (0 = no per-task bound;
+#                          unset or blank = the registry default,
+#                          config_wake_max_task_seconds_default)
 #   MAX_PROJECT_SECONDS  — per-project budget, clock reset per project
 #                          (0 = no per-project bound)
 #   MAX_RUNTIME_SECONDS  — whole-batch budget, clock started at wake
+#                          (0 = no batch bound; unset or blank = the
+#                          registry default,
+#                          config_wake_max_runtime_seconds_default)
 #
 # They must nest task < project <= batch. run_project_chain checks the
 # project and batch budgets only BETWEEN tasks, so without this stage a
@@ -53,6 +58,35 @@
 #       it. Returns 1 otherwise (a kill at the full max_task_seconds, or no
 #       limit armed at all).
 #
+#   wd_configured_max_task_seconds
+#       Prints the per-task limit the wake is configured with:
+#       MAX_TASK_SECONDS when it is set and not blank (0 included -- an
+#       explicit 0 still disables the per-task bound), otherwise the config
+#       registry default from config_loader.sh's
+#       config_wake_max_task_seconds_default. An unset variable never reads
+#       as 0 (no bound). run_project_chain seeds its _eff_task from this.
+#
+#   wd_configured_max_runtime_seconds
+#       Prints the whole-batch budget the wake is configured with, by the
+#       same rule: MAX_RUNTIME_SECONDS when it is set and not blank (an
+#       explicit 0 still disables the batch bound), otherwise
+#       config_loader.sh's config_wake_max_runtime_seconds_default. An unset
+#       variable never reads as 0 (no bound).
+#
+#   wd_batch_budget_left <batch_elapsed>
+#       Prints the seconds left in the whole-batch budget
+#       (wd_configured_max_runtime_seconds) after <batch_elapsed> seconds,
+#       clamped at 0. Prints nothing when the budget is 0 (no batch bound).
+#       A non-numeric budget or elapsed value reads as 0, as in
+#       wd_effective_task_timeout. The one place a batch-budget check
+#       applies the 0 rule: the lock wait (wake_lock_wait.sh) reads it here.
+#
+#   wd_batch_budget_reached <batch_elapsed>
+#       Returns 0 when a batch budget is in force and <batch_elapsed> has
+#       reached it, 1 otherwise -- a budget of 0 is never reached. The
+#       between-tasks check in run_project_chain and the contention retry
+#       pass in wake_common_run stop on it.
+#
 #   wd_chain_task_timeout_budget
 #       run_project_chain's per-dispatch call: sets the caller's
 #       _task_timeout_budget_seconds from the chain's own ceilings and
@@ -60,7 +94,9 @@
 #       wrapper in wake_driver_invoke.sh reads _project_lock_file:
 #       _eff_task, _eff_project, _project_start_epoch (run_project_chain
 #       locals) and MAX_RUNTIME_SECONDS, WAKE_START_EPOCH (wake globals).
-#       An unset clock reads as "started now", i.e. a full budget.
+#       An unset clock reads as "started now", i.e. a full budget; an unset
+#       or blank _eff_task reads as wd_configured_max_task_seconds, and an
+#       unset or blank MAX_RUNTIME_SECONDS as wd_configured_max_runtime_seconds.
 #
 #   wd_warn_runtime_bound_nesting <project_name> <max_task> <project_cap>
 #                                 <batch_cap>
@@ -78,6 +114,15 @@
 #       and returns 0, or returns 1 for a per-task timeout; see its own
 #       header below.
 #
+#   requeue_after_timeout_with_commits <task_id> <task_status> <log_file>
+#                                      <killed_at> <owner_role> <evidence>
+#       wd_finalize_task's resolution of a kill at max_task_seconds itself:
+#       when the feature branch holds commits ahead of the source branch and
+#       the requeue budget allows, records the timeout and one requeue on the
+#       Block Record, sets its resume to branch and returns the task to
+#       BACKLOG (returns 0); otherwise returns 1 and the caller blocks the
+#       task as a per-task timeout. See its own header below.
+#
 #   wd_record_branch_resume <task_id> <task_status>
 #       Records that the task's next dispatch attaches its existing feature
 #       branch (resume mode branch) instead of re-creating it: the Block
@@ -89,10 +134,29 @@
 # -----------------------------------------------------
 #   log()  — wake_bootstrap.sh's logger; used by wd_warn_runtime_bound_nesting
 #            and requeue_after_budget_stop.
+#   config_wake_max_task_seconds_default,
+#   config_wake_max_runtime_seconds_default (config_loader.sh) — sourced
+#            below from this file's own directory when the caller has not
+#            already sourced config_loader.sh; used by
+#            wd_configured_max_task_seconds and
+#            wd_configured_max_runtime_seconds.
 #   transition_task_state, set_block, set_block_or_append,
 #   normalize_status_file (wake_task_state.sh / wake_task_transition.sh) and
-#   block_record_field, block_record_update (block_record.sh) — used by
-#   requeue_after_budget_stop, which wd_finalize_task calls.
+#   block_record_field, block_record_update, block_record_write
+#   (block_record.sh) and pp_run_ops (pp_run_ops.sh) — used by
+#   requeue_after_budget_stop and requeue_after_timeout_with_commits, which
+#   wd_finalize_task calls.
+#   operator_inbox_notice (operator_inbox_notice.sh, sourced below) — the
+#   inbox entry an unreadable requeue budget leaves; it reads KANBAN_ROOT
+#   (else PGAI_AGENT_KANBAN_ROOT_PATH) and _CURRENT_PROJECT.
+
+# Guarded so a caller that already loaded the config keeps the cfg path its
+# load_config recorded: sourcing config_loader.sh again would reset it.
+declare -F config_wake_max_task_seconds_default >/dev/null \
+  && declare -F config_wake_max_runtime_seconds_default >/dev/null \
+  || source "$(dirname "${BASH_SOURCE[0]}")/config_loader.sh"
+# shellcheck source=operator_inbox_notice.sh
+source "$(dirname "${BASH_SOURCE[0]}")/operator_inbox_notice.sh"
 
 # Wall-clock read, isolated so tests can redefine it.
 _wd_epoch_now() {
@@ -149,11 +213,42 @@ wd_task_limit_was_budget_cap() {
   (( _max_task == 0 || _armed < _max_task ))
 }
 
+wd_configured_max_task_seconds() {
+  if [[ -n "${MAX_TASK_SECONDS:-}" ]]; then
+    printf '%s\n' "$MAX_TASK_SECONDS"
+  else
+    config_wake_max_task_seconds_default
+  fi
+}
+
+wd_configured_max_runtime_seconds() {
+  if [[ -n "${MAX_RUNTIME_SECONDS:-}" ]]; then
+    printf '%s\n' "$MAX_RUNTIME_SECONDS"
+  else
+    config_wake_max_runtime_seconds_default
+  fi
+}
+
+wd_batch_budget_left() {
+  local _cap _elapsed
+  _cap="$(_wd_budget_int "$(wd_configured_max_runtime_seconds)")"
+  _elapsed="$(_wd_budget_int "${1:-0}")"
+  (( _cap > 0 )) || return 0
+  (( _elapsed < _cap )) || _elapsed="$_cap"
+  printf '%s\n' "$(( _cap - _elapsed ))"
+}
+
+wd_batch_budget_reached() {
+  local _left
+  _left="$(wd_batch_budget_left "${1:-0}")"
+  [[ "$_left" == "0" ]]
+}
+
 wd_chain_task_timeout_budget() {
   local _now
   _now="$(_wd_epoch_now)"
-  _task_timeout_budget_seconds="$(wd_effective_task_timeout "${_eff_task:-0}" "${_eff_project:-0}" \
-    "$(( _now - ${_project_start_epoch:-_now} ))" "${MAX_RUNTIME_SECONDS:-0}" "$(( _now - ${WAKE_START_EPOCH:-_now} ))")"
+  _task_timeout_budget_seconds="$(wd_effective_task_timeout "${_eff_task:-$(wd_configured_max_task_seconds)}" "${_eff_project:-0}" \
+    "$(( _now - ${_project_start_epoch:-_now} ))" "$(wd_configured_max_runtime_seconds)" "$(( _now - ${WAKE_START_EPOCH:-_now} ))")"
 }
 
 wd_warn_runtime_bound_nesting() {
@@ -219,6 +314,116 @@ requeue_after_budget_stop() {
     normalize_status_file "$task_status"
   else
     log "task ${task_id}: WARNING atomic transition to BACKLOG failed after a budget stop; status.md/marker left as they were (no partial update)"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# requeue_after_timeout_with_commits <task_id> <task_status> <log_file>
+#                                    <killed_at> <owner_role> <evidence>
+#
+# wd_finalize_task's step after requeue_after_budget_stop declined a kill
+# (the watchdog fired at max_task_seconds itself). <evidence> is the
+# block_record_evidence line the per-task timeout block would record; its
+# ahead=<n> token is the count of commits the feature branch holds ahead of
+# the source branch. <killed_at> is the armed limit in seconds.
+#
+# Returns 1 -- the caller blocks the task as a per-task timeout, exactly as
+# it would without this step -- when:
+#   * ahead is 0 or absent: the agent committed nothing, so there is no
+#     work for a requeue to resume;
+#   * [overwatch] requeue_budget cannot be read (block_triage requeue-budget
+#     refused) or the Block Record's requeues cannot be read: the bound
+#     cannot be checked, so the task is not requeued past it. An unreadable
+#     requeue_budget also leaves one operator inbox entry naming the read
+#     error (_wd_requeue_budget_unreadable_notice), since the block it
+#     causes is a config fault the task's own record does not name;
+#   * the Block Record's requeues has reached the budget: the same bound
+#     OVERWATCH's block triage applies, so a task that keeps timing out ends
+#     BLOCKED with Needs Human yes, and triage then escalates it instead of
+#     requeueing it again;
+#   * the Block Record write or update is refused: an uncounted requeue
+#     would escape the bound.
+#
+# Otherwise the timeout is recorded on the Block Record (reason_code
+# per_task_timeout, <owner_role>, <evidence> and timeout_s=<killed_at>; a
+# record the task already carries keeps its requeues, as any re-block does),
+# one requeue is counted against it (requeues plus one, per_task_timeout
+# appended to requeue_reasons) and its resume is set to branch -- the
+# fields a block-triage requeue writes -- and the task returns to BACKLOG
+# with ## Needs Human no and the outcome on its ## Summary. The next
+# dispatch's worktree stage (wd_setup_task_worktree, wake_driver_worktree.sh)
+# reads resume branch and attaches the existing feature branch at its tip.
+# Block-storm detection and block triage never see the task: both read only
+# tasks whose ## State is BLOCKED. Returns 0; a failed atomic transition to
+# BACKLOG is narrated and left for the next reconciliation pass, as
+# requeue_after_budget_stop does.
+# ---------------------------------------------------------------------------
+requeue_after_timeout_with_commits() {
+  local task_id="${1:-}" task_status="${2:-}" log_file="${3:-}" killed_at="${4:-}" owner_role="${5:-}" evidence="${6:-}"
+  local _ahead=0 _budget="" _requeues=""
+  [[ "$evidence" =~ (^|[;[:space:]])ahead=([0-9]+) ]] && _ahead="${BASH_REMATCH[2]}"
+  (( 10#$_ahead > 0 )) || return 1
+
+  if ! _budget="$(pp_run_ops pgai_agent_kanban.overwatch.block_triage requeue-budget "$task_status")" \
+      || [[ ! "$_budget" =~ ^[0-9]+$ ]]; then
+    log "task ${task_id}: WARNING: [overwatch] requeue_budget could not be read (see the error above); the timed-out task is blocked rather than requeued past an unchecked bound"
+    _wd_requeue_budget_unreadable_notice "$task_id" "$task_status" "$_ahead" "$_budget"
+    return 1
+  fi
+  if ! _requeues="$(block_record_field "$task_status" requeues 0)" || [[ ! "$_requeues" =~ ^[0-9]+$ ]]; then
+    log "task ${task_id}: WARNING: its Block Record requeue count could not be read; the timed-out task is blocked rather than requeued past an unchecked bound"
+    return 1
+  fi
+  if (( _requeues >= _budget )); then
+    log "task ${task_id}: per-task timeout with ${_ahead} commit(s) on its feature branch, but the requeue budget is spent (${_requeues} of ${_budget}); blocking it"
+    return 1
+  fi
+  if ! block_record_write "$task_status" per_task_timeout "$owner_role" "$evidence" "timeout_s=${killed_at}" \
+      || ! block_record_update "$task_status" --record-requeue per_task_timeout --resume branch; then
+    log "task ${task_id}: WARNING: the Block Record could not count this requeue; blocking the timed-out task instead"
+    return 1
+  fi
+
+  local _spent=$(( _requeues + 1 ))
+  log "task ${task_id}: per-task timeout (${killed_at}s) after ${_ahead} commit(s) on its feature branch -- returning it to BACKLOG to resume on that branch (requeue ${_spent} of ${_budget})"
+  if transition_task_state "$task_id" "$task_status" "BACKLOG"; then
+    set_block "$task_status" "Needs Human" "no"
+    set_block "$task_status" "Summary" "Returned to BACKLOG by the wake: the per-task timeout (max_task_seconds, ${killed_at}s) stopped the agent after it had committed ${_ahead} commit(s) ahead of the source branch. The next dispatch resumes on the existing feature branch, keeping those commits. Requeue ${_spent} of ${_budget} ([overwatch] requeue_budget); once it is spent, a further timeout blocks the task. See ${log_file}."
+    normalize_status_file "$task_status"
+  else
+    log "task ${task_id}: WARNING atomic transition to BACKLOG failed after a per-task timeout; status.md/marker left as they were (no partial update)"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _wd_requeue_budget_unreadable_notice <task_id> <task_status> <ahead> <value>
+#
+# The operator inbox entry for a timed-out task blocked because
+# [overwatch] requeue_budget could not be read. The read error is captured
+# by reading the budget once more with its stderr kept (the first read's
+# stderr is already in the wake log); <value> is what the first read
+# printed, named when the second read prints no error. Written with
+# write --once, Source the task ID, and the question names only the task
+# and the read error, so a task that times out again on the same error
+# leaves one entry. Never fails; a write it cannot make is a WARNING.
+# ---------------------------------------------------------------------------
+_wd_requeue_budget_unreadable_notice() {
+  local task_id="${1:-}" task_status="${2:-}" ahead="${3:-0}" value="${4:-}"
+  local root="${KANBAN_ROOT:-${PGAI_AGENT_KANBAN_ROOT_PATH:-}}" project="${_CURRENT_PROJECT:-}"
+  local read_error="" entry="" scripts_dir question meanwhile how_to_answer
+  read_error="$(pp_run_ops pgai_agent_kanban.overwatch.block_triage requeue-budget "$task_status" 2>&1 >/dev/null)" || true
+  read_error="${read_error//$'\n'/ }"
+  [[ -n "$read_error" ]] || read_error="the read printed '${value}' where a whole number belongs"
+  scripts_dir="${root}/scripts"
+  question="Task ${task_id} hit its per-task timeout with committed work, but the wake could not read [overwatch] requeue_budget (${read_error}), so it blocked the task instead of requeueing it past an unchecked bound. Fix requeue_budget and return the task to BACKLOG?"
+  meanwhile="The wake blocked the task as a per-task timeout (## State BLOCKED, Needs Human yes) and counted no requeue on its Block Record. Its feature branch held ${ahead} commit(s) ahead of the source branch."
+  how_to_answer="Set [overwatch] requeue_budget to a whole number (project.cfg, then kanban.cfg; default 3) and confirm it reads: $(printf '%q' "${scripts_dir}/lib/pp_run_ops.sh") pgai_agent_kanban.overwatch.block_triage requeue-budget $(printf '%q' "$task_status"). Then return the task: $(printf '%q' "${scripts_dir}/task-status.sh") --project ${project} --key ${task_id} --state BACKLOG --needs-human no. Close this entry: $(printf '%q' "${scripts_dir}/inbox.sh") --project ${project} close --id followed by this entry's INBOX ID."
+  if entry="$(operator_inbox_notice "$root" "$project" "$task_id" "$question" "$meanwhile" "$how_to_answer")"; then
+    log "task ${task_id}: operator inbox entry ${entry} names the requeue_budget read error"
+  else
+    log "task ${task_id}: WARNING: the operator inbox entry for the unreadable requeue_budget was not written: ${entry}"
   fi
   return 0
 }

@@ -74,7 +74,9 @@ _OLD_READER_SHAPE = re.compile(r"\\s\*\\n\(\.\*\?\)")
 _SITES = [
     (
         _MD_FIELDS,
-        re.compile(r'pattern = re\.compile\(\s*(r"\(\^##\\s\+" \+ re\.escape\(header\) \+ r"[^"]*"),\s*([\w.| ]+),\s*\)'),
+        re.compile(
+            r'pattern = re\.compile\(\s*(r"\(\^##\\s\+" \+ re\.escape\(header\) \+ r"[^"]*"),\s*([\w.| ]+),\s*\)'
+        ),
         re.M | re.IGNORECASE,
         "## Owner",
     ),
@@ -110,7 +112,7 @@ _status_section_re 'HEADING'
     )
     assert result.returncode == 0, _explain(result)
     assert result.stdout.startswith("(^HEADING"), _explain(result)
-    return result.stdout[len("(^HEADING"):]
+    return result.stdout[len("(^HEADING") :]
 
 
 def _old_shape_hits(path: pathlib.Path) -> list[str]:
@@ -134,9 +136,7 @@ def test_scoped_files_carry_no_section_reader_of_the_old_shape() -> None:
 def test_old_shape_sweep_reports_a_seeded_reader(tmp_path: pathlib.Path) -> None:
     seeded = tmp_path / "seeded.sh"
     seeded.write_text("ok=1\nm = re.search(r'^## Labels\\s*\\n(.*?)(\\n+##|\\Z)', text)\n", encoding="utf-8")
-    assert _old_shape_hits(seeded) == [
-        "seeded.sh:2: m = re.search(r'^## Labels\\s*\\n(.*?)(\\n+##|\\Z)', text)"
-    ]
+    assert _old_shape_hits(seeded) == ["seeded.sh:2: m = re.search(r'^## Labels\\s*\\n(.*?)(\\n+##|\\Z)', text)"]
 
 
 @pytest.mark.parametrize(("path", "extractor", "flags", "written"), _SITES, ids=_SITE_IDS)
@@ -163,7 +163,13 @@ def test_reader_regex_ends_in_the_status_section_boundary(
         "## Task\nx\n\n{h}\n",
         "## Task\nx\n\n{h}",
     ],
-    ids=["blank-line-then-next", "next-heading-directly", "trailing-space-and-blank-lines", "last-section", "last-line-no-newline"],
+    ids=[
+        "blank-line-then-next",
+        "next-heading-directly",
+        "trailing-space-and-blank-lines",
+        "last-section",
+        "last-line-no-newline",
+    ],
 )
 def test_reader_regex_reads_empty_body_as_empty(
     path: pathlib.Path, extractor: re.Pattern, flags: int, written: str, shape: str
@@ -191,9 +197,9 @@ def test_reader_regex_reads_populated_body_as_before(
 ) -> None:
     _source, rx = _site_pattern(path, extractor, flags)
     m = rx.search(shape.format(h=written))
-    assert m is not None and m.group(2).strip().replace("\r", "") == expected, (
-        f"{path.name}: populated {written!r} misread: {m.group(2) if m else None!r}"
-    )
+    assert (
+        m is not None and m.group(2).strip().replace("\r", "") == expected
+    ), f"{path.name}: populated {written!r} misread: {m.group(2) if m else None!r}"
 
 
 # --- overwatch_protocol.sh: transient_retry_field / zero_progress_field -------

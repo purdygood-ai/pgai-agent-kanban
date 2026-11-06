@@ -142,7 +142,7 @@ def _dev_tree(tmp_path: pathlib.Path, *tags: str) -> pathlib.Path:
     return repo
 
 
-def _seed_two_bundles(root: pathlib.Path, cfg: "str | None") -> "tuple[pathlib.Path, pathlib.Path]":
+def _seed_two_bundles(root: pathlib.Path, cfg: str | None) -> tuple[pathlib.Path, pathlib.Path]:
     """Project ``pref`` with a v1.0.0 and a v1.1.0 bundle, each naming one
     ``running`` bug; *cfg* is the project.cfg body (None writes none).
     Returns (v1.0.0 bug, v1.1.0 bug)."""

@@ -54,9 +54,7 @@ _FIXTURE_ROOT = _TEAM_DIR / "tests" / "fixtures" / "container_engine_free"
 
 def _import_lint_module():
     """Import lint_container_engine_free as a module."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_container_engine_free", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_container_engine_free", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -79,13 +77,11 @@ def test_seeded_container_invocation_is_reported() -> None:
     for f in _lint.find_sweep_files(fixture_dir):
         findings.extend(_lint.scan_file(f))
 
-    assert len(findings) == 1, (
-        f"expected exactly one violation in {fixture_dir}, got: {findings!r}"
-    )
+    assert len(findings) == 1, f"expected exactly one violation in {fixture_dir}, got: {findings!r}"
     finding = findings[0]
-    assert finding.path.name == "test_seeded_container_invocation.py", (
-        f"expected the finding to name the seeded fixture file; got: {finding.path}"
-    )
+    assert (
+        finding.path.name == "test_seeded_container_invocation.py"
+    ), f"expected the finding to name the seeded fixture file; got: {finding.path}"
     assert finding.line > 0
 
 
@@ -103,9 +99,7 @@ def test_seeded_container_invocation_fails_the_cli_naming_the_file() -> None:
 
     assert exit_code == 1
     output = buf.getvalue()
-    assert "test_seeded_container_invocation.py" in output, (
-        f"lint output does not name the offending file:\n{output}"
-    )
+    assert "test_seeded_container_invocation.py" in output, f"lint output does not name the offending file:\n{output}"
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +113,7 @@ def test_clean_sweep_set_reports_nothing() -> None:
     for f in _lint.find_sweep_files(fixture_dir):
         findings.extend(_lint.scan_file(f))
 
-    assert findings == [], (
-        f"expected zero violations in a clean sweep set; got: {findings!r}"
-    )
+    assert findings == [], f"expected zero violations in a clean sweep set; got: {findings!r}"
 
 
 def test_clean_sweep_set_exits_zero_via_cli() -> None:
@@ -169,9 +161,9 @@ def test_real_per_rc_sweep_set_is_currently_clean() -> None:
 
 def test_default_sweep_dirs_never_include_the_cold_tier() -> None:
     defaults = _lint._default_sweep_dirs()
-    assert not any("cold" in p.parts for p in defaults), (
-        f"a default sweep dir resolves through team/tests/cold/: {defaults!r}"
-    )
+    assert not any(
+        "cold" in p.parts for p in defaults
+    ), f"a default sweep dir resolves through team/tests/cold/: {defaults!r}"
 
 
 def test_cold_tier_container_use_does_not_fail_either_gated_runner() -> None:
@@ -183,9 +175,7 @@ def test_cold_tier_container_use_does_not_fail_either_gated_runner() -> None:
 
     defaults = _lint._default_sweep_dirs()
     for d in defaults:
-        assert cold_dir != d and cold_dir not in d.parents, (
-            f"default sweep dir {d} reaches the cold tier"
-        )
+        assert cold_dir != d and cold_dir not in d.parents, f"default sweep dir {d} reaches the cold tier"
 
 
 # ---------------------------------------------------------------------------

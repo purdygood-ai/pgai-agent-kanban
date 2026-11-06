@@ -191,7 +191,7 @@ def _run_narrate(
         cap.run_script(
             f"source {_FINALIZE_SH!s}\n"
             f"narrate_model_mismatch {str(status_path)!r} {str(tokens_path)!r} {task_id!r}\n"
-            f"echo \"EXIT:$?\"\n"
+            f'echo "EXIT:$?"\n'
         )
     return cap
 
@@ -234,9 +234,7 @@ def test_disagreeing_case_warns_naming_both_models_and_exits_zero(
     )
     cap = _run_narrate(tmp_path, status, tokens)
     assert "EXIT:0" in cap.stdout, "narration must never change the caller's exit status"
-    warning_lines = [
-        line for line in cap.log_content.splitlines() if "model mismatch" in line
-    ]
+    warning_lines = [line for line in cap.log_content.splitlines() if "model mismatch" in line]
     assert len(warning_lines) == 1, f"expected exactly one warning; got: {cap.log_content!r}"
     assert "claude-fable-5-1" in warning_lines[0]
     assert "claude-sonnet-5" in warning_lines[0]
@@ -257,9 +255,7 @@ def test_disagreeing_case_warns_naming_both_models_and_exits_zero(
         ),
     ],
 )
-def test_absent_or_unparseable_usage_is_silent_no_op(
-    tmp_path: pathlib.Path, label: str, tokens_content
-) -> None:
+def test_absent_or_unparseable_usage_is_silent_no_op(tmp_path: pathlib.Path, label: str, tokens_content) -> None:
     """Acceptance criterion 3: missing, empty, or unparseable token usage —
     including the legacy schema and the captured:false failure record — is
     a silent no-op: no warning, no error, exit 0."""

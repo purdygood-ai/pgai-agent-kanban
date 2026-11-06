@@ -209,7 +209,7 @@ def finding_blocks(report_text: str) -> list:
     return [body for _heading, body in finding_sections(report_text)]
 
 
-def _field_line_re(label: str) -> "re.Pattern":
+def _field_line_re(label: str) -> re.Pattern:
     """The field-line pattern for *label*; field_value's docstring states it."""
     words = r"\s+".join(re.escape(word) for word in label.split())
     return re.compile(r"^\s*" + words + r"\s*:\s*(\S.*?)\s*$", re.IGNORECASE)
@@ -274,7 +274,7 @@ def filed_as_bug_id(block: str) -> str:
     return f"BUG-{int(match.group(1)):04d}" if match else ""
 
 
-def bug_file_for_id(bugs_dir: pathlib.Path, bug_id: str) -> "pathlib.Path | None":
+def bug_file_for_id(bugs_dir: pathlib.Path, bug_id: str) -> pathlib.Path | None:
     """Return the bug file for *bug_id* under *bugs_dir*, or None.
 
     *bug_id* is a normalized ``BUG-NNNN`` id. The lexically first
@@ -323,8 +323,7 @@ def stop_bug_paths(report_path: str, bugs_dir: str, cause: str) -> list:
         bug_file = bug_file_for_id(bugs, bug_id)
         if bug_file is None:
             print(
-                f"WARNING: Filed As '{field_value(block, 'Filed As')}' does not "
-                f"resolve to a bug file under {bugs}",
+                f"WARNING: Filed As '{field_value(block, 'Filed As')}' does not " f"resolve to a bug file under {bugs}",
                 file=sys.stderr,
             )
             continue
@@ -357,7 +356,7 @@ def resolve_stop_bug_files(report_path: str, bugs_dir: str, cause: str) -> list:
     return [str(path.resolve()) for path in stop_bug_paths(report_path, bugs_dir, cause)]
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.stop_bug_files",

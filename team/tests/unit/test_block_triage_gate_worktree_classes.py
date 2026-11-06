@@ -109,8 +109,16 @@ class Sandbox:
         self.worktree_base = self.root / "tmp" / "worktrees"
         self.worktree = self.worktree_base / _TASK
         self.home = tmp_path / "home"
-        for d in (self.project_root / "overwatch" / "backups", self.task_dir / "artifacts", self.task_dir / "logs",
-                  self.queue.parent, self.root / "locks", self.worktree_base, self.home, self.bin_dir):
+        for d in (
+            self.project_root / "overwatch" / "backups",
+            self.task_dir / "artifacts",
+            self.task_dir / "logs",
+            self.queue.parent,
+            self.root / "locks",
+            self.worktree_base,
+            self.home,
+            self.bin_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project_root / "overwatch" / "actions.log").write_text("", encoding="utf-8")
         (self.project_root / "project.cfg").write_text(
@@ -136,8 +144,8 @@ class Sandbox:
         wrapper.write_text(
             "#!/usr/bin/env bash\n"
             f"printf '%s\\n' \"$*\" >> {shlex.quote(str(self.trace))}\n"
-            f"PATH=\"${{PATH#{shlex.quote(str(self.bin_dir))}:}}\"\n"
-            "exec git \"$@\"\n",
+            f'PATH="${{PATH#{shlex.quote(str(self.bin_dir))}:}}"\n'
+            'exec git "$@"\n',
             encoding="utf-8",
         )
         wrapper.chmod(0o755)
@@ -169,12 +177,22 @@ class Sandbox:
     def set_marker(self, marker: str) -> None:
         self.queue.write_text(f"# CODER Backlog\n\n## Queue\n\n- [{marker}] {_TASK} — example\n", encoding="utf-8")
 
-    def block(self, reason_code: str, evidence: list, *, owner: str = "CODER", blockers: str = "",
-              now: "datetime.datetime | None" = None) -> None:
+    def block(
+        self,
+        reason_code: str,
+        evidence: list,
+        *,
+        owner: str = "CODER",
+        blockers: str = "",
+        now: datetime.datetime | None = None,
+    ) -> None:
         """Block the task the way a block site does (a re-block keeps the epoch)."""
         text = self.text()
-        for heading, body in (("State", "BLOCKED"), ("Needs Human", "yes"),
-                              ("Blockers", blockers or f"{reason_code} block")):
+        for heading, body in (
+            ("State", "BLOCKED"),
+            ("Needs Human", "yes"),
+            ("Blockers", blockers or f"{reason_code} block"),
+        ):
             text = set_or_append_section(text, heading, body)
         self.status.write_text(text, encoding="utf-8")
         write_block_record(self.status, reason_code, owner, evidence, now=now)
@@ -222,7 +240,8 @@ class Sandbox:
         git_dir = self.repo / ".git"
         logs = {
             str(p.relative_to(git_dir)): p.read_bytes()
-            for p in sorted(git_dir.rglob("*")) if p.is_file() and "logs" in p.relative_to(git_dir).parts
+            for p in sorted(git_dir.rglob("*"))
+            if p.is_file() and "logs" in p.relative_to(git_dir).parts
         }
         return {
             "refs": _git(self.repo, "for-each-ref", "--format=%(refname) %(objectname)"),
@@ -249,13 +268,22 @@ class Sandbox:
 
     def bash(self, body: str, **extra_env: str) -> subprocess.CompletedProcess:
         script = f"set -uo pipefail\ncd {shlex.quote(str(_TEAM_DIR))}\n" + body
-        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=180,
-                              env=self.env(**extra_env), cwd=str(self.tmp))
+        return subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=self.env(**extra_env),
+            cwd=str(self.tmp),
+        )
 
     def run_check(self, **extra_env: str) -> subprocess.CompletedProcess:
         self.trace.write_text("", encoding="utf-8")
-        result = self.bash(f"source {shlex.quote(str(_CHECK))}\nrc=0\noverwatch_check_block_triage || rc=$?\n"
-                           "echo \"CHECK_EXIT=$rc\"\n", **extra_env)
+        result = self.bash(
+            f"source {shlex.quote(str(_CHECK))}\nrc=0\noverwatch_check_block_triage || rc=$?\n"
+            'echo "CHECK_EXIT=$rc"\n',
+            **extra_env,
+        )
         assert "CHECK_EXIT=0" in result.stdout, _diagnostic(result)
         return result
 
@@ -391,7 +419,7 @@ def test_clean_merge_tree_requeues_the_owner_to_merge_only(sandbox):
 def test_second_merge_refusal_after_a_requeue_escalates(sandbox):
     _unmerged_branch(sandbox, conflicting=False)
     sandbox.run_check()
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
     sandbox.block("gate_merge_not_found", sandbox.gate_evidence(), now=later)
 
     sandbox.run_check()
@@ -539,7 +567,7 @@ def test_empty_commit_block_with_no_sha_to_quote_escalates(sandbox):
 # ---------------------------------------------------------------------------
 
 
-def _stale_registration(sb: Sandbox, *, unique_commit: bool = False, path: "pathlib.Path | None" = None) -> pathlib.Path:
+def _stale_registration(sb: Sandbox, *, unique_commit: bool = False, path: pathlib.Path | None = None) -> pathlib.Path:
     """A registered worktree holding the feature branch whose directory was removed."""
     sb.make_repo()
     stale = path or sb.worktree
@@ -598,7 +626,7 @@ def test_repeat_create_failure_after_a_prune_escalates(sandbox):
     _stale_registration(sandbox)
     _create_fails(sandbox)
     sandbox.run_check()
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=10)
     sandbox.block("worktree_create_failed", ["worktree=gone", f"branch={_FEATURE}"], now=later)
 
     sandbox.run_check()
@@ -697,8 +725,15 @@ def test_block_triage_disabled_leaves_the_residue_and_the_state_alone(sandbox):
 
 @pytest.mark.parametrize(
     ("verb", "args"),
-    [("add", ("x",)), ("remove", ("--force", "x")), ("remove", ("-f", "x")), ("remove", ()),
-     ("prune", ("--expire", "now")), ("move", ("a", "b")), ("lock", ("x",))],
+    [
+        ("add", ("x",)),
+        ("remove", ("--force", "x")),
+        ("remove", ("-f", "x")),
+        ("remove", ()),
+        ("prune", ("--expire", "now")),
+        ("move", ("a", "b")),
+        ("lock", ("x",)),
+    ],
 )
 def test_worktree_cleanup_refuses_anything_but_plain_remove_and_prune(sandbox, verb, args):
     sandbox.make_repo()

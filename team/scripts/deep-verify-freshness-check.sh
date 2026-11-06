@@ -67,8 +67,10 @@
 #
 # Configuration:
 #   PGAI_AGENT_KANBAN_ROOT_PATH             — kanban root (default: $HOME/pgai_agent_kanban)
-#   PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS  — override the freshness window
-#                                              in days (default: 7).
+#   PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS  — the freshness window in days;
+#                                              else kanban.cfg [release]
+#                                              deep_verify_freshness_window_days
+#                                              (default: 7).
 #   PGAI_DEEP_VERIFY_FRESHNESS_NOW          — ISO-8601 UTC timestamp
 #                                              overriding "now" (e.g.
 #                                              2026-09-03T12:00:00+00:00).
@@ -82,10 +84,10 @@
 set -euo pipefail
 # --- Bootstrap: self-locate → source shell-env → fail loud ---
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # --- Locate the lib directory relative to this script ---
-_FC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_FC_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _FC_LIB_DIR="${_FC_SCRIPT_DIR}/lib"
 
 # --- Source the standard argument layer ---
@@ -103,6 +105,10 @@ source "${_FC_LIB_DIR}/projects.sh"
 # --- Source the dual-channel error-contract emitter ---
 # shellcheck source=lib/error_contract.sh
 source "${_FC_LIB_DIR}/error_contract.sh"
+
+# --- Source the config loader (the freshness window's one reader) ---
+# shellcheck source=lib/config_loader.sh
+source "${_FC_LIB_DIR}/config_loader.sh"
 
 # --- Source the shared Python invocation helper ---
 # shellcheck source=lib/pp_run_ops.sh
@@ -143,8 +149,9 @@ if argparse_has help; then
         "the lane itself." \
         "" \
         "Freshness policy (default): Verdict=built, Version matches" \
-        "--version exactly, and Timestamp is no older than 7 days (override" \
-        "with PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS)." \
+        "--version exactly, and Timestamp is no older than 7 days (set" \
+        "kanban.cfg [release] deep_verify_freshness_window_days, or" \
+        "PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS, which wins)." \
         "" \
         "Exit codes: 0 = fresh green record found. 1 = no record at all; a" \
         "malformed/unreadable ledger; Verdict=failed-to-build or" \
@@ -253,7 +260,8 @@ if [[ "${_fc_fields[found]:-false}" != "true" ]]; then
 fi
 
 # --- Resolve the freshness window and clock (both test-overridable). ---
-_fc_window_days="${PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS:-7}"
+config_export_tunables "$KANBAN_ROOT/kanban.cfg"
+_fc_window_days="$PGAI_DEEP_VERIFY_FRESHNESS_WINDOW_DAYS"
 _fc_now_iso="${PGAI_DEEP_VERIFY_FRESHNESS_NOW:-$(date -u +%Y-%m-%dT%H:%M:%S+00:00)}"
 
 # --- Classify the record (pure decision, routed through pp_run_ops per

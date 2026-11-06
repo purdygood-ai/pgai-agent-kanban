@@ -90,8 +90,7 @@ def test_real_tree_has_zero_violations() -> None:
     # behavior a fixture could stand in for.
     violations = _lint.scan_tree(_TEAM_DIR)
     assert violations == [], (
-        f"Expected zero root-HALT-scope violations in the shipped tree; found "
-        f"{len(violations)}: {violations}"
+        f"Expected zero root-HALT-scope violations in the shipped tree; found " f"{len(violations)}: {violations}"
     )
 
 
@@ -425,12 +424,8 @@ def test_root_scoped_overwatch_halt_shape_is_detected(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "keyword", ["local", "declare", "typeset", "export", "readonly"]
-)
-def test_bash_declaration_prefixed_root_halt_write_in_unnamed_scope_is_flagged(
-    tmp_path: Path, keyword: str
-) -> None:
+@pytest.mark.parametrize("keyword", ["local", "declare", "typeset", "export", "readonly"])
+def test_bash_declaration_prefixed_root_halt_write_in_unnamed_scope_is_flagged(tmp_path: Path, keyword: str) -> None:
     """A declaration keyword in front of the assignment must not hide the
     site from detection. Asserted once per keyword rather than by one
     representative, so no single keyword can regress unnoticed."""
@@ -445,9 +440,7 @@ def test_bash_declaration_prefixed_root_halt_write_in_unnamed_scope_is_flagged(
         """,
     )
     violations = _lint.scan_bash_file(sh)
-    assert len(violations) == 1, (
-        f"declaration keyword {keyword!r} hid the root-scoped write from detection"
-    )
+    assert len(violations) == 1, f"declaration keyword {keyword!r} hid the root-scoped write from detection"
     assert violations[0].scope == "single_project_repair"
     assert violations[0].line == 4
 

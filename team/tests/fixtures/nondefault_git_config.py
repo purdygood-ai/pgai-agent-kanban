@@ -71,7 +71,6 @@ import dataclasses
 import pathlib
 import subprocess
 import sys
-from typing import Optional
 
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
@@ -141,7 +140,7 @@ class NonDefaultGitConfigRoot:
         """The folder of :data:`TASK_ID`."""
         return self.project_root / "tasks" / TASK_ID
 
-    def env(self, extra: Optional[dict] = None) -> dict:
+    def env(self, extra: dict | None = None) -> dict:
         """A scrubbed subprocess environment pointing every root variable at :attr:`root`.
 
         ``PGAI_TASKS_DIR``, ``PGAI_PROJECT_ROOT``, ``PGAI_PROJECT_NAME`` and
@@ -161,33 +160,42 @@ class NonDefaultGitConfigRoot:
             extra_env=values,
         )
 
-    def bash(self, body: str, *args: str, extra_env: Optional[dict] = None,
-             cwd: Optional[pathlib.Path] = None, prelude: bool = True) -> subprocess.CompletedProcess:
+    def bash(
+        self,
+        body: str,
+        *args: str,
+        extra_env: dict | None = None,
+        cwd: pathlib.Path | None = None,
+        prelude: bool = True,
+    ) -> subprocess.CompletedProcess:
         """Run *body* under ``bash``, by default with ini_parser.sh and project_paths.sh sourced.
 
         *args* become ``$1``, ``$2``, ...; the environment is :meth:`env`.
         ``prelude=False`` sources nothing first, for a script that loads
         its own libraries.
         """
-        prelude = (
-            f'source "{_LIB / "ini_parser.sh"}"\nsource "{_LIB / "project_paths.sh"}"\n' if prelude else ""
-        )
+        prelude = f'source "{_LIB / "ini_parser.sh"}"\nsource "{_LIB / "project_paths.sh"}"\n' if prelude else ""
         return subprocess.run(
             ["bash", "-c", f"{prelude}{body}\n", "fixture", *args],
-            capture_output=True, text=True, env=self.env(extra_env),
-            cwd=str(cwd or self.root), timeout=60,
+            capture_output=True,
+            text=True,
+            env=self.env(extra_env),
+            cwd=str(cwd or self.root),
+            timeout=60,
         )
 
-    def git(self, *args: str, repo: Optional[pathlib.Path] = None) -> str:
+    def git(self, *args: str, repo: pathlib.Path | None = None) -> str:
         """``git -C <repo> <args>`` (default repo: the dev tree); stdout stripped."""
         return _git(self.env(), repo or self.dev_tree, *args)
 
 
 def _git(env: dict, repo: pathlib.Path, *args: str) -> str:
     done = subprocess.run(
-        ["git", "-c", "user.email=fixture@example.invalid", "-c", "user.name=Fixture",
-         "-C", str(repo), *args],
-        capture_output=True, text=True, env=env, timeout=60,
+        ["git", "-c", "user.email=fixture@example.invalid", "-c", "user.name=Fixture", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
     if done.returncode != 0:
         raise RuntimeError(f"git -C {repo} {' '.join(args)} failed ({done.returncode}): {done.stderr.strip()}")
@@ -247,8 +255,12 @@ def _build_repositories(env: dict, base: pathlib.Path) -> tuple[pathlib.Path, st
     second = _commit(env, dev, "second")
     for tag in (f"{BRANCH_PREFIX}{RELEASED_VERSION}", DECOY_PREFIX_VERSION, f"ai_{DECOY_PREFIX_VERSION}"):
         _git(env, dev, "tag", tag)
-    for branch in (f"{BRANCH_PREFIX}rc/{RC_VERSION}", f"{BRANCH_PREFIX}feature/{TASK_ID}",
-                   f"feature/{TASK_ID}", f"ai_feature/{TASK_ID}"):
+    for branch in (
+        f"{BRANCH_PREFIX}rc/{RC_VERSION}",
+        f"{BRANCH_PREFIX}feature/{TASK_ID}",
+        f"feature/{TASK_ID}",
+        f"ai_feature/{TASK_ID}",
+    ):
         _git(env, dev, "branch", branch)
 
     urls = {}
@@ -263,7 +275,9 @@ def _build_repositories(env: dict, base: pathlib.Path) -> tuple[pathlib.Path, st
     return dev, urls[REMOTE_NAME], urls[DECOY_REMOTE]
 
 
-def build_nondefault_git_config_root(parent: pathlib.Path, subdir: str = "nondefault_git_config") -> NonDefaultGitConfigRoot:
+def build_nondefault_git_config_root(
+    parent: pathlib.Path, subdir: str = "nondefault_git_config"
+) -> NonDefaultGitConfigRoot:
     """Build the fixture described in the module docstring under *parent*/*subdir*.
 
     Args:
@@ -287,6 +301,11 @@ def build_nondefault_git_config_root(parent: pathlib.Path, subdir: str = "nondef
     project_root = root / "projects" / PROJECT
     _write_project(project_root, dev)
     return NonDefaultGitConfigRoot(
-        root=root, project=PROJECT, project_root=project_root, dev_tree=dev,
-        upstream_url=upstream_url, origin_url=origin_url, home=home,
+        root=root,
+        project=PROJECT,
+        project_root=project_root,
+        dev_tree=dev,
+        upstream_url=upstream_url,
+        origin_url=origin_url,
+        home=home,
     )

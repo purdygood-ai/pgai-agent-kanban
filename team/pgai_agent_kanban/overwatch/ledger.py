@@ -68,7 +68,6 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass, field, fields
-from typing import Optional
 
 # Run by file path (``python3 .../ledger.py``) or loaded from a file outside
 # its package, this module has no parent package and the interpreter puts only
@@ -83,6 +82,7 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+from pgai_agent_kanban.lib.dataclass_records import from_known_fields  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -140,9 +140,9 @@ class LedgerEntry:
     findings: list = field(default_factory=list)
     actions_taken: list = field(default_factory=list)
     evidence_paths: list = field(default_factory=list)
-    family_key: Optional[str] = None
-    entry_id: Optional[str] = None
-    outcome: Optional[str] = None
+    family_key: str | None = None
+    entry_id: str | None = None
+    outcome: str | None = None
 
     def resolved_entry_id(self) -> str:
         """Return entry_id, computing a deterministic default if unset.
@@ -158,10 +158,9 @@ class LedgerEntry:
         return f"entry-{digest}"
 
     @classmethod
-    def from_dict(cls, data: dict) -> "LedgerEntry":
+    def from_dict(cls, data: dict) -> LedgerEntry:
         """Construct from a plain dict (e.g. parsed JSON), ignoring unknown keys."""
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        return from_known_fields(cls, data)
 
     def to_dict(self) -> dict:
         """Return the entry as a dict keyed by field name, with ``entry_id`` resolved (generated when unset)."""
@@ -192,8 +191,7 @@ def format_entry(entry: LedgerEntry) -> str:
     findings_display = ", ".join(entry.findings) if entry.findings else "none"
     outcome_display = entry.outcome if entry.outcome else _PENDING
     lines = [
-        f"## Entry: {entry.timestamp} — {entry.rc} — attempt "
-        f"{entry.attempt_from} → {entry.attempt_to}",
+        f"## Entry: {entry.timestamp} — {entry.rc} — attempt " f"{entry.attempt_from} → {entry.attempt_to}",
         f"<!-- entry-id: {entry_id} -->",
         f"<!-- family-key: {entry.family_key or 'none'} -->",
         f"- Trigger: {entry.trigger}",
@@ -255,7 +253,7 @@ def append_entry(ledger_path: str, entry: LedgerEntry) -> str:
     """
     existing = ""
     if os.path.isfile(ledger_path):
-        with open(ledger_path, "r", encoding="utf-8") as handle:
+        with open(ledger_path, encoding="utf-8") as handle:
             existing = handle.read()
 
     block = format_entry(entry)
@@ -362,7 +360,7 @@ def parse_entries(ledger_path: str) -> list:
     """
     if not os.path.isfile(ledger_path):
         return []
-    with open(ledger_path, "r", encoding="utf-8") as handle:
+    with open(ledger_path, encoding="utf-8") as handle:
         text = handle.read()
     return [_parse_block(block_text) for _start, block_text in _split_entry_blocks(text)]
 
@@ -372,11 +370,7 @@ def find_entry_ids_by_family(ledger_path: str, family_key: str) -> list:
     *family_key*. Empty list when the ledger has no entries for that family
     (including when the ledger does not exist yet).
     """
-    return [
-        entry["entry_id"]
-        for entry in parse_entries(ledger_path)
-        if entry.get("family_key") == family_key
-    ]
+    return [entry["entry_id"] for entry in parse_entries(ledger_path) if entry.get("family_key") == family_key]
 
 
 # ---------------------------------------------------------------------------
@@ -401,7 +395,7 @@ def backfill_outcome(ledger_path: str, entry_id: str, outcome: str) -> bool:
     if not os.path.isfile(ledger_path):
         raise LedgerError(f"ledger.py: cannot backfill — ledger not found: {ledger_path}")
 
-    with open(ledger_path, "r", encoding="utf-8") as handle:
+    with open(ledger_path, encoding="utf-8") as handle:
         text = handle.read()
     lines = text.splitlines()
     blocks = _split_entry_blocks(text)
@@ -433,9 +427,7 @@ def backfill_outcome(ledger_path: str, entry_id: str, outcome: str) -> bool:
             break
 
     if outcome_line_idx is None:
-        raise LedgerError(
-            f"ledger.py: entry {entry_id!r} has no Outcome line — ledger file is malformed"
-        )
+        raise LedgerError(f"ledger.py: entry {entry_id!r} has no Outcome line — ledger file is malformed")
 
     if current_outcome == outcome:
         return False
@@ -546,7 +538,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "append":
-        data = json.loads(open(args.entry_json, "r", encoding="utf-8").read())
+        data = json.loads(open(args.entry_json, encoding="utf-8").read())
         entry = LedgerEntry.from_dict(data)
         entry_id = append_entry(args.ledger_path, entry)
         sys.stdout.write(json.dumps({"entry_id": entry_id}) + "\n")

@@ -44,8 +44,7 @@ import pathlib
 import re
 import shutil
 import subprocess
-import textwrap
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,9 +77,7 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 # ---------------------------------------------------------------------------
 
 _RESET_LOG_RELPATH = "logs/reset.log"
-_RESET_LOG_TIMESTAMP_RE = re.compile(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}"
-)
+_RESET_LOG_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}")
 
 
 def _normalize_reset_log(raw: bytes) -> bytes:
@@ -110,9 +107,7 @@ def _normalize_reset_log(raw: bytes) -> bytes:
 # script run. Those are normalised; op, the root-relative path, sha256, user
 # and test are still compared verbatim.
 _SENTINEL_WRITE_LOG_RELPATH = "logs/sentinel-writes.log"
-_SENTINEL_WRITE_PROCESS_FIELD_RE = re.compile(
-    r"(^|\t)(time|epoch|entry|pid|ppid|parent)=[^\t\n]*", re.MULTILINE
-)
+_SENTINEL_WRITE_PROCESS_FIELD_RE = re.compile(r"(^|\t)(time|epoch|entry|pid|ppid|parent)=[^\t\n]*", re.MULTILINE)
 
 
 def _normalize_sentinel_write_log(raw: bytes, root: pathlib.Path) -> bytes:
@@ -295,8 +290,7 @@ def _materialise_sandbox(root: pathlib.Path) -> None:
     bugs_dir = project_root / "bugs"
     bugs_dir.mkdir(parents=True, exist_ok=True)
     (bugs_dir / f"{_SANDBOX_BUG_KEY}.md").write_text(
-        f"# Bug: {_SANDBOX_BUG_KEY}\n\n## Status\nopen\n\n"
-        "## Summary\nSandbox test bug fixture.\n",
+        f"# Bug: {_SANDBOX_BUG_KEY}\n\n## Status\nopen\n\n" "## Summary\nSandbox test bug fixture.\n",
         encoding="utf-8",
     )
 
@@ -306,10 +300,7 @@ def _materialise_sandbox(root: pathlib.Path) -> None:
 
     # project.cfg
     (project_root / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {_SANDBOX_PROJECT_NAME}\n"
-        f"dev_tree_path = {root}\n"
-        "git_repo_url = none\n",
+        "[project]\n" f"project_name = {_SANDBOX_PROJECT_NAME}\n" f"dev_tree_path = {root}\n" "git_repo_url = none\n",
         encoding="utf-8",
     )
 
@@ -1183,17 +1174,14 @@ def _add_priority_fixture(sandbox_root: pathlib.Path) -> None:
     priority_dir = project_root / "priority"
     priority_dir.mkdir(parents=True, exist_ok=True)
     (priority_dir / f"{_SANDBOX_PRIORITY_KEY}.md").write_text(
-        f"# Priority: {_SANDBOX_PRIORITY_KEY}\n\n"
-        "## Status\nopen\n\n"
-        "## Summary\nSandbox test priority fixture.\n",
+        f"# Priority: {_SANDBOX_PRIORITY_KEY}\n\n" "## Status\nopen\n\n" "## Summary\nSandbox test priority fixture.\n",
         encoding="utf-8",
     )
     # Priority backlog marker file.
     queues_dir = project_root / "tasks" / "queues"
     queues_dir.mkdir(parents=True, exist_ok=True)
     (queues_dir / "priority_backlog.md").write_text(
-        "# PRIORITY Backlog\n\n"
-        f"- [ ] {_SANDBOX_PRIORITY_KEY}\n",
+        "# PRIORITY Backlog\n\n" f"- [ ] {_SANDBOX_PRIORITY_KEY}\n",
         encoding="utf-8",
     )
 
@@ -1253,7 +1241,7 @@ class TestResetKindForms:
         self,
         sandbox_root: pathlib.Path,
         dev_tree_team_dir: pathlib.Path,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """POST /operations/reset with 'key' selector resets the task and returns exit_code 0."""
@@ -1273,7 +1261,7 @@ class TestResetKindForms:
         self,
         sandbox_root: pathlib.Path,
         dev_tree_team_dir: pathlib.Path,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """POST /operations/reset with 'agent' selector resets the task and returns exit_code 0."""
@@ -1291,7 +1279,7 @@ class TestResetKindForms:
     def test_reset_via_bug_selector_returns_exit_code_0(
         self,
         sandbox_root: pathlib.Path,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/reset with 'bug' selector resets the bug intake and returns exit_code 0."""
         resp = ops_api_client.post(
@@ -1306,7 +1294,7 @@ class TestResetKindForms:
     def test_reset_via_priority_selector_returns_exit_code_0(
         self,
         sandbox_root: pathlib.Path,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/reset with 'priority' selector resets the priority intake and returns exit_code 0."""
         _add_priority_fixture(sandbox_root)
@@ -1323,7 +1311,7 @@ class TestResetKindForms:
     def test_reset_via_requirement_selector_returns_exit_code_0(
         self,
         sandbox_root: pathlib.Path,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/reset with 'requirement' selector resets the requirement intake and returns exit_code 0."""
         _add_requirement_fixture(sandbox_root)
@@ -1342,7 +1330,7 @@ class TestResetKindForms:
 
     def test_reset_two_selectors_returns_422_naming_both_fields(
         self,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/reset with two selectors returns 422 naming both conflicting fields.
 
@@ -1373,7 +1361,7 @@ class TestResetKindForms:
 
     def test_reset_no_selector_returns_422_naming_missing_choice(
         self,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/reset with no kind selector returns 422 naming the missing choice.
 
@@ -1396,15 +1384,14 @@ class TestResetKindForms:
         message = body["message"]
         # The missing choice should reference the selector fields.
         assert any(
-            field in message
-            for field in ("key", "agent", "bug", "priority", "requirement")
+            field in message for field in ("key", "agent", "bug", "priority", "requirement")
         ), f"No selector field names in 422 message: {message!r}"
 
     def test_reset_key_only_regression_passes(
         self,
         sandbox_root: pathlib.Path,
         dev_tree_team_dir: pathlib.Path,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Existing key-only reset behavior is preserved (regression fixture).
@@ -1445,7 +1432,7 @@ class TestSetVersionCeilingEndpoint:
 
     def test_set_version_ceiling_dry_run_returns_exit_code_0(
         self,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/set-version-ceiling with dry_run and minor returns exit_code 0.
 
@@ -1462,10 +1449,7 @@ class TestSetVersionCeilingEndpoint:
             },
         )
 
-        assert resp.status_code == 200, (
-            f"Expected HTTP 200 on success; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected HTTP 200 on success; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0, (
             f"set-version-ceiling must exit 0 in dry-run mode; "
@@ -1475,7 +1459,7 @@ class TestSetVersionCeilingEndpoint:
 
     def test_set_version_ceiling_no_action_returns_nonzero_exit_code_with_refusal(
         self,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/set-version-ceiling with no action flag returns non-zero exit_code.
 
@@ -1490,18 +1474,13 @@ class TestSetVersionCeilingEndpoint:
             json={"project": _SANDBOX_PROJECT_NAME},
         )
 
-        assert resp.status_code == 409, (
-            f"Expected HTTP 409 on refusal; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 409, f"Expected HTTP 409 on refusal; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] != 0, (
-            f"set-version-ceiling must exit non-zero when no action is supplied; "
-            f"got exit_code={body['exit_code']}."
+            f"set-version-ceiling must exit non-zero when no action is supplied; " f"got exit_code={body['exit_code']}."
         )
         assert "at least one action is required" in body["stderr"], (
-            "The refusal must appear in stderr.\n"
-            f"stdout: {body['stdout']}\nstderr: {body['stderr']}"
+            "The refusal must appear in stderr.\n" f"stdout: {body['stdout']}\nstderr: {body['stderr']}"
         )
 
 
@@ -1525,7 +1504,7 @@ class TestSwitchProviderEndpoint:
 
     def test_switch_provider_positive_path_returns_exit_code_0(
         self,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
         sandbox_root: pathlib.Path,
         tmp_path: pathlib.Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -1549,10 +1528,7 @@ class TestSwitchProviderEndpoint:
             )
             mock_run.assert_not_called()
 
-        assert resp.status_code == 200, (
-            f"Expected HTTP 200 on success; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected HTTP 200 on success; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0, body
         assert body["stdout"].startswith("Active provider switched: codex → claude\n"), body["stdout"]
@@ -1560,7 +1536,7 @@ class TestSwitchProviderEndpoint:
 
     def test_switch_provider_unknown_provider_returns_nonzero_exit_code_with_refusal(
         self,
-        ops_api_client: "TestClient",
+        ops_api_client: TestClient,
     ) -> None:
         """POST /operations/switch-provider with an unknown provider returns non-zero exit_code.
 
@@ -1574,14 +1550,8 @@ class TestSwitchProviderEndpoint:
             json={"provider": "unknown-provider"},
         )
 
-        assert resp.status_code == 409, (
-            f"Expected HTTP 409 on refusal; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 409, f"Expected HTTP 409 on refusal; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 1, body
         assert body["error"] == "switch_provider.unknown_provider", body
-        assert body["stderr"], (
-            "The refusal must appear in stderr; stderr was empty.\n"
-            f"stdout: {body['stdout']}"
-        )
+        assert body["stderr"], "The refusal must appear in stderr; stderr was empty.\n" f"stdout: {body['stdout']}"

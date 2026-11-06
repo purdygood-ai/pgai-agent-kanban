@@ -83,9 +83,7 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 # The extraction may drop the shebang between the two stages
 # (`grep -v '^#!'`), so --help never opens on `!/usr/bin/env bash`.
 _SHEBANG_FILTER = r"""(?:grep -v '\^#!' \| )?"""
-_SELF_HEADER_EXTRACTION = re.compile(
-    r"""grep '\^#' "\$0" \| """ + _SHEBANG_FILTER + r"""sed 's/\^# \\\{0,1\\\}//'"""
-)
+_SELF_HEADER_EXTRACTION = re.compile(r"""grep '\^#' "\$0" \| """ + _SHEBANG_FILTER + r"""sed 's/\^# \\\{0,1\\\}//'""")
 
 # A line-count limit applied to the extraction above, in either its
 # pre-repair shape (feeding a `head -N` pipe stage directly -- the shape
@@ -100,12 +98,11 @@ _OLD_HEAD_LIMIT = re.compile(
 )
 _NEW_MAPFILE_LIMIT = re.compile(r"mapfile -t __help_lines <")
 
-# The shared header printer's call on a non-comment line. Its callers print
+# A call to the shared header printer (header_help_print, or the
+# header_help_exit_if_requested prelude) on a non-comment line. Its callers print
 # the same leading comment block, so they owe the same exit-0 and
 # no-shebang properties the sweep checks.
-_HEADER_HELP_PRINT_CALL = re.compile(
-    r"^(?![ \t]*#)[^\n]*\bheader_help_print\b", re.MULTILINE
-)
+_HEADER_HELP_PRINT_CALL = re.compile(r"^(?![ \t]*#)[^\n]*\bheader_help_(?:print|exit_if_requested)\b", re.MULTILINE)
 
 # Repeat count for the repaired-script sweep (Group 1). The fix removed the
 # scheduling race entirely -- the extraction now always drains to EOF before
@@ -126,7 +123,8 @@ def _discover_self_header_help_scripts() -> list[pathlib.Path]:
     """Every *.sh under team/scripts/ whose --help path extracts its own
     leading comment block via the shared convention AND applies a
     line-count limit to it, in either the pre-repair or repaired shape,
-    plus every script that prints it through ``header_help_print``.
+    plus every script that prints it through ``header_help_print`` or
+    ``header_help_exit_if_requested``.
     Discovered by the construct rather than by a hardcoded path list, per
     the grep-zero sweep convention: a script adopting, repairing, or
     regressing the convention moves in, stays in, or is still caught by
@@ -134,9 +132,7 @@ def _discover_self_header_help_scripts() -> list[pathlib.Path]:
     found = []
     for path in sorted(_SCRIPTS_DIR.rglob("*.sh")):
         text = path.read_text()
-        if _SELF_HEADER_EXTRACTION.search(text) and (
-            _OLD_HEAD_LIMIT.search(text) or _NEW_MAPFILE_LIMIT.search(text)
-        ):
+        if _SELF_HEADER_EXTRACTION.search(text) and (_OLD_HEAD_LIMIT.search(text) or _NEW_MAPFILE_LIMIT.search(text)):
             found.append(path)
         elif _HEADER_HELP_PRINT_CALL.search(text):
             found.append(path)
@@ -190,9 +186,7 @@ def test_no_covered_script_pipes_extraction_directly_into_head() -> None:
     straight into a `head -N` stage), not a name or an enumerated path
     list, so a *new* script that copies the pre-repair shape is caught
     here too, not only the twenty this repair covers today."""
-    violations = [
-        str(path) for path in sorted(_SCRIPTS_DIR.rglob("*.sh")) if _OLD_HEAD_LIMIT.search(path.read_text())
-    ]
+    violations = [str(path) for path in sorted(_SCRIPTS_DIR.rglob("*.sh")) if _OLD_HEAD_LIMIT.search(path.read_text())]
     assert not violations, (
         f"these scripts pipe their self-header extraction directly into "
         f"`head -N`, which can close its read end before the extraction "
@@ -262,9 +256,7 @@ def test_covered_scripts_help_omits_the_shebang(tmp_path: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 # Synthetic fixture shared by Groups 2 and 3
 # ---------------------------------------------------------------------------
-def _write_synthetic_header_script(
-    path: pathlib.Path, *, extraction_body: str, header_line_count: int = 5000
-) -> None:
+def _write_synthetic_header_script(path: pathlib.Path, *, extraction_body: str, header_line_count: int = 5000) -> None:
     """Writes a standalone script whose --help branch is built from
     `extraction_body`, preceded by a `header_line_count`-line comment
     block. The header is made deliberately far longer than any real
@@ -311,8 +303,7 @@ def test_pre_repair_extraction_shape_fails_intermittently(tmp_path: pathlib.Path
     for attempt in range(_SYNTHETIC_REPEAT_COUNT):
         result = subprocess.run(
             ["bash", str(script), "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             env=_run_env(),
             cwd=str(tmp_path),
             timeout=20,
@@ -330,8 +321,7 @@ def test_pre_repair_extraction_shape_fails_intermittently(tmp_path: pathlib.Path
     )
     non_zero = [rc for _, rc in failures]
     assert all(rc == 141 for rc in non_zero), (
-        f"expected every non-zero exit to be 141 (SIGPIPE, 128+13); saw "
-        f"{non_zero}"
+        f"expected every non-zero exit to be 141 (SIGPIPE, 128+13); saw " f"{non_zero}"
     )
 
 
@@ -352,15 +342,14 @@ def test_repaired_extraction_shape_exits_zero_across_repeated_invocations(
         script,
         extraction_body=(
             "    mapfile -t __help_lines < <(grep '^#' \"$0\" | sed 's/^# \\{0,1\\}//')\n"
-            '    printf \'%s\\n\' "${__help_lines[@]:0:1}"'
+            "    printf '%s\\n' \"${__help_lines[@]:0:1}\""
         ),
     )
     failures = []
     for attempt in range(_SYNTHETIC_REPEAT_COUNT):
         result = subprocess.run(
             ["bash", str(script), "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             env=_run_env(),
             cwd=str(tmp_path),
             timeout=20,

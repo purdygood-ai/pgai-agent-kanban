@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
 
 from pgai_agent_kanban import task_status as ts
 from pgai_agent_kanban.ops.write import set_marker
@@ -40,7 +39,7 @@ __all__ = ["find_queue_file", "return_to_backlog"]
 _STALE_BLOCK_SECTIONS = ("Blocked By Agent", "Blocked Reason")
 
 
-def find_queue_file(project_root: "Path | str", task_id: str) -> Optional[Path]:
+def find_queue_file(project_root: Path | str, task_id: str) -> Path | None:
     """The project queue file carrying a line for *task_id*, or None."""
     line_re = re.compile(r"^\s*-?\s*\[[^\]\n]*\]\s+" + re.escape(task_id) + r"(\s|$)", re.MULTILINE)
     queues = Path(project_root) / "tasks" / "queues"
@@ -55,7 +54,7 @@ def find_queue_file(project_root: "Path | str", task_id: str) -> Optional[Path]:
 
 def return_to_backlog(
     status_file: Path,
-    queue_file: Optional[Path],
+    queue_file: Path | None,
     *,
     project: str,
     task_id: str,
@@ -69,8 +68,13 @@ def return_to_backlog(
     """
     text = Path(status_file).read_text(encoding="utf-8")
     ts.write_task_status(
-        Path(status_file), state="BACKLOG", needs_human="no", blockers="none",
-        summary=summary, project=project, key=task_id,
+        Path(status_file),
+        state="BACKLOG",
+        needs_human="no",
+        blockers="none",
+        summary=summary,
+        project=project,
+        key=task_id,
     )
     stale = {heading: "none" for heading in _STALE_BLOCK_SECTIONS if ts.read_section(text, heading)}
     if stale:

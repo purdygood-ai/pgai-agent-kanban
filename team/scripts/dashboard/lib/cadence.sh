@@ -282,9 +282,14 @@ dashboard_pane_visible() {
         return 0
     fi
 
-    local attached active
-    if ! read -r attached active < <(tmux display-message -p -t "$target" \
-            '#{session_attached} #{window_active}' 2>/dev/null) \
+    # A plain command substitution, never a process substitution: callers
+    # run this function inside `$(...)`, whose subshell exits as soon as
+    # this function returns -- a process substitution's child would outlive
+    # it and be left for PID 1 to reap. A command substitution is waited for
+    # before the next line runs.
+    local reply attached active
+    reply="$(tmux display-message -p -t "$target" '#{session_attached} #{window_active}' 2>/dev/null)"
+    if ! read -r attached active <<<"$reply" \
        || [[ ! "$attached" =~ ^[0-9]+$ ]]; then
         echo 1
         return 0
@@ -374,6 +379,143 @@ _dashboard_cadence_wait() {
 }
 
 # ---------------------------------------------------------------------------
+# _dashboard_cadence_has_exited <pid>
+# True when <pid> has exited: it no longer exists, or it is a zombie
+# waiting for its parent to reap it. Reads /proc without forking.
+# ---------------------------------------------------------------------------
+_dashboard_cadence_has_exited() {
+    local stat
+    { read -r stat < "/proc/$1/stat"; } 2>/dev/null || return 0
+    stat="${stat##*) }"
+    [[ "${stat%% *}" == "Z" ]]
+}
+
+# ---------------------------------------------------------------------------
+# _dashboard_cadence_reap <grace-seconds> [<pid>...]
+# Ends each <pid> -- a child of this shell -- and reaps it before
+# returning: continues it (a stopped process only acts on a signal once
+# continued), sends SIGTERM, waits up to <grace-seconds> (a whole number)
+# for it to exit, sends SIGKILL if it has not, then `wait`s it. A pid that
+# has already gone is skipped.
+# ---------------------------------------------------------------------------
+_dashboard_cadence_reap() {
+    local grace="$1" pid tries
+    shift
+    [[ $# -gt 0 ]] || return 0
+    kill -CONT "$@" 2>/dev/null
+    kill -TERM "$@" 2>/dev/null
+    tries=$(( grace * 20 ))
+    for pid in "$@"; do
+        while ! _dashboard_cadence_has_exited "$pid" && (( tries-- > 0 )); do
+            sleep 0.05
+        done
+        if ! _dashboard_cadence_has_exited "$pid"; then
+            kill -KILL "$pid" 2>/dev/null
+            while ! _dashboard_cadence_has_exited "$pid"; do
+                sleep 0.05
+            done
+        fi
+        wait "$pid" 2>/dev/null
+    done
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _dashboard_cadence_end_group <leader-pid> <grace-seconds>
+# Ends every descendant of <leader-pid> and then the leader itself, from
+# the leaves up, so that each one is reaped by its own parent and none is
+# orphaned to PID 1 by a parent that exited first. Returns once the leader
+# has exited (the caller, its parent, reaps it), or once <grace-seconds> (a
+# whole number) have been spent; the group is never left stopped. Returns
+# at once, leaving the leader to the caller, where the kernel does not
+# provide /proc/<pid>/task/<pid>/children.
+#
+# Each pass freezes the leader's process group (SIGSTOP) and waits until
+# every descendant has stopped, so none can start a child between the
+# census and its signal. It then queues SIGTERM for the leaves -- running
+# descendants with no child of their own, exited-but-unreaped ones still
+# count as children -- or, once the leader has no child left, for the
+# leader, and continues the group: a signalled process dies before it runs
+# another instruction, while its parent, continued, reaps it.
+# ---------------------------------------------------------------------------
+_dashboard_cadence_end_group() {
+    local leader="$1" ticks=$(( $2 * 100 )) unsettled pid line state kids
+    local -a queue members leaves
+    [[ -r "/proc/${leader}/task/${leader}/children" ]] || return 0
+    while (( ticks > 0 )); do
+        _dashboard_cadence_has_exited "$leader" && return 0
+        kill -STOP -- "-${leader}" 2>/dev/null || return 0
+        while true; do
+            members=()
+            leaves=()
+            unsettled=0
+            queue=("$leader")
+            while [[ ${#queue[@]} -gt 0 ]]; do
+                pid="${queue[0]}"
+                queue=("${queue[@]:1}")
+                { read -r line < "/proc/${pid}/stat"; } 2>/dev/null || continue
+                read -r state _ <<<"${line##*) }"
+                [[ "$state" == [TtZX] ]] || unsettled=1
+                kids=""
+                { read -r kids < "/proc/${pid}/task/${pid}/children"; } 2>/dev/null
+                if [[ "$pid" != "$leader" ]]; then
+                    members+=("$pid")
+                    [[ -z "$kids" && "$state" != [ZX] ]] && leaves+=("$pid")
+                fi
+                [[ -n "$kids" ]] && queue+=($kids)
+            done
+            (( unsettled == 0 || ticks <= 0 )) && break
+            sleep 0.01
+            (( ticks-- ))
+        done
+        if [[ ${#members[@]} -eq 0 ]]; then
+            kill -TERM "$leader" 2>/dev/null
+        elif [[ ${#leaves[@]} -gt 0 ]]; then
+            kill -TERM "${leaves[@]}" 2>/dev/null
+        fi
+        kill -CONT -- "-${leader}" 2>/dev/null
+        sleep 0.01
+        (( ticks-- ))
+    done
+    kill -CONT -- "-${leader}" 2>/dev/null
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# _dashboard_cadence_end_loop <exit-status>
+# A loop's HUP/TERM/INT handler (a pane kill ends its loop with SIGHUP):
+# ends and reaps every process the loop started that is still running --
+# the pending interval sleep, a renderer cut off mid-render, a stream's
+# group leader -- and only then exits with <exit-status>, running the
+# loop's EXIT trap. A loop that exited first would leave those children to
+# PID 1, and a PID 1 that does not reap (a container started with
+# `sleep infinity`) keeps every one of them as a zombie.
+#
+# The children are read from /proc/<pid>/task/<pid>/children; where the
+# kernel does not provide that file, the recorded interval sleep and the
+# last background pid stand in for it, each only while /proc still names
+# this loop as its parent (a reaped pid may already belong to another
+# process).
+# ---------------------------------------------------------------------------
+_dashboard_cadence_end_loop() {
+    local status="$1" children="/proc/$$/task/$$/children" pid stat
+    local -a pids=()
+    if [[ -r "$children" ]]; then
+        read -r -a pids < "$children" || true
+    else
+        for pid in "${_pgai_cadence_sleep_pid:-}" "${!:-}"; do
+            [[ -n "$pid" ]] || continue
+            { read -r stat < "/proc/${pid}/stat"; } 2>/dev/null || continue
+            stat="${stat##*) }"
+            read -r _ stat _ <<<"$stat"
+            [[ "$stat" == "$$" ]] && pids+=("$pid")
+        done
+    fi
+    _dashboard_cadence_reap 2 "${pids[@]}"
+    exit "$status"
+}
+
+# ---------------------------------------------------------------------------
 # _dashboard_cadence_hidden_seconds <active_interval> <hidden_multiplier>
 # The hidden re-check interval: <active_interval> x <hidden_multiplier>.
 # ---------------------------------------------------------------------------
@@ -388,6 +530,8 @@ _dashboard_cadence_hidden_seconds() {
 # sleep is <active_interval> while visible and <active_interval> x
 # <hidden_multiplier> while hidden (a visibility re-check only -- a hidden
 # pane never renders), and PGAI_DASHBOARD_PANE_SIGNAL cuts it short.
+# When the loop is ended (the pane closes: SIGHUP; or SIGTERM/SIGINT) it
+# reaps the pending sleep and any renderer still running before it exits.
 # ---------------------------------------------------------------------------
 dashboard_cadence_run_loop() {
     local active_interval="${1:?dashboard_cadence_run_loop: active_interval required}"
@@ -434,6 +578,11 @@ dashboard_cadence_run_loop() {
     }
     trap _pgai_cadence_on_activate "${PGAI_DASHBOARD_PANE_SIGNAL:-USR1}"
     trap _pgai_cadence_on_activate "${PGAI_DASHBOARD_LOOP_SIGNAL}"
+    # Ending the loop (a pane kill sends SIGHUP) reaps the pending sleep and
+    # any renderer still running before the loop exits.
+    trap '_dashboard_cadence_end_loop 129' HUP
+    trap '_dashboard_cadence_end_loop 143' TERM
+    trap '_dashboard_cadence_end_loop 130' INT
     _dashboard_cadence_register_loop
 
     # One-time stagger, applied ONLY before the first render (never
@@ -479,7 +628,7 @@ dashboard_cadence_run_loop() {
 # <active_interval> x <hidden_multiplier> while hidden, and at once on
 # PGAI_DASHBOARD_PANE_SIGNAL. The loop ends when the renderer exits; when
 # the loop itself is ended (the pane closes: SIGHUP; or SIGTERM/SIGINT) the
-# renderer's group is continued and terminated with it, so no stopped
+# renderer's group is continued, ended and reaped with it, so no stopped
 # stream outlives its pane. Without setsid on PATH the renderer runs in the
 # loop's own group and is never stopped (narrated once to the debug log).
 # ---------------------------------------------------------------------------
@@ -524,17 +673,23 @@ dashboard_cadence_run_stream() {
         stream_pid=$!
     fi
 
+    # Ends the stream's group from the leaves up, so each member is reaped
+    # by its own parent, then reaps the leader (this loop's child) -- with
+    # SIGKILL after a bounded grace -- and kills whatever of the group is
+    # still left once the leader is gone. _dashboard_cadence_end_loop then
+    # reaps the loop's other children and exits.
     _pgai_cadence_stream_stop() {
         if [[ "$can_pause" -eq 1 ]]; then
-            kill -CONT -- "-${stream_pid}" 2>/dev/null || true
-            kill -TERM -- "-${stream_pid}" 2>/dev/null || true
+            _dashboard_cadence_end_group "$stream_pid" 2
+            _dashboard_cadence_reap 2 "$stream_pid"
+            kill -KILL -- "-${stream_pid}" 2>/dev/null || true
         else
-            kill -TERM "$stream_pid" 2>/dev/null || true
+            _dashboard_cadence_reap 2 "$stream_pid"
         fi
     }
-    trap '_pgai_cadence_stream_stop; exit 129' HUP
-    trap '_pgai_cadence_stream_stop; exit 143' TERM
-    trap '_pgai_cadence_stream_stop; exit 130' INT
+    trap '_pgai_cadence_stream_stop; _dashboard_cadence_end_loop 129' HUP
+    trap '_pgai_cadence_stream_stop; _dashboard_cadence_end_loop 143' TERM
+    trap '_pgai_cadence_stream_stop; _dashboard_cadence_end_loop 130' INT
 
     local visible paused=0
     while kill -0 "$stream_pid" 2>/dev/null; do

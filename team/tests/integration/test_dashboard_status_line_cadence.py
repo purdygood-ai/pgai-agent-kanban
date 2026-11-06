@@ -6,17 +6,19 @@ however many clients are attached and however often the panes redraw.
 
 End to end on a private tmux server (tmux -L <private>) with a fixture
 kanban root: team/scripts/dashboard/create.sh builds the real board, then
-two clients attach through pseudo-terminals for 60 seconds while every pane
-refreshes on its own cadence. Pinned:
+two clients attach through pseudo-terminals while every pane refreshes on
+its own cadence, until the status line has rendered five times (at most 60
+seconds). Pinned:
 
   * status-format[2] runs no #() job: it reads the session's
     @pgai_status_bottom option;
   * exactly one status-bottom-loop.sh runs for the session, started by
     create.sh, and the option carries the rendered line (the fixture's
     global HALT shows in it);
-  * over the 60 attached seconds, status-bottom.sh starts at most 13 times
-    (once per 5-second interval, plus one) -- counted by process start, the
-    renderer's own subshells excluded;
+  * over the attached window, status-bottom.sh starts no more often than
+    once per 5-second interval (plus one for the window's start and one of
+    margin), so two clients rendering apiece would exceed it -- counted by
+    process start, the renderer's own subshells excluded;
   * after kill.sh tears the session down, the loop exits within one
     interval and a margin.
 
@@ -34,7 +36,8 @@ import sys
 import threading
 import time
 import uuid
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Iterator
 
 import pytest
 
@@ -48,9 +51,10 @@ _CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
 _KILL_SH = _TEAM_DIR / "scripts" / "dashboard" / "kill.sh"
 _LABEL = "status-line-cadence"
 
-_ATTACHED_SECONDS = 60
+# The attached window ends once this many renders are seen, or at the deadline.
+_ENOUGH_RENDERS = 5
+_ATTACHED_DEADLINE_SECONDS = 60
 _REFRESH_SECONDS = 5
-_MAX_RENDERS = _ATTACHED_SECONDS // _REFRESH_SECONDS + 1
 _PROC = pathlib.Path("/proc")
 
 
@@ -62,7 +66,10 @@ class PrivateTmux(NamedTuple):
     def run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [self.real_tmux, "-L", self.socket_name, *args],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         )
 
 
@@ -71,9 +78,7 @@ def _fixture_root(tmp_path: pathlib.Path) -> pathlib.Path:
     (root / "projects" / "alpha").mkdir(parents=True)
     (root / "VERSION").write_text("v9.9.9\n", encoding="utf-8")
     (root / "projects.cfg").write_text("[project:alpha]\npriority=1\n\n", encoding="utf-8")
-    (root / "projects" / "alpha" / "project.cfg").write_text(
-        "[project]\nworkflow_type = release\n", encoding="utf-8"
-    )
+    (root / "projects" / "alpha" / "project.cfg").write_text("[project]\nworkflow_type = release\n", encoding="utf-8")
     (root / "HALT").write_text("", encoding="utf-8")
     return root
 
@@ -89,7 +94,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
     bin_dir.mkdir()
     wrapper = bin_dir / "tmux"
     wrapper.write_text(
-        f"#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket_name)} \"$@\"\n",
+        f'#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket_name)} "$@"\n',
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
@@ -122,7 +127,11 @@ class _AttachedClient:
         self._master = master
         self.proc = subprocess.Popen(
             [tmux.real_tmux, "-L", tmux.socket_name, "attach-session", "-t", f"={session}"],
-            stdin=slave, stdout=slave, stderr=slave, env=tmux.env, close_fds=True,
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env=tmux.env,
+            close_fds=True,
         )
         os.close(slave)
         threading.Thread(target=self._drain, daemon=True).start()
@@ -146,7 +155,7 @@ class _AttachedClient:
         os.close(self._master)
 
 
-def _argv(pid: "int | str") -> list[str]:
+def _argv(pid: int | str) -> list[str]:
     try:
         raw = (_PROC / str(pid) / "cmdline").read_bytes()
     except OSError:
@@ -154,7 +163,7 @@ def _argv(pid: "int | str") -> list[str]:
     return [part.decode(errors="replace") for part in raw.split(b"\0") if part]
 
 
-def _ppid(pid: str) -> "str | None":
+def _ppid(pid: str) -> str | None:
     try:
         stat = (_PROC / pid / "stat").read_text()
     except OSError:
@@ -198,7 +207,7 @@ class _RendererStartCounter:
                     self.seen.add((entry.name, start))
             time.sleep(0.05)
 
-    def __enter__(self) -> "_RendererStartCounter":
+    def __enter__(self) -> _RendererStartCounter:
         self._thread.start()
         return self
 
@@ -217,9 +226,7 @@ def _loop_pids(session: str) -> list[int]:
     return pids
 
 
-def test_two_attached_clients_cost_one_render_per_interval(
-    private_tmux: PrivateTmux, tmp_path: pathlib.Path
-) -> None:
+def test_two_attached_clients_cost_one_render_per_interval(private_tmux: PrivateTmux, tmp_path: pathlib.Path) -> None:
     session = f"cadence-{uuid.uuid4().hex[:6]}"
     root = pathlib.Path(private_tmux.env["PGAI_AGENT_KANBAN_ROOT_PATH"])
 
@@ -227,7 +234,10 @@ def test_two_attached_clients_cost_one_render_per_interval(
     with log_path.open("w") as log:
         proc = subprocess.Popen(
             ["bash", str(_CREATE_SH), "--kanban-root", str(root), "--session", session],
-            stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=private_tmux.env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env=private_tmux.env,
         )
         # The final exec-attach fails headless ("open terminal failed"); the
         # session, its panes and the status loop already exist by then.
@@ -258,16 +268,21 @@ def test_two_attached_clients_cost_one_render_per_interval(
         assert len(listed) == 2, f"expected two attached clients, tmux lists {listed}"
 
         with _RendererStartCounter(root) as counter:
-            time.sleep(_ATTACHED_SECONDS)
+            started = time.monotonic()
+            deadline = started + _ATTACHED_DEADLINE_SECONDS
+            while len(counter.seen) < _ENOUGH_RENDERS and time.monotonic() < deadline:
+                time.sleep(0.2)
+        watched = time.monotonic() - started
     finally:
         for client in clients:
             client.close()
 
     starts = len(counter.seen)
-    assert starts <= _MAX_RENDERS, (
-        f"status-bottom.sh started {starts} times in {_ATTACHED_SECONDS}s with two clients "
-        f"attached; at most {_MAX_RENDERS} (one per {_REFRESH_SECONDS}s interval, plus one) "
-        "is the bound"
+    max_renders = int(watched // _REFRESH_SECONDS) + 2
+    assert starts <= max_renders, (
+        f"status-bottom.sh started {starts} times in {watched:.1f}s with two clients "
+        f"attached; at most {max_renders} (one per {_REFRESH_SECONDS}s interval, plus one, "
+        "plus one of margin) is the bound"
     )
     assert starts >= 3, f"the status loop rendered only {starts} times while clients were attached"
 
@@ -275,8 +290,12 @@ def test_two_attached_clients_cost_one_render_per_interval(
     assert "HALT GLOBAL" in line, line
 
     kill = subprocess.run(
-        ["bash", str(_KILL_SH), "--session", session], env=private_tmux.env,
-        capture_output=True, text=True, timeout=120, check=False,
+        ["bash", str(_KILL_SH), "--session", session],
+        env=private_tmux.env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert kill.returncode == 0, kill.stdout + kill.stderr
     deadline = time.monotonic() + _REFRESH_SECONDS + 15

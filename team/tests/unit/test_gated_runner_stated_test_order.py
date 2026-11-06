@@ -177,13 +177,13 @@ def test_gated_runner_replay_command_forces_family_var_absence_across_shells(
     command from stage 1. The probe substituted for the pytest invocation
     reports what a real pytest child would see for those names.
     """
-    stage1_script = f'''
+    stage1_script = f"""
 set -euo pipefail
 unset KANBAN_ROOT PYTHONHASHSEED PGAI_LINT_CHANGELOG_MODE 2>/dev/null || true
 source "{_GATED_RUNNER_LINT_SH}"
 export PYTEST_ADDOPTS="--basetemp={tmp_path / "basetemp"}"
 gated_runner_replay_command "python3 -c \\"import os,sys; sys.stdout.write(repr((os.environ.get('KANBAN_ROOT'), os.environ.get('PYTHONHASHSEED'), os.environ.get('PYTEST_ADDOPTS'))))\\""
-'''
+"""
     stage1 = subprocess.run(
         ["bash", "-c", stage1_script],
         capture_output=True,
@@ -247,12 +247,12 @@ def test_gated_runner_replay_command_carries_export_with_second_attribute() -> N
     `declare -x ` misses this because bash's own `declare -p` output for
     this variable is `declare -rx NAME=...`, not `declare -x NAME=...`.
     """
-    script = f'''
+    script = f"""
 set -euo pipefail
 source "{_GATED_RUNNER_LINT_SH}"
 declare -rx PYTEST_ADDOPTS="--basetemp=/replay-example"
 gated_runner_replay_command PYTEST_HERE
-'''
+"""
     result = subprocess.run(
         ["bash", "-c", script],
         capture_output=True,
@@ -322,12 +322,10 @@ def _run_fixture_pass(fixture_dir: pathlib.Path, workdir: pathlib.Path, label: s
             f"stderr:\n{result.stderr}"
         )
     tree = ET.parse(junit_path)
-    return [
-        f'{tc.get("classname")}::{tc.get("name")}' for tc in tree.getroot().iter("testcase")
-    ]
+    return [f'{tc.get("classname")}::{tc.get("name")}' for tc in tree.getroot().iter("testcase")]
 
 
-_FIXTURE_TEST_MODULE = '''
+_FIXTURE_TEST_MODULE = """
 def test_a():
     assert True
 
@@ -346,7 +344,7 @@ def test_d():
 
 def test_e():
     assert True
-'''
+"""
 
 
 @pytest.mark.skipif(

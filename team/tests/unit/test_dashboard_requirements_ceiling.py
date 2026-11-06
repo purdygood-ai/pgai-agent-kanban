@@ -87,8 +87,19 @@ def _render(root: pathlib.Path, *, color: bool = False):
         env["TERM"] = "xterm-256color"
     requirements = root / "projects" / "demo" / "requirements"
     return run_dashboard_script(
-        ["bash", str(_COLUMN_RENDER), "input", str(requirements), str(root / "tmp" / "cache"), "10", "40",
-         "--label", "REQUIREMENTS", "--kanban-root", str(root)],
+        [
+            "bash",
+            str(_COLUMN_RENDER),
+            "input",
+            str(requirements),
+            str(root / "tmp" / "cache"),
+            "10",
+            "40",
+            "--label",
+            "REQUIREMENTS",
+            "--kanban-root",
+            str(root),
+        ],
         env=env,
         timeout=60,
     )

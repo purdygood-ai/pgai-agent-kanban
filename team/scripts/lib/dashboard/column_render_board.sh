@@ -5,7 +5,9 @@
 # board columns: the gather that resolves and classifies every registered
 # project's items runs ONCE per tick for all eight columns (bugs,
 # priorities, requirements, pm, coder, writer, tester, cm), and every
-# column renders its own slice of that one snapshot.
+# column renders its own slice of that one snapshot. The AGENTS column
+# (agents) renders a ninth slice the build derives from the five role
+# columns' sources, so it adds no gather.
 #
 # WHY
 # ----

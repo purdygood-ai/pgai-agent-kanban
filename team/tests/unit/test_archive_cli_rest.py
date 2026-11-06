@@ -197,9 +197,7 @@ def test_default_run_moves_the_planned_items_and_a_second_run_moves_nothing(scen
 
     assert first.returncode == 0, _diagnostic(first)
     rows = read_rows(box.root / "archive" / box.project / "ARCHIVE-LEDGER.tsv")
-    assert sorted(row.item_id for row in rows) == sorted(
-        (*scenario.expected_bug_ids, *scenario.expected_task_ids)
-    )
+    assert sorted(row.item_id for row in rows) == sorted((*scenario.expected_bug_ids, *scenario.expected_task_ids))
     for task_id in scenario.expected_task_ids:
         assert (box.root / "archive" / box.project / "tasks" / task_id).is_dir()
         assert not (box.project_root / "tasks" / task_id).exists()
@@ -321,8 +319,11 @@ def test_run_archive_with_accept_chain_lock_works_under_its_own_chains_lock(smal
         repo_lock_path(small.root, small.project), holder="wake-chain", pid=os.getpid(), op="hold", task="none"
     ):
         run = run_archive(
-            OpsContext(kanban_root=small.root), small.project,
-            out=lines.append, err=errors.append, accept_chain_lock=True,
+            OpsContext(kanban_root=small.root),
+            small.project,
+            out=lines.append,
+            err=errors.append,
+            accept_chain_lock=True,
         )
 
     assert run.exit_code == EXIT_OK, "\n".join(lines + errors)
@@ -348,9 +349,9 @@ def test_rest_dry_run_reports_the_same_planned_moves_as_the_cli_dry_run(scenario
     body = response.json()
     assert body["exit_code"] == 0, body
     assert f"tasks: {len(scenario.expected_task_ids)} item(s) would move" in body["stdout"]
-    assert body["stdout"] == cli.stdout, (
-        f"REST dry run differs from the CLI dry run\n--- REST ---\n{body['stdout']}\n--- CLI ---\n{cli.stdout}"
-    )
+    assert (
+        body["stdout"] == cli.stdout
+    ), f"REST dry run differs from the CLI dry run\n--- REST ---\n{body['stdout']}\n--- CLI ---\n{cli.stdout}"
     assert box.snapshot() == before, "a dry run changed the sandbox"
 
 
@@ -372,11 +373,18 @@ def test_rest_archive_moves_the_planned_items(small, monkeypatch):
     [
         (("--count", "ten"), {"count": "ten"}, "archive.invalid_count", 422),
         (("--count", "-1"), {"count": -1}, "archive.invalid_count", 422),
-        (("--restore", "BUG-0001", "--count", "2"), {"restore": "BUG-0001", "count": 2}, "archive.conflicting_options", 422),
+        (
+            ("--restore", "BUG-0001", "--count", "2"),
+            {"restore": "BUG-0001", "count": 2},
+            "archive.conflicting_options",
+            422,
+        ),
         (("--restore", "BUG-0099"), {"restore": "BUG-0099"}, "archive.restore_not_archived", 500),
     ],
 )
-def test_rest_refuses_what_the_cli_refuses_with_the_same_triple(small, tmp_path, monkeypatch, cli_args, body, error_key, http_status):
+def test_rest_refuses_what_the_cli_refuses_with_the_same_triple(
+    small, tmp_path, monkeypatch, cli_args, body, error_key, http_status
+):
     cli = _run_cli(small.root, tmp_path, "--project", small.project, *cli_args)
     with _client(small.root, monkeypatch) as client:
         response = client.post("/operations/archive", json={"project": small.project, **body})

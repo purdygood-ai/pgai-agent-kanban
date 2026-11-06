@@ -45,6 +45,7 @@ USAGE
 from __future__ import annotations
 
 import os
+import shlex
 import stat
 from pathlib import Path
 
@@ -117,6 +118,7 @@ def install_git_network_stub(
     log_file: Path,
     *,
     succeed_verbs: tuple[str, ...] = (),
+    fail_stderr: str = "",
 ) -> dict[str, str]:
     """Write a network-intercepting ``git`` stub into *bin_dir*.
 
@@ -137,6 +139,11 @@ def install_git_network_stub(
         still never reach any network -- the stub does nothing but log them.
         For a script under test that must get past a ``fetch`` to reach the
         ``push`` the test asserts on. Default: every network verb fails.
+    fail_stderr:
+        Text the stub writes to stderr (one line) when it fails a network
+        verb, standing in for git's own error message -- for a script under
+        test that must report that text. Default: a failing verb writes
+        nothing.
 
     Returns
     -------
@@ -158,8 +165,7 @@ def install_git_network_stub(
     unknown = sorted(set(succeed_verbs) - set(NETWORK_CAPABLE_VERBS))
     if unknown:
         raise ValueError(
-            f"succeed_verbs {unknown} are not network-capable verbs; "
-            f"choose from {list(NETWORK_CAPABLE_VERBS)}"
+            f"succeed_verbs {unknown} are not network-capable verbs; " f"choose from {list(NETWORK_CAPABLE_VERBS)}"
         )
     real_git = _resolve_unshimmed_git("git-network-stub")
 
@@ -168,6 +174,7 @@ def install_git_network_stub(
 
     verb_pattern = "|".join(NETWORK_CAPABLE_VERBS)
     succeed_pattern = "|".join(succeed_verbs) or "''"
+    fail_line = f"printf '%s\\n' {shlex.quote(fail_stderr)} >&2" if fail_stderr else ":"
     stub_script = f"""#!/usr/bin/env bash
 # Test-only git interceptor (network-stub fixture).
 # Logs any network-capable invocation ({", ".join(NETWORK_CAPABLE_VERBS)})
@@ -185,6 +192,7 @@ for _arg in "$@"; do
       case "$_arg" in
         {succeed_pattern}) exit 0 ;;
       esac
+      {fail_line}
       exit 1
       ;;
   esac
@@ -192,12 +200,7 @@ done
 exec "$REAL_GIT" "$@"
 """
     stub_path.write_text(stub_script, encoding="utf-8")
-    stub_path.chmod(
-        stub_path.stat().st_mode
-        | stat.S_IXUSR
-        | stat.S_IXGRP
-        | stat.S_IXOTH
-    )
+    stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     existing_path = os.environ.get("PATH", "")
     return {"PATH": f"{bin_dir}{os.pathsep}{existing_path}"}

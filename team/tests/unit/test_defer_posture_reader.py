@@ -63,7 +63,7 @@ def _bash_resolve(tmp_path: pathlib.Path, root: pathlib.Path, project: str) -> s
         f'source "{_BASH_RESOLVER}"\n'
         'resolve_defer_posture "$1"; rc=$?\n'
         'printf "ERRFILE=%s\\n" "$DEFER_POSTURE_LAST_ERROR_FILE" >&2\n'
-        'exit $rc\n'
+        "exit $rc\n"
     )
     scratch = tmp_path / "scratch"
     scratch.mkdir(exist_ok=True)
@@ -77,7 +77,10 @@ def _bash_resolve(tmp_path: pathlib.Path, root: pathlib.Path, project: str) -> s
     )
     return subprocess.run(
         ["bash", "-c", script, "resolve", project],
-        capture_output=True, text=True, env=env, timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
     )
 
 
@@ -250,7 +253,9 @@ def test_read_line_value_answers_as_bash_read_ini(tmp_path, section, key):
     _write(cfg, _INI_TEXT)
     bash = subprocess.run(
         ["bash", "-c", f'source "{_BASH_INI}"; read_ini "$1" "$2" "$3" "@ABSENT@"', "ri", str(cfg), section, key],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     python = ini.read_line_value(cfg, section, key)
     assert (python if python is not None else "@ABSENT@") == bash.stdout
@@ -278,8 +283,15 @@ def test_campaign_until_helpers(tmp_path):
 
 @pytest.mark.parametrize(
     "value, ok",
-    [("v1.2.3", True), ("v10.20.30", True), ("1.2.3", False), ("v1.2", False),
-     ("v1.2.3-rc1", False), ("v1.2.3 ", False), ("v١.2.3", False)],
+    [
+        ("v1.2.3", True),
+        ("v10.20.30", True),
+        ("1.2.3", False),
+        ("v1.2", False),
+        ("v1.2.3-rc1", False),
+        ("v1.2.3 ", False),
+        ("v١.2.3", False),
+    ],
 )
 def test_is_well_formed_until(value, ok):
     assert defer_posture.is_well_formed_until(value) is ok
@@ -295,8 +307,14 @@ def test_posture_mode_words(tmp_path):
 
 @pytest.mark.parametrize(
     "severity, level, expected",
-    [("low", "low", "deferred"), (" Medium. ", "high", "deferred"), ("high", "medium", "kept"),
-     ("critical", "high", "kept"), ("urgent", "high", "unparseable"), ("low", "bogus", "unparseable")],
+    [
+        ("low", "low", "deferred"),
+        (" Medium. ", "high", "deferred"),
+        ("high", "medium", "kept"),
+        ("critical", "high", "kept"),
+        ("urgent", "high", "unparseable"),
+        ("low", "bogus", "unparseable"),
+    ],
 )
 def test_severity_defer_decision(severity, level, expected):
     assert defer_posture.severity_defer_decision(severity, level) == expected
@@ -367,7 +385,8 @@ def test_verdict_posture_fields_come_from_the_reader(tmp_path, monkeypatch):
     assert calls == [(str(root), _PROJECT)]
     assert first["deferred_bugs"] == {"value": "true", "tier": "campaign file"}
     assert first["until"] == {
-        "value": "v4.5.6", "tier": "campaign file",
+        "value": "v4.5.6",
+        "tier": "campaign file",
         "campaign_file": str(root / "projects" / _PROJECT / "DEFER-LOW-BUGS"),
     }
     assert first["pending_bundles"] == []

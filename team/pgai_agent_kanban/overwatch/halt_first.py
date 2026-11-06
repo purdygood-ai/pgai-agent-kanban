@@ -76,7 +76,8 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
+from collections.abc import Callable, Mapping
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -151,7 +152,7 @@ class Envelope:
 
     status: str
     detail: str
-    halt_path: Optional[str] = None
+    halt_path: str | None = None
     value: Any = None
 
     @property
@@ -160,19 +161,19 @@ class Envelope:
         return self.status == STATUS_RAN
 
 
-def firing_timestamp(moment: Optional[datetime.datetime] = None) -> str:
+def firing_timestamp(moment: datetime.datetime | None = None) -> str:
     """The backup-directory timestamp: ``OVERWATCH_FIRING_TIMESTAMP`` when set,
     else *moment* (default now) as ``YYYY-MM-DDThh:mm:ssZ`` in UTC."""
     fixed = os.environ.get("OVERWATCH_FIRING_TIMESTAMP", "").strip()
     if fixed:
         return fixed
-    when = moment or datetime.datetime.now(datetime.timezone.utc)
+    when = moment or datetime.datetime.now(datetime.UTC)
     if when.tzinfo is None:
-        when = when.replace(tzinfo=datetime.timezone.utc)
-    return when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        when = when.replace(tzinfo=datetime.UTC)
+    return when.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def backup_file(kanban_root: "Path | str", project: str, source: "Path | str", timestamp: str) -> str:
+def backup_file(kanban_root: Path | str, project: str, source: Path | str, timestamp: str) -> str:
     """Copy *source* under the project's OVERWATCH backups and return the copy's path.
 
     The layout is ``overwatch_backup_file``'s (see the module docstring); a
@@ -195,7 +196,7 @@ def backup_file(kanban_root: "Path | str", project: str, source: "Path | str", t
     return str(destination)
 
 
-def _proc_start_time(pid: str) -> Optional[str]:
+def _proc_start_time(pid: str) -> str | None:
     """Field 22 of ``/proc/<pid>/stat`` (read past the command name), or None."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
@@ -206,7 +207,7 @@ def _proc_start_time(pid: str) -> Optional[str]:
     return value if value.isdigit() else None
 
 
-def repair_halt_state(halt_path: "Path | str") -> str:
+def repair_halt_state(halt_path: Path | str) -> str:
     """``live`` for a repair HALT whose creator still runs, ``dead`` for one
     whose creator is gone, ``other`` for anything else (no file, an operator
     or CM HALT, a malformed marker)."""
@@ -221,7 +222,7 @@ def repair_halt_state(halt_path: "Path | str") -> str:
     return "live" if _proc_start_time(pid) == start else "dead"
 
 
-def clear_dead_repair_halt(kanban_root: "Path | str", project: str, halt_path: "Path | str") -> bool:
+def clear_dead_repair_halt(kanban_root: Path | str, project: str, halt_path: Path | str) -> bool:
     """Remove *halt_path* when it is a repair HALT whose creator is gone, logging
     the removal; True when it was removed. Any other HALT is never touched."""
     if repair_halt_state(halt_path) != "dead":
@@ -232,7 +233,11 @@ def clear_dead_repair_halt(kanban_root: "Path | str", project: str, halt_path: "
         return False
     try:
         log_action(
-            str(kanban_root), project, _LOG_NAME, str(halt_path), "stale-repair-halt-removed",
+            str(kanban_root),
+            project,
+            _LOG_NAME,
+            str(halt_path),
+            "stale-repair-halt-removed",
             "removed the project HALT a stopped OVERWATCH repair left behind; an operator or CM HALT is never removed",
         )
     except OSError:
@@ -245,11 +250,11 @@ def _op_token(op: str) -> str:
     return re.sub(r"\s+", "-", op.strip()) or "fix"
 
 
-def write_repair_halt(halt_path: "Path | str", op: str) -> bool:
+def write_repair_halt(halt_path: Path | str, op: str) -> bool:
     """Create *halt_path* as this process's repair HALT; False when a HALT is already there."""
     token = _op_token(op)
     start = _proc_start_time(str(os.getpid())) or "0"
-    at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     lines = [
         f"# HALT created by OVERWATCH while it repairs this project ({token}); removed when the repair ends.",
         f"{REPAIR_HALT_MARKER} pid={os.getpid()} start={start} fn={token} at={at}",
@@ -324,7 +329,7 @@ def _decline_lock_busy(project: str, op: str, lock_file: Path, holder: str, wait
     return Envelope(STATUS_DECLINED_LOCK_BUSY, message)
 
 
-def _lock_wait(value: Optional[float], env: Mapping[str, str]) -> float:
+def _lock_wait(value: float | None, env: Mapping[str, str]) -> float:
     if value is not None:
         return max(float(value), 0.0)
     raw = str(env.get("OVERWATCH_LOCK_WAIT_SECONDS", "")).strip()
@@ -332,15 +337,15 @@ def _lock_wait(value: Optional[float], env: Mapping[str, str]) -> float:
 
 
 def run_halt_first(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     fix: Callable[[], Any],
     *,
     op: str,
     task: str = "none",
     past_project_halt: bool = False,
-    lock_wait_seconds: Optional[float] = None,
-    env: Optional[Mapping[str, str]] = None,
+    lock_wait_seconds: float | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> Envelope:
     """Run *fix* under the HALT-first protocol (see the module docstring).
 
@@ -379,7 +384,10 @@ def run_halt_first(
     while True:
         try:
             held = acquire_lock(
-                lock_file, holder=LOCK_HOLDER, pid=os.getpid(), op=f"overwatch-halt-first-fix:{_op_token(op)}",
+                lock_file,
+                holder=LOCK_HOLDER,
+                pid=os.getpid(),
+                op=f"overwatch-halt-first-fix:{_op_token(op)}",
                 task=(task or "none").strip() or "none",
             )
             break
@@ -401,9 +409,7 @@ def run_halt_first(
             try:
                 created = write_repair_halt(halt, op)
             except OSError as exc:
-                return Envelope(
-                    STATUS_FAILED, f"the repair HALT {halt} could not be written ({exc}); {op} was not run"
-                )
+                return Envelope(STATUS_FAILED, f"the repair HALT {halt} could not be written ({exc}); {op} was not run")
             if not created:
                 # A HALT appeared between the check and the create (a writer
                 # not holding the repo lock): it defers the fix like any other.

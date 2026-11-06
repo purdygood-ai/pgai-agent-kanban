@@ -85,8 +85,11 @@ def _sandbox(tmp_path: pathlib.Path, *, registered: bool = True) -> pathlib.Path
 
 def _run(tmp_path, root, script, *args, **extra) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(script), *args], capture_output=True, text=True,
-        env=_env(tmp_path, root, **extra), timeout=60,
+        ["bash", str(script), *args],
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root, **extra),
+        timeout=60,
     )
 
 
@@ -126,9 +129,7 @@ def test_defer_route_and_cli_reach_ops_write_defer(tmp_path):
     expected = _ARMED_BODY.format(until="v7.1.0")
     assert (rest_project / "DEFER-LOW-BUGS").read_text(encoding="utf-8") == expected
     assert (cli_project / "DEFER-LOW-BUGS").read_text(encoding="utf-8") == expected
-    assert result.response.json()["stdout"] == result.cli.completed.stdout.replace(
-        str(cli_board), str(rest_board)
-    )
+    assert result.response.json()["stdout"] == result.cli.completed.stdout.replace(str(cli_board), str(rest_board))
 
 
 def test_undefer_route_and_cli_reach_ops_write_undefer(tmp_path):
@@ -178,9 +179,7 @@ def test_cli_defer_until_then_already_deferred_then_undefer_then_not_deferred(tm
 
     armed = _run(tmp_path, root, _DEFER_SH, "--project", _PROJECT, "--until", "v2.40.0")
     assert (armed.returncode, armed.stderr) == (0, "")
-    assert armed.stdout == (
-        f"defer: DEFER-LOW-BUGS armed for project {_PROJECT} (until: v2.40.0, path: {campaign})\n"
-    )
+    assert armed.stdout == (f"defer: DEFER-LOW-BUGS armed for project {_PROJECT} (until: v2.40.0, path: {campaign})\n")
     assert campaign.read_text(encoding="utf-8") == _ARMED_BODY.format(until="v2.40.0")
     assert stat.S_IMODE(campaign.stat().st_mode) == 0o600
     first_mtime = campaign.stat().st_mtime_ns
@@ -200,9 +199,7 @@ def test_cli_defer_until_then_already_deferred_then_undefer_then_not_deferred(tm
 
     nothing = _run(tmp_path, root, _UNDEFER_SH, "--project", _PROJECT)
     assert (nothing.returncode, nothing.stderr) == (0, "")
-    assert nothing.stdout == (
-        f"undefer: nothing to clear for project {_PROJECT} (no campaign file at {campaign})\n"
-    )
+    assert nothing.stdout == (f"undefer: nothing to clear for project {_PROJECT} (no campaign file at {campaign})\n")
     assert sorted(p.name for p in campaign.parent.iterdir()) == []
 
 
@@ -325,12 +322,20 @@ def test_ops_cli_verbs_exit_1_on_a_refusal_and_print_the_narration_on_success(tm
     root = _sandbox(tmp_path)
     env = _env(tmp_path, root, PYTHONPATH=str(_TEAM_DIR))
     argv = [sys.executable, "-m", "pgai_agent_kanban.ops"]
-    refused = subprocess.run(argv + ["defer", str(root), _PROJECT, "nope"],
-                             capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
-    armed = subprocess.run(argv + ["defer", str(root), _PROJECT, "v1.0.0"],
-                           capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
-    missing = subprocess.run(argv + ["undefer", str(root)],
-                             capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
+    refused = subprocess.run(
+        argv + ["defer", str(root), _PROJECT, "nope"], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60
+    )
+    armed = subprocess.run(
+        argv + ["defer", str(root), _PROJECT, "v1.0.0"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        timeout=60,
+    )
+    missing = subprocess.run(
+        argv + ["undefer", str(root)], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60
+    )
     assert refused.returncode == 1 and "defer.until_malformed" in refused.stderr
     assert armed.returncode == 0 and armed.stdout.startswith("defer: DEFER-LOW-BUGS armed")
     assert missing.returncode == 1 and "KANBAN_ROOT and PROJECT" in missing.stderr

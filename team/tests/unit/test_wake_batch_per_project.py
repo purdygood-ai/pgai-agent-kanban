@@ -197,7 +197,11 @@ class _Sandbox:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(self.root / "scripts" / "wake-batch.sh"), f"--agent={agent}"],
-            cwd=cwd, env=env, capture_output=True, text=True, timeout=_WAKE_TIMEOUT_S,
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_WAKE_TIMEOUT_S,
         )
 
     def event_lines(self) -> list[str]:
@@ -229,7 +233,9 @@ def test_one_firing_runs_both_projects_side_by_side(tmp_path) -> None:
     for project in _PROJECTS:
         assert (box.root / "locks" / f"wake-batch-coder-{project}.record").is_file()
     batch_logs = sorted(p.name for p in (box.root / "logs" / "agents").glob("coder-batch-*.log"))
-    assert any(n.endswith("-alpha.log") for n in batch_logs) and any(n.endswith("-beta.log") for n in batch_logs), batch_logs
+    assert any(n.endswith("-alpha.log") for n in batch_logs) and any(
+        n.endswith("-beta.log") for n in batch_logs
+    ), batch_logs
 
 
 def test_a_waiting_task_in_project_2_runs_while_project_1_has_a_long_queue(tmp_path) -> None:
@@ -250,9 +256,9 @@ def test_a_waiting_task_in_project_2_runs_while_project_1_has_a_long_queue(tmp_p
     events = box.event_lines()
     assert f"dispatch beta {waiting}" in events, events
     held = [e for e in events if e.startswith("await alpha ")]
-    assert held == [f"await alpha {alpha_tasks[0]} saw-beta=yes"], (
-        f"beta's promoted task was not dispatched while alpha's first task ran: {events}"
-    )
+    assert held == [
+        f"await alpha {alpha_tasks[0]} saw-beta=yes"
+    ], f"beta's promoted task was not dispatched while alpha's first task ran: {events}"
     assert all(box.state("alpha", task) == "DONE" for task in alpha_tasks), out
 
 
@@ -310,7 +316,12 @@ class _StubInstall:
             env.pop(name, None)
         return subprocess.run(
             ["bash", str(self.script), "--agent=coder"],
-            capture_output=True, text=True, env=env, cwd=str(self.tmp_path), timeout=120, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(self.tmp_path),
+            timeout=120,
+            check=False,
         )
 
     def ran(self) -> list[str]:
@@ -389,10 +400,15 @@ def test_a_section_name_the_registry_rejects_is_refused_by_name_once(tmp_path) -
         assert result.returncode == 0, out
         stderr_blocks = result.stderr.split("error:   ")
         for name in bad_names:
-            logged = [line for line in result.stdout.splitlines() if f"'{name}'" in line and "not a plain project name" in line]
+            logged = [
+                line
+                for line in result.stdout.splitlines()
+                if f"'{name}'" in line and "not a plain project name" in line
+            ]
             assert len(logged) == 1, out
             refusals = [
-                block for block in stderr_blocks
+                block
+                for block in stderr_blocks
                 if block.startswith("wake_batch.project_name_not_plain") and f"'{name}'" in block
             ]
             assert len(refusals) == 1, out

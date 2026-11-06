@@ -45,9 +45,7 @@ import pathlib
 import re
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
-_RESOLUTION_STAGE_PATH = (
-    _TEAM_DIR / "pgai_agent_kanban" / "overwatch" / "resolution_stage.py"
-)
+_RESOLUTION_STAGE_PATH = _TEAM_DIR / "pgai_agent_kanban" / "overwatch" / "resolution_stage.py"
 
 # The only two local-variable targets a write-mode open() may legitimately
 # name in this file: `tmp_path` (the atomic tempfile-then-os.replace
@@ -62,9 +60,7 @@ _ALLOWED_WRITE_TARGETS = frozenset({"tmp_path", "log_file"})
 # Matches open(<target>, "<mode>", ...) or open(<target>, mode="<mode>", ...)
 # for the first two positional-ish arguments. Deliberately loose on
 # whitespace (SOP: keep regex loose for whitespace that gets discarded).
-_OPEN_CALL_RE = re.compile(
-    r"open\(\s*([^,()]+?)\s*,\s*(?:mode\s*=\s*)?[\"']([rwaxb+]+)[\"']"
-)
+_OPEN_CALL_RE = re.compile(r"open\(\s*([^,()]+?)\s*,\s*(?:mode\s*=\s*)?[\"']([rwaxb+]+)[\"']")
 
 
 def _write_mode_open_calls(source: str) -> list:
@@ -82,9 +78,9 @@ def test_source_file_exists() -> None:
     """Sanity precondition: the module this check scans must exist at the
     expected path — a silent 0-byte scan (file missing) would otherwise
     look identical to a clean pass."""
-    assert _RESOLUTION_STAGE_PATH.is_file(), (
-        f"expected the OVERWATCH resolution stage module at {_RESOLUTION_STAGE_PATH}"
-    )
+    assert (
+        _RESOLUTION_STAGE_PATH.is_file()
+    ), f"expected the OVERWATCH resolution stage module at {_RESOLUTION_STAGE_PATH}"
 
 
 def test_every_write_mode_open_call_targets_an_allowlisted_local_variable() -> None:
@@ -103,9 +99,7 @@ def test_every_write_mode_open_call_targets_an_allowlisted_local_variable() -> N
         "matching, and either way the check is not exercising anything"
     )
 
-    offenders = [
-        (target, mode) for target, mode in calls if target not in _ALLOWED_WRITE_TARGETS
-    ]
+    offenders = [(target, mode) for target, mode in calls if target not in _ALLOWED_WRITE_TARGETS]
     assert not offenders, (
         "direct write-mode open() call(s) on a non-allowlisted target found in "
         f"{_RESOLUTION_STAGE_PATH} — every kanban state mutation in this module "
@@ -143,9 +137,7 @@ def test_no_write_mode_open_call_targets_a_known_state_path_literal() -> None:
         "cfg_path",
     )
     for name in known_state_path_names:
-        pattern = re.compile(
-            rf"open\(\s*{re.escape(name)}\s*,\s*(?:mode\s*=\s*)?[\"'][wax]"
-        )
+        pattern = re.compile(rf"open\(\s*{re.escape(name)}\s*,\s*(?:mode\s*=\s*)?[\"'][wax]")
         assert not pattern.search(source), (
             f"found a write-mode open() call directly targeting '{name}' in "
             f"{_RESOLUTION_STAGE_PATH} — a real kanban state path must never "
@@ -181,9 +173,7 @@ def test_check_itself_fails_on_a_spliced_in_direct_state_edit() -> None:
     )
 
     calls = _write_mode_open_calls(regressed)
-    offenders = [
-        (target, mode) for target, mode in calls if target not in _ALLOWED_WRITE_TARGETS
-    ]
+    offenders = [(target, mode) for target, mode in calls if target not in _ALLOWED_WRITE_TARGETS]
     assert offenders, (
         "the spliced-in direct write of release_state_md was not detected — "
         "the grep-zero check's own regression-detection logic is broken"

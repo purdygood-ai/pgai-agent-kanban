@@ -124,10 +124,7 @@ _QUEUE_FILE_AGENT_MAP = {
 # accept") so a new agent name introduced after this module was written
 # still matches.
 _QUEUE_LINE_RE = re.compile(
-    r"^\s*-\s+\[(.)\]\s+"
-    r"([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)?"
-    r"-(?:\d{8}-\d+-\S+|v\d+[.\d]*-\d+))"
-    r"\s*$"
+    r"^\s*-\s+\[(.)\]\s+" r"([A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)?" r"-(?:\d{8}-\d+-\S+|v\d+[.\d]*-\d+))" r"\s*$"
 )
 
 
@@ -155,7 +152,7 @@ def _queue_file_to_agent(stem: str) -> str:
     return _QUEUE_FILE_AGENT_MAP.get(candidate, "unknown")
 
 
-def _build_queue_marker_map(queues_dir: "pathlib.Path | None") -> dict[str, str]:
+def _build_queue_marker_map(queues_dir: pathlib.Path | None) -> dict[str, str]:
     queue_marker_map: dict[str, str] = {}
     if queues_dir is None or not queues_dir.is_dir():
         return queue_marker_map
@@ -185,9 +182,9 @@ def empty_queue_details() -> dict[str, dict[str, list]]:
 
 
 def resolve_queue_details(
-    tasks_root: "pathlib.Path | str",
-    queues_dir: "pathlib.Path | str | None" = None,
-) -> dict[str, dict[str, list[dict[str, "str | None"]]]]:
+    tasks_root: pathlib.Path | str,
+    queues_dir: pathlib.Path | str | None = None,
+) -> dict[str, dict[str, list[dict[str, str | None]]]]:
     """Resolve the per-agent, per-state active-task listing for one project.
 
     Args:
@@ -209,7 +206,7 @@ def resolve_queue_details(
 
     queue_marker_map = _build_queue_marker_map(queues_dir)
 
-    grouped: dict[str, dict[str, list[tuple[str, "str | None"]]]] = {
+    grouped: dict[str, dict[str, list[tuple[str, str | None]]]] = {
         agent: {state: [] for state in STATE_ORDER} for agent in AGENT_ORDER
     }
 
@@ -250,7 +247,7 @@ def resolve_queue_details(
                     pass
 
             if state not in STATE_ORDER:
-                warn_type: "str | None" = f"unknown_state:{state}"
+                warn_type: str | None = f"unknown_state:{state}"
                 grouped[agent]["BACKLOG"].append((task_id, warn_type))
                 seen_task_ids.add(task_id)
                 continue
@@ -291,20 +288,16 @@ def resolve_queue_details(
                 valid = _QUEUE_MARKER_VALID_STATES.get(marker, {"BACKLOG"})
                 state = "BACKLOG" if "BACKLOG" in valid else next(iter(valid))
                 already_present = any(
-                    tid == task_id
-                    for ag in AGENT_ORDER
-                    for st in STATE_ORDER
-                    for tid, _ in grouped[ag][st]
+                    tid == task_id for ag in AGENT_ORDER for st in STATE_ORDER for tid, _ in grouped[ag][st]
                 )
                 if not already_present:
                     grouped[agent][state].append((task_id, "folder_missing"))
                     seen_task_ids.add(task_id)
 
-    result: dict[str, dict[str, list[dict[str, "str | None"]]]] = {
+    result: dict[str, dict[str, list[dict[str, str | None]]]] = {
         agent: {
             state: [
-                {"task_id": tid, "warning": warn}
-                for tid, warn in sorted(grouped[agent][state], key=lambda x: x[0])
+                {"task_id": tid, "warning": warn} for tid, warn in sorted(grouped[agent][state], key=lambda x: x[0])
             ]
             for state in STATE_ORDER
         }
@@ -322,8 +315,7 @@ def main() -> int:
     """
     if len(sys.argv) not in (2, 3):
         print(
-            "usage: python3 -m pgai_agent_kanban.dashboard.queue_details "
-            "<tasks_root> [<queues_dir>]",
+            "usage: python3 -m pgai_agent_kanban.dashboard.queue_details " "<tasks_root> [<queues_dir>]",
             file=sys.stderr,
         )
         return 1

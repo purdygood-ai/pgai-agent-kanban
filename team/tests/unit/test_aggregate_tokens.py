@@ -45,7 +45,6 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -72,9 +71,7 @@ try:
         _zero_agent_entry,
     )
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import aggregate_tokens as agg  # type: ignore[no-redef]
     from aggregate_tokens import (  # type: ignore[no-redef]
         is_new_schema,
@@ -91,13 +88,13 @@ except ImportError:
         read_rc_version,
         read_agent,
         scan_tasks,
-        _zero_agent_entry,
     )
 
 
 # ---------------------------------------------------------------------------
 # Helpers: build fixture data
 # ---------------------------------------------------------------------------
+
 
 def _make_tokens_dir(task_dir: pathlib.Path) -> pathlib.Path:
     """Ensure artifacts/ exists inside task_dir and return its path."""
@@ -114,8 +111,7 @@ def _write_tokens_json(task_dir: pathlib.Path, data: dict) -> pathlib.Path:
     return p
 
 
-def _write_readme(task_dir: pathlib.Path, release_version: str | None = None,
-                  role: str = "CODER") -> pathlib.Path:
+def _write_readme(task_dir: pathlib.Path, release_version: str | None = None, role: str = "CODER") -> pathlib.Path:
     """Write a minimal README.md with an optional Release Version section."""
     lines = ["# Task: My Task\n\n"]
     lines.append(f"## Role\n{role}\n\n")
@@ -139,16 +135,16 @@ def _minimal_legacy_token(
 ) -> dict:
     """Return a minimal legacy-schema tokens.json dict."""
     return {
-        "model":                       model,
-        "provider":                    provider,
-        "agent":                       agent,
-        "input_tokens":                input_tokens,
-        "output_tokens":               output_tokens,
+        "model": model,
+        "provider": provider,
+        "agent": agent,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
         "cache_creation_input_tokens": cache_creation_input_tokens,
-        "cache_read_input_tokens":     cache_read_input_tokens,
-        "invocations":                 invocations,
-        "elapsed_seconds":             60,
-        "timestamp":                   timestamp,
+        "cache_read_input_tokens": cache_read_input_tokens,
+        "invocations": invocations,
+        "elapsed_seconds": 60,
+        "timestamp": timestamp,
     }
 
 
@@ -162,19 +158,19 @@ def _minimal_new_schema_token(
 ) -> dict:
     """Return a minimal new-schema tokens.json dict."""
     return {
-        "provider":        "claude",
-        "agent":           agent,
-        "invocations":     invocations,
+        "provider": "claude",
+        "agent": agent,
+        "invocations": invocations,
         "elapsed_seconds": 90,
-        "timestamp":       timestamp,
-        "total_cost_usd":  total_cost_usd,
+        "timestamp": timestamp,
+        "total_cost_usd": total_cost_usd,
         "model_usage": {
             model_name: {
-                "input_tokens":                12,
-                "output_tokens":               14,
+                "input_tokens": 12,
+                "output_tokens": 14,
                 "cache_creation_input_tokens": 0,
-                "cache_read_input_tokens":     52366,
-                "cost_usd":                    model_cost_usd,
+                "cache_read_input_tokens": 52366,
+                "cost_usd": model_cost_usd,
             }
         },
     }
@@ -187,10 +183,10 @@ def _minimal_pricing() -> dict:
             "claude": {
                 "models": {
                     "claude-sonnet-4-6": {
-                        "input_per_1m":           3.0,
-                        "cache_creation_per_1m":  3.75,
-                        "cache_read_per_1m":      0.30,
-                        "output_per_1m":          15.0,
+                        "input_per_1m": 3.0,
+                        "cache_creation_per_1m": 3.75,
+                        "cache_read_per_1m": 0.30,
+                        "output_per_1m": 15.0,
                     }
                 }
             }
@@ -281,8 +277,7 @@ def test_read_field_from_markdown_skips_blank_lines_after_heading() -> None:
     assert read_field_from_markdown(text, "Role") == "CODER"
 
 
-def test_read_field_from_markdown_returns_none_when_no_value_follows(
-) -> None:
+def test_read_field_from_markdown_returns_none_when_no_value_follows() -> None:
     """read_field_from_markdown returns None when the heading has no body."""
     text = "## Release Version\n"
     assert read_field_from_markdown(text, "Release Version") is None
@@ -377,9 +372,7 @@ def test_compute_cost_computes_cache_creation_tokens_correctly() -> None:
     """compute_cost correctly prices cache_creation tokens."""
     pricing = _minimal_pricing()
     # 1,000,000 cache_creation tokens at $3.75/1M => $3.75
-    tok = _minimal_legacy_token(
-        input_tokens=0, output_tokens=0, cache_creation_input_tokens=1_000_000
-    )
+    tok = _minimal_legacy_token(input_tokens=0, output_tokens=0, cache_creation_input_tokens=1_000_000)
     result = compute_cost(pricing, tok)
     assert abs(result.cache_creation_cost_usd - 3.75) < 1e-6
 
@@ -388,9 +381,7 @@ def test_compute_cost_computes_cache_read_tokens_correctly() -> None:
     """compute_cost correctly prices cache_read tokens."""
     pricing = _minimal_pricing()
     # 1,000,000 cache_read tokens at $0.30/1M => $0.30
-    tok = _minimal_legacy_token(
-        input_tokens=0, output_tokens=0, cache_read_input_tokens=1_000_000
-    )
+    tok = _minimal_legacy_token(input_tokens=0, output_tokens=0, cache_read_input_tokens=1_000_000)
     result = compute_cost(pricing, tok)
     assert abs(result.cache_read_cost_usd - 0.30) < 1e-6
 
@@ -399,6 +390,7 @@ def test_compute_cost_returns_zero_for_unknown_model(capsys) -> None:
     """compute_cost returns all-zero costs and emits a warning for an unknown model."""
     # Reset the per-run model-warning set so this test is independent.
     import aggregate_tokens as _agg_mod  # direct import for internal state
+
     _agg_mod._MODEL_WARNED.clear()
 
     pricing = _minimal_pricing()
@@ -451,9 +443,7 @@ def test_load_tokens_json_returns_none_when_file_absent(tmp_path: pathlib.Path) 
     assert result is None
 
 
-def test_load_tokens_json_returns_none_for_malformed_json(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_load_tokens_json_returns_none_for_malformed_json(tmp_path: pathlib.Path, capsys) -> None:
     """load_tokens_json returns None (and emits a warning) for malformed JSON."""
     task_dir = tmp_path / "CODER-20260101-001-bad-json"
     task_dir.mkdir()
@@ -467,9 +457,7 @@ def test_load_tokens_json_returns_none_for_malformed_json(
     assert "WARNING" in captured.err
 
 
-def test_load_tokens_json_returns_none_for_json_array_at_top_level(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_load_tokens_json_returns_none_for_json_array_at_top_level(tmp_path: pathlib.Path, capsys) -> None:
     """load_tokens_json returns None when tokens.json top-level value is a list."""
     task_dir = tmp_path / "CODER-20260101-001-list-json"
     task_dir.mkdir()
@@ -585,7 +573,7 @@ def test_all_rc_versions_collects_distinct_versions() -> None:
         {"rc_version": "v0.1.0", "tokens": {}},
         {"rc_version": "v0.2.0", "tokens": {}},
         {"rc_version": "v0.1.0", "tokens": {}},  # duplicate
-        {"rc_version": None,     "tokens": {}},  # no version — skipped
+        {"rc_version": None, "tokens": {}},  # no version — skipped
     ]
     result = all_rc_versions(records)
     assert result == ["v0.1.0", "v0.2.0"]
@@ -724,13 +712,13 @@ def _make_rc_record(
     if tok is None:
         tok = _minimal_legacy_token()
     return {
-        "task_id":    task_id,
-        "task_dir":   pathlib.Path("/synthetic") / task_id,
+        "task_id": task_id,
+        "task_dir": pathlib.Path("/synthetic") / task_id,
         "rc_version": rc_version,
-        "tokens":     tok,
-        "agent":      task_id.split("-")[0].lower(),
+        "tokens": tok,
+        "agent": task_id.split("-")[0].lower(),
         "new_schema": new_schema,
-        "captured":   captured,
+        "captured": captured,
     }
 
 
@@ -873,10 +861,17 @@ def test_build_rc_rollup_totals_contain_required_schema_keys(
     usage_rc_dir = tmp_path / "usage" / "rc"
     records = [_make_rc_record()]
     required_keys = {
-        "input_tokens", "output_tokens", "cache_creation_tokens",
-        "cache_read_tokens", "cost_usd", "input_cost_usd",
-        "cache_creation_cost_usd", "cache_read_cost_usd", "output_cost_usd",
-        "invocations", "uncaptured_tasks",
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_tokens",
+        "cache_read_tokens",
+        "cost_usd",
+        "input_cost_usd",
+        "cache_creation_cost_usd",
+        "cache_read_cost_usd",
+        "output_cost_usd",
+        "invocations",
+        "uncaptured_tasks",
     }
 
     out_path = build_rc_rollup("p", "v0.1.0", records, {}, usage_rc_dir)
@@ -954,12 +949,9 @@ def test_build_day_rollup_collects_rc_versions(tmp_path: pathlib.Path) -> None:
     """build_day_rollup lists distinct RC versions seen on the day in rcs_shipped."""
     usage_daily_dir = tmp_path / "usage" / "daily"
     records = [
-        _make_day_record("CODER-20260101-001-a", rc_version="v0.1.0",
-                         timestamp="2026-05-17T01:00:00Z"),
-        _make_day_record("CODER-20260101-002-b", rc_version="v0.2.0",
-                         timestamp="2026-05-17T02:00:00Z"),
-        _make_day_record("CODER-20260101-003-c", rc_version="v0.1.0",
-                         timestamp="2026-05-17T03:00:00Z"),  # duplicate RC
+        _make_day_record("CODER-20260101-001-a", rc_version="v0.1.0", timestamp="2026-05-17T01:00:00Z"),
+        _make_day_record("CODER-20260101-002-b", rc_version="v0.2.0", timestamp="2026-05-17T02:00:00Z"),
+        _make_day_record("CODER-20260101-003-c", rc_version="v0.1.0", timestamp="2026-05-17T03:00:00Z"),  # duplicate RC
     ]
 
     out_path = build_day_rollup("p", "2026-05-17", records, {}, usage_daily_dir)
@@ -971,15 +963,11 @@ def test_build_day_rollup_collects_rc_versions(tmp_path: pathlib.Path) -> None:
 def test_build_day_rollup_accumulates_by_agent(tmp_path: pathlib.Path) -> None:
     """build_day_rollup groups invocations by agent name in by_agent."""
     usage_daily_dir = tmp_path / "usage" / "daily"
-    tok1 = _minimal_legacy_token(agent="coder", invocations=2,
-                                  timestamp="2026-05-17T01:00:00Z")
-    tok2 = _minimal_legacy_token(agent="writer", invocations=3,
-                                  timestamp="2026-05-17T02:00:00Z")
+    tok1 = _minimal_legacy_token(agent="coder", invocations=2, timestamp="2026-05-17T01:00:00Z")
+    tok2 = _minimal_legacy_token(agent="writer", invocations=3, timestamp="2026-05-17T02:00:00Z")
     records = [
-        _make_day_record("CODER-20260101-001-a", tok=tok1,
-                         timestamp="2026-05-17T01:00:00Z"),
-        _make_day_record("WRITER-20260101-001-b", tok=tok2,
-                         timestamp="2026-05-17T02:00:00Z"),
+        _make_day_record("CODER-20260101-001-a", tok=tok1, timestamp="2026-05-17T01:00:00Z"),
+        _make_day_record("WRITER-20260101-001-b", tok=tok2, timestamp="2026-05-17T02:00:00Z"),
     ]
     # Override agent keys
     records[0]["agent"] = "coder"
@@ -1004,8 +992,7 @@ def test_build_day_rollup_accumulates_by_model_for_new_schema(
         model_cost_usd=0.026,
         timestamp="2026-05-17T03:24:46Z",
     )
-    records = [_make_day_record("CODER-20260101-001-slug", tok=tok,
-                                 new_schema=True, timestamp="2026-05-17T03:24:46Z")]
+    records = [_make_day_record("CODER-20260101-001-slug", tok=tok, new_schema=True, timestamp="2026-05-17T03:24:46Z")]
     records[0]["new_schema"] = True
 
     out_path = build_day_rollup("p", "2026-05-17", records, {}, usage_daily_dir)
@@ -1021,8 +1008,7 @@ def test_build_day_rollup_excludes_uncaptured_from_totals(
     usage_daily_dir = tmp_path / "usage" / "daily"
     tok = _minimal_legacy_token(input_tokens=1000, timestamp="2026-05-17T01:00:00Z")
     tok["captured"] = False
-    records = [_make_day_record("CODER-20260101-001-killed", tok=tok,
-                                 captured=False, timestamp="2026-05-17T01:00:00Z")]
+    records = [_make_day_record("CODER-20260101-001-killed", tok=tok, captured=False, timestamp="2026-05-17T01:00:00Z")]
     records[0]["captured"] = False
 
     out_path = build_day_rollup("p", "2026-05-17", records, {}, usage_daily_dir)
@@ -1041,9 +1027,17 @@ def test_build_day_rollup_output_has_required_schema_keys(
     records = [_make_day_record(timestamp="2026-05-17T01:00:00Z")]
     required_top_level = {"date", "project", "rcs_shipped", "totals", "by_agent", "by_model"}
     required_totals = {
-        "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
-        "cost_usd", "input_cost_usd", "cache_creation_cost_usd",
-        "cache_read_cost_usd", "output_cost_usd", "invocations", "uncaptured_tasks",
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_tokens",
+        "cache_read_tokens",
+        "cost_usd",
+        "input_cost_usd",
+        "cache_creation_cost_usd",
+        "cache_read_cost_usd",
+        "output_cost_usd",
+        "invocations",
+        "uncaptured_tasks",
     }
 
     out_path = build_day_rollup("p", "2026-05-17", records, {}, usage_daily_dir)
@@ -1150,7 +1144,8 @@ def test_project_dev_tree_without_pricing_is_priced_from_the_kanban_table(
     _write_readme(task_dir, release_version="v1.0.0")
 
     monkeypatch.setattr(
-        sys, "argv",
+        sys,
+        "argv",
         ["aggregate_tokens.py", "--project", "demo", "--rc", "v1.0.0", "--kanban-root", str(root)],
     )
     with pytest.raises(SystemExit) as exit_info:
@@ -1174,9 +1169,7 @@ def test_load_pricing_reads_the_source_checkout_table() -> None:
     assert agg.load_pricing() == json.loads(source_table.read_text(encoding="utf-8"))
 
 
-def test_missing_pricing_table_warning_names_the_kanban_side_path(
-    tmp_path: pathlib.Path, monkeypatch, capsys
-) -> None:
+def test_missing_pricing_table_warning_names_the_kanban_side_path(tmp_path: pathlib.Path, monkeypatch, capsys) -> None:
     """With no table installed, the warning names <kanban root>/scripts/lib/token_pricing.json
     and never the project's dev tree."""
     root = tmp_path / "kanban"
@@ -1185,9 +1178,7 @@ def test_missing_pricing_table_warning_names_the_kanban_side_path(
     dev_tree.mkdir()
     project_dir = root / "projects" / "demo"
     project_dir.mkdir(parents=True)
-    (project_dir / "project.cfg").write_text(
-        f"[project]\ndev_tree_path = {dev_tree}\n", encoding="utf-8"
-    )
+    (project_dir / "project.cfg").write_text(f"[project]\ndev_tree_path = {dev_tree}\n", encoding="utf-8")
 
     pricing = module.load_pricing()
 
@@ -1199,9 +1190,7 @@ def test_missing_pricing_table_warning_names_the_kanban_side_path(
     assert str(dev_tree) not in err
 
 
-def test_load_pricing_install_root_override_reads_that_tree(
-    tmp_path: pathlib.Path, monkeypatch, capsys
-) -> None:
+def test_load_pricing_install_root_override_reads_that_tree(tmp_path: pathlib.Path, monkeypatch, capsys) -> None:
     """An explicit install_root reads that tree's scripts/lib table; a malformed
     table yields {} and one warning naming the file."""
     monkeypatch.setattr(agg, "_PRICING_WARNED", False)

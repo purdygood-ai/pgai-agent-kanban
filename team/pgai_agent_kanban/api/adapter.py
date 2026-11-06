@@ -82,7 +82,7 @@ import signal
 import subprocess
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from ..lib.error_contract import format_error_contract
 from ..ops.errors import Ambiguous, CliRefusal, NotFound, OpsError, Refused, cli_exit_code
@@ -140,8 +140,8 @@ class ShellResult:
     exit_code: int
     stdout: str
     stderr: str
-    error: Optional[OpsError] = field(default=None, compare=False, repr=False)
-    status: Optional[int] = field(default=None, compare=False)
+    error: OpsError | None = field(default=None, compare=False, repr=False)
+    status: int | None = field(default=None, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +220,7 @@ def shell_out(
     script_path: str,
     flags: dict[str, Any],
     *,
-    timeout_seconds: Optional[float] = None,
+    timeout_seconds: float | None = None,
 ) -> ShellResult:
     """Invoke a script with the given flags and return a ShellResult envelope.
 
@@ -258,7 +258,7 @@ def shell_out(
     return run_bounded(build_argv(script_path, flags), timeout_seconds=timeout_seconds)
 
 
-def run_bounded(argv: list[str], *, timeout_seconds: Optional[float] = None) -> ShellResult:
+def run_bounded(argv: list[str], *, timeout_seconds: float | None = None) -> ShellResult:
     """Run *argv* (stdin /dev/null, output captured) in its own process group, bounded.
 
     The one bounded runner behind :func:`shell_out` and every route that
@@ -286,7 +286,7 @@ def run_bounded(argv: list[str], *, timeout_seconds: Optional[float] = None) -> 
     )
 
 
-def _stop_process_group(proc: "subprocess.Popen[str]") -> tuple[str, str]:
+def _stop_process_group(proc: subprocess.Popen[str]) -> tuple[str, str]:
     """SIGTERM *proc*'s process group, SIGKILL what remains after the grace; return its output so far.
 
     A descendant that left the group and still holds the output pipes cannot
@@ -342,7 +342,7 @@ _INVALID_KEY_RE = re.compile(r"invalid|not[_-]?component|malformed|required|conf
 _CONFLICT_KEY_RE = re.compile(r"ambiguous|conflict")
 
 
-def status_for_error_key(error_key: str) -> Optional[int]:
+def status_for_error_key(error_key: str) -> int | None:
     """Return the HTTP status a refusal's stable error key names, or None.
 
     422 for a key naming an invalid, malformed, missing-but-required or
@@ -367,8 +367,8 @@ def http_status_for(
     exit_code: int,
     *,
     error_key: str = "",
-    error: Optional[OpsError] = None,
-    status: Optional[int] = None,
+    error: OpsError | None = None,
+    status: int | None = None,
 ) -> int:
     """Map a result to its HTTP status integer.
 
@@ -443,9 +443,7 @@ def validate_required(
     for key in required_keys:
         value = params.get(key)
         if value is None or value == "":
-            raise ValidationError(
-                f"Required parameter '{key}' is missing or empty.", key=key
-            )
+            raise ValidationError(f"Required parameter '{key}' is missing or empty.", key=key)
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +493,7 @@ class OpsOutcome:
     exit_code: int = 0
     stdout: str = ""
     stderr: str = ""
-    error: Optional[OpsError] = field(default=None)
+    error: OpsError | None = field(default=None)
 
     @property
     def ok(self) -> bool:
@@ -539,13 +537,13 @@ class ops_call(contextlib.AbstractContextManager):  # noqa: N801 -- used as a wi
     exception propagates after the captured streams are restored.
     """
 
-    def __init__(self, *, exit_code: Optional[int] = None, capture: bool = True) -> None:
+    def __init__(self, *, exit_code: int | None = None, capture: bool = True) -> None:
         self._exit_code_override = exit_code
         self._capture = capture
         self._outcome = OpsOutcome()
         self._stdout = io.StringIO()
         self._stderr = io.StringIO()
-        self._redirects: Optional[contextlib.ExitStack] = None
+        self._redirects: contextlib.ExitStack | None = None
 
     def __enter__(self) -> OpsOutcome:
         if not self._capture:
@@ -577,9 +575,5 @@ class ops_call(contextlib.AbstractContextManager):  # noqa: N801 -- used as a wi
             return False
         outcome.error = exc
         outcome.stderr += f"{exc}\n"
-        outcome.exit_code = (
-            self._exit_code_override
-            if self._exit_code_override is not None
-            else cli_exit_code(exc)
-        )
+        outcome.exit_code = self._exit_code_override if self._exit_code_override is not None else cli_exit_code(exc)
         return True

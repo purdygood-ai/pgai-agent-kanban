@@ -67,7 +67,7 @@ from pgai_agent_kanban.lib.bug_filing import (
 from tests.fixtures.hand_filed_bug import CLOSED_STATUSES, write_hand_filed_bug
 
 
-def _write_bug(bugs_dir: pathlib.Path, name: str, *, status: "str | None") -> None:
+def _write_bug(bugs_dir: pathlib.Path, name: str, *, status: str | None) -> None:
     bugs_dir.mkdir(parents=True, exist_ok=True)
     body = "" if status is None else f"## Status\n{status}\n\n"
     (bugs_dir / name).write_text(f"# fixture\n\n{body}", encoding="utf-8")
@@ -287,9 +287,7 @@ def test_find_existing_bug_matches_a_string_key_against_the_section_value(tmp_pa
 def test_find_existing_bug_matches_a_set_key_in_any_order(tmp_path: pathlib.Path) -> None:
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir()
-    (bugs_dir / "BUG-9301-widget-drops-input.md").write_text(
-        render_bug_record("BUG-9301", _record(key=("b/x", "a/y")))
-    )
+    (bugs_dir / "BUG-9301-widget-drops-input.md").write_text(render_bug_record("BUG-9301", _record(key=("b/x", "a/y"))))
 
     assert find_existing_bug(str(bugs_dir), "Example Key", {"a/y", "b/x"}) == "BUG-9301"
     assert find_existing_bug(str(bugs_dir), "Example Key", ("a/y",)) is None

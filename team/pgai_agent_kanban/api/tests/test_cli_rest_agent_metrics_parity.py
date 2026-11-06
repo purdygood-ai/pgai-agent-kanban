@@ -49,7 +49,7 @@ from fastapi.testclient import TestClient
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _API_TESTS_DIR = _THIS_FILE.parent
 _TEAM_DIR = _API_TESTS_DIR.parent.parent.parent  # team/
-_PROJECT_ROOT = _TEAM_DIR.parent                  # project root (contains team/)
+_PROJECT_ROOT = _TEAM_DIR.parent  # project root (contains team/)
 _AGENT_METRICS_SH = _TEAM_DIR / "scripts" / "dashboard" / "agent-metrics.sh"
 
 for _path in (_PROJECT_ROOT, _TEAM_DIR):
@@ -62,7 +62,6 @@ from tests.fixtures.rc_rollup_history import (  # noqa: E402
     build_rc_history,
     write_rollups,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture builder helpers
@@ -210,9 +209,7 @@ def _parse_total(raw: str) -> int:
 
 # A rendered agent row: "<agent>  <wall>  <tokens>  <tasks>  <total tokens>
 # <total tasks>", whitespace-padded; the three averages carry one decimal.
-_ROW_RE = re.compile(
-    r"^(\S+)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+([\d,]+)\s+([\d,]+)\s*$"
-)
+_ROW_RE = re.compile(r"^(\S+)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+(--|[\d,]+\.\d)\s+([\d,]+)\s+([\d,]+)\s*$")
 
 # The footer after the rows: "<label>: <N> shipped RCs (<M> cancelled excluded)",
 # where <label> is "window", "all" or "since vX.Y.Z".
@@ -224,9 +221,12 @@ _FOOTER_RE = re.compile(
 def _run_cli(kanban_root: pathlib.Path, project: str, span_args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            "bash", str(_AGENT_METRICS_SH),
-            "--kanban-root", str(kanban_root),
-            "--project", project,
+            "bash",
+            str(_AGENT_METRICS_SH),
+            "--kanban-root",
+            str(kanban_root),
+            "--project",
+            project,
             *span_args,
             "--no-color",
         ],
@@ -326,7 +326,9 @@ def _assert_pair_agrees(cli: dict, body: dict, label: str) -> None:
 
 class TestCliRestAgentMetricsParity:
     def test_every_agent_field_matches_between_cli_and_rest(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """CLI and REST agree on every agent's averages and totals for a
         project with a normal multi-RC window (including an
@@ -344,7 +346,7 @@ class TestCliRestAgentMetricsParity:
         agents = cli["agents"]
         assert set(agents.keys()) == {"coder", "writer"}
         assert agents["coder"]["avg_wall_minutes"] == 30.0  # only v0.1.0 carries wall data for coder
-        assert agents["coder"]["avg_tasks"] == 2.5          # (2+3)/2, one decimal, never floored
+        assert agents["coder"]["avg_tasks"] == 2.5  # (2+3)/2, one decimal, never floored
         assert agents["coder"]["total_tasks"] == 5
         assert agents["coder"]["total_tokens"] == 2500
         # coder and writer are both invoked in v0.1.0 -- an RC-level join
@@ -354,7 +356,9 @@ class TestCliRestAgentMetricsParity:
         assert agents["coder"]["avg_wall_minutes"] != agents["writer"]["avg_wall_minutes"]
 
     def test_cancelled_rc_is_excluded_and_counted_on_both_surfaces(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Five shipped RCs of 2 cm tasks each plus one cancelled RC: both
         surfaces read cm as 2.0 tasks/RC over 10 total tasks, and both
@@ -411,7 +415,9 @@ class TestCliRestAgentMetricsParity:
             assert body["window"] == body["shipped_count"]
 
     def test_span_modes_select_different_rc_sets(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The span parameters are honored, not ignored: on the 40-RC
         history --all covers every shipped RC, --since and --last fewer."""
@@ -463,7 +469,9 @@ class TestCliRestAgentMetricsParity:
             assert f"--{name}" in cli.stderr, f"CLI stderr {cli.stderr!r} does not name --{name}"
 
     def test_empty_project_matches_the_no_metrics_placeholder_on_both_surfaces(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A registered project with no metrics/rc/ directory renders as
         an empty agent list on both surfaces -- never a stack trace."""
@@ -478,7 +486,9 @@ class TestCliRestAgentMetricsParity:
         assert (body["shipped_count"], body["excluded_count"]) == (0, 0)
 
     def test_unknown_project_matches_the_no_metrics_placeholder_on_both_surfaces(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A project name that is not registered in projects.cfg at all
         renders the SAME empty-agents placeholder on both surfaces --
@@ -494,7 +504,9 @@ class TestCliRestAgentMetricsParity:
         assert resp.json()["agents"] == []
 
     def test_changing_the_fixture_data_changes_both_surfaces_in_lockstep(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A single fixture mutation (adding a new RC rollup) is reflected
         identically by both surfaces, proving they read the same underlying
@@ -518,8 +530,11 @@ class TestCliRestAgentMetricsParity:
         _assert_pair_agrees(cli_before, body_before, "before")
         assert _rest_agents(body_before) == {
             "coder": {
-                "avg_wall_minutes": 10.0, "avg_tokens": 100.0, "avg_tasks": 1.0,
-                "total_tokens": 100, "total_tasks": 1,
+                "avg_wall_minutes": 10.0,
+                "avg_tokens": 100.0,
+                "avg_tasks": 1.0,
+                "total_tokens": 100,
+                "total_tasks": 1,
             }
         }
 
@@ -541,7 +556,10 @@ class TestCliRestAgentMetricsParity:
         _assert_pair_agrees(cli_after, body_after, "after")
         assert _rest_agents(body_after) == {
             "coder": {
-                "avg_wall_minutes": 20.0, "avg_tokens": 300.0, "avg_tasks": 2.0,
-                "total_tokens": 600, "total_tasks": 4,
+                "avg_wall_minutes": 20.0,
+                "avg_tokens": 300.0,
+                "avg_tasks": 2.0,
+                "total_tokens": 600,
+                "total_tasks": 4,
             }
         }

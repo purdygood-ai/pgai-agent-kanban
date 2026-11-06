@@ -220,23 +220,17 @@ def test_why_details_names_disagreeing_marker_and_state_while_leaving_agreeing_e
     assert result.returncode in (0, 2, 3, 4, 5), f"why.sh refused: {result.stderr!r}"
     tails = _section(result.stdout, "queue tails (last 5, raw markers)")
 
-    disagreeing_line = next(
-        line for line in tails.splitlines() if "CODER-20260910-102-stale-marker" in line
-    )
+    disagreeing_line = next(line for line in tails.splitlines() if "CODER-20260910-102-stale-marker" in line)
     assert "[x]" in disagreeing_line, disagreeing_line
     assert "status.md: WORKING" in disagreeing_line, (
         "the disagreeing entry must name both the raw marker and the real "
         f"status.md state in the same line: {disagreeing_line!r}"
     )
 
-    agrees_done_line = next(
-        line for line in tails.splitlines() if "CODER-20260910-101-agrees-done" in line
-    )
+    agrees_done_line = next(line for line in tails.splitlines() if "CODER-20260910-101-agrees-done" in line)
     assert "status.md: DONE" in agrees_done_line, agrees_done_line
 
-    agrees_backlog_line = next(
-        line for line in tails.splitlines() if "CODER-20260910-103-agrees-backlog" in line
-    )
+    agrees_backlog_line = next(line for line in tails.splitlines() if "CODER-20260910-103-agrees-backlog" in line)
     assert "status.md: BACKLOG" in agrees_backlog_line, agrees_backlog_line
 
 
@@ -275,8 +269,7 @@ def test_why_details_reports_malformed_refusal_ledger_as_unusable_never_as_no_re
     result = _run_why(["--project", "demo", "--details"], tmp_path)
 
     assert result.returncode != 0, (
-        "a malformed refusal ledger must refuse, not silently render a "
-        f"pane: {result.stdout!r}"
+        "a malformed refusal ledger must refuse, not silently render a " f"pane: {result.stdout!r}"
     )
     assert result.stdout == "", (
         "why.sh's --details 'never printed over' contract means nothing "
@@ -284,17 +277,13 @@ def test_why_details_reports_malformed_refusal_ledger_as_unusable_never_as_no_re
     )
 
     combined = result.stdout + result.stderr
-    assert str(ledger_path) in combined, (
-        f"the refusal must name the malformed ledger file by path: {combined!r}"
-    )
+    assert str(ledger_path) in combined, f"the refusal must name the malformed ledger file by path: {combined!r}"
     assert "malformed" in combined.lower(), combined
     assert "remedy" in combined.lower(), (
-        "the refusal must say which required field is missing, not just "
-        f"that the file is bad: {combined!r}"
+        "the refusal must say which required field is missing, not just " f"that the file is bad: {combined!r}"
     )
     assert "no discovery/gate refusal recorded" not in combined, (
-        "a malformed record must never read as the healthy 'never "
-        f"recorded' empty state: {combined!r}"
+        "a malformed record must never read as the healthy 'never " f"recorded' empty state: {combined!r}"
     )
 
 
@@ -358,14 +347,14 @@ def test_why_no_argument_walk_does_not_mask_a_stalled_project_behind_a_healthy_o
     # context ("... stays within the 60m stall threshold"); what distinguishes
     # an actual stall is the "churn or a hang" cause fragment, only emitted
     # once the threshold is exceeded (team/pgai_agent_kanban/ops/verdict.py).
-    assert "churn or a hang" in alpha_line, (
-        f"a stalled project's line must not read as a bare healthy RUNNING: {alpha_line!r}"
-    )
+    assert (
+        "churn or a hang" in alpha_line
+    ), f"a stalled project's line must not read as a bare healthy RUNNING: {alpha_line!r}"
 
     assert beta_line.startswith("lane-beta: RUNNING"), beta_line
-    assert "churn or a hang" not in beta_line, (
-        f"a healthy project sharing the walk must not be flagged as stalled: {beta_line!r}"
-    )
+    assert (
+        "churn or a hang" not in beta_line
+    ), f"a healthy project sharing the walk must not be flagged as stalled: {beta_line!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -404,8 +393,10 @@ def test_verify_rc_state_marker_check_diagnoses_identically_on_prefixed_and_bare
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "matrixtest-prefixed", prefixed_repo,
-        "matrixtest-bare", bare_repo,
+        "matrixtest-prefixed",
+        prefixed_repo,
+        "matrixtest-bare",
+        bare_repo,
     )
     _write_release_state(kanban_root / "projects" / "matrixtest-prefixed", "v1.0.0")
     _write_release_state(kanban_root / "projects" / "matrixtest-bare", "v1.0.0")
@@ -422,14 +413,10 @@ def test_verify_rc_state_marker_check_diagnoses_identically_on_prefixed_and_bare
         project_root = kanban_root / "projects" / project_name
         task_dir = project_root / "tasks" / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "status.md").write_text(
-            "## State\nWORKING\n\n## Summary\nfixture task\n", encoding="utf-8"
-        )
+        (task_dir / "status.md").write_text("## State\nWORKING\n\n## Summary\nfixture task\n", encoding="utf-8")
         queue_dir = project_root / "tasks" / "queues"
         queue_dir.mkdir(parents=True, exist_ok=True)
-        (queue_dir / "coder_backlog.md").write_text(
-            f"- [x] {task_id} — stale done marker\n", encoding="utf-8"
-        )
+        (queue_dir / "coder_backlog.md").write_text(f"- [x] {task_id} — stale done marker\n", encoding="utf-8")
 
     prefixed_result = _run_verify_rc_state(kanban_root, "matrixtest-prefixed")
     bare_result = _run_verify_rc_state(kanban_root, "matrixtest-bare")
@@ -437,17 +424,20 @@ def test_verify_rc_state_marker_check_diagnoses_identically_on_prefixed_and_bare
     for result in (prefixed_result, bare_result):
         assert result.returncode == 1, result.stdout + result.stderr
         error_lines = [
-            line for line in result.stdout.splitlines()
+            line
+            for line in result.stdout.splitlines()
             if line.startswith("[ERROR]") and "status/marker mismatch" in line
         ]
         assert error_lines, result.stdout
 
     prefixed_error = next(
-        line for line in prefixed_result.stdout.splitlines()
+        line
+        for line in prefixed_result.stdout.splitlines()
         if line.startswith("[ERROR]") and "status/marker mismatch" in line
     )
     bare_error = next(
-        line for line in bare_result.stdout.splitlines()
+        line
+        for line in bare_result.stdout.splitlines()
         if line.startswith("[ERROR]") and "status/marker mismatch" in line
     )
     # Compare everything up to the trailing "— status: <path>" segment, since

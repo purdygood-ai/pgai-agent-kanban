@@ -80,8 +80,7 @@ _CLI_VERSIONS_EMPTY_KEY = "run-cold-build-tests.cli-versions-empty"
 # Per-pair success line printed by team/tests/cold/test_docker_cold_build.py's
 # _build_flavor_image() on a successful build.
 _BUILT_PAIR_RE = re.compile(
-    r"\[cold-build\]\s+\[(?P<engine>\S+)\]\s+\[(?P<flavor>\S+)\]\s+"
-    r"Image built successfully"
+    r"\[cold-build\]\s+\[(?P<engine>\S+)\]\s+\[(?P<flavor>\S+)\]\s+" r"Image built successfully"
 )
 
 # Narrated-skip line printed by the same module's _narrate_skip(), one line
@@ -203,10 +202,7 @@ def extract_failing_tests(output_text: str) -> list:
 
 
 def _extract_built_pairs(output_text: str) -> list:
-    return [
-        f"{m.group('engine')}/{m.group('flavor')}: built"
-        for m in _BUILT_PAIR_RE.finditer(output_text)
-    ]
+    return [f"{m.group('engine')}/{m.group('flavor')}: built" for m in _BUILT_PAIR_RE.finditer(output_text)]
 
 
 def _extract_skip_reasons(output_text: str) -> list:
@@ -229,17 +225,13 @@ def shows_build_evidence(output_text: str) -> bool:
 def _no_pair_built_detail(skip_reasons: list) -> str:
     """The detail prefix for a run in which no pair built and every pair
     the run reached was narrate-skipped, naming each skip reason."""
-    return (
-        "no (engine, flavor) pair built; every pair the run reached was "
-        "narrate-skipped: " + "; ".join(skip_reasons)
+    return "no (engine, flavor) pair built; every pair the run reached was " "narrate-skipped: " + "; ".join(
+        skip_reasons
     )
 
 
 def _extract_failing_pairs(output_text: str) -> list:
-    return [
-        f"{pair.engine}/{pair.flavor}: failed at step: {pair.step}"
-        for pair in extract_failing_pairs(output_text)
-    ]
+    return [f"{pair.engine}/{pair.flavor}: failed at step: {pair.step}" for pair in extract_failing_pairs(output_text)]
 
 
 def _single_line(detail: str) -> str:
@@ -329,10 +321,7 @@ def classify_cold_build_result(exit_code: int, output_text: str) -> Classificati
                     ),
                 )
             # The builds that ran are recorded as built.
-            detail_parts = [
-                "no image-build test failed; non-build cold test(s) failed: "
-                + failing_nodeids
-            ]
+            detail_parts = ["no image-build test failed; non-build cold test(s) failed: " + failing_nodeids]
             built_pairs = _extract_built_pairs(output_text)
             if built_pairs:
                 detail_parts.append("; ".join(built_pairs))
@@ -362,9 +351,7 @@ def classify_cold_build_result(exit_code: int, output_text: str) -> Classificati
         if built_pairs:
             detail_parts = list(built_pairs)
             if skip_reasons:
-                detail_parts.append(
-                    f"(also narrate-skipped: {'; '.join(skip_reasons)})"
-                )
+                detail_parts.append(f"(also narrate-skipped: {'; '.join(skip_reasons)})")
             return Classification(VERDICT_BUILT, _single_line("; ".join(detail_parts)))
         if skip_reasons:
             # No pair built, pairs were narrate-skipped, and the lane still
@@ -372,10 +359,7 @@ def classify_cold_build_result(exit_code: int, output_text: str) -> Classificati
             # all-skipped marker prints only when pytest collected nothing.
             return Classification(
                 VERDICT_COULD_NOT_ATTEMPT,
-                _single_line(
-                    _no_pair_built_detail(skip_reasons)
-                    + " (the lane exited 0: the other cold tests passed)"
-                ),
+                _single_line(_no_pair_built_detail(skip_reasons) + " (the lane exited 0: the other cold tests passed)"),
             )
         return Classification(
             VERDICT_BUILT,
@@ -418,7 +402,7 @@ def main(argv: list | None = None) -> int:
         return 2
 
     try:
-        with open(argv[1], "r", encoding="utf-8", errors="replace") as handle:
+        with open(argv[1], encoding="utf-8", errors="replace") as handle:
             output_text = handle.read()
     except OSError as exc:
         print(f"classify.py: could not read {argv[1]}: {exc}", file=sys.stderr)

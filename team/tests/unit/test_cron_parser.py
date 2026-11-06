@@ -34,9 +34,10 @@ try:
         _is_every_minute,
     )
 except ImportError:
-    import sys, pathlib
+    import sys
+    import pathlib
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
-    from lib import cron_parser  # type: ignore[no-redef]
     from lib.cron_parser import (  # type: ignore[no-redef]
         next_firings,
         _parse_field,
@@ -89,19 +90,23 @@ def test_parse_field(field: str, min_val: int, max_val: int, expected: list) -> 
     "command, expected",
     [
         pytest.param(
-            "$ROOT/scripts/wake-batch.sh --agent=coder --sleep=12", 12,
+            "$ROOT/scripts/wake-batch.sh --agent=coder --sleep=12",
+            12,
             id="extracts_equals_form",
         ),
         pytest.param(
-            "$ROOT/scripts/wake-batch.sh --agent=pm --sleep 36", 36,
+            "$ROOT/scripts/wake-batch.sh --agent=pm --sleep 36",
+            36,
             id="extracts_positional_form",
         ),
         pytest.param(
-            "$ROOT/scripts/wake-batch.sh --agent=pm", 0,
+            "$ROOT/scripts/wake-batch.sh --agent=pm",
+            0,
             id="returns_zero_when_absent",
         ),
         pytest.param(
-            "$ROOT/scripts/wake-batch.sh --agent=po --sleep=0", 0,
+            "$ROOT/scripts/wake-batch.sh --agent=po --sleep=0",
+            0,
             id="returns_zero_for_explicit_zero",
         ),
     ],
@@ -160,11 +165,17 @@ def test_weekly_sentinel(minute_vals: list, hour_vals: list, dow_vals: list, exp
     "minute_vals, hour_vals, dow_vals, expected",
     [
         pytest.param(
-            list(range(60)), list(range(24)), list(range(7)), True,
+            list(range(60)),
+            list(range(24)),
+            list(range(7)),
+            True,
             id="all_fields_complete",
         ),
         pytest.param(
-            list(range(0, 60, 5)), list(range(24)), list(range(7)), False,
+            list(range(0, 60, 5)),
+            list(range(24)),
+            list(range(7)),
+            False,
             id="partial_minutes_returns_false",
         ),
     ],
@@ -187,7 +198,8 @@ _LINE_WITH_QUOTED_HASH = "* * * * * echo '#not-a-comment'"
     "line, expected",
     [
         pytest.param(
-            _LINE_WITH_UNQUOTED_HASH, _LINE_WITH_UNQUOTED_HASH.index("#"),
+            _LINE_WITH_UNQUOTED_HASH,
+            _LINE_WITH_UNQUOTED_HASH.index("#"),
             id="unquoted_hash",
         ),
         pytest.param(_LINE_WITHOUT_COMMENT, -1, id="no_comment_returns_negative_one"),
@@ -222,27 +234,33 @@ def test_next_firings_returns_empty_dict(crontab: str) -> None:
     [
         pytest.param(
             "*/5 * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=coder\n",
-            "coder", id="simple_every_5_minutes_agent",
+            "coder",
+            id="simple_every_5_minutes_agent",
         ),
         pytest.param(
             "*/5 * * * * $KANBAN_ROOT/scripts/wake-batch.sh pm\n",
-            "pm", id="wake_script_positional_agent_form",
+            "pm",
+            id="wake_script_positional_agent_form",
         ),
         pytest.param(
             "*/5 * * * * $KANBAN_ROOT/scripts/wake/claude.sh --agent=writer\n",
-            "writer", id="provider_subdir_wake_script",
+            "writer",
+            id="provider_subdir_wake_script",
         ),
         pytest.param(
             "0 3 * * * $KANBAN_ROOT/scripts/cleanup.sh\n",
-            "cleanup", id="cleanup_entry_is_detected",
+            "cleanup",
+            id="cleanup_entry_is_detected",
         ),
         pytest.param(
             "0 3 * * * $KANBAN_ROOT/scripts/cleanup/cleanup.sh\n",
-            "cleanup", id="cleanup_entry_nested_path",
+            "cleanup",
+            id="cleanup_entry_nested_path",
         ),
         pytest.param(
             "*/5 * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=tester # every 5 min\n",
-            "tester", id="inline_comment_stripped_before_parse",
+            "tester",
+            id="inline_comment_stripped_before_parse",
         ),
     ],
 )
@@ -259,15 +277,21 @@ def test_next_firings_extracts_agent_or_cleanup_key_as_integer_seconds(crontab: 
     [
         pytest.param(
             "0 4 * * 0 $KANBAN_ROOT/scripts/wake-batch.sh --agent=po\n",
-            "po", "Sun", id="weekly_agent_returns_sentinel_string",
+            "po",
+            "Sun",
+            id="weekly_agent_returns_sentinel_string",
         ),
         pytest.param(
             "0 2 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n",
-            "cleanup", None, id="weekly_cleanup_returns_sentinel_string",
+            "cleanup",
+            None,
+            id="weekly_cleanup_returns_sentinel_string",
         ),
         pytest.param(
             "0 4 * * 7 $KANBAN_ROOT/scripts/wake-batch.sh --agent=po\n",
-            "po", "Sun", id="dow_normalises_7_to_sunday",
+            "po",
+            "Sun",
+            id="dow_normalises_7_to_sunday",
         ),
     ],
 )
@@ -288,26 +312,27 @@ def test_next_firings_weekly_schedule_returns_sentinel_string(
         pytest.param(
             datetime(2024, 1, 15, 10, 30, 0),
             "* * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=coder --sleep=12\n",
-            "coder", 12,
+            "coder",
+            12,
             id="stagger_with_every_minute_schedule_pos_before_stagger",
         ),
         pytest.param(
             datetime(2024, 1, 15, 10, 30, 30),
             "* * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=coder --sleep=12\n",
-            "coder", 42,
+            "coder",
+            42,
             id="stagger_past_slot_uses_next_minute",
         ),
         pytest.param(
             _NOW,
             "*/5 * * * * $KANBAN_ROOT/scripts/wake-batch.sh --agent=cm --sleep=30\n",
-            "cm", 330,
+            "cm",
+            330,
             id="sleep_offset_added_to_regular_schedule",
         ),
     ],
 )
-def test_next_firings_computes_exact_seconds_with_stagger(
-    now: datetime, crontab: str, key: str, expected: int
-) -> None:
+def test_next_firings_computes_exact_seconds_with_stagger(now: datetime, crontab: str, key: str, expected: int) -> None:
     """next_firings adds the --sleep=N stagger to the cron-fire delta, using slot-aware
     math for the every-minute schedule (current-minute slot if not yet passed, else next-minute)."""
     result = next_firings(crontab, now=now)

@@ -91,8 +91,9 @@ operator override sets the name back explicitly through that `extra_env`.
 from __future__ import annotations
 
 import os
+import sys
 import pathlib
-from typing import Iterable, Optional, Union
+from collections.abc import Iterable
 
 _DEFAULT_LANG = "C.UTF-8"
 _STANDARD_TOOLCHAIN_DIRS = ("/usr/local/bin", "/usr/bin", "/bin")
@@ -137,10 +138,10 @@ WAKE_TUNABLE_ENV_NAMES = (
 
 def build_scrubbed_env(
     *,
-    home_dir: Union[str, pathlib.Path],
-    extra_path_dirs: Iterable[Union[str, pathlib.Path]] = (),
+    home_dir: str | pathlib.Path,
+    extra_path_dirs: Iterable[str | pathlib.Path] = (),
     lang: str = _DEFAULT_LANG,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
 ) -> dict:
     """Build a subprocess environment from an explicit minimal set of names.
 
@@ -153,6 +154,7 @@ def build_scrubbed_env(
 
     Optional:
       extra_path_dirs -- directories to prepend to PATH ahead of the
+                          suite's interpreter directory and the
                           standard POSIX toolchain, in the order given.
                           Empty by default -- most subprocess tests need
                           nothing ahead of the standard toolchain; pass a
@@ -172,7 +174,12 @@ def build_scrubbed_env(
     merges `os.environ` -- every name present in the result is either
     constructed here or supplied by the caller through extra_env.
     """
-    path_entries = [str(p) for p in extra_path_dirs] + list(_STANDARD_TOOLCHAIN_DIRS)
+    # The suite's own interpreter directory sits between the caller's stubs and
+    # the standard toolchain: a script under test that runs `python3` gets the
+    # Python the suite runs under (the kanban requires 3.12+), while a stub a
+    # caller placed in extra_path_dirs still wins.
+    interpreter_dir = str(pathlib.Path(sys.executable).parent)
+    path_entries = [str(p) for p in extra_path_dirs] + [interpreter_dir] + list(_STANDARD_TOOLCHAIN_DIRS)
     env: dict = {
         "PATH": os.pathsep.join(path_entries),
         "HOME": str(home_dir),

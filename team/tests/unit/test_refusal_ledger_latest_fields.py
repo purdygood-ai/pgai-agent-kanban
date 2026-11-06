@@ -33,24 +33,31 @@ from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _MODULE = "pgai_agent_kanban.lib.refusal_ledger"
 
-_RECORD = "\n".join([
-    "# Refusal ledger",
-    "",
-    "## Refusal: 2026-01-01T00:00:00Z — demo — release.sh:git_step",
-    "",
-    "- Context: install",
-    "- Error: gate.rc-branch-mismatch",
-    "- Message: the release stopped",
-    "- Remedy: git checkout ai_rc/v1.2.3",
-    "",
-])
+_RECORD = "\n".join(
+    [
+        "# Refusal ledger",
+        "",
+        "## Refusal: 2026-01-01T00:00:00Z — demo — release.sh:git_step",
+        "",
+        "- Context: install",
+        "- Error: gate.rc-branch-mismatch",
+        "- Message: the release stopped",
+        "- Remedy: git checkout ai_rc/v1.2.3",
+        "",
+    ]
+)
 
 
 def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 

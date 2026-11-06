@@ -32,32 +32,67 @@ The overview window. Header on top, progress in the middle, and a live log tail 
 
 ## Window 1 — operator
 
-The container operator's whole workspace, in three stacked regions: **board** (top), **cmdline** (middle), and **legend** (bottom). The board is window 2's eight columns at the same widths. The cmdline region is a full-width interactive shell, 15% of the window height (floor, minimum 3 rows), opened at the kanban root with the kanban shell-env sourced. The legend is window 2's one-row colour legend bar. Inside a container attach there is no "just open another terminal" — this window is meant to be the one screen an operator watches the board and runs commands (`show.sh`, `reset.sh`, `wontdo.sh`, `intake.sh`) from. For a reminder of the common commands, run `scripts/dashboard/suggested-commands.sh` in the shell.
+The container operator's whole workspace: the board to watch and two shells to work in. Inside a container attach there is no "just open another terminal" — this window is meant to be the one screen an operator watches the board and runs commands (`show.sh`, `reset.sh`, `wontdo.sh`, `intake.sh`) from. For a reminder of the common commands, run `scripts/dashboard/suggested-commands.sh` in the cmdline shell.
 
-<!-- CENSUS-GENERATED:BEGIN window=1 variant=- -->
-| Pane position | Populating script | Standalone command |
-|---|---|---|
-| Top-left, board input col 0 of 3 (BUGS) | `column-render.sh` | `column-render.sh input none none 13 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-left, board input col 1 of 3 (PRIORITIES) | `column-render.sh` | `column-render.sh input none none 13 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-left, board input col 2 of 3 (REQUIREMENTS) | `column-render.sh` | `column-render.sh input none none 13 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-right, board queue col 0 of 5 (PM) | `column-render.sh` | `column-render.sh queue none 13 26 --label PM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-right, board queue col 1 of 5 (CODER) | `column-render.sh` | `column-render.sh queue none 13 26 --label CODER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-right, board queue col 2 of 5 (WRITER) | `column-render.sh` | `column-render.sh queue none 13 26 --label WRITER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-right, board queue col 3 of 5 (TESTER) | `column-render.sh` | `column-render.sh queue none 13 26 --label TESTER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Top-right, board queue col 4 of 5 (CM) | `column-render.sh` | `column-render.sh queue none 13 26 --label CM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| Middle (15% height, floor, min 3 rows, full width, between board and legend) — interactive cmdline shell | (interactive bash, kanban shell-env sourced) | N/A -- interactive shell (cd $PGAI_AGENT_KANBAN_ROOT_PATH; source shell-env if present) |
-| Bottom (LEGEND, 1 row) | `legend-render.sh` | `legend-render.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
-<!-- CENSUS-GENERATED:END window=1 variant=- -->
+It has four regions. By default the board has four columns:
 
-The eight board column panes run the exact same commands as the visibility window's eight columns (same `column-render.sh` calls) — this window's board region is a faithful replica, not a different rendering. `suggested-commands.sh` is a command, not a pane: run in the shell, it prints a curated command reference and exits, and never invokes anything on the operator's behalf.
-
-**The tmux board panes add one flag the standalone commands leave out.** In this window and in window 2, each board column runs its `column-render.sh` command under `cadence-loop.sh` with `--board-widths input=29,queue=26` appended. The BUGS column, for example, runs:
-
-```bash
-column-render.sh input none none 13 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects --board-widths input=29,queue=26
+```text
+┌──────────────────────────────────────────────────────────┬──────────────┐
+│ board                                                    │              │
+│ BUGS PRIORITIES REQUIREMENTS                      AGENTS │  workbench   │
+├──────────────────────────────────────────────────────────┤              │
+│ cmdline                                                  │              │
+├──────────────────────────────────────────────────────────┴──────────────┤
+│ legend                                                                  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-The flag declares the width every board column is drawn at: `input` for the three input columns and `queue` for the five queue columns, the same widths the commands pass positionally. Whichever column builds a tick pre-renders all eight columns at those widths, so the other seven print their pre-rendered slice without starting Python. Output is identical with or without the flag; only the cost changes. The standalone commands in the tables leave it out and print the same content.
+- **board** (top left) — BUGS, PRIORITIES and REQUIREMENTS, then one AGENTS column listing every task in the five role backlogs (PM, CODER, WRITER, TESTER, CM). Each AGENTS row is the project glyph, then the task key with its role prefix (`CODER-YYYYMMDD-NNN`). Rows are grouped by project in registry order and sorted newest number first within a project, so a project's roles interleave; status colours and markers are the role columns' own. The four columns share the board width. `[dashboard] operator_board_agents = split` brings back the five role columns: the board is then window 2's eight columns, at window 2's widths without a workbench, or sharing the narrower board region in roughly the same proportions beside one, none narrower than 15 characters. Setting the key: [dashboard.md](dashboard.md), window 1.
+- **cmdline** (under the board, board width) — an interactive shell, 15% of the window height (floor, minimum 3 rows). The window opens with this pane active.
+- **workbench** (far right) — a second interactive shell, `[dashboard] operator_workbench_pct` of the window width (default 40), as tall as the board and cmdline together. Pane title `workbench`. Room for an assistant CLI or any other long-running interactive tool beside the board.
+- **legend** (bottom) — window 2's one-row colour legend bar, across the full window width.
+
+Both shells are `bash -l` login shells opened at the kanban root, with `~/.bashrc` sourced when present and the kanban shell-env sourced last.
+
+The workbench is absent when `operator_workbench_pct` is `0`, when the window is narrower than `[dashboard] operator_workbench_min_cols` (default 160), or when a board column would get fewer than 15 columns beside it. The board and cmdline then take the full width, and the legend is pane 5 (pane 9 on the split board). The check runs when `create.sh` builds the window and again whenever the window is resized. A built workbench that stops fitting moves to a window of its own named `workbench`, with its shell still running, until the window is wide enough again. How to size, disable and reach the workbench is in [dashboard.md](dashboard.md), window 1.
+
+<!-- CENSUS-GENERATED:BEGIN window=1 variant=merged -->
+| Pane position | Populating script | Standalone command |
+|---|---|---|
+| Top-left, board input col 0 of 3 (BUGS) | `column-render.sh` | `column-render.sh input none none 21 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-left, board input col 1 of 3 (PRIORITIES) | `column-render.sh` | `column-render.sh input none none 21 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-left, board input col 2 of 3 (REQUIREMENTS) | `column-render.sh` | `column-render.sh input none none 21 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-right, board agents col (AGENTS) — every task of the five role backlogs, grouped by project, newest first | `column-render.sh` | `column-render.sh queue none 21 30 --label AGENTS --column-type agents --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Middle (15% height, floor, min 3 rows, board width, between board and legend) — interactive cmdline shell | (interactive bash, kanban shell-env sourced) | N/A -- interactive shell (cd $PGAI_AGENT_KANBAN_ROOT_PATH; source shell-env if present) |
+| Far right (operator_workbench_pct of window width, default 40; board and cmdline height) — interactive workbench shell; absent when operator_workbench_pct is 0, the window is narrower than operator_workbench_min_cols (default 160), or a board column would get under 15 columns beside it (re-checked whenever the window is resized; a built workbench waits in its own window named workbench while absent), and the legend is then pane 5 | `none (interactive shell)` | N/A -- interactive shell (cd $PGAI_AGENT_KANBAN_ROOT_PATH; source shell-env if present) |
+| Bottom (LEGEND, 1 row) | `legend-render.sh` | `legend-render.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
+<!-- CENSUS-GENERATED:END window=1 variant=merged -->
+
+<!-- CENSUS-GENERATED:BEGIN window=1 variant=split -->
+| Pane position | Populating script | Standalone command |
+|---|---|---|
+| Top-left, board input col 0 of 3 (BUGS) | `column-render.sh` | `column-render.sh input none none 21 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-left, board input col 1 of 3 (PRIORITIES) | `column-render.sh` | `column-render.sh input none none 21 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-left, board input col 2 of 3 (REQUIREMENTS) | `column-render.sh` | `column-render.sh input none none 21 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-right, board queue col 0 of 5 (PM) | `column-render.sh` | `column-render.sh queue none 21 26 --label PM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-right, board queue col 1 of 5 (CODER) | `column-render.sh` | `column-render.sh queue none 21 26 --label CODER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-right, board queue col 2 of 5 (WRITER) | `column-render.sh` | `column-render.sh queue none 21 26 --label WRITER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-right, board queue col 3 of 5 (TESTER) | `column-render.sh` | `column-render.sh queue none 21 26 --label TESTER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Top-right, board queue col 4 of 5 (CM) | `column-render.sh` | `column-render.sh queue none 21 26 --label CM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| Middle (15% height, floor, min 3 rows, board width, between board and legend) — interactive cmdline shell | (interactive bash, kanban shell-env sourced) | N/A -- interactive shell (cd $PGAI_AGENT_KANBAN_ROOT_PATH; source shell-env if present) |
+| Far right (operator_workbench_pct of window width, default 40; board and cmdline height) — interactive workbench shell; absent when operator_workbench_pct is 0, the window is narrower than operator_workbench_min_cols (default 160), or a board column would get under 15 columns beside it (re-checked whenever the window is resized; a built workbench waits in its own window named workbench while absent), and the legend is then pane 9 | `none (interactive shell)` | N/A -- interactive shell (cd $PGAI_AGENT_KANBAN_ROOT_PATH; source shell-env if present) |
+| Bottom (LEGEND, 1 row) | `legend-render.sh` | `legend-render.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
+<!-- CENSUS-GENERATED:END window=1 variant=split -->
+
+The first table is the default merged board; the second is the board under `operator_board_agents = split`, whose eight column panes run the same `column-render.sh` calls as window 2's eight columns. On the merged board, BUGS, PRIORITIES and REQUIREMENTS are window 2's input columns and AGENTS is `column-render.sh --column-type agents`. `suggested-commands.sh` is a command, not a pane: run in the shell, it prints a curated command reference and exits, and never invokes anything on the operator's behalf.
+
+**The tmux board panes add one flag the standalone commands leave out.** In window 2 and on the split board, each board column runs its `column-render.sh` command under `cadence-loop.sh` with `--board-widths input=29,queue=26` appended; the merged board appends `--board-widths input=29,queue=26,agents=30`. Window 2's BUGS column, for example, runs:
+
+```bash
+column-render.sh input none none 21 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects --board-widths input=29,queue=26
+```
+
+The flag declares the width every board column is drawn at: `input` for the three input columns, `queue` for the five queue columns and `agents` for the AGENTS column, the same widths the commands pass positionally. Whichever column builds a tick pre-renders every column the flag declares at those widths, so the board's other columns print their pre-rendered slice without starting Python. Output is identical with or without the flag; only the cost changes. The standalone commands in the tables leave it out and print the same content.
 
 ## Window 2 — visibility
 
@@ -66,14 +101,14 @@ A grid of nine narrow columns: three input streams on the left (bugs, priorities
 <!-- CENSUS-GENERATED:BEGIN window=2 variant=- -->
 | Pane position | Populating script | Standalone command |
 |---|---|---|
-| left-col-0 (BUGS) | `column-render.sh` | `column-render.sh input none none 13 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| left-col-1 (PRIORITIES) | `column-render.sh` | `column-render.sh input none none 13 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| left-col-2 (REQUIREMENTS) | `column-render.sh` | `column-render.sh input none none 13 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| right-col-0 (PM queue) | `column-render.sh` | `column-render.sh queue none 13 26 --label PM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| right-col-1 (CODER queue) | `column-render.sh` | `column-render.sh queue none 13 26 --label CODER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| right-col-2 (WRITER queue) | `column-render.sh` | `column-render.sh queue none 13 26 --label WRITER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| right-col-3 (TESTER queue) | `column-render.sh` | `column-render.sh queue none 13 26 --label TESTER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
-| right-col-4 (CM queue) | `column-render.sh` | `column-render.sh queue none 13 26 --label CM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| left-col-0 (BUGS) | `column-render.sh` | `column-render.sh input none none 21 29 --label BUGS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| left-col-1 (PRIORITIES) | `column-render.sh` | `column-render.sh input none none 21 29 --label PRIORITIES --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| left-col-2 (REQUIREMENTS) | `column-render.sh` | `column-render.sh input none none 21 29 --label REQUIREMENTS --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| right-col-0 (PM queue) | `column-render.sh` | `column-render.sh queue none 21 26 --label PM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| right-col-1 (CODER queue) | `column-render.sh` | `column-render.sh queue none 21 26 --label CODER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| right-col-2 (WRITER queue) | `column-render.sh` | `column-render.sh queue none 21 26 --label WRITER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| right-col-3 (TESTER queue) | `column-render.sh` | `column-render.sh queue none 21 26 --label TESTER --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
+| right-col-4 (CM queue) | `column-render.sh` | `column-render.sh queue none 21 26 --label CM --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH --all-projects` |
 | Bottom (LEGEND, 1 row) | `legend-render.sh` | `legend-render.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 <!-- CENSUS-GENERATED:END window=2 variant=- -->
 
@@ -258,7 +293,7 @@ Single pane: each agent's newest reasoning trace from `$KANBAN_ROOT/logs/trainin
 | single | `training-logs.sh` | `PGAI_REASONING_TRACE=1 training-logs.sh --kanban-root $PGAI_AGENT_KANBAN_ROOT_PATH` |
 <!-- CENSUS-GENERATED:END window=11 variant=- -->
 
-The script is already standalone-capable: with `PGAI_REASONING_TRACE=1` it renders one pass and exits; with the variable unset or `0` it prints a placeholder and exits immediately. In tmux it runs under `watch -t -c -n 30`.
+The script is already standalone-capable: with `PGAI_REASONING_TRACE=1` it renders one pass and exits; with the variable unset or `0` it prints a placeholder and exits immediately. In tmux it runs under `cadence-loop.sh --interval 30`, which re-renders it every 30 seconds while its window is visible.
 
 ## Window 12 — terminal
 

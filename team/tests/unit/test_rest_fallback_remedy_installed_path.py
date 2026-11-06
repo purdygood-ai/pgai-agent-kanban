@@ -67,7 +67,7 @@ def _refusal(response) -> dict:
 def _command_part(remedy: str, lead: str = _RERUN) -> str:
     """The command a fallback remedy names: the text after its lead-in sentence."""
     assert remedy.startswith(lead), f"remedy does not start with {lead!r}: {remedy!r}"
-    return remedy[len(lead):]
+    return remedy[len(lead) :]
 
 
 def test_installed_script_command_names_the_script_under_the_root_shell_quoted(tmp_path: pathlib.Path) -> None:
@@ -138,15 +138,19 @@ def test_halt_after_fallback_remedy_names_the_installed_script(
         operations, "_halt_after_result", lambda *_args: ShellResult(1, "", "halt-after.sh: refused in plain text\n")
     )
 
-    response = _client(root).post(
-        "/operations/halt-after", json={"project": _PROJECT, "key": "rc", "until": "v1.2.3"}
-    )
+    response = _client(root).post("/operations/halt-after", json={"project": _PROJECT, "key": "rc", "until": "v1.2.3"})
 
     envelope = _refusal(response)
     assert envelope["error"] == "halt_after.refused", envelope
     words = shlex.split(_command_part(envelope["remedy"]))
     assert words == [
-        str(root / "scripts" / "halt-after.sh"), "--project", _PROJECT, "--key", "rc", "--until", "v1.2.3",
+        str(root / "scripts" / "halt-after.sh"),
+        "--project",
+        _PROJECT,
+        "--key",
+        "rc",
+        "--until",
+        "v1.2.3",
     ]
 
 
@@ -182,7 +186,5 @@ def test_release_locks_fallback_remedy_names_the_installed_script(
     assert envelope["error"] == "release_locks.refused", envelope
     listing = installed_script_command(root, "release-locks.sh")
     rerun = installed_script_command(root, "release-locks.sh", "--release", "repo-wake-demo")
-    assert envelope["remedy"] == (
-        f"Run {listing} with no flags to list every lock by name, then re-run: {rerun}"
-    )
+    assert envelope["remedy"] == (f"Run {listing} with no flags to list every lock by name, then re-run: {rerun}")
     assert shlex.split(rerun)[0] == str(root / "scripts" / "release-locks.sh")

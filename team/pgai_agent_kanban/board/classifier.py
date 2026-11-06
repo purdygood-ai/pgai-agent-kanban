@@ -78,7 +78,7 @@ from __future__ import annotations
 import logging
 import re
 import pathlib
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from pgai_agent_kanban.cm.read_state_field import read_release_state_field
 from pgai_agent_kanban.lib import bundle_items
@@ -164,7 +164,7 @@ _TARGET_VER_RE = re.compile(r"v?\d+\.\d+\.\d+")
 _QUEUE_LINE_RE = re.compile(
     r"^\s*-\s+\[(.)\]\s+"
     r"(((?:CLAUDE|CODEX|GEMINI)-[A-Z][A-Z0-9]*-(\d{8})-(\d+)-\S+)"  # old: grp2=id grp3=date grp4=seq
-    r"|([A-Z][A-Z0-9]*-(\d{8})-(\d+)-\S+))",                          # new: grp5=id grp6=date grp7=seq
+    r"|([A-Z][A-Z0-9]*-(\d{8})-(\d+)-\S+))",  # new: grp5=id grp6=date grp7=seq
     re.IGNORECASE,
 )
 
@@ -303,7 +303,9 @@ def _release_state_field(project_dir: pathlib.Path, heading: str) -> str:
     except (OSError, ValueError) as exc:
         _log.warning(
             "release-state.md field %r unreadable for %s; shown as blank:\n%s",
-            heading, project_dir, exc,
+            heading,
+            project_dir,
+            exc,
         )
         return ""
     return "" if val == "none" else val
@@ -336,7 +338,7 @@ def get_last_released_for_project(project_dir: pathlib.Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_queue_line(line: str) -> Optional[tuple]:
+def parse_queue_line(line: str) -> tuple | None:
     """Parse one line from an agent backlog file.
 
     Returns ``(marker, task_id, date_str, seq_int)`` when the line matches
@@ -414,7 +416,7 @@ def classify_input_item(
     column: str,
     active_rc: str,
     last_released: str,
-    carried: Optional[Iterable[str]] = None,
+    carried: Iterable[str] | None = None,
 ) -> str:
     """Classify an input-directory item (bug, priority, or requirement).
 
@@ -446,7 +448,7 @@ def classify_input_item(
 def classify_intake_file(
     path: pathlib.Path,
     raw_status: str,
-    carried: Optional[Iterable[str]] = None,
+    carried: Iterable[str] | None = None,
 ) -> str:
     """Classify the bug or priority file at *path* whose ``## Status`` is *raw_status*.
 

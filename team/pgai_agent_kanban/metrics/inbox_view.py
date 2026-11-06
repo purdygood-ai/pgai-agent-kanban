@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path. Put this file's own package root -- the
@@ -81,7 +81,7 @@ PROBLEM_NO_PROJECT = "no project directory"
 _ENTRY_INDENT = "  "
 
 
-def read_summary(kanban_root: object, project: str) -> tuple[Optional[InboxSummary], str]:
+def read_summary(kanban_root: object, project: str) -> tuple[InboxSummary | None, str]:
     """Return *project*'s inbox summary, or why there is none.
 
     Returns ``(summary, "")`` when the inbox reads (a missing file is an
@@ -97,9 +97,7 @@ def read_summary(kanban_root: object, project: str) -> tuple[Optional[InboxSumma
         return None, PROBLEM_UNREADABLE
 
 
-def read_open_entries(
-    kanban_root: object, project: str
-) -> tuple[Optional[tuple[InboxEntry, ...]], str]:
+def read_open_entries(kanban_root: object, project: str) -> tuple[tuple[InboxEntry, ...] | None, str]:
     """Return *project*'s open inbox entries, newest first, or why there are none.
 
     Returns ``(entries, "")`` when the inbox reads (a missing file gives
@@ -115,7 +113,7 @@ def read_open_entries(
         return None, PROBLEM_UNREADABLE
 
 
-def open_count(kanban_root: object, project: str) -> Optional[int]:
+def open_count(kanban_root: object, project: str) -> int | None:
     """Return *project*'s open-entry count, or ``None`` when it cannot be read."""
     summary, _ = read_summary(kanban_root, project)
     return summary.open_count if summary is not None else None
@@ -137,7 +135,7 @@ def count_lines(kanban_root: object, projects: Iterable[str]) -> list[str]:
     return lines or [f"{_ENTRY_INDENT}(no projects registered)"]
 
 
-def day_report_text(day_text: str, inbox_open: Optional[int]) -> Optional[str]:
+def day_report_text(day_text: str, inbox_open: int | None) -> str | None:
     """Return the per-day rollup *day_text* with :data:`DAY_KEY` set to *inbox_open*.
 
     Written as the aggregator writes a rollup (two-space indent, sorted keys,
@@ -171,8 +169,7 @@ def _print_day(kanban_root: str, project: str, day_file: str) -> int:
     text = day_report_text(day_text, open_count(kanban_root, project))
     if text is None:
         print(
-            f"[metrics-report] WARNING: {path} is not a JSON object; printed as stored, "
-            f"without \"{DAY_KEY}\".",
+            f"[metrics-report] WARNING: {path} is not a JSON object; printed as stored, " f'without "{DAY_KEY}".',
             file=sys.stderr,
         )
         text = day_text
@@ -180,7 +177,7 @@ def _print_day(kanban_root: str, project: str, day_file: str) -> int:
     return 0
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the inbox view CLI.
 
     ``counts`` prints one ``  <project>: <N> open`` line per named project.

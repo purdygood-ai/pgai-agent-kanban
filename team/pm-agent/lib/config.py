@@ -28,7 +28,6 @@ import os
 import re
 from pathlib import Path
 
-
 _DEFAULTS = {
     "PGAI_REQUIREMENTS_DIR": None,  # resolved relative to kanban_root if None
     "PGAI_PRIORITY_DIR": None,
@@ -39,9 +38,7 @@ _DEFAULTS = {
     "PGAI_CLEANUP_RETENTION_DAYS": "30",
 }
 
-_LINE_RE = re.compile(
-    r'^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$'
-)
+_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 
 
 def _parse_cfg(path):
@@ -89,10 +86,7 @@ def get_config(kanban_root=None):
     explicit_root = kanban_root is not None
     if kanban_root is None:
         # Resolve canonical var first, new-path as default.
-        kanban_root = (
-            os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-            or str(Path.home() / "pgai_agent_kanban")
-        )
+        kanban_root = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH") or str(Path.home() / "pgai_agent_kanban")
     kanban_root = str(kanban_root)
 
     suffix_map = {

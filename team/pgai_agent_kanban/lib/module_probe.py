@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import sys
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 __all__ = ["missing_modules"]
 
@@ -42,7 +42,7 @@ def missing_modules(names: Iterable[str]) -> list[str]:
     return missing
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the probe: exit 0 when every MODULE imports, 1 otherwise."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.lib.module_probe",

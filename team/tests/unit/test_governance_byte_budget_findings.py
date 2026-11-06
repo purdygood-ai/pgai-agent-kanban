@@ -54,8 +54,13 @@ def _run_cli(tmp_path: pathlib.Path, stdin: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE],
-        input=stdin, capture_output=True, text=True, env=env, cwd=str(tmp_path),
-        timeout=60, check=False,
+        input=stdin,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -97,7 +102,8 @@ def test_several_over_budget_lines_render_one_finding_each_in_input_order() -> N
 
 
 @pytest.mark.parametrize(
-    "line", ["coder\t120\n", "coder\t120\t100\textra\n", "coder\tmany\t100\n"],
+    "line",
+    ["coder\t120\n", "coder\t120\t100\textra\n", "coder\tmany\t100\n"],
     ids=["two-fields", "four-fields", "non-integer"],
 )
 def test_malformed_line_raises_value_error(line: str) -> None:
@@ -140,15 +146,11 @@ def test_lint_script_writes_the_module_rendering_for_several_over_budget_roles(
     )
     findings_path = tmp_path / "findings.json"
 
-    result = run_bash(
-        tmp_path, f"bash {_SCRIPT} --kanban-cfg {cfg} --findings-file {findings_path}"
-    )
+    result = run_bash(tmp_path, f"bash {_SCRIPT} --kanban-cfg {cfg} --findings-file {findings_path}")
 
     assert result.returncode == 0, result.stderr
     findings = json.loads(findings_path.read_text(encoding="utf-8"))
     assert [f["role"] for f in findings] == ["pm", "coder", "cm"]
     assert [f["budget_bytes"] for f in findings] == [1, 2, 3]
     lines = [f"{f['role']}\t{f['assembled_bytes']}\t{f['budget_bytes']}\n" for f in findings]
-    assert findings_path.read_text(encoding="utf-8") == (
-        governance_byte_budget.render_findings(lines) + "\n"
-    )
+    assert findings_path.read_text(encoding="utf-8") == (governance_byte_budget.render_findings(lines) + "\n")

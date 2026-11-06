@@ -56,6 +56,7 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
+import sys
 import textwrap
 
 import pytest
@@ -117,15 +118,13 @@ def _pytest_absent_path_env(tmp_path: pathlib.Path) -> dict[str, str]:
     stub_bin.mkdir(parents=True, exist_ok=True)
     python3_stub = stub_bin / "python3"
     python3_stub.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent(f"""\
             #!/usr/bin/env bash
             if [[ "$1" == "-m" && "$2" == "pytest" ]]; then
                 exit 1
             fi
-            exec /usr/bin/python3 "$@"
-            """
-        ),
+            exec {sys.executable} "$@"
+            """),
         encoding="utf-8",
     )
     python3_stub.chmod(0o755)
@@ -177,9 +176,7 @@ def _extract_function_block(path: pathlib.Path, func_name: str) -> str:
     for j in range(start + 1, len(lines)):
         if lines[j].strip() == "}":
             return "\n".join(lines[start : j + 1])
-    raise AssertionError(
-        f"no closing '}}' found for function {func_name!r} starting at line {start}"
-    )
+    raise AssertionError(f"no closing '}}' found for function {func_name!r} starting at line {start}")
 
 
 def _run_extracted_block(block: str, env_setup: str) -> subprocess.CompletedProcess:
@@ -191,9 +188,7 @@ def _run_extracted_block(block: str, env_setup: str) -> subprocess.CompletedProc
     block fell through without exiting (sentinel present).
     """
     script = f"{env_setup}\n{block}\necho REACHED_AFTER_BLOCK\n"
-    return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, timeout=10
-    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
 
 
 # ===========================================================================
@@ -202,15 +197,11 @@ def _run_extracted_block(block: str, env_setup: str) -> subprocess.CompletedProc
 
 
 @pytest.mark.parametrize("script", _RUNNERS, ids=_RUNNER_IDS)
-def test_unknown_argument_prints_full_remedy_block(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_unknown_argument_prints_full_remedy_block(script: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """An unrecognized flag prints Cause(s)/To fix/Rule and names the flag."""
     result = _run_runner(script, ["--this-flag-does-not-exist"], tmp_path)
 
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "--this-flag-does-not-exist" in result.stderr
     assert "Cause(s):" in result.stderr
     assert "To fix:" in result.stderr
@@ -231,8 +222,7 @@ def test_unknown_argument_remedys_help_command_actually_clears_the_gate(
     result = _run_runner(script, ["--help"], tmp_path)
 
     assert result.returncode == 0, (
-        f"expected --help to exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected --help to exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "Usage:" in result.stdout
 
@@ -243,16 +233,13 @@ def test_unknown_argument_remedys_help_command_actually_clears_the_gate(
 
 
 @pytest.mark.parametrize("script", _RUNNERS, ids=_RUNNER_IDS)
-def test_pytest_not_installed_prints_full_remedy_block(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_pytest_not_installed_prints_full_remedy_block(script: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """A pytest-absent environment aborts (exit 2) with a full remedy block."""
     env = _pytest_absent_path_env(tmp_path)
     result = _run_runner(script, [], tmp_path, extra_env=env)
 
     assert result.returncode == 2, (
-        f"expected exit 2; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 2; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "Cause(s):" in result.stderr
     assert "To fix:" in result.stderr
@@ -261,16 +248,17 @@ def test_pytest_not_installed_prints_full_remedy_block(
 
 
 @pytest.mark.parametrize("script", _RUNNERS, ids=_RUNNER_IDS)
-def test_pytest_available_environment_does_not_trip_the_gate(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_pytest_available_environment_does_not_trip_the_gate(script: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """Sanity check: with a PATH exposing the real pytest, the availability
     probe itself (isolated from the rest of the runner) passes — confirming
     'pip install pytest' is genuinely what clears this gate, without ever
     letting the runner reach its own real pytest invocation (see module
     docstring's non-recursion note)."""
-    block = _extract_block(script, 'command -v pytest >/dev/null 2>&1')
-    result = _run_extracted_block(block, env_setup="")
+    # The probe is gated_runner_pytest_available (lib/gated_runner_lint.sh),
+    # which the runner has sourced by this point.
+    block = _extract_block(script, "if ! gated_runner_pytest_available; then")
+    lib = _SCRIPTS_DIR / "lib" / "gated_runner_lint.sh"
+    result = _run_extracted_block(block, env_setup=f"source '{lib}'")
 
     assert "REACHED_AFTER_BLOCK" in result.stdout, (
         f"pytest-availability probe unexpectedly fired in a real pytest-installed "
@@ -298,8 +286,7 @@ def test_unit_runner_pytest_failure_names_next_diagnostic_step_not_a_fix() -> No
     assert "To fix:" not in result.stderr
 
 
-def test_integration_runner_pytest_failure_names_next_diagnostic_step(
-) -> None:
+def test_integration_runner_pytest_failure_names_next_diagnostic_step() -> None:
     script = _SCRIPTS_DIR / "run-integration-tests.sh"
     block = _extract_block(script, "if [[ $PYTEST_EXIT -eq 5 ]]; then")
     result = _run_extracted_block(block, env_setup="PYTEST_EXIT=1")
@@ -310,8 +297,7 @@ def test_integration_runner_pytest_failure_names_next_diagnostic_step(
     assert "To fix:" not in result.stderr
 
 
-def test_integration_runner_empty_suite_exit_5_is_still_treated_as_success(
-) -> None:
+def test_integration_runner_empty_suite_exit_5_is_still_treated_as_success() -> None:
     """Regression guard: the exit-5 (empty suite) branch is untouched by the
     remedy retrofit — it must still fall through without exiting non-zero."""
     script = _SCRIPTS_DIR / "run-integration-tests.sh"
@@ -396,9 +382,7 @@ def test_tmp_cleanliness_failure_points_to_the_residue_lines_above(
         f"{func_name}\n"
         'echo "FUNC_RETURNED=$?"\n'
     )
-    result = subprocess.run(
-        ["bash", "-c", script_text], capture_output=True, text=True, timeout=10
-    )
+    result = subprocess.run(["bash", "-c", script_text], capture_output=True, text=True, timeout=10)
 
     assert result.returncode == 0, (
         "the extracted function must never call `exit` itself — only "
@@ -447,9 +431,7 @@ def test_listener_cleanliness_failure_points_to_the_listener_lines_above(
         f"{func_name}\n"
         'echo "FUNC_RETURNED=$?"\n'
     )
-    result = subprocess.run(
-        ["bash", "-c", script_text], capture_output=True, text=True, timeout=10
-    )
+    result = subprocess.run(["bash", "-c", script_text], capture_output=True, text=True, timeout=10)
 
     assert result.returncode == 0, (
         "the extracted function must never call `exit` itself — only "
@@ -471,9 +453,5 @@ def test_listener_cleanliness_failure_points_to_the_listener_lines_above(
 
 @pytest.mark.parametrize("script", _RUNNERS, ids=_RUNNER_IDS)
 def test_modified_runner_passes_bash_syntax_check(script: pathlib.Path) -> None:
-    result = subprocess.run(
-        ["bash", "-n", str(script)], capture_output=True, text=True, timeout=10
-    )
-    assert result.returncode == 0, (
-        f"bash -n failed for {script}:\n{result.stderr}"
-    )
+    result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, f"bash -n failed for {script}:\n{result.stderr}"

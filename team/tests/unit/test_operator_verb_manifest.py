@@ -80,18 +80,41 @@ _API_PARITY_LINT = _TEAM_DIR / "scripts" / "lint_api_parity.py"
 # The exact v2.20.0 verb set the task README names, plus the already-fronted
 # operator scripts lint_api_parity.py's old hardcoded map covered.
 _REQUIRED_VERBS = {
-    "halt", "unhalt", "halt-global", "unhalt-global", "halt-after",
-    "defer", "undefer", "deep-verify", "cold-build-now", "wake-now",
-    "show", "show-queues", "why", "release-locks", "unwind-rc",
+    "halt",
+    "unhalt",
+    "halt-global",
+    "unhalt-global",
+    "halt-after",
+    "defer",
+    "undefer",
+    "deep-verify",
+    "cold-build-now",
+    "wake-now",
+    "show",
+    "show-queues",
+    "why",
+    "release-locks",
+    "unwind-rc",
     "verify-rc-state",
     # already-fronted operator scripts
-    "reset", "close", "wontdo", "delete", "intake", "set-version-ceiling",
-    "switch-provider", "create-project", "add-project", "remove-project",
+    "reset",
+    "close",
+    "wontdo",
+    "delete",
+    "intake",
+    "set-version-ceiling",
+    "switch-provider",
+    "create-project",
+    "add-project",
+    "remove-project",
     "ship-rc",
     # v2.25.0 REST-parity census rows: closes the estate's remaining
     # census-row gaps for verbs the requirements document names.
-    "rc-metrics", "agent-metrics", "cancel-rc",
-    "release-state", "deep-verify-status",
+    "rc-metrics",
+    "agent-metrics",
+    "cancel-rc",
+    "release-state",
+    "deep-verify-status",
     # archiving finished items: the CLI and its REST twin, registered together.
     "archive",
 }
@@ -100,7 +123,9 @@ _REQUIRED_VERBS = {
 def _bash_verb_names() -> list[str]:
     result = subprocess.run(
         ["bash", "-c", f'source "{_BASH_READER}" && ovm_verb_names'],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return [line for line in result.stdout.splitlines() if line]
 
@@ -108,7 +133,9 @@ def _bash_verb_names() -> list[str]:
 def _bash_verb_flags(verb: str) -> str:
     result = subprocess.run(
         ["bash", "-c", f'source "{_BASH_READER}" && ovm_verb_flags {verb!r}'],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -128,7 +155,8 @@ def _copy_reconciliation_fixture(tmp_path: pathlib.Path) -> pathlib.Path:
 def _run_reconciliation(team_dir: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_RECONCILIATION_LINT), "--team-dir", str(team_dir)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -152,8 +180,7 @@ def test_manifest_declares_every_required_verb():
 def test_manifest_header_states_its_own_parse_rule():
     text = default_manifest_path().read_text(encoding="utf-8")
     assert "Parse rule:" in text, (
-        "manifest header must state its own parse rule, per "
-        "team/config/dashboard_windows.census's format discipline"
+        "manifest header must state its own parse rule, per " "team/config/dashboard_windows.census's format discipline"
     )
 
 
@@ -163,9 +190,9 @@ def test_manifest_is_data_not_prose_every_line_is_comment_or_v_record():
         if not line.strip():
             continue
         first_field = line.split("\t", 1)[0]
-        assert first_field == "V" or line.lstrip().startswith("#"), (
-            f"line {lineno} is neither a comment nor a V record: {line!r}"
-        )
+        assert first_field == "V" or line.lstrip().startswith(
+            "#"
+        ), f"line {lineno} is neither a comment nor a V record: {line!r}"
 
 
 def test_planned_verb_carries_placeholder_columns(tmp_path: pathlib.Path):
@@ -176,9 +203,7 @@ def test_planned_verb_carries_placeholder_columns(tmp_path: pathlib.Path):
     manifest's last remaining planned row -- has since shipped as an active
     verb and is asserted active below."""
     fixture = tmp_path / "fixture.manifest"
-    fixture.write_text(
-        "V\tsome-future-verb\tplanned\t-\t-\t-\t-\tABSENT\tABSENT\tABSENT\t-\tABSENT\n"
-    )
+    fixture.write_text("V\tsome-future-verb\tplanned\t-\t-\t-\t-\tABSENT\tABSENT\tABSENT\t-\tABSENT\n")
     verbs = load_manifest(fixture)
     future_verb = verbs["some-future-verb"]
     assert future_verb.status == "planned"
@@ -256,11 +281,15 @@ def test_bash_reader_returns_class_and_schema_ref_for_a_fixture_row(
     )
     class_result = subprocess.run(
         ["bash", "-c", f'source "{_BASH_READER}" && ovm_verb_class fixture-action-verb "{fixture}"'],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     schema_result = subprocess.run(
         ["bash", "-c", f'source "{_BASH_READER}" && ovm_verb_schema_ref fixture-action-verb "{fixture}"'],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     assert class_result.stdout.strip() == "action"
     assert schema_result.stdout.strip() == "ShellEnvelope"
@@ -314,14 +343,12 @@ def test_reconciliation_check_records_absent_rest_twins_without_failing(
     fixture_team = _copy_reconciliation_fixture(tmp_path)
     manifest = fixture_team / "config" / "operator_verbs.manifest"
     manifest.write_text(
-        manifest.read_text(encoding="utf-8")
-        + "V\tfixture-absent-twin\tactive\tscripts/halt.sh\tproject|help\tyes"
+        manifest.read_text(encoding="utf-8") + "V\tfixture-absent-twin\tactive\tscripts/halt.sh\tproject|help\tyes"
         "\tidempotent\tABSENT\tABSENT\tABSENT\taction\tABSENT\tshell\n",
         encoding="utf-8",
     )
     absent_twins = [
-        v.name for v in load_manifest(manifest).values()
-        if v.rest_method == "ABSENT" and v.rest_route == "ABSENT"
+        v.name for v in load_manifest(manifest).values() if v.rest_method == "ABSENT" and v.rest_route == "ABSENT"
     ]
     assert absent_twins == ["fixture-absent-twin"]
     result = _run_reconciliation(fixture_team)
@@ -357,9 +384,7 @@ def test_bogus_flag_makes_reconciliation_check_fail_then_revert(tmp_path: pathli
     # Revert -- must go green again.
     halt_sh.write_text(original, encoding="utf-8")
     result = _run_reconciliation(fixture_team)
-    assert result.returncode == 0, (
-        f"reconciliation check did not go green after reverting:\n{result.stdout}"
-    )
+    assert result.returncode == 0, f"reconciliation check did not go green after reverting:\n{result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -384,9 +409,7 @@ def test_deleted_route_makes_reconciliation_check_fail_then_revert(tmp_path: pat
     # Revert -- must go green again.
     operations_py.write_text(original, encoding="utf-8")
     result = _run_reconciliation(fixture_team)
-    assert result.returncode == 0, (
-        f"reconciliation check did not go green after reverting:\n{result.stdout}"
-    )
+    assert result.returncode == 0, f"reconciliation check did not go green after reverting:\n{result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -397,18 +420,15 @@ def test_deleted_route_makes_reconciliation_check_fail_then_revert(tmp_path: pat
 def test_lint_api_parity_passes_reading_from_manifest():
     result = subprocess.run(
         [sys.executable, str(_API_PARITY_LINT)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert result.returncode == 0, (
-        f"lint_api_parity.py failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"lint_api_parity.py failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     # One flag-parity pair per active verb whose row names a real body
     # model -- derived from the manifest, never a literal count that drifts
     # each time a twin ships.
     expected_pairs = sum(
-        1
-        for v in load_manifest().values()
-        if v.status == "active" and v.rest_body_model not in ("NONE", "ABSENT")
+        1 for v in load_manifest().values() if v.status == "active" and v.rest_body_model not in ("NONE", "ABSENT")
     )
     assert f"{expected_pairs} script/model pair(s) checked" in result.stdout
 
@@ -428,11 +448,15 @@ def _run_reconciliation_with_manifest(
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            sys.executable, str(_RECONCILIATION_LINT),
-            "--team-dir", str(team_dir),
-            "--manifest", str(manifest_path),
+            sys.executable,
+            str(_RECONCILIATION_LINT),
+            "--team-dir",
+            str(team_dir),
+            "--manifest",
+            str(manifest_path),
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -455,15 +479,12 @@ def test_drift_refusal_names_supplied_manifest_path(tmp_path: pathlib.Path):
 
     result = _run_reconciliation_with_manifest(fixture_team, drifted_manifest)
     assert result.returncode != 0, "drifted manifest must make the check fail"
-    assert str(drifted_manifest) in result.stderr, (
-        f"message must name the manifest actually scanned:\n{result.stderr}"
-    )
-    assert f"--manifest {drifted_manifest}" in result.stderr, (
-        f"remedy must reproduce the failing --manifest invocation:\n{result.stderr}"
-    )
+    assert str(drifted_manifest) in result.stderr, f"message must name the manifest actually scanned:\n{result.stderr}"
+    assert (
+        f"--manifest {drifted_manifest}" in result.stderr
+    ), f"remedy must reproduce the failing --manifest invocation:\n{result.stderr}"
     assert str(fixture_default_manifest) not in result.stderr, (
-        "message/remedy must not name the default manifest when a different "
-        f"one was scanned:\n{result.stderr}"
+        "message/remedy must not name the default manifest when a different " f"one was scanned:\n{result.stderr}"
     )
 
 
@@ -491,12 +512,10 @@ def test_drift_refusal_names_default_manifest_path_when_no_manifest_flag_given(
 
     result = _run_reconciliation(fixture_team)  # no --manifest -> default path
     assert result.returncode != 0, "bogus flag must make the check fail"
-    assert str(expected_default_manifest) in result.stderr, (
-        f"message must still name the default manifest path:\n{result.stderr}"
-    )
-    assert "--manifest" not in result.stderr, (
-        f"remedy must not add --manifest when none was supplied:\n{result.stderr}"
-    )
+    assert (
+        str(expected_default_manifest) in result.stderr
+    ), f"message must still name the default manifest path:\n{result.stderr}"
+    assert "--manifest" not in result.stderr, f"remedy must not add --manifest when none was supplied:\n{result.stderr}"
 
     halt_sh.write_text(original, encoding="utf-8")
 
@@ -529,9 +548,7 @@ def test_python_reader_exposes_impl_and_tolerates_a_row_without_it(
     fixture = tmp_path / "fixture.manifest"
     fixture.write_text(_IMPL_FIXTURE_ROWS)
     verbs = load_manifest(fixture)
-    assert verbs["fixture-module-verb"].impl == (
-        "module:pgai_agent_kanban.ops.read.get_release_state"
-    )
+    assert verbs["fixture-module-verb"].impl == ("module:pgai_agent_kanban.ops.read.get_release_state")
     assert verbs["fixture-shell-verb"].impl == "shell"
     assert verbs["fixture-no-impl-verb"].impl is None
 
@@ -543,7 +560,9 @@ def test_bash_reader_exposes_impl(tmp_path: pathlib.Path):
     def _impl(verb: str) -> str:
         return subprocess.run(
             ["bash", "-c", f'source "{_BASH_READER}" && ovm_verb_impl {verb} "{fixture}"'],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
 
     assert _impl("fixture-module-verb") == "module:pgai_agent_kanban.ops.read.get_release_state"
@@ -555,7 +574,9 @@ def test_bash_and_python_readers_agree_on_impl_for_every_verb():
     for name, verb in load_manifest().items():
         bash_value = subprocess.run(
             ["bash", "-c", f'source "{_BASH_READER}" && ovm_verb_impl {name!r}'],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         assert bash_value == verb.impl, name
 
@@ -566,8 +587,7 @@ def test_bash_and_python_readers_agree_on_impl_for_every_verb():
         ("shell", "shell", None, None),
         ("-", "planned", None, None),
         (" shell ", "shell", None, None),
-        ("module:pgai_agent_kanban.ops.write.halt", "module",
-         "pgai_agent_kanban.ops.write", "halt"),
+        ("module:pgai_agent_kanban.ops.write.halt", "module", "pgai_agent_kanban.ops.write", "halt"),
     ],
 )
 def test_parse_impl_accepts_its_grammar(value, kind, module, function):
@@ -577,8 +597,7 @@ def test_parse_impl_accepts_its_grammar(value, kind, module, function):
 
 @pytest.mark.parametrize(
     "value",
-    [None, "", "bash", "module:", "module:halt", "module:pkg.", "module:pkg..fn",
-     "module:pkg.fn-name", "Shell"],
+    [None, "", "bash", "module:", "module:halt", "module:pkg.", "module:pkg..fn", "module:pkg.fn-name", "Shell"],
 )
 def test_parse_impl_rejects_values_outside_its_grammar(value):
     with pytest.raises(ValueError) as excinfo:
@@ -699,15 +718,14 @@ def test_route_inventory_equals_routes_the_built_app_registers(tmp_path: pathlib
 def test_verbose_run_lists_every_registered_route_with_what_covers_it():
     result = subprocess.run(
         [sys.executable, str(_RECONCILIATION_LINT), "--verbose"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "0 drift finding(s)" in result.stdout
 
     route_lines = [
-        line.strip()[len("route: "):]
-        for line in result.stdout.splitlines()
-        if line.strip().startswith("route: ")
+        line.strip()[len("route: ") :] for line in result.stdout.splitlines() if line.strip().startswith("route: ")
     ]
     routes, _ = _lovm._registered_routes(_TEAM_DIR)
     assert len(route_lines) == len(routes)
@@ -720,13 +738,9 @@ def test_verbose_run_lists_every_registered_route_with_what_covers_it():
 @pytest.mark.parametrize("method,route", _NAMED_ROUTES)
 def test_named_board_and_dashboard_route_is_covered(method: str, route: str):
     twins = {(v.rest_method, v.rest_route) for v in load_manifest().values()}
-    entries = [
-        e for e in _lovm._load_route_exemptions(_EXEMPT_FILE)
-        if (e.method, e.route) == (method, route)
-    ]
+    entries = [e for e in _lovm._load_route_exemptions(_EXEMPT_FILE) if (e.method, e.route) == (method, route)]
     assert (method, route) in twins or (len(entries) == 1 and entries[0].has_reason), (
-        f"{method} {route} is neither a manifest REST twin nor a reasoned route "
-        f"entry in {_EXEMPT_FILE}"
+        f"{method} {route} is neither a manifest REST twin nor a reasoned route " f"entry in {_EXEMPT_FILE}"
     )
 
 
@@ -850,8 +864,7 @@ def test_route_entries_exempt_no_script_in_the_parity_gate():
     loaded = lint_api_parity._load_census_exempt(_TEAM_DIR)
     route_entries = {f"{e.method} {e.route}" for e in _lovm._load_route_exemptions(_EXEMPT_FILE)}
     script_names = {
-        p.name for root in ("scripts", "scripts/dashboard", "scripts/cm")
-        for p in (_TEAM_DIR / root).glob("*")
+        p.name for root in ("scripts", "scripts/dashboard", "scripts/cm") for p in (_TEAM_DIR / root).glob("*")
     }
     assert route_entries
     assert route_entries <= loaded
@@ -896,8 +909,6 @@ def test_manifest_rows_twinning_put_and_delete_routes_pass_every_check(tmp_path:
 def test_check_four_reads_the_fronted_script_from_the_handler_body():
     """The shared inventory keeps check 4's fronted-script reading: an
     operations route that shells out names its script."""
-    fronted = {
-        (d.method, d.route): d.fronted_script for d in _lovm._all_router_routes(_TEAM_DIR)
-    }
+    fronted = {(d.method, d.route): d.fronted_script for d in _lovm._all_router_routes(_TEAM_DIR)}
     assert fronted[("POST", "/operations/halt")] == "halt.sh"
     assert fronted[("GET", "/health")] is None

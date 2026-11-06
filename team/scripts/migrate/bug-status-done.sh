@@ -57,7 +57,7 @@
 
 set -euo pipefail
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/header_help.sh
 source "$_SCRIPT_DIR/../lib/header_help.sh"
 
@@ -121,20 +121,11 @@ for project_dir in "$KANBAN_ROOT/projects"/*/; do
     continue
   fi
 
-  # Locate the dev tree for this project (needed for git tag checks).
-  # Prefer project.cfg (lowercase); fall back to PROJECT.cfg for legacy installs.
-  cfg_file=""
-  if [[ -f "${project_dir}project.cfg" ]]; then
-    cfg_file="${project_dir}project.cfg"
-  elif [[ -f "${project_dir}PROJECT.cfg" ]]; then
-    cfg_file="${project_dir}PROJECT.cfg"
-  fi
-  dev_tree=""
-  if [[ -n "$cfg_file" ]]; then
-    dev_tree="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "$cfg_file" \
-      | head -n1 \
-      | sed 's/^[^=]*=[[:space:]]*//; s/^["'"'"']//; s/["'"'"']$//')"
-  fi
+  # The project's own repository (pp_dev_tree_path: project.cfg, else a
+  # legacy PROJECT.cfg), needed for the release-tag checks: its tags live
+  # in no other.
+  cfg_file="$(_pp_project_cfg_file "${project_dir%/}")"
+  dev_tree="$(pp_dev_tree_path "$project_name" 2>/dev/null)" || dev_tree=""
 
   if [[ -z "$dev_tree" || ! -d "$dev_tree" ]]; then
     echo "  WARNING: dev_tree_path not found in project.cfg — cannot check shipped tags." >&2

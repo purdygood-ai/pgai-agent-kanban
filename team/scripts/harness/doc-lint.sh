@@ -88,7 +88,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Self-locate — each tree finds itself; never import from a sibling tree
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # Every container-engine command goes through the shared helper
 # (pgai_docker), the one path kanban code takes to an engine.
 # shellcheck source=../lib/docker_use.sh

@@ -121,7 +121,8 @@ import os
 import pathlib
 import re
 import sys
-from typing import Mapping, Union
+from typing import Union
+from collections.abc import Mapping
 
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 
@@ -169,15 +170,11 @@ _PROJECT_SECTION_PREFIX = "project:"
 #: (``PROJECTS_CFG_NAME_RE``), in this tree's own ``scripts/lib/`` --
 #: ``team/scripts/lib/`` in a checkout, ``<kanban_root>/scripts/lib/`` in a
 #: live install -- so each tree reads its own copy.
-PROJECT_NAME_RULE_FILE = (
-    pathlib.Path(__file__).resolve().parents[2] / "scripts" / "lib" / "projects_cfg.sh"
-)
+PROJECT_NAME_RULE_FILE = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "lib" / "projects_cfg.sh"
 
 #: The one ``PROJECTS_CFG_NAME_RE='...'`` assignment line in
 #: :data:`PROJECT_NAME_RULE_FILE` (surrounding blanks tolerated).
-_NAME_RULE_ASSIGNMENT_RE = re.compile(
-    r"^[ \t]*PROJECTS_CFG_NAME_RE[ \t]*=[ \t]*'([^'\n]+)'[ \t]*$", re.MULTILINE
-)
+_NAME_RULE_ASSIGNMENT_RE = re.compile(r"^[ \t]*PROJECTS_CFG_NAME_RE[ \t]*=[ \t]*'([^'\n]+)'[ \t]*$", re.MULTILINE)
 
 
 class ProjectNameRuleError(RuntimeError):
@@ -188,8 +185,8 @@ class ProjectNameRuleError(RuntimeError):
     """
 
 
-@functools.lru_cache(maxsize=None)
-def _load_project_name_rule(path: str) -> "re.Pattern[str]":
+@functools.cache
+def _load_project_name_rule(path: str) -> re.Pattern[str]:
     try:
         text = pathlib.Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -207,14 +204,13 @@ def _load_project_name_rule(path: str) -> "re.Pattern[str]":
                 "ini.project_name_rule_missing",
                 f"The project-name rule could not be loaded: {path} {reason}. Every "
                 "projects.cfg reader takes the rule from that file, so none can list projects.",
-                f"restore {path} from the release that installed this tree, or from "
-                "version control in a checkout",
+                f"restore {path} from the release that installed this tree, or from " "version control in a checkout",
             )
         )
     return re.compile(found.group(1))
 
 
-def project_name_rule() -> "re.Pattern[str]":
+def project_name_rule() -> re.Pattern[str]:
     """Return the project-name rule as a compiled, anchored pattern.
 
     The rule is ``PROJECTS_CFG_NAME_RE`` in ``team/scripts/lib/projects_cfg.sh``
@@ -292,7 +288,7 @@ _LINE_SKIP_RE = re.compile(r"^[ \t]*([#;].*)?$")
 _LINE_INLINE_COMMENT_RE = re.compile(r"[ \t]+[#;].*$")
 
 
-def read_line_value(path: PathLike, section: str, key: str) -> "str | None":
+def read_line_value(path: PathLike, section: str, key: str) -> str | None:
     """Return ``[section] key`` from *path* by the bash ``read_ini`` rules.
 
     The line-for-line Python form of ``read_ini`` in
@@ -336,7 +332,7 @@ def read_line_value(path: PathLike, section: str, key: str) -> "str | None":
     return None
 
 
-def _section_name(line: str) -> "str | None":
+def _section_name(line: str) -> str | None:
     """Return the section a header line opens, or None for any other line."""
     if not line.startswith("["):
         return None
@@ -371,7 +367,7 @@ def _join_lines(lines: list[str]) -> str:
     return "".join(f"{line}\n" for line in lines)
 
 
-def _locate(lines: list[str], section: str, key: str) -> "tuple[int | None, int | None, int | None]":
+def _locate(lines: list[str], section: str, key: str) -> tuple[int | None, int | None, int | None]:
     """Return ``(header, last_data, match)`` line indexes for *section*/*key*.
 
     *header* is the section's first header line, *last_data* the last
@@ -496,7 +492,7 @@ class ProjectEntry:
         return self.options.get("dashboard_color", "").strip()
 
 
-def _parse_priority(raw: "str | None") -> int:
+def _parse_priority(raw: str | None) -> int:
     if raw is None:
         return DEFAULT_PROJECT_PRIORITY
     try:
@@ -586,7 +582,7 @@ def projects_registry(kanban_root: PathLike) -> list[ProjectEntry]:
     for index, section in enumerate(parser.sections()):
         if not section.startswith(_PROJECT_SECTION_PREFIX):
             continue
-        name = section[len(_PROJECT_SECTION_PREFIX):]
+        name = section[len(_PROJECT_SECTION_PREFIX) :]
         if not is_project_name(name):
             continue
         options = dict(parser.items(section))
@@ -611,10 +607,10 @@ _PROJECT_ENABLED_VALUES = frozenset({"", "true"})
 
 #: ``(projects.cfg path, project, raw value)`` already warned about in this
 #: process, so each unrecognised value is narrated once.
-_ENABLED_WARNED: "set[tuple[str, str, str]]" = set()
+_ENABLED_WARNED: set[tuple[str, str, str]] = set()
 
 
-def parse_project_enabled(raw: "str | None") -> "tuple[bool, bool]":
+def parse_project_enabled(raw: str | None) -> tuple[bool, bool]:
     """Read one raw projects.cfg ``enabled`` value.
 
     Args:

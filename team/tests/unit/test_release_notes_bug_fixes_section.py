@@ -49,29 +49,38 @@ _VERSION = "v9.9.9"
 # Fix text) for the bundled bug reports. None of the categories is "bugfix"
 # -- that is the point of the fixture.
 _BUGS = [
-    ("BUG-0901-release-notes-section.md", "release",
-     "Release notes omitted shipped bug fixes whose category was not bugfix:\n\n"
-     "```\n## Bug Fixes\nNone\n```\n",
-     "Fixed: Release notes omitted shipped bug fixes whose category was not bugfix.",
-     "Classify a bundled item as a bug fix by its filename."),
-    ("BUG-0902-api-port-resolution.md", "api",
-     "The API server ignored the port in the project configuration "
-     "(e.g. `api.port = 8100`) and bound the default:\n"
-     "- `curl localhost:8100` refused the connection\n"
-     "- `curl localhost:8000` answered\n",
-     "Fixed: The API server ignored the port in the project configuration "
-     "(e.g. `api.port = 8100`) and bound the default.",
-     "Resolve the port from the project configuration first."),
-    ("BUG-0903-wake-stale-lock.md", "wake",
-     "A stale wake lock left by a dead process stalled the queue.\n",
-     "Fixed: A stale wake lock left by a dead process stalled the queue.",
-     "Options: (a) reap the lock by pid; (b) expire it after a timeout."),
-    ("BUG-0904-docs-broken-link.md", "docs",
-     "The operations guide linked to a configuration reference page that "
-     "no longer exists.\n",
-     "Fixed: The operations guide linked to a configuration reference page "
-     "that no longer exists.",
-     "Point the link at the current configuration reference."),
+    (
+        "BUG-0901-release-notes-section.md",
+        "release",
+        "Release notes omitted shipped bug fixes whose category was not bugfix:\n\n" "```\n## Bug Fixes\nNone\n```\n",
+        "Fixed: Release notes omitted shipped bug fixes whose category was not bugfix.",
+        "Classify a bundled item as a bug fix by its filename.",
+    ),
+    (
+        "BUG-0902-api-port-resolution.md",
+        "api",
+        "The API server ignored the port in the project configuration "
+        "(e.g. `api.port = 8100`) and bound the default:\n"
+        "- `curl localhost:8100` refused the connection\n"
+        "- `curl localhost:8000` answered\n",
+        "Fixed: The API server ignored the port in the project configuration "
+        "(e.g. `api.port = 8100`) and bound the default.",
+        "Resolve the port from the project configuration first.",
+    ),
+    (
+        "BUG-0903-wake-stale-lock.md",
+        "wake",
+        "A stale wake lock left by a dead process stalled the queue.\n",
+        "Fixed: A stale wake lock left by a dead process stalled the queue.",
+        "Options: (a) reap the lock by pid; (b) expire it after a timeout.",
+    ),
+    (
+        "BUG-0904-docs-broken-link.md",
+        "docs",
+        "The operations guide linked to a configuration reference page that " "no longer exists.\n",
+        "Fixed: The operations guide linked to a configuration reference page " "that no longer exists.",
+        "Point the link at the current configuration reference.",
+    ),
 ]
 
 # Text that appears only inside a fixture Symptom's fence or list; it must
@@ -84,9 +93,9 @@ def _section_body(text: str, heading_re: str) -> list[str]:
     *heading_re*, up to the next heading of the same or higher level."""
     match = re.search(heading_re, text, re.MULTILINE)
     assert match, f"heading {heading_re!r} not found in:\n{text}"
-    rest = text[match.end():]
+    rest = text[match.end() :]
     level = heading_re.count("#")
-    stop = re.search(r"^#{1,%d}\s" % level, rest, re.MULTILINE)
+    stop = re.search(rf"^#{{1,{level}}}\s", rest, re.MULTILINE)
     block = rest[: stop.start()] if stop else rest
     return [ln.strip() for ln in block.splitlines() if ln.strip()]
 
@@ -127,16 +136,14 @@ def release(tmp_path: pathlib.Path) -> dict:
 
     bundle = tmp_path / f"{_VERSION}-bugfix-bundle.md"
     bundle.write_text(
-        "# Bundle\n\n## Bundled Items\n\n"
-        + "".join(f"- {p.name} (`{p}`)\n" for p in item_paths),
+        "# Bundle\n\n## Bundled Items\n\n" + "".join(f"- {p.name} (`{p}`)\n" for p in item_paths),
         encoding="utf-8",
     )
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     rc = release_notes_main(
-        [str(bundle), str(repo_root), _VERSION,
-         "FUNCTIONAL", "2026-09-30", "test-project", "none", "rc/" + _VERSION]
+        [str(bundle), str(repo_root), _VERSION, "FUNCTIONAL", "2026-09-30", "test-project", "none", "rc/" + _VERSION]
     )
     assert rc == 0, f"release notes generator returned {rc}"
     notes_path = repo_root / "release-notes" / f"{_VERSION}.md"
@@ -148,20 +155,15 @@ def release(tmp_path: pathlib.Path) -> dict:
 
 
 class TestReleaseNotesBugFixes:
-    def test_every_bug_is_listed_under_bug_fixes_whatever_its_category(
-        self, release: dict
-    ) -> None:
+    def test_every_bug_is_listed_under_bug_fixes_whatever_its_category(self, release: dict) -> None:
         bug_fixes = _section_body(release["notes"], r"^##\s+Bug Fixes\s*$")
         for _, category, _, expected, _ in _BUGS:
             assert f"- {expected}" in bug_fixes, (
-                f"bug with category {category!r} missing from ## Bug Fixes; "
-                f"section reads: {bug_fixes}"
+                f"bug with category {category!r} missing from ## Bug Fixes; " f"section reads: {bug_fixes}"
             )
         assert len(bug_fixes) == len(_BUGS), bug_fixes
 
-    def test_fix_and_symptom_detail_text_never_reach_the_notes(
-        self, release: dict
-    ) -> None:
+    def test_fix_and_symptom_detail_text_never_reach_the_notes(self, release: dict) -> None:
         for _, _, _, _, fix in _BUGS:
             assert fix not in release["notes"]
         for fragment in _SYMPTOM_DETAIL_ONLY:
@@ -187,15 +189,17 @@ class TestReleaseNotesBugFixes:
 class TestRegeneratedChangelogFixed:
     def test_fixed_lists_every_bundled_bug(self, release: dict) -> None:
         content = regenerate(
-            release["repo_root"], [_VERSION], [], release["bugs_dir"],
+            release["repo_root"],
+            [_VERSION],
+            [],
+            release["bugs_dir"],
             published_changelog=None,
         )
         fixed = _section_body(content, r"^###\s+Fixed\s*$")
         assert fixed != ["None"], f"### Fixed is empty:\n{content}"
         for _, category, _, expected, fix in _BUGS:
             assert any(expected in line for line in fixed), (
-                f"bug with category {category!r} missing from ### Fixed; "
-                f"section reads: {fixed}"
+                f"bug with category {category!r} missing from ### Fixed; " f"section reads: {fixed}"
             )
             assert fix not in content
         for fragment in _SYMPTOM_DETAIL_ONLY:
@@ -204,7 +208,10 @@ class TestRegeneratedChangelogFixed:
 
     def test_changelog_carries_no_internal_bug_id(self, release: dict) -> None:
         content = regenerate(
-            release["repo_root"], [_VERSION], [], release["bugs_dir"],
+            release["repo_root"],
+            [_VERSION],
+            [],
+            release["bugs_dir"],
             published_changelog=None,
         )
         leaked = _INTERNAL_BUG_ID_RE.findall(content)
@@ -226,8 +233,7 @@ def test_requirement_bundle_lands_under_features_and_changelog_implemented(tmp_p
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     rc = release_notes_main(
-        [str(requirement), str(repo_root), version,
-         "FUNCTIONAL", "2026-09-30", "test-project", "none", "rc/" + version]
+        [str(requirement), str(repo_root), version, "FUNCTIONAL", "2026-09-30", "test-project", "none", "rc/" + version]
     )
     assert rc == 0
     notes = (repo_root / "release-notes" / f"{version}.md").read_text(encoding="utf-8")

@@ -100,9 +100,7 @@ def _call_site_block(runner: str, lint_script: str) -> str:
 
 
 def _git(repo: pathlib.Path, *args: str) -> None:
-    result = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=60
-    )
+    result = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, f"git {' '.join(args)}: {result.stderr}"
 
 
@@ -174,9 +172,7 @@ def _sandbox_env(tmp_path: pathlib.Path) -> dict:
     )
 
 
-def _run_merge_harness(
-    tmp_path: pathlib.Path, workdir: pathlib.Path, body: str, out: pathlib.Path
-) -> list[dict]:
+def _run_merge_harness(tmp_path: pathlib.Path, workdir: pathlib.Path, body: str, out: pathlib.Path) -> list[dict]:
     """Run *body* in bash with the real gated_runner_lint.sh sourced, from
     *workdir*, then write the aggregate findings file to *out* and return
     its findings."""
@@ -204,9 +200,9 @@ def _assert_per_instance(findings: list[dict], expected: dict[str, tuple[str, in
         mine = [f for f in findings if f["lint"] == lint]
         assert by_lint[lint] == count, (lint, mine)
         for finding in mine:
-            assert "exit_code" not in finding and "detail" not in finding, (
-                f"{lint} reached the aggregate as a coarse pass/fail entry: {finding}"
-            )
+            assert (
+                "exit_code" not in finding and "detail" not in finding
+            ), f"{lint} reached the aggregate as a coarse pass/fail entry: {finding}"
             assert finding["severity"] == "quality", finding
             assert finding.get("cause") and finding.get("remedy"), finding
 
@@ -240,9 +236,12 @@ def test_changelog_freshness_findings_merge_per_instance(tmp_path: pathlib.Path)
         [
             sys.executable,
             str(_SCRIPTS_DIR / "lint_changelog_freshness.py"),
-            "--changelog", str(stale),
-            "--bugs-dir", str(bugs),
-            "--findings-file", str(lint_out),
+            "--changelog",
+            str(stale),
+            "--bugs-dir",
+            str(bugs),
+            "--findings-file",
+            str(lint_out),
         ],
         capture_output=True,
         text=True,

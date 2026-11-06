@@ -33,6 +33,9 @@ Covered:
      its update entry point (library and bash wrapper) records a requeue.
   7. An invalid budget refuses the CLI dual-channel before anything is
      planned or written, and the printed remedy, run as printed, fixes it.
+  8. The CLI's requeue-budget command prints the budget for the project
+     holding a task's status.md (what the wake reads to bound its own
+     requeue of a timed-out task), and refuses an invalid one.
 
 Every fixture builds a sandbox kanban root under pytest's tmp_path; CLI runs
 use a scrubbed environment whose kanban root is the sandbox. Nothing reads or
@@ -46,7 +49,6 @@ import datetime
 import pathlib
 import shlex
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -72,7 +74,7 @@ _BLOCK_RECORD_LIB = _TEAM_DIR / "scripts" / "lib" / "block_record.sh"
 
 _PROJECT = "budget-proj"
 _TASK = "CODER-20260101-001-example-task"
-_T0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_T0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
 # Every requeue handler stubbed: the plan, the Block Record, the ledger and
 # the Triage Note are exercised for real, without a repository to snapshot.
@@ -92,8 +94,13 @@ class Sandbox:
         self.project_root = self.root / "projects" / _PROJECT
         self.task_dir = self.project_root / "tasks" / _TASK
         self.queue = self.project_root / "tasks" / "queues" / "coder_backlog.md"
-        for d in (self.task_dir / "artifacts", self.task_dir / "logs", self.queue.parent, self.root / "tmp",
-                  tmp_path / "home"):
+        for d in (
+            self.task_dir / "artifacts",
+            self.task_dir / "logs",
+            self.queue.parent,
+            self.root / "tmp",
+            tmp_path / "home",
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project_root / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8")
         (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8")
@@ -131,7 +138,7 @@ class Sandbox:
             text = set_or_append_section(text, heading.replace("_", " "), body)
         self.status.write_text(text, encoding="utf-8")
 
-    def block(self, reason_code: str, at: datetime.datetime, evidence: Optional[list] = None) -> None:
+    def block(self, reason_code: str, at: datetime.datetime, evidence: list | None = None) -> None:
         """Block the task the way a block site does (a re-block keeps the record's triage fields)."""
         self.set_sections(State="BLOCKED", Needs_Human="yes", Blockers=f"{reason_code} block")
         write_block_record(self.status, reason_code, "CODER", evidence or ["worktree=gone"], now=at)
@@ -158,9 +165,21 @@ class Sandbox:
             },
         )
         return subprocess.run(
-            ["python3", "-m", "pgai_agent_kanban.overwatch.block_triage", *args,
-             "--kanban-root", str(self.root), "--project", _PROJECT],
-            capture_output=True, text=True, timeout=120, env=env, cwd=str(_TEAM_DIR),
+            [
+                "python3",
+                "-m",
+                "pgai_agent_kanban.overwatch.block_triage",
+                *args,
+                "--kanban-root",
+                str(self.root),
+                "--project",
+                _PROJECT,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+            cwd=str(_TEAM_DIR),
         )
 
 
@@ -207,7 +226,9 @@ def test_alternating_timeout_and_dirty_worktree_is_requeued_up_to_the_budget_the
 
     # Every requeue after the first passed verification and restarted the epoch.
     assert [(e.reason_code, e.status) for e in read_ledger(sandbox.evidence_dir) if e is not None] == [
-        ("per_task_timeout", "passed"), ("gate_dirty_worktree", "passed"), ("per_task_timeout", "passed"),
+        ("per_task_timeout", "passed"),
+        ("gate_dirty_worktree", "passed"),
+        ("per_task_timeout", "passed"),
     ]
 
     diagnosis = _section(text, "OVERWATCH Diagnosis")
@@ -441,10 +462,11 @@ def test_bash_wrapper_records_a_requeue_and_reads_the_new_fields(sandbox):
     script = (
         f"set -uo pipefail\nsource {shlex.quote(str(_BLOCK_RECORD_LIB))}\n"
         f"block_record_update {status} --record-requeue per_task_timeout || exit 9\n"
-        f"echo \"N=[$(block_record_field {status} requeues)] R=[$(block_record_field {status} requeue_reasons)]\"\n"
+        f'echo "N=[$(block_record_field {status} requeues)] R=[$(block_record_field {status} requeue_reasons)]"\n'
     )
-    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60, env=env,
-                            cwd=str(sandbox.tmp))
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, timeout=60, env=env, cwd=str(sandbox.tmp)
+    )
 
     assert "N=[1] R=[per_task_timeout]" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
 
@@ -478,8 +500,13 @@ def test_invalid_budget_remedy_runs_as_printed_and_fixes_the_value(sandbox):
         resolve_requeue_budget(sandbox.root, _PROJECT)
     assert str(cfg) in info.value.message
 
-    done = subprocess.run(["bash", "-c", info.value.remedy], capture_output=True, text=True, timeout=30,
-                          env=build_scrubbed_env(home_dir=sandbox.tmp / "home"))
+    done = subprocess.run(
+        ["bash", "-c", info.value.remedy],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=build_scrubbed_env(home_dir=sandbox.tmp / "home"),
+    )
 
     assert done.returncode == 0, done.stderr
     assert resolve_requeue_budget(sandbox.root, _PROJECT) == DEFAULT_REQUEUE_BUDGET
@@ -496,3 +523,41 @@ def test_cli_plan_reports_the_budget_escalation(sandbox):
     fields = result.stdout.rstrip("\n").split("\t")
     assert fields[0] == _TASK and fields[2:5] == ["escalate", "zero_progress", "escalate"], fields
     assert "requeue budget is spent" in fields[5]
+
+
+def _requeue_budget_cli(sb: Sandbox) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["python3", "-m", "pgai_agent_kanban.overwatch.block_triage", "requeue-budget", str(sb.status)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(_TEAM_DIR),
+        env=build_scrubbed_env(home_dir=sb.tmp / "home"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("kanban_cfg", "project_cfg", "budget"),
+    [
+        ("[wake]\n", "", DEFAULT_REQUEUE_BUDGET),
+        ("[overwatch]\nrequeue_budget = 5\n", "", 5),
+        ("[overwatch]\nrequeue_budget = 5\n", "\n[overwatch]\nrequeue_budget = 0\n", 0),
+    ],
+)
+def test_cli_requeue_budget_prints_the_budget_of_the_project_holding_the_task(sandbox, kanban_cfg, project_cfg, budget):
+    (sandbox.root / "kanban.cfg").write_text(kanban_cfg, encoding="utf-8")
+    with (sandbox.project_root / "project.cfg").open("a", encoding="utf-8") as fh:
+        fh.write(project_cfg)
+
+    result = _requeue_budget_cli(sandbox)
+
+    assert (result.returncode, result.stdout) == (0, f"{budget}\n"), result.stderr
+
+
+def test_cli_requeue_budget_refuses_an_invalid_budget_dual_channel(sandbox):
+    (sandbox.root / "kanban.cfg").write_text("[overwatch]\nrequeue_budget = three\n", encoding="utf-8")
+
+    result = _requeue_budget_cli(sandbox)
+
+    assert result.returncode == 1 and result.stdout == "", result.stderr
+    assert "block-triage.bad-requeue-budget" in result.stderr and "remedy:" in result.stderr

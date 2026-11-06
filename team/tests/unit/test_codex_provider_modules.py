@@ -46,10 +46,7 @@ _PROVIDER = _TEAM_DIR / "scripts" / "lib" / "provider_codex.sh"
 _MODULE = "pgai_agent_kanban.lib.codex_provider"
 
 _AGENT_MESSAGE = '{"type":"item.completed","item":{"type":"agent_message","text":"%s"}}'
-_TURN_COMPLETED = (
-    '{"type":"turn.completed","usage":'
-    '{"input_tokens":120,"cached_input_tokens":40,"output_tokens":7}}'
-)
+_TURN_COMPLETED = '{"type":"turn.completed","usage":' '{"input_tokens":120,"cached_input_tokens":40,"output_tokens":7}}'
 
 
 def _write_lines(path: pathlib.Path, *lines: str) -> pathlib.Path:
@@ -64,7 +61,12 @@ def _run_cli(tmp_path: pathlib.Path, *args: str, stdin: bytes = b"") -> subproce
     )
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        input=stdin, capture_output=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        input=stdin,
+        capture_output=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -84,9 +86,7 @@ def test_copy_stream_to_temp_file_keeps_every_byte(tmp_path: pathlib.Path, monke
     assert path.read_bytes() == data
 
 
-def test_copy_stream_lands_under_the_resolved_temp_root_with_tmpdir_unset(
-    tmp_path: pathlib.Path, monkeypatch
-) -> None:
+def test_copy_stream_lands_under_the_resolved_temp_root_with_tmpdir_unset(tmp_path: pathlib.Path, monkeypatch) -> None:
     """With TMPDIR unset the capture still lands under resolve_temp_root(),
     which is created when missing -- never in the system temp directory."""
     root = tmp_path / "kanban-temp" / "not-yet-made"
@@ -199,8 +199,13 @@ def test_fallback_preflight_fails_a_cli_that_exits_non_zero_printing_nothing(tmp
     )
 
     result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(tmp_path), timeout=120, check=False,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
+        check=False,
     )
 
     assert "rc=1" in result.stdout, result.stdout + result.stderr
@@ -220,7 +225,8 @@ def test_preflight_error_cli_exit_status_says_whether_a_message_was_printed(tmp_
     assert (failed.returncode, failed.stdout.decode()) == (0, "model 'gpt-x' rejected by codex: nope\n")
     assert (passed.returncode, passed.stdout) == (1, b"")
     assert (no_file.returncode, no_file.stdout.decode()) == (
-        0, "codex exited 2 with no output; check CLI installation\n",
+        0,
+        "codex exited 2 with no output; check CLI installation\n",
     )
 
 
@@ -382,12 +388,18 @@ def test_provider_parse_output_stamps_the_configured_model(tmp_path: pathlib.Pat
         encoding="utf-8",
     )
     env = build_scrubbed_env(
-        home_dir=home, extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "temp")},
+        home_dir=home,
+        extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "temp")},
     )
 
     result = subprocess.run(
-        ["bash", str(script)], capture_output=True, text=True, env=env,
-        cwd=str(tmp_path), timeout=60, check=False,
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

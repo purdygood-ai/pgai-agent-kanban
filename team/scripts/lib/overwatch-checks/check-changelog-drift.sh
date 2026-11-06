@@ -89,6 +89,12 @@
 #
 # --dry-run: detects drift but does NOT modify CHANGELOG.md or commit.
 
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CCD_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CCD_SELF_DIR=""
+_CCD_LIB_DIR="${_CCD_SELF_DIR%/*}"
+
 # overwatch_registered_projects and overwatch_branch_prefix: the shared
 # projects.cfg and branch_prefix readers.
 # shellcheck source=../overwatch_config.sh
@@ -101,30 +107,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _ccd_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-changelog-drift: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-changelog-drift: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-changelog-drift: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-changelog-drift || return 1
 
     # Resolve dev tree path from project.cfg (falls back to PROJECT.cfg, then env).
     local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
@@ -138,15 +121,12 @@ _ccd_resolve_env() {
     _CCD_DEV_TREE=""
     _CCD_BRANCH_PREFIX=""
     if [[ -n "${_cfg_file}" ]]; then
-        _CCD_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
         _CCD_BRANCH_PREFIX="$(overwatch_branch_prefix "${OVERWATCH_PROJECT}")" || return 1
     fi
 
-    if [[ -z "${_CCD_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        _CCD_DEV_TREE="${PGAI_DEV_TREE_PATH}"
-    fi
+    # The documented dev_tree_path chain (overwatch_dev_tree, overwatch_config.sh):
+    # project.cfg, then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    _CCD_DEV_TREE="$(overwatch_dev_tree "${OVERWATCH_PROJECT}")" || _CCD_DEV_TREE=""
 
     if [[ -z "${_CCD_DEV_TREE}" ]]; then
         echo "check-changelog-drift: cannot resolve dev tree path (set PGAI_DEV_TREE_PATH or ensure project.cfg has dev_tree_path)" >&2
@@ -249,7 +229,7 @@ _ccd_regenerate_changelog() {
     # cwd-independent invocation regardless of how this module was sourced.
     if ! declare -f pp_run_ops >/dev/null 2>&1; then
         local _ccd_pp_helper
-        _ccd_pp_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && cd .. && pwd)/pp_run_ops.sh"
+        _ccd_pp_helper="${_CCD_LIB_DIR}/pp_run_ops.sh"
         # shellcheck source=../pp_run_ops.sh
         [[ -f "${_ccd_pp_helper}" ]] && source "${_ccd_pp_helper}"
     fi
@@ -406,7 +386,7 @@ overwatch_check_changelog_drift() {
     # our commit.
     if ! declare -f overwatch_halt_first_fix >/dev/null 2>&1; then
         local _ccd_protocol
-        _ccd_protocol="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/overwatch_protocol.sh"
+        _ccd_protocol="${_CCD_LIB_DIR}/overwatch_protocol.sh"
         # shellcheck source=../overwatch_protocol.sh
         [[ -f "${_ccd_protocol}" ]] && source "${_ccd_protocol}"
     fi
@@ -596,16 +576,13 @@ _ccd_commit_regenerated() {
 # ---------------------------------------------------------------------------
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # Source required libraries when running standalone.
-    _CCD_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    _CCD_LIB_DIR="$(cd "${_CCD_SELF_DIR}/.." && pwd)"
-
     for _lib in temp.sh project_paths.sh projects.sh overwatch_lib.sh overwatch_protocol.sh; do
         if [[ -f "${_CCD_LIB_DIR}/${_lib}" ]]; then
             # shellcheck source=/dev/null
             source "${_CCD_LIB_DIR}/${_lib}" 2>/dev/null || true
         fi
     done
-    unset _lib _CCD_LIB_DIR _CCD_SELF_DIR
+    unset _lib
 
     overwatch_check_changelog_drift "$@"
     exit $?

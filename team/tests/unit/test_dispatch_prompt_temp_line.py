@@ -35,7 +35,6 @@ Acceptance criteria exercised:
 
 from __future__ import annotations
 
-import os
 import pathlib
 import textwrap
 
@@ -84,6 +83,7 @@ _POST_SESSION_MARKER = "Post-session /tmp litter check"
 # Helper: extract a block of lines between two markers (inclusive of start,
 # exclusive of end).
 # ---------------------------------------------------------------------------
+
 
 def _extract_block(path: pathlib.Path, start_marker: str, end_marker: str) -> list[str]:
     """Return lines from start_marker (inclusive) up to but not including
@@ -150,9 +150,9 @@ def test_lib_exposes_bracket_compute_function() -> None:
     pgai_project_temp_dir internally — confirming the function body is there.
     """
     content = _WAKE_BRACKET_SH.read_text(encoding="utf-8")
-    assert "wake_bracket_compute_temp_subtree" in content, (
-        f"{_WAKE_BRACKET_SH} does not define wake_bracket_compute_temp_subtree."
-    )
+    assert (
+        "wake_bracket_compute_temp_subtree" in content
+    ), f"{_WAKE_BRACKET_SH} does not define wake_bracket_compute_temp_subtree."
     assert "pgai_project_temp_dir" in content, (
         f"{_WAKE_BRACKET_SH} does not call pgai_project_temp_dir — the shared "
         "lib must implement the temp-subtree resolution."
@@ -165,28 +165,20 @@ def test_sibling_scratch_lines_are_byte_identical() -> None:
     across both siblings.
     """
     claude_lines = [
-        ln
-        for ln in _CLAUDE_SH.read_text(encoding="utf-8").splitlines()
-        if "Scratch/diagnostic output goes under" in ln
+        ln for ln in _CLAUDE_SH.read_text(encoding="utf-8").splitlines() if "Scratch/diagnostic output goes under" in ln
     ]
     codex_lines = [
-        ln
-        for ln in _CODEX_SH.read_text(encoding="utf-8").splitlines()
-        if "Scratch/diagnostic output goes under" in ln
+        ln for ln in _CODEX_SH.read_text(encoding="utf-8").splitlines() if "Scratch/diagnostic output goes under" in ln
     ]
 
     assert claude_lines, (
-        f"Scratch line not found in {_CLAUDE_SH}. "
-        "Expected a line containing 'Scratch/diagnostic output goes under'."
+        f"Scratch line not found in {_CLAUDE_SH}. " "Expected a line containing 'Scratch/diagnostic output goes under'."
     )
     assert codex_lines, (
-        f"Scratch line not found in {_CODEX_SH}. "
-        "Expected a line containing 'Scratch/diagnostic output goes under'."
+        f"Scratch line not found in {_CODEX_SH}. " "Expected a line containing 'Scratch/diagnostic output goes under'."
     )
     assert claude_lines == codex_lines, (
-        "Scratch lines differ between siblings.\n"
-        f"claude.sh: {claude_lines}\n"
-        f"codex.sh:  {codex_lines}"
+        "Scratch lines differ between siblings.\n" f"claude.sh: {claude_lines}\n" f"codex.sh:  {codex_lines}"
     )
 
 
@@ -238,20 +230,15 @@ def test_prompt_contains_resolved_subtree_path(tmp_path: pathlib.Path) -> None:
     # Must contain an absolute path (starts with '/').
     # Extract the path portion (between "goes under " and " —").
     assert "goes under /" in emitted, (
-        "The emitted scratch line does not contain an absolute path after "
-        "'goes under '. Got:\n" + emitted
+        "The emitted scratch line does not contain an absolute path after " "'goes under '. Got:\n" + emitted
     )
 
     # Must contain the mandatory text components.
-    assert "Scratch/diagnostic output goes under" in emitted, (
-        f"Emitted line missing expected prefix. Got:\n{emitted}"
-    )
-    assert "never bare /tmp" in emitted, (
-        f"Emitted line missing 'never bare /tmp'. Got:\n{emitted}"
-    )
-    assert "SOP: Temporary File Convention" in emitted, (
-        f"Emitted line missing 'SOP: Temporary File Convention'. Got:\n{emitted}"
-    )
+    assert "Scratch/diagnostic output goes under" in emitted, f"Emitted line missing expected prefix. Got:\n{emitted}"
+    assert "never bare /tmp" in emitted, f"Emitted line missing 'never bare /tmp'. Got:\n{emitted}"
+    assert (
+        "SOP: Temporary File Convention" in emitted
+    ), f"Emitted line missing 'SOP: Temporary File Convention'. Got:\n{emitted}"
 
 
 def test_subtree_path_is_absolute(tmp_path: pathlib.Path) -> None:
@@ -268,12 +255,8 @@ def test_subtree_path_is_absolute(tmp_path: pathlib.Path) -> None:
     assert result.returncode == 0, f"Script failed: {result.stderr}"
 
     path = result.stdout.strip()
-    assert path.startswith("/"), (
-        f"pgai_project_temp_dir did not return an absolute path. Got: {path!r}"
-    )
-    assert project_name in path, (
-        f"Project name '{project_name}' not present in resolved path: {path!r}"
-    )
+    assert path.startswith("/"), f"pgai_project_temp_dir did not return an absolute path. Got: {path!r}"
+    assert project_name in path, f"Project name '{project_name}' not present in resolved path: {path!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +295,10 @@ def test_scratch_line_adjacent_to_working_dir_override(sibling: pathlib.Path) ->
             if "Scratch/diagnostic output goes under" in line and scratch_idx is None:
                 scratch_idx = i
 
-    assert wd_override_idx is not None, (
-        f"${'{_prompt_working_dir_override}'} not found inside the prompt heredoc in {sibling}."
-    )
-    assert scratch_idx is not None, (
-        f"Scratch line not found inside the prompt heredoc in {sibling}."
-    )
+    assert (
+        wd_override_idx is not None
+    ), f"${'{_prompt_working_dir_override}'} not found inside the prompt heredoc in {sibling}."
+    assert scratch_idx is not None, f"Scratch line not found inside the prompt heredoc in {sibling}."
     assert scratch_idx == wd_override_idx + 1, (
         f"Scratch line (line {scratch_idx + 1}) is not immediately after "
         f"${'{_prompt_working_dir_override}'} (line {wd_override_idx + 1}) in {sibling}.\n"

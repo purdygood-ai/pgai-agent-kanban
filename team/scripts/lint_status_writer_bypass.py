@@ -4,8 +4,8 @@ lint_status_writer_bypass.py
 ==============================
 A structural lint that flags a task's ``## State``, ``## Needs Human``, ``##
 Summary``, or ``## Blockers`` field being mutated directly — via a regex
-substitution or an in-place stream edit — in an agent-facing script, instead
-of going through the status-writer tool
+substitution or an in-place stream edit — in an agent-facing script or a
+module of the Python package, instead of going through the status-writer tool
 (``team/pgai_agent_kanban/task_status.py`` / ``team/scripts/task-status.sh``).
 
 WHY THIS EXISTS
@@ -25,10 +25,19 @@ risk, not a runtime failure by itself.
 
 SCOPE
 -----
-Default scan surface: every ``*.sh`` file directly under ``team/scripts/``
-(non-recursive) — the flat, agent-invocable top-level script surface every
-role file's documented Procedure references (``bash team/scripts/<name>.sh
-...``). This deliberately excludes:
+Default scan surface:
+
+  - every ``*.sh`` file directly under ``team/scripts/`` (non-recursive) —
+    the flat, agent-invocable top-level script surface every role file's
+    documented Procedure references (``bash team/scripts/<name>.sh ...``);
+  - every ``*.py`` file under ``team/pgai_agent_kanban/`` (recursive) — the
+    Python package the scripts, the wake, OVERWATCH and the REST layer call
+    into, where a status.md write that skips ``task_status`` is the same
+    regression however the module is reached. The package's own
+    ``task_status.py`` (``_EXEMPT_PACKAGE_FILES`` below) is the sanctioned
+    writer itself and is not scanned.
+
+This deliberately excludes:
 
   - ``team/scripts/lib/**`` — the wake substrate (``wake_task_state.sh``,
     ``wake_lifecycle.sh``, ``wake_driver*.sh``, and siblings). These run as
@@ -37,9 +46,8 @@ role file's documented Procedure references (``bash team/scripts/<name>.sh
     sync) — the framework's own substrate, not something an agent itself
     invokes. They predate this tool and are out of scope for conversion
     here; team/SOP-core.md's "Gates and Refusals" governs that layer.
-  - ``team/scripts/cm/**`` and ``team/pgai_agent_kanban/**`` — CM release
-    internals and the Python ops/API library are invoked by other scripts or
-    by the dashboard/REST layer, never directly by an agent's own procedure.
+  - ``team/scripts/cm/**`` — CM release internals, invoked by other
+    scripts, never directly by an agent's own procedure.
   - Two named top-level exemptions (``_EXEMPT_BASENAMES`` below):
 
       * ``task-status.sh`` — the canonical wrapper this lint exists to
@@ -93,8 +101,9 @@ USAGE
                      script's directory, i.e. team/ when the script lives
                      at team/scripts/).
   --paths PATH...   Explicit file list to scan instead of the default scope
-                     (every team/scripts/*.sh file, minus the exemptions
-                     named in the SCOPE section above).
+                     (every team/scripts/*.sh file and every
+                     team/pgai_agent_kanban/**/*.py file, minus the
+                     exemptions named in the SCOPE section above).
   --verbose, -v      Print each file as it is checked.
 """
 
@@ -106,32 +115,50 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+# The pgai_agent_kanban package sits beside scripts/ in the same tree
+# (team/ in the dev tree, the kanban root when installed); each tree finds
+# its own copy.
+_PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
+from pgai_agent_kanban.lint.source_text import (  # noqa: E402
+    mask_comment_lines as _mask_comment_lines,
+    violation_causes as _build_causes,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 # Two named exemptions from the default flat team/scripts/*.sh scan surface.
 # See the module docstring's SCOPE section for the rationale behind each.
-_EXEMPT_BASENAMES = frozenset({
-    "task-status.sh",
-    "unwind-rc.sh",
-})
+_EXEMPT_BASENAMES = frozenset(
+    {
+        "task-status.sh",
+        "unwind-rc.sh",
+    }
+)
+
+# The Python package scanned by default, and its files (relative to it) the
+# scan skips: task_status.py is the sanctioned writer, not a bypass of it.
+_PACKAGE_DIRNAME = "pgai_agent_kanban"
+_EXEMPT_PACKAGE_FILES = frozenset(
+    {
+        "task_status.py",
+    }
+)
 
 # The four fields team_status.py manages, and no other agent-facing code
 # path may mutate directly. Matches the exact heading text (case-sensitive,
 # word-bounded so "## Summary" does not also match a hypothetical
 # "## Summary Extended") task_status.py's own _set_section_body regex uses.
 _MANAGED_HEADINGS = ("State", "Needs Human", "Summary", "Blockers")
-_HEADING_RE = re.compile(
-    r"##\s+(?:" + "|".join(re.escape(h) for h in _MANAGED_HEADINGS) + r")\b"
-)
+_HEADING_RE = re.compile(r"##\s+(?:" + "|".join(re.escape(h) for h in _MANAGED_HEADINGS) + r")\b")
 
 # A mutating operation: Python re.sub/re.subn/<pattern>.subn(, or a bash
 # in-place stream edit. Deliberately excludes re.search/re.match/re.findall
 # — a read is not the failure mode this lint exists to catch.
-_MUTATION_SIGNAL_RE = re.compile(
-    r"re\.sub\(|re\.subn\(|\.subn\(|sed\s+-i|sed\s+--in-place"
-)
+_MUTATION_SIGNAL_RE = re.compile(r"re\.sub\(|re\.subn\(|\.subn\(|sed\s+-i|sed\s+--in-place")
 
 # How many lines (in either direction) a mutation signal must appear within
 # of a managed-heading occurrence to be treated as the same edit. Generous
@@ -162,22 +189,6 @@ class Violation(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def _mask_comment_lines(text: str) -> str:
-    """Return *text* with every comment-only line blanked out (same length).
-
-    A line is a "comment line" when its first non-whitespace character is
-    ``#``. Blanking (rather than deleting) preserves line numbers for
-    subsequent regex matches and their derived line-number reporting.
-    """
-    masked_lines = []
-    for line in text.splitlines(keepends=False):
-        if line.lstrip().startswith("#"):
-            masked_lines.append("")
-        else:
-            masked_lines.append(line)
-    return "\n".join(masked_lines)
-
-
 # ---------------------------------------------------------------------------
 # Core scan
 # ---------------------------------------------------------------------------
@@ -192,21 +203,15 @@ def scan_file_for_bypass(path: Path) -> list[Violation]:
     masked_lines = _mask_comment_lines(text).splitlines()
     raw_lines = text.splitlines()
 
-    heading_lines = [
-        i for i, line in enumerate(masked_lines) if _HEADING_RE.search(line)
-    ]
-    mutation_lines = [
-        i for i, line in enumerate(masked_lines) if _MUTATION_SIGNAL_RE.search(line)
-    ]
+    heading_lines = [i for i, line in enumerate(masked_lines) if _HEADING_RE.search(line)]
+    mutation_lines = [i for i, line in enumerate(masked_lines) if _MUTATION_SIGNAL_RE.search(line)]
     if not heading_lines or not mutation_lines:
         return []
 
     violations: list[Violation] = []
     reported: set[int] = set()
     for h_idx in heading_lines:
-        nearby = any(
-            abs(h_idx - m_idx) <= _WINDOW_LINES for m_idx in mutation_lines
-        )
+        nearby = any(abs(h_idx - m_idx) <= _WINDOW_LINES for m_idx in mutation_lines)
         if not nearby or h_idx in reported:
             continue
         reported.add(h_idx)
@@ -235,22 +240,20 @@ def scan_paths(paths: list[Path], *, verbose: bool = False) -> list[Violation]:
 
 
 def _default_scan_targets(team_dir: Path) -> list[Path]:
-    """Every team/scripts/*.sh file, minus the named exemptions."""
+    """Every team/scripts/*.sh file and every team/pgai_agent_kanban/**/*.py
+    file, minus the named exemptions."""
     scripts_dir = team_dir / "scripts"
-    return sorted(
-        p
-        for p in scripts_dir.glob("*.sh")
-        if p.name not in _EXEMPT_BASENAMES
+    package_dir = team_dir / _PACKAGE_DIRNAME
+    scripts = sorted(p for p in scripts_dir.glob("*.sh") if p.name not in _EXEMPT_BASENAMES)
+    package = sorted(
+        p for p in package_dir.rglob("*.py") if p.relative_to(package_dir).as_posix() not in _EXEMPT_PACKAGE_FILES
     )
+    return scripts + package
 
 
 # ---------------------------------------------------------------------------
 # Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
 # ---------------------------------------------------------------------------
-
-
-def _build_causes(violations: list[Violation]) -> list[str]:
-    return [f"{v.path}:{v.line}: {v.kind} — {v.snippet!r}" for v in violations]
 
 
 def _format_remedy_block(violations: list[Violation], *, lint_script: Path) -> str:
@@ -269,7 +272,7 @@ def _format_remedy_block(violations: list[Violation], *, lint_script: Path) -> s
         "tool: bash team/scripts/task-status.sh --project <name> --key <task-id> "
         "--state <STATE> [--needs-human yes|no] [--summary TEXT] [--blockers TEXT]."
     )
-    lines.append(f"  2. python3 \"{lint_script}\"")
+    lines.append(f'  2. python3 "{lint_script}"')
     lines.append("")
     lines.append(
         "Rule: ## State, ## Needs Human, ## Summary, and ## Blockers are mutated "
@@ -292,7 +295,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Flags a task's ## State, ## Needs Human, ## Summary, or ## "
             "Blockers field being mutated directly in an agent-facing "
-            "script, instead of through team/pgai_agent_kanban/task_status.py."
+            "script or the Python package, instead of through "
+            "team/pgai_agent_kanban/task_status.py."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -318,8 +322,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Explicit file list to scan instead of the default scope "
-            "(every team/scripts/*.sh file under --team-dir, minus the "
-            "named exemptions)."
+            "(every team/scripts/*.sh file and every "
+            "team/pgai_agent_kanban/**/*.py file under --team-dir, minus "
+            "the named exemptions)."
         ),
     )
     parser.add_argument(
@@ -355,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
         scan_targets = _default_scan_targets(team_dir)
         if not scan_targets:
             print(
-                f"ERROR: no team/scripts/*.sh files found under {team_dir}",
+                f"ERROR: no team/scripts/*.sh or team/pgai_agent_kanban/**/*.py " f"files found under {team_dir}",
                 file=sys.stderr,
             )
             return 2

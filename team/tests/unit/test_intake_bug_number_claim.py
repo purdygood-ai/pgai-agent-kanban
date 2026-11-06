@@ -75,14 +75,12 @@ def _draft(stem: str) -> bytes:
         "## Symptom\n"
         "Seen while filing BUG-0010 by hand; see also BUG-0009.\n"
         "Trailing line without a newline \u2014 kept as is"
-    ).encode("utf-8")
+    ).encode()
 
 
 def _expected_renumbered(draft: bytes, old_stem: str, new_stem: str) -> bytes:
     """*draft* with exactly its title line and **Bug ID:** line renamed."""
-    return draft.replace(
-        f"# {old_stem}\n".encode(), f"# {new_stem}\n".encode(), 1
-    ).replace(
+    return draft.replace(f"# {old_stem}\n".encode(), f"# {new_stem}\n".encode(), 1).replace(
         f"**Bug ID:** {old_stem}\n".encode(), f"**Bug ID:** {new_stem}\n".encode(), 1
     )
 
@@ -105,7 +103,7 @@ def _stage(path: pathlib.Path, data: bytes) -> pathlib.Path:
     return path
 
 
-def _intake_env(root: pathlib.Path, base: pathlib.Path, extra: "dict | None" = None) -> dict:
+def _intake_env(root: pathlib.Path, base: pathlib.Path, extra: dict | None = None) -> dict:
     """The sandbox environment: every root-resolving name points at *root*."""
     env_extra = {
         "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
@@ -255,9 +253,7 @@ def test_priority_and_requirements_deposits_are_not_claimed_or_renumbered(tmp_pa
     "name",
     ["BUG-0010-dotted.slug.md", "BUG-0010-Upper-Case.md", "BUG-0010-v1.2.3-notes.md"],
 )
-def test_intake_sh_refuses_a_slug_with_a_dot_or_uppercase_before_writing(
-    name: str, tmp_path: pathlib.Path
-) -> None:
+def test_intake_sh_refuses_a_slug_with_a_dot_or_uppercase_before_writing(name: str, tmp_path: pathlib.Path) -> None:
     project, ctx = _make_board(tmp_path)
     bugs = project / "bugs"
     (bugs / "BUG-0010-already-filed.md").write_bytes(_EXISTING_0010)
@@ -339,9 +335,7 @@ def test_a_depositor_holding_the_claim_forces_a_concurrent_one_to_the_next_numbe
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=_intake_env(
-            ctx.kanban_root, tmp_path, {"PYTHONPATH": str(shim), "INTAKE_TEST_BARRIER_DIR": str(barrier)}
-        ),
+        env=_intake_env(ctx.kanban_root, tmp_path, {"PYTHONPATH": str(shim), "INTAKE_TEST_BARRIER_DIR": str(barrier)}),
         cwd=str(_TEAM_DIR),
         stdin=subprocess.DEVNULL,
     )
@@ -375,10 +369,7 @@ def test_two_unsynchronised_depositors_of_one_name_end_with_two_distinct_numbers
 ) -> None:
     project, ctx = _make_board(tmp_path)
     bugs = project / "bugs"
-    sources = [
-        _stage(tmp_path / side / "BUG-0010-same-draft.md", _draft("BUG-0010-same-draft"))
-        for side in ("a", "b")
-    ]
+    sources = [_stage(tmp_path / side / "BUG-0010-same-draft.md", _draft("BUG-0010-same-draft")) for side in ("a", "b")]
     env = _intake_env(ctx.kanban_root, tmp_path)
 
     procs = [
@@ -475,9 +466,7 @@ def test_claim_never_returns_a_number_a_file_took_after_the_scan(
 
 
 @pytest.mark.parametrize("bad", [0, 10000, -1, "7", True])
-def test_claim_refuses_a_preferred_number_outside_the_four_digit_field(
-    scanner, bad, bugs_dir: pathlib.Path
-) -> None:
+def test_claim_refuses_a_preferred_number_outside_the_four_digit_field(scanner, bad, bugs_dir: pathlib.Path) -> None:
     with pytest.raises(ValueError, match="preferred_num"):
         scanner.claim_next_bug_id(str(bugs_dir), "slug", "t", preferred_num=bad)
     assert os.listdir(bugs_dir) == []
@@ -572,9 +561,7 @@ def test_claim_takes_a_preferred_number_the_archive_holds_only_after_the_archive
     assert sorted(os.listdir(archive)) == ["BUG-0005-old-archived.md", "BUG-0009-newest-archived.md"]
 
 
-def test_claim_without_a_preferred_number_lands_above_the_archive_s_highest(
-    scanner, tmp_path: pathlib.Path
-) -> None:
+def test_claim_without_a_preferred_number_lands_above_the_archive_s_highest(scanner, tmp_path: pathlib.Path) -> None:
     """The high-water scan counts the archive too, so the fallback loop never retries a taken number."""
     project, ctx = _make_board(tmp_path)
     bugs = project / "bugs"
@@ -590,9 +577,7 @@ def test_claim_without_a_preferred_number_lands_above_the_archive_s_highest(
     assert _claim_locks(bugs) == []
 
 
-def test_claim_on_an_emptied_live_ledger_never_returns_an_archived_number(
-    scanner, tmp_path: pathlib.Path
-) -> None:
+def test_claim_on_an_emptied_live_ledger_never_returns_an_archived_number(scanner, tmp_path: pathlib.Path) -> None:
     project, ctx = _make_board(tmp_path)
     bugs = project / "bugs"
     archive = _archive_bugs(ctx.kanban_root)

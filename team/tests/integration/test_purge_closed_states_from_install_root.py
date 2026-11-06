@@ -67,11 +67,17 @@ def test_purge_reads_the_shared_closed_state_list_from_an_install_root(tmp_path:
 
     proc = subprocess.run(
         [
-            "bash", "-c",
+            "bash",
+            "-c",
             f'set -euo pipefail\nsource "{root}/scripts/lib/purge-helpers.sh"\n'
             f'purge_closed_bugs "{proj}" 30 false\npurge_closed_priorities "{proj}" 30 false\n',
         ],
-        capture_output=True, text=True, timeout=120, env=env, cwd=str(elsewhere), check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+        cwd=str(elsewhere),
+        check=False,
     )
 
     assert proc.returncode == 0, f"rc={proc.returncode}\nstdout={proc.stdout!r}\nstderr={proc.stderr!r}"

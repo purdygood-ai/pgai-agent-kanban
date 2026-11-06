@@ -77,10 +77,7 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 
 def _release_headings(root: pathlib.Path) -> list[str]:
     changelog = root / "projects" / _PROJECT / "CHANGELOG.md"
-    return [
-        line for line in changelog.read_text(encoding="utf-8").splitlines()
-        if line.startswith("## v")
-    ]
+    return [line for line in changelog.read_text(encoding="utf-8").splitlines() if line.startswith("## v")]
 
 
 def _warning_lines(stderr: str) -> list[str]:

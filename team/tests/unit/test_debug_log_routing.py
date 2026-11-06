@@ -39,7 +39,6 @@ from __future__ import annotations
 import pathlib
 import textwrap
 
-import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -94,6 +93,7 @@ _ROUTING_SNIPPET_FUNC = textwrap.dedent("""\
 # Extraction starts at the anchor comment and runs until the closing 'fi'
 # of the _debug_gate guard block (which is the last line of the routing block).
 # ---------------------------------------------------------------------------
+
 
 def _extract_routing_block(path: pathlib.Path) -> list[str]:
     """Extract the debug-log routing block from a wake provider sibling.
@@ -165,10 +165,7 @@ def test_project_scoped_debug_log_routes_to_project_dir(
     """)
 
     result = run_bash(tmp_path, script, timeout=10)
-    assert result.returncode == 0, (
-        f"Routing snippet failed (exit {result.returncode}).\n"
-        f"stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Routing snippet failed (exit {result.returncode}).\n" f"stderr: {result.stderr}"
 
     resolved_path = result.stdout.strip()
 
@@ -186,9 +183,7 @@ def test_project_scoped_debug_log_routes_to_project_dir(
         f"Expected project-scoped debug log to be created at {expected_log}; "
         "it does not exist after the routing snippet ran."
     )
-    assert expected_log.stat().st_size > 0, (
-        f"Project-scoped debug log {expected_log} exists but is empty."
-    )
+    assert expected_log.stat().st_size > 0, f"Project-scoped debug log {expected_log} exists but is empty."
 
     # Root logs/debug/ must have gained NO new files.
     # The directory mtime changes when a new file is created inside it.
@@ -229,15 +224,12 @@ def test_project_scoped_root_debug_dir_gains_no_new_files(
     """)
 
     result = run_bash(tmp_path, script, timeout=10)
-    assert result.returncode == 0, (
-        f"Routing snippet failed: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Routing snippet failed: {result.stderr}"
 
     files_after = set(root_debug_dir.iterdir())
     new_files = files_after - files_before
-    assert not new_files, (
-        f"Root logs/debug/ gained new file(s) during a project-scoped run:\n"
-        + "\n".join(str(f) for f in sorted(new_files))
+    assert not new_files, f"Root logs/debug/ gained new file(s) during a project-scoped run:\n" + "\n".join(
+        str(f) for f in sorted(new_files)
     )
 
 
@@ -253,7 +245,7 @@ def test_project_less_debug_log_routes_to_root_dir(
 
     When _CURRENT_PROJECT is unset (empty), the reserved root tier must receive
     the write.  This proves the root tier is live and correctly targeted for
-    genuinely project-less contexts (e.g. pm-hallucination-capture.sh).
+    genuinely project-less contexts (a caller with no project context).
     """
     kanban_root = tmp_path / "kanban"
 
@@ -271,10 +263,7 @@ def test_project_less_debug_log_routes_to_root_dir(
     """)
 
     result = run_bash(tmp_path, script, timeout=10)
-    assert result.returncode == 0, (
-        f"Routing snippet failed (exit {result.returncode}).\n"
-        f"stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Routing snippet failed (exit {result.returncode}).\n" f"stderr: {result.stderr}"
 
     resolved_path = result.stdout.strip()
 
@@ -295,19 +284,15 @@ def test_project_less_debug_log_routes_to_root_dir(
     # with no defect in the routing code under test.
     resolved_relative_parts = pathlib.Path(resolved_path).relative_to(kanban_root).parts
     assert "projects" not in resolved_relative_parts, (
-        f"Project-less debug log was incorrectly routed to a project directory: "
-        f"{resolved_path}"
+        f"Project-less debug log was incorrectly routed to a project directory: " f"{resolved_path}"
     )
 
     # The log file must exist at the root tier.
     expected_log = kanban_root / "logs" / "debug" / "pm.log"
     assert expected_log.exists(), (
-        f"Root-tier debug log must be created at {expected_log} for a "
-        "project-less invocation; it does not exist."
+        f"Root-tier debug log must be created at {expected_log} for a " "project-less invocation; it does not exist."
     )
-    assert expected_log.stat().st_size > 0, (
-        f"Root-tier debug log {expected_log} exists but is empty."
-    )
+    assert expected_log.stat().st_size > 0, f"Root-tier debug log {expected_log} exists but is empty."
 
 
 def test_project_less_empty_string_routes_to_root_dir(
@@ -333,9 +318,7 @@ def test_project_less_empty_string_routes_to_root_dir(
     """)
 
     result = run_bash(tmp_path, script, timeout=10)
-    assert result.returncode == 0, (
-        f"Routing snippet failed: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Routing snippet failed: {result.stderr}"
 
     resolved_path = result.stdout.strip()
     expected_prefix = str(kanban_root / "logs" / "debug")
@@ -371,20 +354,16 @@ def test_gate_false_no_files_created(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script, timeout=10)
-    assert result.returncode == 0, (
-        f"Routing snippet failed: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Routing snippet failed: {result.stderr}"
 
     root_debug = kanban_root / "logs" / "debug"
     proj_debug = kanban_root / "projects" / project_name / "logs" / "debug"
 
     assert not root_debug.exists() or list(root_debug.iterdir()) == [], (
-        f"Root debug dir received files when gate was false: "
-        f"{list(root_debug.iterdir())}"
+        f"Root debug dir received files when gate was false: " f"{list(root_debug.iterdir())}"
     )
     assert not proj_debug.exists() or list(proj_debug.iterdir()) == [], (
-        f"Project debug dir received files when gate was false: "
-        f"{list(proj_debug.iterdir())}"
+        f"Project debug dir received files when gate was false: " f"{list(proj_debug.iterdir())}"
     )
 
 
@@ -405,12 +384,10 @@ def test_sibling_debug_routing_blocks_are_byte_identical() -> None:
     codex_block = _extract_routing_block(_CODEX_SH)
 
     assert claude_block, (
-        f"Debug routing block not found in {_CLAUDE_SH}. "
-        f"Expected a comment containing '{_ROUTING_ANCHOR}'."
+        f"Debug routing block not found in {_CLAUDE_SH}. " f"Expected a comment containing '{_ROUTING_ANCHOR}'."
     )
     assert codex_block, (
-        f"Debug routing block not found in {_CODEX_SH}. "
-        f"Expected a comment containing '{_ROUTING_ANCHOR}'."
+        f"Debug routing block not found in {_CODEX_SH}. " f"Expected a comment containing '{_ROUTING_ANCHOR}'."
     )
     assert claude_block == codex_block, (
         "Debug routing blocks differ between siblings.\n"
@@ -444,7 +421,7 @@ def test_sibling_debug_routing_project_condition_present_in_claude() -> None:
     the routing block so the per-project path switch is actually tested.
     """
     content = _CLAUDE_SH.read_text(encoding="utf-8")
-    assert '_CURRENT_PROJECT' in content, (
+    assert "_CURRENT_PROJECT" in content, (
         f"_CURRENT_PROJECT reference not found in {_CLAUDE_SH}. "
         "The routing block must check this variable for per-project path selection."
     )
@@ -453,7 +430,7 @@ def test_sibling_debug_routing_project_condition_present_in_claude() -> None:
 def test_sibling_debug_routing_project_condition_present_in_codex() -> None:
     """Structural: the project-context condition is present in codex.sh."""
     content = _CODEX_SH.read_text(encoding="utf-8")
-    assert '_CURRENT_PROJECT' in content, (
+    assert "_CURRENT_PROJECT" in content, (
         f"_CURRENT_PROJECT reference not found in {_CODEX_SH}. "
         "The routing block must check this variable for per-project path selection."
     )

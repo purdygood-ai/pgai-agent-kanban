@@ -105,7 +105,17 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+
+# The census lint owns the file walk and the bash comment stripper; it sits
+# beside this script and must stay runnable on its own, so it is the owner.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from lint_gate_census_compliance import (  # noqa: E402
+    _iter_bash_files,
+    _iter_python_files,
+    _strip_bash_comment,
+)
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -120,14 +130,10 @@ _BASH_FUNC_RE = re.compile(r"\b(pgai_format_error_contract|pgai_emit_error_contr
 
 # The emitter's own definition file is excluded from every scan surface --
 # it defines the functions and mentions their names in its own docstring
-# and usage examples, but never calls them itself.
-_EXCLUDED_BASH_BASENAMES = frozenset({"error_contract.sh"})
-_EXCLUDED_PYTHON_BASENAMES = frozenset({"error_contract.py", "conftest.py"})
+# and usage examples, but never calls them itself. The exclusion lists live
+# with the file walk this lint shares (lint_gate_census_compliance).
 
-_EXAMPLE_REMEDY_TEXT = (
-    "re-run the command that produced this failure after the cause "
-    "diagnosed above is resolved"
-)
+_EXAMPLE_REMEDY_TEXT = "re-run the command that produced this failure after the cause " "diagnosed above is resolved"
 
 # Availability-probe command heads this lint recognizes: a bare emitter
 # identifier immediately following one of these heads (as the head's sole
@@ -173,31 +179,6 @@ class _Finding:
 # ---------------------------------------------------------------------------
 
 
-def _strip_bash_comment(line: str) -> str:
-    """Return *line* with any unquoted, unescaped trailing '#...' comment removed."""
-    in_single = False
-    in_double = False
-    i = 0
-    n = len(line)
-    while i < n:
-        c = line[i]
-        if c == "\\" and not in_single and i + 1 < n:
-            i += 2
-            continue
-        if c == "'" and not in_double:
-            in_single = not in_single
-            i += 1
-            continue
-        if c == '"' and not in_single:
-            in_double = not in_double
-            i += 1
-            continue
-        if c == "#" and not in_single and not in_double:
-            return line[:i]
-        i += 1
-    return line
-
-
 def _extract_bash_statement(text: str, start: int) -> str:
     """Collect shell statement text beginning at *start*.
 
@@ -241,7 +222,7 @@ def _extract_bash_statement(text: str, start: int) -> str:
     return "".join(out)
 
 
-def _tokenize_bash_args(statement: str) -> Optional[list[str]]:
+def _tokenize_bash_args(statement: str) -> list[str] | None:
     """Split *statement* into shell words. Returns None when unparseable."""
     try:
         return shlex.split(statement, posix=True)
@@ -267,7 +248,7 @@ def _is_availability_probe_operand(prefix: str) -> bool:
     return any(pattern.search(prefix) for pattern in _PROBE_TAIL_PATTERNS)
 
 
-def _bash_call_finding(path: Path, line_no: int, func_name: str, tokens: Optional[list[str]]) -> Optional[_Finding]:
+def _bash_call_finding(path: Path, line_no: int, func_name: str, tokens: list[str] | None) -> _Finding | None:
     if tokens is None:
         return None
     missing = [name for i, name in enumerate(FIELD_NAMES) if i >= len(tokens)]
@@ -309,23 +290,12 @@ def _scan_bash_file(path: Path) -> list[_Finding]:
     return findings
 
 
-def _iter_bash_files(dirs: Iterable[Path]) -> list[Path]:
-    files: list[Path] = []
-    for directory in dirs:
-        if not directory.is_dir():
-            continue
-        for candidate in sorted(directory.glob("*.sh")):
-            if candidate.is_file() and candidate.name not in _EXCLUDED_BASH_BASENAMES:
-                files.append(candidate)
-    return files
-
-
 # ---------------------------------------------------------------------------
 # Python scanning
 # ---------------------------------------------------------------------------
 
 
-def _call_func_name(node: ast.Call) -> Optional[str]:
+def _call_func_name(node: ast.Call) -> str | None:
     if isinstance(node.func, ast.Name):
         return node.func.id
     if isinstance(node.func, ast.Attribute):
@@ -334,14 +304,10 @@ def _call_func_name(node: ast.Call) -> Optional[str]:
 
 
 def _is_blank_string_literal(node: ast.expr) -> bool:
-    return (
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value.strip() == ""
-    )
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.strip() == ""
 
 
-def _python_call_finding(path: Path, node: ast.Call, func_name: str) -> Optional[_Finding]:
+def _python_call_finding(path: Path, node: ast.Call, func_name: str) -> _Finding | None:
     # A call site using *args or **kwargs spreading cannot be statically
     # resolved to a fixed error/message/remedy assignment -- skip rather
     # than guess.
@@ -359,11 +325,7 @@ def _python_call_finding(path: Path, node: ast.Call, func_name: str) -> Optional
             supplied[kw.arg] = kw.value
 
     missing = [name for name in FIELD_NAMES if name not in supplied]
-    blank = [
-        name
-        for name, value_node in supplied.items()
-        if _is_blank_string_literal(value_node)
-    ]
+    blank = [name for name, value_node in supplied.items() if _is_blank_string_literal(value_node)]
     if not missing and not blank:
         return None
     return _Finding(path=path, line=node.lineno, function=func_name, missing=missing, blank=blank)
@@ -391,24 +353,6 @@ def _scan_python_file(path: Path) -> list[_Finding]:
     return findings
 
 
-def _iter_python_files(root: Path) -> list[Path]:
-    if not root.is_dir():
-        return []
-    files: list[Path] = []
-    for candidate in sorted(root.rglob("*.py")):
-        if not candidate.is_file():
-            continue
-        if candidate.name in _EXCLUDED_PYTHON_BASENAMES:
-            continue
-        if candidate.name.startswith("test_"):
-            continue
-        relative_parts = set(candidate.relative_to(root).parts)
-        if "tests" in relative_parts or "fixtures" in relative_parts:
-            continue
-        files.append(candidate)
-    return files
-
-
 # ---------------------------------------------------------------------------
 # Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
 # ---------------------------------------------------------------------------
@@ -424,9 +368,7 @@ def _relative(path: Path, repo_root: Path) -> str:
 def _example_fix_line(finding: _Finding, rel: str) -> str:
     fields_str = ", ".join(finding.affected_fields)
     if finding.function in _BASH_FUNC_NAMES:
-        example = (
-            f'{finding.function} "$error_key" "$message" "{_EXAMPLE_REMEDY_TEXT}"'
-        )
+        example = f'{finding.function} "$error_key" "$message" "{_EXAMPLE_REMEDY_TEXT}"'
     else:
         example = f'{finding.function}(error_key, message, remedy="{_EXAMPLE_REMEDY_TEXT}")'
     return (
@@ -441,10 +383,7 @@ def _format_remedy_block(findings: list[_Finding], repo_root: Path, lint_script:
     for finding in findings:
         rel = _relative(finding.path, repo_root)
         fields_str = ", ".join(finding.affected_fields)
-        causes.append(
-            f"{rel}:{finding.line} — {finding.function} call is missing the "
-            f"{fields_str} field(s)"
-        )
+        causes.append(f"{rel}:{finding.line} — {finding.function} call is missing the " f"{fields_str} field(s)")
         commands.append(_example_fix_line(finding, rel))
     commands.append(f'python3 "{lint_script}"')
 
@@ -457,10 +396,7 @@ def _format_remedy_block(findings: list[_Finding], repo_root: Path, lint_script:
     for cause in causes:
         lines.append(f"  - {cause}")
     lines.append("")
-    lines.append(
-        "To fix (adapt the example remedy text below to the failure this site "
-        "actually reports):"
-    )
+    lines.append("To fix (adapt the example remedy text below to the failure this site " "actually reports):")
     for i, command in enumerate(commands, start=1):
         lines.append(f"  {i}. {command}")
     lines.append("")
@@ -503,7 +439,7 @@ def _default_bash_dirs(script_dir: Path) -> list[Path]:
     ]
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_dual_channel_pair.py",
         description=(
@@ -550,7 +486,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the dual-channel pair lint, printing each finding and its JSON array.
 
     Exit codes: 0 always, whatever was found (quality class); 2 usage error
@@ -561,12 +497,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     script_dir = Path(__file__).resolve().parent  # team/scripts/
     repo_root = script_dir.parent.parent  # repo root
 
-    bash_dirs = (
-        [Path(d) for d in args.bash_dirs] if args.bash_dirs else _default_bash_dirs(script_dir)
-    )
-    python_dir = (
-        Path(args.python_dir) if args.python_dir else (repo_root / "team" / "pgai_agent_kanban")
-    )
+    bash_dirs = [Path(d) for d in args.bash_dirs] if args.bash_dirs else _default_bash_dirs(script_dir)
+    python_dir = Path(args.python_dir) if args.python_dir else (repo_root / "team" / "pgai_agent_kanban")
 
     bash_files = _iter_bash_files(bash_dirs)
     python_files = _iter_python_files(python_dir)

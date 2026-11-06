@@ -38,9 +38,7 @@ def _commands(blocks: list[dict]) -> list[str]:
 )
 def test_bash_block_after_any_fence_is_returned(preceding: str, expected: list[str]) -> None:
     blocks = extract_blocks(f"# Guide\n\n## Step 1\n\n{preceding}\n{_BASH_AFTER}")
-    assert _commands(blocks) == expected, (
-        f"a block before the bash block changed which commands were read: {blocks!r}"
-    )
+    assert _commands(blocks) == expected, f"a block before the bash block changed which commands were read: {blocks!r}"
     assert all(not block["block_skip"] and not block["docker_gate"] for block in blocks)
 
 
@@ -51,15 +49,16 @@ def test_indented_annotation_names_the_indented_fence_below_it() -> None:
         "   ```bash\n"
         "   # a comment line\n"
         "   scripts/cold-build-now.sh --image all\n"
-        "   ```\n\n"
-        + _BASH_AFTER
+        "   ```\n\n" + _BASH_AFTER
     )
     blocks = extract_blocks(text)
     assert blocks == [
-        {"block_skip": True, "docker_gate": False,
-         "commands": [{"cmd": "scripts/cold-build-now.sh --image all", "inline_skip": False}]},
-        {"block_skip": False, "docker_gate": False,
-         "commands": [{"cmd": "echo real-command", "inline_skip": False}]},
+        {
+            "block_skip": True,
+            "docker_gate": False,
+            "commands": [{"cmd": "scripts/cold-build-now.sh --image all", "inline_skip": False}],
+        },
+        {"block_skip": False, "docker_gate": False, "commands": [{"cmd": "echo real-command", "inline_skip": False}]},
     ]
 
 
@@ -67,8 +66,7 @@ def test_unlabelled_block_counts_only_when_an_annotation_names_it() -> None:
     text = (
         "```\nplain output\n```\n\n"
         "<!-- doc-lint: skip needs a service -->\n\n```\nservice-cmd\n```\n\n"
-        "<!-- doc-lint: docker -->\n```\ndocker ps\n```\n\n"
-        + _BASH_AFTER
+        "<!-- doc-lint: docker -->\n```\ndocker ps\n```\n\n" + _BASH_AFTER
     )
     blocks = extract_blocks(text)
     assert [(block["block_skip"], block["docker_gate"], _commands([block])) for block in blocks] == [
@@ -85,8 +83,7 @@ def test_annotation_before_a_non_shell_block_is_spent_on_that_block() -> None:
     text = "<!-- doc-lint: skip -->\n```text\nsample\n```\n\n" + _BASH_AFTER
     blocks = extract_blocks(text)
     assert blocks == [
-        {"block_skip": False, "docker_gate": False,
-         "commands": [{"cmd": "echo real-command", "inline_skip": False}]},
+        {"block_skip": False, "docker_gate": False, "commands": [{"cmd": "echo real-command", "inline_skip": False}]},
     ]
 
 

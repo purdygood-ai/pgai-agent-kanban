@@ -64,7 +64,7 @@
 #           container_mounts_assemble "${_SCRIPT_NAME}" \
 #               "${PGAI_AGENT_KANBAN_ROOT_PATH:-}" "${HOME:-}" \
 #               "${EXTRA_MOUNTS[@]}" || exit $?
-#           pgai_docker "${engine}" run --rm -it \
+#           pgai_docker "${engine}" run --rm -it --init \
 #               "${CONTAINER_MOUNTS_ARGS[@]}" "${image}"
 #
 #   container_mounts_engine_flags <kanban-root>
@@ -76,6 +76,11 @@
 [[ -n "${_PGAI_CONTAINER_MOUNTS_SH_LOADED:-}" ]] && return 0
 _PGAI_CONTAINER_MOUNTS_SH_LOADED=1
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_CONTAINER_MOUNTS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _CONTAINER_MOUNTS_LIB_DIR=""
+
 CONTAINER_MOUNTS_KANBAN_ROOT=""
 CONTAINER_MOUNTS_HOME=""
 CONTAINER_MOUNTS_ARGS=()
@@ -84,7 +89,7 @@ container_mounts_engine_flags() {
     local kanban_root="${1:-}"
     if ! command -v read_ini >/dev/null 2>&1; then
         # shellcheck source=ini_parser.sh
-        source "$(dirname "${BASH_SOURCE[0]}")/ini_parser.sh" || return 0
+        source "${_CONTAINER_MOUNTS_LIB_DIR}/ini_parser.sh" || return 0
     fi
     local engine
     engine="$(read_ini "${kanban_root}/kanban.cfg" docker docker_exe "docker" 2>/dev/null || true)"

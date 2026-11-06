@@ -92,7 +92,7 @@ _OUTDATED = {
     "priority/templates/PRIORITY-TEMPLATE.md": "# Priority template from an older release\n",
     "requirements/templates/REQUIREMENTS-TEMPLATE.md": "# Requirements template from an older release\n",
 }
-_FIXED_NOW = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc)
+_FIXED_NOW = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
 _FIXED_STAMP = "20260102T030405Z"
 
 
@@ -123,9 +123,7 @@ def _register(root: pathlib.Path, *names: str) -> None:
 def _snapshot(directory: pathlib.Path) -> dict[str, bytes]:
     """Relative path -> bytes for every file under *directory*."""
     return {
-        str(path.relative_to(directory)): path.read_bytes()
-        for path in sorted(directory.rglob("*"))
-        if path.is_file()
+        str(path.relative_to(directory)): path.read_bytes() for path in sorted(directory.rglob("*")) if path.is_file()
     }
 
 
@@ -154,7 +152,11 @@ def _run_install(sandbox: pathlib.Path, root: pathlib.Path) -> subprocess.Comple
     """install.sh --force over *root*: non-interactive, no host crontab, no git."""
     return subprocess.run(
         ["bash", str(_INSTALL_SH), "--force", "--no-system-cron", "--stamp-version", "v0.0.0-sandbox-test"],
-        capture_output=True, text=True, timeout=_TIMEOUT, env=_sandbox_env(sandbox, root), cwd=str(sandbox),
+        capture_output=True,
+        text=True,
+        timeout=_TIMEOUT,
+        env=_sandbox_env(sandbox, root),
+        cwd=str(sandbox),
     )
 
 
@@ -162,10 +164,22 @@ def _run_upgrade(sandbox: pathlib.Path, root: pathlib.Path) -> subprocess.Comple
     """upgrade.sh's phase-2 body against *root* (DEV_TREE is this checkout)."""
     return subprocess.run(
         [
-            "bash", str(_UPGRADE_SH), "--phase2", "--phase2-protocol", "1", "--kanban-root", str(root),
-            "--force", "--stamp-version", "v0.0.1-sandbox-test",
+            "bash",
+            str(_UPGRADE_SH),
+            "--phase2",
+            "--phase2-protocol",
+            "1",
+            "--kanban-root",
+            str(root),
+            "--force",
+            "--stamp-version",
+            "v0.0.1-sandbox-test",
         ],
-        capture_output=True, text=True, timeout=_TIMEOUT, env=_sandbox_env(sandbox, root), cwd=str(sandbox),
+        capture_output=True,
+        text=True,
+        timeout=_TIMEOUT,
+        env=_sandbox_env(sandbox, root),
+        cwd=str(sandbox),
     )
 
 
@@ -380,8 +394,11 @@ def test_each_project_is_refreshed_from_its_own_workflow_templates(tmp_path):
 
 def test_the_cli_reads_templates_from_the_tree_it_is_installed_in(tmp_path):
     installed = tmp_path / "installed"
-    shutil.copytree(_TEAM_DIR / "pgai_agent_kanban", installed / "pgai_agent_kanban",
-                    ignore=shutil.ignore_patterns("__pycache__", "tests"))
+    shutil.copytree(
+        _TEAM_DIR / "pgai_agent_kanban",
+        installed / "pgai_agent_kanban",
+        ignore=shutil.ignore_patterns("__pycache__", "tests"),
+    )
     (installed / "scripts" / "lib").mkdir(parents=True)
     shutil.copyfile(_SCRIPTS / "lib" / "pp_run_ops.sh", installed / "scripts" / "lib" / "pp_run_ops.sh")
     # The project-name rule the registry readers take from the installed tree.
@@ -394,9 +411,18 @@ def test_the_cli_reads_templates_from_the_tree_it_is_installed_in(tmp_path):
     env = _sandbox_env(tmp_path, installed)
 
     run = subprocess.run(
-        ["bash", str(installed / "scripts" / "lib" / "pp_run_ops.sh"), "pgai_agent_kanban.ops",
-         "refresh_seeded_templates", f"--kanban-root={installed}"],
-        capture_output=True, text=True, timeout=60, env=env, cwd=str(tmp_path),
+        [
+            "bash",
+            str(installed / "scripts" / "lib" / "pp_run_ops.sh"),
+            "pgai_agent_kanban.ops",
+            "refresh_seeded_templates",
+            f"--kanban-root={installed}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=str(tmp_path),
     )
 
     assert run.returncode == 0, _output(run)
@@ -468,7 +494,11 @@ def test_the_ops_entry_point_routes_the_refresh_verb(tmp_path):
 
     run = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.ops", "refresh_seeded_templates", f"--kanban-root={root}"],
-        capture_output=True, text=True, timeout=60, env=env, cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=str(root),
     )
 
     assert run.returncode == 0, _output(run)
@@ -518,8 +548,7 @@ def _readme_files(with_readme: bool) -> dict[str, str]:
 _WITH_README = pytest.mark.parametrize("with_readme", [True, False], ids=["readme", "no-readme"])
 
 _NO_OP_CLOSING = (
-    "Seeded templates: all copies in 1 registered project(s) already match the installed "
-    "templates; nothing changed."
+    "Seeded templates: all copies in 1 registered project(s) already match the installed " "templates; nothing changed."
 )
 _STORED_ONE_CLOSING = (
     "Seeded templates: all intake copies in 1 registered project(s) already match the installed "
@@ -549,12 +578,16 @@ def test_an_unchanged_readme_template_prints_and_writes_nothing(tmp_path, capsys
 
 @_WITH_README
 def test_a_changed_readme_template_prints_one_runnable_diff_and_moves_the_old_snapshot_aside(
-    tmp_path, capsys, with_readme,
+    tmp_path,
+    capsys,
+    with_readme,
 ):
     root = tmp_path / "root"
     old = _OLD_README_TEMPLATE.format(name="alpha")
     project_dir = _project(
-        root, "alpha", files={**_current_copies(), **_readme_files(with_readme), _README_SNAPSHOT: old},
+        root,
+        "alpha",
+        files={**_current_copies(), **_readme_files(with_readme), _README_SNAPSHOT: old},
     )
     _register(root, "alpha")
     readme_before = _readme_state(project_dir)
@@ -564,10 +597,14 @@ def test_a_changed_readme_template_prints_one_runnable_diff_and_moves_the_old_sn
     out = capsys.readouterr().out
     notices = _notices(out, "alpha")
     assert len(notices) == 1, out
-    command = notices[0][notices[0].index("diff -u"):]
+    command = notices[0][notices[0].index("diff -u") :]
     diff = subprocess.run(
-        ["bash", "-c", command], capture_output=True, text=True, timeout=60,
-        env=_sandbox_env(tmp_path, root), cwd=str(tmp_path),
+        ["bash", "-c", command],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_sandbox_env(tmp_path, root),
+        cwd=str(tmp_path),
     )
     assert diff.returncode == 1, diff.stderr
     installed_line = next(line for line in _README_TEMPLATE.read_text(encoding="utf-8").splitlines() if line.strip())
@@ -645,10 +682,14 @@ def test_a_project_skipped_for_its_intake_templates_still_gets_the_readme_check(
 
 def test_a_rotated_snapshot_never_overwrites_an_existing_file(tmp_path, capsys):
     root = tmp_path / "root"
-    project_dir = _project(root, "alpha", files={
-        _README_SNAPSHOT: "the snapshot being replaced\n",
-        f".readme-template.{_FIXED_STAMP}.md": "an earlier moved-aside snapshot\n",
-    })
+    project_dir = _project(
+        root,
+        "alpha",
+        files={
+            _README_SNAPSHOT: "the snapshot being replaced\n",
+            f".readme-template.{_FIXED_STAMP}.md": "an earlier moved-aside snapshot\n",
+        },
+    )
     _register(root, "alpha")
 
     seeded_templates.refresh_seeded_templates(root, scripts_dir=_SCRIPTS, now=_FIXED_NOW)
@@ -742,6 +783,7 @@ def test_the_readme_check_never_opens_or_stats_the_project_readme(tmp_path, monk
             if isinstance(path, (str, os.PathLike)):
                 touched.append(os.path.abspath(os.fspath(path)))
             return real(path, *args, **kwargs)
+
         return wrapper
 
     monkeypatch.setattr(builtins, "open", spy(builtins.open))
@@ -789,7 +831,9 @@ def _closing(out: str) -> str:
 def test_closing_line_after_moving_a_changed_snapshot_aside_does_not_say_nothing_changed(tmp_path, capsys):
     root = tmp_path / "root"
     project_dir = _project(
-        root, "alpha", files={**_current_copies(), _README_SNAPSHOT: _OLD_README_TEMPLATE.format(name="alpha")},
+        root,
+        "alpha",
+        files={**_current_copies(), _README_SNAPSHOT: _OLD_README_TEMPLATE.format(name="alpha")},
     )
     _register(root, "alpha")
 
@@ -899,7 +943,12 @@ def test_help_describes_the_readme_template_check_and_its_notice(tmp_path: pathl
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     result = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.ops", "refresh_seeded_templates", "--help"],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     text = " ".join(result.stdout.split())

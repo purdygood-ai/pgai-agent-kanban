@@ -105,12 +105,8 @@ _ENGINE_SUBCOMMANDS = (
 )
 
 # What may precede a command word on a shell line.
-_CMD_POSITION = (
-    r"(?:^|[;&|({!`]|\$\(|\b(?:then|do|else|exec|if|while|until|command|time)\b)\s*"
-)
-_LITERAL_ENGINE_RE = re.compile(
-    _CMD_POSITION + r"((?:[\w./-]*/)?(?:docker|podman))\s+[\w-]"
-)
+_CMD_POSITION = r"(?:^|[;&|({!`]|\$\(|\b(?:then|do|else|exec|if|while|until|command|time)\b)\s*"
+_LITERAL_ENGINE_RE = re.compile(_CMD_POSITION + r"((?:[\w./-]*/)?(?:docker|podman))\s+[\w-]")
 _VARIABLE_ENGINE_RE = re.compile(
     _CMD_POSITION
     + r"(\$\{?[A-Za-z_]*(?:ENGINE|DOCKER|PODMAN|_EXE)[A-Za-z0-9_]*\}?)\s+(?:"
@@ -123,9 +119,7 @@ _HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(?:'([^']+)'|\"([^\"]+)\"|\\?([A-Za
 _LONE_VAR_RE = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$")
 
 _PY_LIST_RE = re.compile(r"""\[\s*[rbuf]?["'](?:[\w./-]*/)?(docker|podman)["']""")
-_PY_STRING_CALL_RE = re.compile(
-    r"""(?:os\.system|os\.popen|subprocess\.\w+|Popen)\(\s*[rbuf]?["'](docker|podman)\s"""
-)
+_PY_STRING_CALL_RE = re.compile(r"""(?:os\.system|os\.popen|subprocess\.\w+|Popen)\(\s*[rbuf]?["'](docker|podman)\s""")
 
 
 class Finding(NamedTuple):

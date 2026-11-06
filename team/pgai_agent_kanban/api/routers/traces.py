@@ -71,8 +71,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -93,9 +92,7 @@ _LIMIT_DEFAULT = 50
 _LIMIT_MAX = 2000
 
 # Fixed agent-role set — same whitelist used by the logs router.
-_VALID_AGENTS: frozenset[str] = frozenset(
-    {"pm", "po", "coder", "writer", "tester", "cm", "overwatch"}
-)
+_VALID_AGENTS: frozenset[str] = frozenset({"pm", "po", "coder", "writer", "tester", "cm", "overwatch"})
 
 # Filename convention: <YYYYMMDDTHHmmss>-<TASK-KEY>.md
 # The timestamp prefix is exactly 15 characters: 8 digits + "T" + 6 digits.
@@ -107,7 +104,7 @@ _TIMESTAMP_RE = re.compile(r"^(\d{8}T\d{6})-(.+)$")
 # ---------------------------------------------------------------------------
 
 
-def _parse_limit(raw: Optional[str]) -> int:
+def _parse_limit(raw: str | None) -> int:
     """Parse and validate the ``limit`` query parameter.
 
     Returns an integer in [1, 2000].  Values above 2000 are clamped.
@@ -122,19 +119,13 @@ def _parse_limit(raw: Optional[str]) -> int:
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Invalid 'limit' value: {raw!r}. "
-                "limit must be a positive integer (1–2000)."
-            ),
+            detail=(f"Invalid 'limit' value: {raw!r}. " "limit must be a positive integer (1–2000)."),
         )
 
     if n <= 0:
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Invalid 'limit' value: {n!r}. "
-                "limit must be a positive integer (greater than 0)."
-            ),
+            detail=(f"Invalid 'limit' value: {n!r}. " "limit must be a positive integer (greater than 0)."),
         )
 
     return min(n, _LIMIT_MAX)
@@ -161,7 +152,7 @@ def _parse_trace_filename(stem: str) -> tuple[str, str] | None:
     ts_raw, task_key = m.group(1), m.group(2)
     # ts_raw is "YYYYMMDDTHHmmss" — parse to a datetime and format as ISO.
     try:
-        dt = datetime.strptime(ts_raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+        dt = datetime.strptime(ts_raw, "%Y%m%dT%H%M%S").replace(tzinfo=UTC)
     except ValueError:
         return None
 
@@ -170,8 +161,8 @@ def _parse_trace_filename(stem: str) -> tuple[str, str] | None:
 
 def _enumerate_traces(
     kanban_root: pathlib.Path,
-    project_filter: Optional[str],
-    agent_filter: Optional[str],
+    project_filter: str | None,
+    agent_filter: str | None,
 ) -> list[dict]:
     """Walk the training-trace tree and return all matching trace records.
 
@@ -213,9 +204,7 @@ def _enumerate_traces(
             agent_dirs = [training_root / agent_filter]
         else:
             try:
-                agent_dirs = [
-                    a for a in sorted(training_root.iterdir()) if a.is_dir()
-                ]
+                agent_dirs = [a for a in sorted(training_root.iterdir()) if a.is_dir()]
             except OSError:
                 continue
 
@@ -269,15 +258,13 @@ def _sort_newest_first(traces: list[dict]) -> list[dict]:
 @router.get(
     "/traces",
     summary="List training-trace index",
-    response_description=(
-        "JSON array of trace objects sorted newest-first."
-    ),
+    response_description=("JSON array of trace objects sorted newest-first."),
 )
 def get_traces_index(
     request: Request,
-    project: Optional[str] = None,
-    agent: Optional[str] = None,
-    limit: Optional[str] = None,
+    project: str | None = None,
+    agent: str | None = None,
+    limit: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the training-trace index sorted newest-first.
@@ -329,7 +316,7 @@ def get_traces_index(
     # Validate optional project parameter.
     # Traversal check fires before any filesystem access.
     # -----------------------------------------------------------------------
-    project_filter: Optional[str] = None
+    project_filter: str | None = None
     if project is not None and project != "":
         if has_traversal(project):
             raise HTTPException(
@@ -345,7 +332,7 @@ def get_traces_index(
     # Validate optional agent parameter.
     # Traversal check fires first; then whitelist check.
     # -----------------------------------------------------------------------
-    agent_filter: Optional[str] = None
+    agent_filter: str | None = None
     if agent is not None and agent != "":
         if has_traversal(agent):
             raise HTTPException(
@@ -359,10 +346,7 @@ def get_traces_index(
         if agent_lower not in _VALID_AGENTS:
             raise HTTPException(
                 status_code=HTTP_UNPROCESSABLE_ENTITY,
-                detail=(
-                    f"Unknown agent: {agent!r}. "
-                    f"Valid agents: {sorted(_VALID_AGENTS)!r}."
-                ),
+                detail=(f"Unknown agent: {agent!r}. " f"Valid agents: {sorted(_VALID_AGENTS)!r}."),
             )
         agent_filter = agent_lower
 
@@ -388,9 +372,7 @@ def get_traces_index(
 @router.get(
     "/traces/{trace_id}",
     summary="Fetch one training trace by opaque id",
-    response_description=(
-        "Standard envelope with the trace markdown body in stdout."
-    ),
+    response_description=("Standard envelope with the trace markdown body in stdout."),
 )
 def get_trace_by_id(
     trace_id: str,
@@ -431,7 +413,7 @@ def get_trace_by_id(
     # This is the opaque-id discipline: we never construct a path from the id.
     all_traces = _enumerate_traces(kanban_root, None, None)
 
-    matched_path: Optional[pathlib.Path] = None
+    matched_path: pathlib.Path | None = None
     for entry in all_traces:
         if entry["id"] == trace_id:
             # Reconstruct the canonical path from trusted components.

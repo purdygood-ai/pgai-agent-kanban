@@ -69,9 +69,7 @@ from pathlib import Path
 
 _DEFAULT_VERSION = "2.1.251 (Claude Code)"
 
-_SAFEGUARD_REFUSAL_TEXT = (
-    "Error: request blocked by safety system before dispatch."
-)
+_SAFEGUARD_REFUSAL_TEXT = "Error: request blocked by safety system before dispatch."
 
 _USAGE_LIMIT_TEXT = "Claude usage limit reached."
 
@@ -218,12 +216,7 @@ echo '{{"type":"result","result":"stub agent completed the task","usage":{{"inpu
 exit 0
 """
     stub_path.write_text(stub_script, encoding="utf-8")
-    stub_path.chmod(
-        stub_path.stat().st_mode
-        | stat.S_IXUSR
-        | stat.S_IXGRP
-        | stat.S_IXOTH
-    )
+    stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     existing_path = os.environ.get("PATH", "")
     return {"PATH": f"{bin_dir}{os.pathsep}{existing_path}"}

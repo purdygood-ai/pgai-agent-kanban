@@ -11,6 +11,10 @@ Two record writers carry the core JSON shape:
 The JSON payload shape is a contract — do NOT change key names, sort_keys,
 indent, or trailing-newline handling without filing a separate task.
 
+write_ship and write_cancel replace an existing per-RC JSON through the
+shared atomic writer (pgai_agent_kanban.lib.atomic_write): a dashboard or API
+reader sees the old complete record or the new one, never a partial file.
+
 write_open_with_attempt is a sibling of write_open, adding the
 retry-counter tracking keys (attempt, family_key, cargo) computed by
 pgai_agent_kanban.cm.bundle_family. It does not replace write_open — both
@@ -74,6 +78,21 @@ import shutil
 import sys
 import tempfile
 
+# Run by file path (``python3 .../cm/write_rc_state.py``, as the CM scripts
+# do) the module has no parent package; put this tree's own package root
+# first so the package import below resolves from the same tree. Imported as
+# a package member, sys.path is left untouched.
+if not __package__:
+    _OWN_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if _OWN_PACKAGE_ROOT not in sys.path:
+        sys.path.insert(0, _OWN_PACKAGE_ROOT)
+
+from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
+
+#: Scratch-file prefix for the per-RC JSON writes, so a scratch file left by
+#: a killed process names its writer.
+_RC_JSON_TMP_PREFIX = ".rc_state_json_tmp_"
+
 
 def write_open(rc: str, opened_at: str) -> None:
     """Write a fresh per-RC release-state JSON to stdout.
@@ -90,12 +109,12 @@ def write_open(rc: str, opened_at: str) -> None:
         opened_at: ISO8601 UTC timestamp string (e.g. "2026-07-07T12:00:00Z").
     """
     payload = {
-        'rc': rc,
-        'opened_at': opened_at,
-        'closed_at': None,
-        'outcome': 'in_progress',
+        "rc": rc,
+        "opened_at": opened_at,
+        "closed_at": None,
+        "outcome": "in_progress",
     }
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def write_open_with_attempt(
@@ -136,23 +155,40 @@ def write_open_with_attempt(
         cargo:      Sorted list of bundled-item basenames, or [].
     """
     payload = {
-        'rc': rc,
-        'opened_at': opened_at,
-        'closed_at': None,
-        'outcome': 'in_progress',
-        'attempt': attempt,
-        'family_key': family_key,
-        'cargo': cargo,
+        "rc": rc,
+        "opened_at": opened_at,
+        "closed_at": None,
+        "outcome": "in_progress",
+        "attempt": attempt,
+        "family_key": family_key,
+        "cargo": cargo,
     }
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _write_rc_json(path: str, state: dict) -> None:
+    """Replace the per-RC JSON at *path* with *state*, atomically.
+
+    The payload is ``json.dumps(state, indent=2, sort_keys=True)`` plus a
+    trailing newline. It goes through the shared atomic writer, so a reader
+    sees the old complete file or the new one, never a partial write; an
+    existing file keeps its permission bits. On failure the ``OSError``
+    propagates and *path* is untouched.
+    """
+    atomic_write(
+        path,
+        json.dumps(state, indent=2, sort_keys=True) + "\n",
+        prefix=_RC_JSON_TMP_PREFIX,
+        preserve_mode=True,
+    )
 
 
 def write_ship(path: str, rc: str, closed_at: str) -> None:
     """Update an existing per-RC release-state JSON with shipped outcome.
 
     Reads the JSON file at *path* (or starts from an empty dict if the file is
-    missing or corrupt), merges in the shipped state, and writes the result
-    back in-place.  Prints a status message to stdout on success.
+    missing or corrupt), merges in the shipped state, and replaces the file
+    with the result atomically.  Prints a status message to stdout on success.
 
     Key merging rules (mirrors write_cancel, differing only in outcome value):
       - state.setdefault('rc', rc) — rc is only set when not already present
@@ -169,20 +205,20 @@ def write_ship(path: str, rc: str, closed_at: str) -> None:
         state = json.loads(open(path).read()) if os.path.exists(path) else {}
     except (json.JSONDecodeError, OSError):
         state = {}
-    state.setdefault('rc', rc)
+    state.setdefault("rc", rc)
     # opened_at is preserved when present; not added when absent (no error on missing key)
-    state['closed_at'] = closed_at
-    state['outcome'] = 'shipped'
-    open(path, 'w').write(json.dumps(state, indent=2, sort_keys=True) + '\n')
-    print('  Per-RC release-state JSON updated (shipped): ' + path)
+    state["closed_at"] = closed_at
+    state["outcome"] = "shipped"
+    _write_rc_json(path, state)
+    print("  Per-RC release-state JSON updated (shipped): " + path)
 
 
 def write_cancel(path: str, rc: str, closed_at: str, say=None) -> None:
     """Update an existing per-RC release-state JSON with cancelled outcome.
 
     Reads the JSON file at *path* (or starts from an empty dict if the file is
-    missing or corrupt), merges in the cancelled state, and writes the result
-    back in-place.  Prints a status message to stdout on success, or hands it
+    missing or corrupt), merges in the cancelled state, and replaces the file
+    with the result atomically.  Prints a status message to stdout on success, or hands it
     to *say* (one line, no trailing newline) when given.
 
     Key merging rules:
@@ -202,12 +238,12 @@ def write_cancel(path: str, rc: str, closed_at: str, say=None) -> None:
         state = json.loads(open(path).read()) if os.path.exists(path) else {}
     except (json.JSONDecodeError, OSError):
         state = {}
-    state.setdefault('rc', rc)
+    state.setdefault("rc", rc)
     # opened_at is preserved when present; not added when absent (no error on missing key)
-    state['closed_at'] = closed_at
-    state['outcome'] = 'cancelled'
-    open(path, 'w').write(json.dumps(state, indent=2, sort_keys=True) + '\n')
-    (say or print)('  Per-RC release-state JSON updated (cancelled): ' + path)
+    state["closed_at"] = closed_at
+    state["outcome"] = "cancelled"
+    _write_rc_json(path, state)
+    (say or print)("  Per-RC release-state JSON updated (cancelled): " + path)
 
 
 def archive_cancelled(path: str, rc: str, closed_at: str, say=None) -> str:
@@ -237,7 +273,7 @@ def archive_cancelled(path: str, rc: str, closed_at: str, say=None) -> str:
         str: path to the archive file, or empty string if nothing was moved.
     """
     if not os.path.exists(path):
-        return ''
+        return ""
 
     try:
         state = json.loads(open(path).read())
@@ -245,32 +281,32 @@ def archive_cancelled(path: str, rc: str, closed_at: str, say=None) -> str:
         state = {}
 
     # Only archive records that are actually cancelled; skip all others.
-    if state.get('outcome') != 'cancelled':
-        return ''
+    if state.get("outcome") != "cancelled":
+        return ""
 
     # Build the archive path: history/vX.Y.Z-cancelled-TIMESTAMP.json
     # Timestamp is derived from closed_at (already set by write_cancel).
     state_dir = os.path.dirname(path)
-    history_dir = os.path.join(state_dir, 'history')
+    history_dir = os.path.join(state_dir, "history")
     os.makedirs(history_dir, exist_ok=True)
 
     # Sanitise the timestamp for use in a filename (replace colons).
-    ts = closed_at.replace(':', '-').replace('T', '-')
-    base_name = f'{rc}-cancelled-{ts}'
-    archive_name = f'{base_name}.json'
+    ts = closed_at.replace(":", "-").replace("T", "-")
+    base_name = f"{rc}-cancelled-{ts}"
+    archive_name = f"{base_name}.json"
     archive_path = os.path.join(history_dir, archive_name)
 
     # Handle collision: multiple cancel cycles in the same second produce the
     # same timestamp.  Append a counter suffix to disambiguate.
     counter = 1
     while os.path.exists(archive_path):
-        archive_name = f'{base_name}-{counter}.json'
+        archive_name = f"{base_name}-{counter}.json"
         archive_path = os.path.join(history_dir, archive_name)
         counter += 1
 
     shutil.copy2(path, archive_path)
     os.remove(path)
-    (say or print)(f'  Per-RC history archived: {archive_path}')
+    (say or print)(f"  Per-RC history archived: {archive_path}")
     return archive_path
 
 
@@ -286,40 +322,40 @@ def promote_cancelled_to_history(path: str) -> str:
     the caller must decide whether to error out on a non-cancelled incumbent.
     """
     if not os.path.exists(path):
-        return ''
+        return ""
 
     try:
         state = json.loads(open(path).read())
     except (json.JSONDecodeError, OSError):
-        return ''
+        return ""
 
-    if state.get('outcome') != 'cancelled':
-        return ''
+    if state.get("outcome") != "cancelled":
+        return ""
 
     # Derive timestamp from closed_at in the record; fall back to rc value.
-    closed_at = state.get('closed_at') or 'unknown'
-    rc = state.get('rc', os.path.splitext(os.path.basename(path))[0])
+    closed_at = state.get("closed_at") or "unknown"
+    rc = state.get("rc", os.path.splitext(os.path.basename(path))[0])
 
     state_dir = os.path.dirname(path)
-    history_dir = os.path.join(state_dir, 'history')
+    history_dir = os.path.join(state_dir, "history")
     os.makedirs(history_dir, exist_ok=True)
 
-    ts = str(closed_at).replace(':', '-').replace('T', '-')
-    base_name = f'{rc}-cancelled-{ts}'
-    archive_name = f'{base_name}.json'
+    ts = str(closed_at).replace(":", "-").replace("T", "-")
+    base_name = f"{rc}-cancelled-{ts}"
+    archive_name = f"{base_name}.json"
     archive_path = os.path.join(history_dir, archive_name)
 
     # Handle collision: multiple cancel cycles in the same second produce the
     # same timestamp.  Append a counter suffix to disambiguate.
     counter = 1
     while os.path.exists(archive_path):
-        archive_name = f'{base_name}-{counter}.json'
+        archive_name = f"{base_name}-{counter}.json"
         archive_path = os.path.join(history_dir, archive_name)
         counter += 1
 
     shutil.copy2(path, archive_path)
     os.remove(path)
-    print(f'  Prior cancelled RC archived before re-open: {archive_path}')
+    print(f"  Prior cancelled RC archived before re-open: {archive_path}")
     return archive_path
 
 
@@ -331,35 +367,35 @@ def promote_cancelled_to_history(path: str) -> str:
 # Kept in step with RELEASE_STATE_SCHEMA in read_state_field.py (the loader);
 # this module stays importable as a bare script, so it names them itself.
 RELEASE_STATE_FIELDS = (
-    'Active RC',
-    'RC Opened At',
-    'RC Opened By Task',
-    'Last Released',
+    "Active RC",
+    "RC Opened At",
+    "RC Opened By Task",
+    "Last Released",
 )
 
 # Retired field headings an older file may still carry among the schema
 # fields. They count as part of the field region (never as an appended
 # block) and are left untouched.
 _RETIRED_RELEASE_STATE_FIELDS = (
-    'Last Released At',
-    'Last Released By Task',
+    "Last Released At",
+    "Last Released By Task",
 )
 
 # Title line written when the file is created from nothing.
-_RELEASE_STATE_TITLE = '# Release State\n'
+_RELEASE_STATE_TITLE = "# Release State\n"
 
 # Liberal on read: any run of whitespace after '##', trailing whitespace ok.
-_LEVEL2_HEADING_RE = re.compile(r'^##\s+(.*?)\s*$')
+_LEVEL2_HEADING_RE = re.compile(r"^##\s+(.*?)\s*$")
 # Any heading of level two or deeper ends a field's section.
-_SECTION_BOUNDARY_RE = re.compile(r'^\s*##')
-_HORIZONTAL_RULE_RE = re.compile(r'^\s*-{3,}\s*$')
-_HTML_COMMENT_OPEN = '<!--'
-_HTML_COMMENT_CLOSE = '-->'
+_SECTION_BOUNDARY_RE = re.compile(r"^\s*##")
+_HORIZONTAL_RULE_RE = re.compile(r"^\s*-{3,}\s*$")
+_HTML_COMMENT_OPEN = "<!--"
+_HTML_COMMENT_CLOSE = "-->"
 
 
 def _heading_name(line: str):
     """Return the heading text of a '## ...' line, or None for any other line."""
-    match = _LEVEL2_HEADING_RE.match(line.rstrip('\r\n'))
+    match = _LEVEL2_HEADING_RE.match(line.rstrip("\r\n"))
     return match.group(1) if match else None
 
 
@@ -410,7 +446,7 @@ def _value_index(lines: list, heading_idx: int):
             continue
         if _SECTION_BOUNDARY_RE.match(text) or _HORIZONTAL_RULE_RE.match(text):
             return None
-        if not text or text.startswith('#'):
+        if not text or text.startswith("#"):
             continue
         if text.startswith(_HTML_COMMENT_OPEN):
             in_html_comment = _HTML_COMMENT_CLOSE not in text
@@ -457,11 +493,10 @@ def render_release_state(text: str, updates: dict) -> str:
     unknown = sorted(set(updates) - set(RELEASE_STATE_FIELDS))
     if unknown:
         raise ValueError(
-            f'not release-state fields: {", ".join(unknown)} '
-            f'(accepted: {", ".join(RELEASE_STATE_FIELDS)})'
+            f'not release-state fields: {", ".join(unknown)} ' f'(accepted: {", ".join(RELEASE_STATE_FIELDS)})'
         )
     for heading, value in updates.items():
-        if not isinstance(value, str) or not value.strip() or '\n' in value or '\r' in value:
+        if not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value:
             raise ValueError(
                 f"release-state field '{heading}' needs a single-line, non-empty "
                 f"value (got {value!r}); use 'none' for an unset field"
@@ -470,8 +505,8 @@ def render_release_state(text: str, updates: dict) -> str:
     if not text:
         text = _RELEASE_STATE_TITLE
     lines = text.splitlines(keepends=True)
-    if not lines[-1].endswith('\n'):
-        lines[-1] += '\n'
+    if not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
 
     # Index just past the most recent schema field's section content; a
     # missing field is inserted at the next '##' boundary from here.
@@ -485,26 +520,26 @@ def render_release_state(text: str, updates: dict) -> str:
                 continue
             insert_at = _next_boundary_index(lines, anchor)
             if insert_at < len(lines):
-                block = [f'## {heading}\n', f'{new_value.strip()}\n', '\n']
+                block = [f"## {heading}\n", f"{new_value.strip()}\n", "\n"]
             else:
-                block = [] if lines[-1].strip() == '' else ['\n']
-                block += [f'## {heading}\n', f'{new_value.strip()}\n']
+                block = [] if lines[-1].strip() == "" else ["\n"]
+                block += [f"## {heading}\n", f"{new_value.strip()}\n"]
             lines[insert_at:insert_at] = block
             anchor = insert_at + len(block)
             continue
 
         if new_value is not None:
-            lines[heading_idx] = f'## {heading}\n'
+            lines[heading_idx] = f"## {heading}\n"
         value_idx = _value_index(lines, heading_idx)
         if new_value is not None:
             if value_idx is None:
-                lines.insert(heading_idx + 1, f'{new_value.strip()}\n')
+                lines.insert(heading_idx + 1, f"{new_value.strip()}\n")
                 value_idx = heading_idx + 1
             else:
-                lines[value_idx] = f'{new_value.strip()}\n'
+                lines[value_idx] = f"{new_value.strip()}\n"
         anchor = (value_idx if value_idx is not None else heading_idx) + 1
 
-    return ''.join(lines)
+    return "".join(lines)
 
 
 def update_release_state_fields(path: str, updates: dict) -> None:
@@ -549,25 +584,23 @@ def _rewrite_release_state(path: str, transform, create_missing: bool) -> None:
     """
     target = os.path.realpath(path)
     try:
-        with open(target, encoding='utf-8') as fh:
+        with open(target, encoding="utf-8") as fh:
             original = fh.read()
         mode = os.stat(target).st_mode & 0o7777
     except FileNotFoundError:
         if not create_missing:
             raise
-        original = ''
+        original = ""
         umask = os.umask(0)
         os.umask(umask)
         mode = 0o644 & ~umask
 
     rendered = transform(original)
 
-    directory = os.path.dirname(target) or '.'
-    fd, tmp_path = tempfile.mkstemp(
-        dir=directory, prefix='.release-state.', suffix='.tmp'
-    )
+    directory = os.path.dirname(target) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".release-state.", suffix=".tmp")
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as fh:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(rendered)
             fh.flush()
             os.fsync(fh.fileno())
@@ -583,11 +616,11 @@ def _rewrite_release_state(path: str, transform, create_missing: bool) -> None:
 # release-state.md — appended Auto-Ship Event record
 # ---------------------------------------------------------------------------
 
-AUTO_SHIP_EVENT_HEADING = 'Auto-Ship Event'
+AUTO_SHIP_EVENT_HEADING = "Auto-Ship Event"
 
 # Timestamp shape written when the caller does not supply one; the same
 # UTC form the shell helpers stamp on their own appended events.
-_EVENT_TIMESTAMP_FORMAT = '%Y-%m-%dT%H:%M:%SZ'
+_EVENT_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
 def _event_value(label: str, value) -> str:
@@ -598,12 +631,9 @@ def _event_value(label: str, value) -> str:
     optional field would then take for that field, so a multi-line or
     empty value is refused rather than written.
     """
-    text = '' if value is None else str(value)
-    if '\n' in text or '\r' in text or not text.strip():
-        raise ValueError(
-            f"Auto-Ship Event '{label}' needs a single-line, non-empty value "
-            f"(got {value!r})"
-        )
+    text = "" if value is None else str(value)
+    if "\n" in text or "\r" in text or not text.strip():
+        raise ValueError(f"Auto-Ship Event '{label}' needs a single-line, non-empty value " f"(got {value!r})")
     return text.strip()
 
 
@@ -629,25 +659,25 @@ def render_auto_ship_event(
         ValueError: when *trigger* is not a positive whole number, or any
             value is empty or spans more than one line.
     """
-    trigger_text = _event_value('Trigger', trigger)
-    if not re.fullmatch(r'[0-9]+', trigger_text) or int(trigger_text) < 1:
+    trigger_text = _event_value("Trigger", trigger)
+    if not re.fullmatch(r"[0-9]+", trigger_text) or int(trigger_text) < 1:
         raise ValueError(
             f"Auto-Ship Event 'Trigger' must be a positive whole number "
             f"naming the ship-policy trigger, e.g. 2 (got {trigger!r})"
         )
     fields = [
-        ('Timestamp', timestamp),
-        ('Version', version),
-        ('Trigger', str(int(trigger_text))),
-        ('Error Key', error_key),
-        ('Ship Posture', ship_posture),
-        ('TESTER Task', tester_task),
+        ("Timestamp", timestamp),
+        ("Version", version),
+        ("Trigger", str(int(trigger_text))),
+        ("Error Key", error_key),
+        ("Ship Posture", ship_posture),
+        ("TESTER Task", tester_task),
     ]
     if filed_bug is not None:
-        fields.append(('Filed Bug', filed_bug))
-    lines = [f'## {AUTO_SHIP_EVENT_HEADING}\n']
-    lines += [f'{label}: {_event_value(label, value)}\n' for label, value in fields]
-    return ''.join(lines)
+        fields.append(("Filed Bug", filed_bug))
+    lines = [f"## {AUTO_SHIP_EVENT_HEADING}\n"]
+    lines += [f"{label}: {_event_value(label, value)}\n" for label, value in fields]
+    return "".join(lines)
 
 
 def _append_block(text: str, block: str) -> str:
@@ -657,12 +687,12 @@ def _append_block(text: str, block: str) -> str:
     to finish an unterminated last line, then a blank line unless *text*
     already ends in one. An empty *text* takes the block alone.
     """
-    if not text or text.endswith('\n\n'):
-        separator = ''
-    elif text.endswith('\n'):
-        separator = '\n'
+    if not text or text.endswith("\n\n"):
+        separator = ""
+    elif text.endswith("\n"):
+        separator = "\n"
     else:
-        separator = '\n\n'
+        separator = "\n\n"
     return text + separator + block
 
 
@@ -713,9 +743,7 @@ def append_auto_ship_event(
             not a positive whole number. Nothing is written.
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
-            _EVENT_TIMESTAMP_FORMAT
-        )
+        timestamp = datetime.datetime.now(datetime.UTC).strftime(_EVENT_TIMESTAMP_FORMAT)
     block = render_auto_ship_event(
         timestamp=timestamp,
         version=version,
@@ -725,9 +753,7 @@ def append_auto_ship_event(
         tester_task=tester_task,
         filed_bug=filed_bug,
     )
-    _rewrite_release_state(
-        path, lambda original: _append_block(original, block), create_missing=False
-    )
+    _rewrite_release_state(path, lambda original: _append_block(original, block), create_missing=False)
     return block
 
 
@@ -751,28 +777,28 @@ def main() -> None:
             "block to it."
         ),
     )
-    subparsers = parser.add_subparsers(dest='command', required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     # open subcommand
     p_open = subparsers.add_parser(
-        'open',
+        "open",
         help=(
             "Write a fresh per-RC release-state JSON to stdout. "
             "Redirect stdout to the target file (as open-rc.sh does)."
         ),
     )
     p_open.add_argument(
-        'rc',
+        "rc",
         help="The RC version string (e.g. 'v1.8.0').",
     )
     p_open.add_argument(
-        'opened_at',
+        "opened_at",
         help="ISO8601 UTC timestamp string (e.g. '2026-07-07T12:00:00Z').",
     )
 
     # open-with-attempt subcommand (adds the bundle-family retry counter)
     p_open_attempt = subparsers.add_parser(
-        'open-with-attempt',
+        "open-with-attempt",
         help=(
             "Write a fresh per-RC release-state JSON to stdout, including "
             "the bundle-family attempt counter. Redirect stdout to the "
@@ -780,72 +806,66 @@ def main() -> None:
         ),
     )
     p_open_attempt.add_argument(
-        'rc',
+        "rc",
         help="The RC version string (e.g. 'v2.0.1').",
     )
     p_open_attempt.add_argument(
-        'opened_at',
+        "opened_at",
         help="ISO8601 UTC timestamp string (e.g. '2026-07-07T12:00:00Z').",
     )
     p_open_attempt.add_argument(
-        'attempt',
+        "attempt",
         type=int,
         help="Attempt number within the bundle family (>= 1).",
     )
     p_open_attempt.add_argument(
-        'family_key',
+        "family_key",
         help="Family identity string, or the literal 'none' when the RC has no trackable cargo.",
     )
     p_open_attempt.add_argument(
-        'cargo_json',
+        "cargo_json",
         help="JSON-encoded list of bundled-item basenames (e.g. '[\"BUG-0001-foo.md\"]').",
     )
 
     # ship subcommand
     p_ship = subparsers.add_parser(
-        'ship',
-        help=(
-            "Merge a shipped outcome into an existing per-RC release-state "
-            "JSON file, updating it in-place."
-        ),
+        "ship",
+        help=("Merge a shipped outcome into an existing per-RC release-state " "JSON file, updating it in-place."),
     )
     p_ship.add_argument(
-        'path',
+        "path",
         help="Path to the JSON state file to read and update in-place.",
     )
     p_ship.add_argument(
-        'rc',
+        "rc",
         help="The RC version string (e.g. 'v1.8.0').",
     )
     p_ship.add_argument(
-        'closed_at',
+        "closed_at",
         help="ISO8601 UTC timestamp string for the ship time.",
     )
 
     # cancel subcommand
     p_cancel = subparsers.add_parser(
-        'cancel',
-        help=(
-            "Merge a cancelled outcome into an existing per-RC release-state "
-            "JSON file, updating it in-place."
-        ),
+        "cancel",
+        help=("Merge a cancelled outcome into an existing per-RC release-state " "JSON file, updating it in-place."),
     )
     p_cancel.add_argument(
-        'path',
+        "path",
         help="Path to the JSON state file to read and update in-place.",
     )
     p_cancel.add_argument(
-        'rc',
+        "rc",
         help="The RC version string (e.g. 'v1.8.0').",
     )
     p_cancel.add_argument(
-        'closed_at',
+        "closed_at",
         help="ISO8601 UTC timestamp string for the cancellation time.",
     )
 
     # archive-cancelled subcommand
     p_archive = subparsers.add_parser(
-        'archive-cancelled',
+        "archive-cancelled",
         help=(
             "Move a cancelled per-RC JSON from the active slot to history/, "
             "freeing the version number for re-use. Idempotent when the file "
@@ -853,21 +873,21 @@ def main() -> None:
         ),
     )
     p_archive.add_argument(
-        'path',
+        "path",
         help="Path to the active per-RC JSON file (e.g. release-state/v1.8.0.json).",
     )
     p_archive.add_argument(
-        'rc',
+        "rc",
         help="The RC version string (e.g. 'v1.8.0').",
     )
     p_archive.add_argument(
-        'closed_at',
+        "closed_at",
         help="ISO8601 UTC timestamp string used to name the archive file.",
     )
 
     # release-state subcommand (the release-state.md markdown field writer)
     p_state = subparsers.add_parser(
-        'release-state',
+        "release-state",
         help=(
             "Set fields of the project-scoped release-state.md in place, "
             "atomically. Only the named fields change; every other line, "
@@ -881,21 +901,21 @@ def main() -> None:
         ),
     )
     p_state.add_argument(
-        'path',
+        "path",
         help="Path to the release-state.md file to update.",
     )
     for heading in RELEASE_STATE_FIELDS:
         p_state.add_argument(
-            '--' + heading.lower().replace(' ', '-'),
-            dest=heading.lower().replace(' ', '_'),
-            metavar='VALUE',
+            "--" + heading.lower().replace(" ", "-"),
+            dest=heading.lower().replace(" ", "_"),
+            metavar="VALUE",
             default=None,
             help=f"New value for '## {heading}'.",
         )
 
     # auto-ship-event subcommand (appends one ## Auto-Ship Event block)
     p_event = subparsers.add_parser(
-        'auto-ship-event',
+        "auto-ship-event",
         help=(
             "Append one '## Auto-Ship Event' block to the end of an existing "
             "release-state.md, atomically. Every existing byte is kept; a "
@@ -912,75 +932,80 @@ def main() -> None:
         ),
     )
     p_event.add_argument(
-        'path',
+        "path",
         help="Path to the existing release-state.md to append to.",
     )
     p_event.add_argument(
-        '--version', required=True, metavar='VERSION',
+        "--version",
+        required=True,
+        metavar="VERSION",
         help="The version that shipped (e.g. 'v1.8.0').",
     )
     p_event.add_argument(
-        '--trigger', required=True, metavar='N',
+        "--trigger",
+        required=True,
+        metavar="N",
         help="Ship-policy trigger number that would have stopped the release (e.g. 2).",
     )
     p_event.add_argument(
-        '--error-key', required=True, metavar='KEY',
-        help=(
-            "Machine error key of the stop that did not happen "
-            "(e.g. 'cm-release.trigger-2.systemic-risk-high')."
-        ),
+        "--error-key",
+        required=True,
+        metavar="KEY",
+        help=("Machine error key of the stop that did not happen " "(e.g. 'cm-release.trigger-2.systemic-risk-high')."),
     )
     p_event.add_argument(
-        '--ship-posture', required=True, metavar='POSTURE',
+        "--ship-posture",
+        required=True,
+        metavar="POSTURE",
         help="Resolved ship posture the release shipped under (e.g. 'always').",
     )
     p_event.add_argument(
-        '--tester-task', required=True, metavar='TASK_ID',
+        "--tester-task",
+        required=True,
+        metavar="TASK_ID",
         help="TESTER task whose report drove the ship decision.",
     )
     p_event.add_argument(
-        '--filed-bug', default=None, metavar='NAME',
+        "--filed-bug",
+        default=None,
+        metavar="NAME",
         help=(
-            "Bug filed for the pattern, when one was filed; adds a "
-            "'Filed Bug:' line. Omit when no bug was filed."
+            "Bug filed for the pattern, when one was filed; adds a " "'Filed Bug:' line. Omit when no bug was filed."
         ),
     )
     p_event.add_argument(
-        '--timestamp', default=None, metavar='TS',
-        help=(
-            "When the event happened. Default: the current UTC time as "
-            "YYYY-MM-DDThh:mm:ssZ."
-        ),
+        "--timestamp",
+        default=None,
+        metavar="TS",
+        help=("When the event happened. Default: the current UTC time as " "YYYY-MM-DDThh:mm:ssZ."),
     )
 
     args = parser.parse_args()
-    if args.command == 'open':
+    if args.command == "open":
         write_open(args.rc, args.opened_at)
-    elif args.command == 'open-with-attempt':
-        family_key = None if args.family_key == 'none' else args.family_key
+    elif args.command == "open-with-attempt":
+        family_key = None if args.family_key == "none" else args.family_key
         cargo = json.loads(args.cargo_json)
         write_open_with_attempt(args.rc, args.opened_at, args.attempt, family_key, cargo)
-    elif args.command == 'ship':
+    elif args.command == "ship":
         write_ship(args.path, args.rc, args.closed_at)
-    elif args.command == 'cancel':
+    elif args.command == "cancel":
         write_cancel(args.path, args.rc, args.closed_at)
-    elif args.command == 'archive-cancelled':
+    elif args.command == "archive-cancelled":
         archive_cancelled(args.path, args.rc, args.closed_at)
-    elif args.command == 'release-state':
+    elif args.command == "release-state":
         updates = {
-            heading: getattr(args, heading.lower().replace(' ', '_'))
+            heading: getattr(args, heading.lower().replace(" ", "_"))
             for heading in RELEASE_STATE_FIELDS
-            if getattr(args, heading.lower().replace(' ', '_')) is not None
+            if getattr(args, heading.lower().replace(" ", "_")) is not None
         }
         if not updates:
-            p_state.error(
-                'name at least one field, e.g. --active-rc none'
-            )
+            p_state.error("name at least one field, e.g. --active-rc none")
         try:
             update_release_state_fields(args.path, updates)
         except ValueError as exc:
             p_state.error(str(exc))
-    elif args.command == 'auto-ship-event':
+    elif args.command == "auto-ship-event":
         try:
             append_auto_ship_event(
                 args.path,
@@ -994,12 +1019,12 @@ def main() -> None:
             )
         except FileNotFoundError:
             p_event.error(
-                f'release-state.md not found: {args.path} — an Auto-Ship '
-                f'Event is appended to an existing file; check the path'
+                f"release-state.md not found: {args.path} — an Auto-Ship "
+                f"Event is appended to an existing file; check the path"
             )
         except ValueError as exc:
             p_event.error(str(exc))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

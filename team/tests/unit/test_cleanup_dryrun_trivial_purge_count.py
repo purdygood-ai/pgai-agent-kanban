@@ -94,31 +94,26 @@ def test_dry_run_reports_seeded_trivial_log_count_as_a_plain_integer(
     )
 
     assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
 
     match = re.search(r"trivial_logs_deleted:\s*(\S+)", result.stdout)
-    assert match is not None, (
-        f"summary is missing a trivial_logs_deleted field:\n{result.stdout}"
-    )
+    assert match is not None, f"summary is missing a trivial_logs_deleted field:\n{result.stdout}"
     value = match.group(1)
     assert value.isdigit(), (
         f"trivial_logs_deleted must be a plain integer, got {value!r} -- a "
         "non-integer value means the dry-run narration leaked into the "
         f"count channel again:\n{result.stdout}"
     )
-    assert value == "3", (
-        f"expected the seeded count 3, got {value!r}:\n{result.stdout}"
-    )
+    assert value == "3", f"expected the seeded count 3, got {value!r}:\n{result.stdout}"
 
     # Per-file narration still appears, once each, in the Step 0 section --
     # the fix separates the channels, it does not silence the narration.
     for path in seeded:
         narration_line = f"[DRY-RUN] trivial-purge would delete: {path}"
-        assert result.stdout.count(narration_line) == 1, (
-            f"expected exactly one narration line for {path}:\n{result.stdout}"
-        )
+        assert (
+            result.stdout.count(narration_line) == 1
+        ), f"expected exactly one narration line for {path}:\n{result.stdout}"
 
     # Dry-run never deletes.
     for path in seeded:

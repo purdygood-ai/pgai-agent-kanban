@@ -57,8 +57,9 @@ def _require_git() -> None:
     require_binary("git", label="harness-temp-root")
 
 
-def _run(script: pathlib.Path, tmp_path: pathlib.Path, args: list[str],
-         env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+def _run(
+    script: pathlib.Path, tmp_path: pathlib.Path, args: list[str], env_extra: dict[str, str]
+) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     cwd = tmp_path / "elsewhere"
@@ -72,8 +73,13 @@ def _run(script: pathlib.Path, tmp_path: pathlib.Path, args: list[str],
     )
     proc = subprocess.Popen(
         ["bash", str(script), *args],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(cwd), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         out, err = proc.communicate(timeout=_TIMEOUT_SECONDS)
@@ -108,8 +114,12 @@ def test_baseline_scratch_lands_under_the_temp_dir_override(tmp_path: pathlib.Pa
     other_tmpdir = tmp_path / "other_tmpdir"
     other_tmpdir.mkdir()
 
-    result = _run(_BASELINE_SH, tmp_path, ["--compare", str(_seeded_capture_dir(tmp_path))],
-                  {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)})
+    result = _run(
+        _BASELINE_SH,
+        tmp_path,
+        ["--compare", str(_seeded_capture_dir(tmp_path))],
+        {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)},
+    )
 
     assert result.returncode == 0, _diag(result)
     scratch_parent = sandbox / "harness" / "engine-behavior-baseline"
@@ -124,8 +134,12 @@ def test_baseline_scratch_follows_kanban_cfg_paths_without_an_override(tmp_path:
     root.mkdir()
     (root / "kanban.cfg").write_text(f"[paths]\ntmp_root = {configured}\ntmp_subdir = scratch\n", encoding="utf-8")
 
-    result = _run(_BASELINE_SH, tmp_path, ["--compare", str(_seeded_capture_dir(tmp_path))],
-                  {"PGAI_AGENT_KANBAN_ROOT_PATH": str(root)})
+    result = _run(
+        _BASELINE_SH,
+        tmp_path,
+        ["--compare", str(_seeded_capture_dir(tmp_path))],
+        {"PGAI_AGENT_KANBAN_ROOT_PATH": str(root)},
+    )
 
     assert result.returncode == 0, _diag(result)
     assert (configured / "scratch" / "harness" / "engine-behavior-baseline").is_dir(), _diag(result)
@@ -150,13 +164,15 @@ def test_flow_check_throwaway_root_lands_under_the_temp_dir_override(tmp_path: p
     ],
     ids=["engine-behavior-baseline", "helloworld-flow-check"],
 )
-def test_missing_temp_sh_refuses_naming_the_path(tmp_path: pathlib.Path, script: pathlib.Path,
-                                                 error_key: str, exit_code: int) -> None:
+def test_missing_temp_sh_refuses_naming_the_path(
+    tmp_path: pathlib.Path, script: pathlib.Path, error_key: str, exit_code: int
+) -> None:
     broken = _without_temp_sh(tmp_path, script)
     sandbox = tmp_path / "sandbox_tmp"
 
-    result = _run(broken, tmp_path, ["--capture", str(tmp_path / "capture")],
-                  {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox)})
+    result = _run(
+        broken, tmp_path, ["--capture", str(tmp_path / "capture")], {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox)}
+    )
 
     assert result.returncode == exit_code, _diag(result)
     assert f"error:   {error_key}" in result.stderr, _diag(result)

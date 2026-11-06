@@ -15,6 +15,8 @@ Coverage:
     which backup went where.
   - A firing in which two actions touched the same file reverts it to its
     pre-firing content (rows are undone newest first).
+  - overwatch-revert.sh's own action-log writer appends one six-field line
+    whatever tab, CR or LF any field holds.
 
 Every path is a throwaway kanban root under pytest's tmp_path.
 """
@@ -22,6 +24,8 @@ Every path is a throwaway kanban root under pytest's tmp_path.
 from __future__ import annotations
 
 import pathlib
+
+import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -39,8 +43,9 @@ def _sandbox(tmp_path: pathlib.Path) -> pathlib.Path:
     (root / "kanban.cfg").write_text("[wake]\n", encoding="utf-8")
     for task in ("TASK-A", "TASK-B"):
         (project_root / "tasks" / task).mkdir(parents=True)
-        (project_root / "tasks" / task / "status.md").write_text(f"# Status\n\n## State\nBLOCKED\n\n{task}\n",
-                                                                encoding="utf-8")
+        (project_root / "tasks" / task / "status.md").write_text(
+            f"# Status\n\n## State\nBLOCKED\n\n{task}\n", encoding="utf-8"
+        )
     return root
 
 
@@ -62,7 +67,7 @@ def _backup_and_log(tmp_path: pathlib.Path, root: pathlib.Path, task: str) -> st
         f"bp=\"$(overwatch_backup_file '{status}')\"\n"
         f"overwatch_log_action fixture-check {task} requeue \"$bp\" 'fixture fix'\n"
         f"printf 'new state\\n' > '{status}'\n"
-        "echo \"BACKUP=$bp\"\n"
+        'echo "BACKUP=$bp"\n'
     )
     result = run_bash(tmp_path, script, extra_env=_env(root))
     assert result.returncode == 0, result.stderr
@@ -112,8 +117,9 @@ def test_reverting_the_firing_restores_each_tasks_own_status(tmp_path):
     _backup_and_log(tmp_path, root, "TASK-A")
     _backup_and_log(tmp_path, root, "TASK-B")
 
-    result = run_bash(tmp_path, f"bash scripts/overwatch-revert.sh --project {_PROJECT} {_FIRING}",
-                      extra_env=_env(root))
+    result = run_bash(
+        tmp_path, f"bash scripts/overwatch-revert.sh --project {_PROJECT} {_FIRING}", extra_env=_env(root)
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     for task, text in originals.items():
@@ -130,8 +136,38 @@ def test_a_file_two_actions_touched_reverts_to_its_pre_firing_content(tmp_path):
     _backup_and_log(tmp_path, root, "TASK-A")
     _backup_and_log(tmp_path, root, "TASK-A")
 
-    result = run_bash(tmp_path, f"bash scripts/overwatch-revert.sh --project {_PROJECT} {_FIRING}",
-                      extra_env=_env(root))
+    result = run_bash(
+        tmp_path, f"bash scripts/overwatch-revert.sh --project {_PROJECT} {_FIRING}", extra_env=_env(root)
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert status.read_text(encoding="utf-8") == original
+
+
+_REVERT_LOG_ARGS = {
+    "name": "overwatch-revert",
+    "target": _FIRING,
+    "action": "revert-completed",
+    "backup_path": "none",
+    "reason": "one line",
+}
+
+
+@pytest.mark.parametrize("field", list(_REVERT_LOG_ARGS))
+def test_the_revert_log_writer_appends_one_six_field_line_whatever_any_field_holds(tmp_path, field):
+    root = _sandbox(tmp_path)
+    args = dict(_REVERT_LOG_ARGS, **{field: "first\tpart\r\nsecond  part\n"})
+    script = (
+        "set -euo pipefail\nsource scripts/overwatch-revert.sh\n"
+        '_or_append_log "$NAME" "$TARGET" "$ACTION" "$BACKUP_PATH" "$REASON"\n'
+    )
+
+    result = run_bash(tmp_path, script, extra_env=_env(root) | {key.upper(): value for key, value in args.items()})
+
+    assert result.returncode == 0, result.stderr
+    log = (root / "projects" / _PROJECT / "overwatch" / "actions.log").read_bytes().decode("utf-8")
+    assert log.endswith("\n") and log.count("\n") == 1 and "\r" not in log, repr(log)
+    fields = log[:-1].split("\t")
+    assert len(fields) == 6, fields
+    expected = dict(args, **{field: "first part second part"})
+    assert fields[1:] == list(expected.values())

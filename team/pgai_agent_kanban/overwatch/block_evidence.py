@@ -77,7 +77,7 @@ import pathlib
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 # Run by file path, this module has no parent package; put its own package
 # root first on sys.path so the imports below resolve from the same tree.
@@ -127,7 +127,7 @@ def _readme_role(status_file: Path) -> str:
     return section_value(text, "Role")
 
 
-def resolve_owner_role(status_file: "Path | str", candidates: Sequence[str] = ()) -> str:
+def resolve_owner_role(status_file: Path | str, candidates: Sequence[str] = ()) -> str:
     """Return the task's owner role, or ``""`` when none is known.
 
     Each candidate is tried in order, then the ``## Role`` of the README
@@ -145,7 +145,7 @@ def resolve_owner_role(status_file: "Path | str", candidates: Sequence[str] = ()
 # ---------------------------------------------------------------------------
 
 
-def _git(cwd: Path, *args: str) -> Optional[subprocess.CompletedProcess]:
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(
             ["git", "-C", str(cwd), *args],
@@ -163,7 +163,7 @@ def _branch_exists(cwd: Path, branch: str) -> bool:
     return result is not None and result.returncode == 0
 
 
-def _git_dir(worktree: str, repo: str) -> Optional[Path]:
+def _git_dir(worktree: str, repo: str) -> Path | None:
     """The directory git runs in: the worktree when it exists, else the repo."""
     for candidate in (worktree, repo):
         if candidate and Path(candidate).is_dir():
@@ -224,10 +224,10 @@ class Dispatch:
 
     batch_log: str
     offset_start: int
-    offset_end: Optional[int]
-    span_seconds: Optional[float]
+    offset_end: int | None
+    span_seconds: float | None
 
-    def resolved_end(self) -> Optional[int]:
+    def resolved_end(self) -> int | None:
         """The span's end: the recorded end, else the batch log's current size."""
         if self.offset_end is not None:
             return self.offset_end
@@ -246,11 +246,11 @@ class Dispatch:
         return f"batch_log={self.batch_log}#{self.offset_start}-{end if end is not None else 'eof'}"
 
 
-def _as_offset(value: object) -> Optional[int]:
+def _as_offset(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
-def latest_dispatch(task_dir: "Path | str") -> Optional[Dispatch]:
+def latest_dispatch(task_dir: Path | str) -> Dispatch | None:
     """Return the task's latest dispatch, or None when there is no usable ledger.
 
     Torn or non-object lines are skipped. The span in seconds is measured
@@ -275,7 +275,7 @@ def latest_dispatch(task_dir: "Path | str") -> Optional[Dispatch]:
 
     latest = records[-1]
     dispatched = next((r for r in reversed(records) if r.get("event") == "dispatched"), None)
-    span: Optional[float] = None
+    span: float | None = None
     if latest.get("event") == "returned" and dispatched is not None:
         start = try_parse_iso(str(dispatched.get("recorded_at", "")))
         end = try_parse_iso(str(latest.get("recorded_at", "")))
@@ -305,13 +305,13 @@ def dispatch_tail(dispatch: Dispatch, lines: int = TAIL_LINES) -> str:
     return _tail(data.decode("utf-8", errors="replace"), lines)
 
 
-def signature_class(text: str) -> Optional[str]:
+def signature_class(text: str) -> str | None:
     """The provider-error class of *text* (``billing``, ``refusal``,
     ``transient``) from the signature table, or ``None``."""
     return provider_signatures.classify(text)
 
 
-def refusal_signature(text: str) -> Optional[str]:
+def refusal_signature(text: str) -> str | None:
     """The label of the first refusal or billing signature, in table order,
     found in *text* (``auth``, ``model_not_found``, ``usage_limit``)."""
     match = provider_signatures.first_match(text, REFUSAL_CLASSES)
@@ -323,8 +323,8 @@ class ZeroProgressVerdict:
     """Why a zero-progress block is, or is not, a provider refusal."""
 
     reason_code: str
-    span_seconds: Optional[float]
-    signature: Optional[str]
+    span_seconds: float | None
+    signature: str | None
 
     def tokens(self) -> list[str]:
         """Return the verdict's evidence tokens: ``span_s=<seconds>`` and ``signature=<text>``.
@@ -336,7 +336,7 @@ class ZeroProgressVerdict:
 
 
 def classify_zero_progress(
-    task_dir: "Path | str",
+    task_dir: Path | str,
     min_span_seconds: float = DEFAULT_MIN_SPAN_SECONDS,
 ) -> ZeroProgressVerdict:
     """Classify a zero-progress block as ``provider_refusal`` or ``zero_progress``.
@@ -393,7 +393,7 @@ def build_evidence(
     source: str = "",
     task_dir: str = "",
     refusal_signals: bool = False,
-    diag_log: Optional[str] = None,
+    diag_log: str | None = None,
     min_span_seconds: float = DEFAULT_MIN_SPAN_SECONDS,
 ) -> str:
     """Return the one-line ``evidence`` value for a block site.
@@ -461,12 +461,15 @@ def _parser() -> argparse.ArgumentParser:
     e.add_argument("--source", default="", help="the branch the feature branch merges into")
     e.add_argument("--task-dir", default="", help="the task folder whose logs/dispatch.jsonl names the batch log")
     e.add_argument(
-        "--refusal-signals", action="store_true",
+        "--refusal-signals",
+        action="store_true",
         help="with --task-dir: add the dispatch span (span_s) and any refusal signature",
     )
     e.add_argument("--diag-log", default=None, help="log whose last line is the block's diagnostic")
     e.add_argument(
-        "--min-span", type=float, default=DEFAULT_MIN_SPAN_SECONDS,
+        "--min-span",
+        type=float,
+        default=DEFAULT_MIN_SPAN_SECONDS,
         help=f"seconds under which a dispatch is a refusal (default {DEFAULT_MIN_SPAN_SECONDS})",
     )
 
@@ -492,13 +495,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     z.add_argument("task_dir", metavar="TASK_DIR", help="the task folder")
     z.add_argument(
-        "--min-span", type=float, default=DEFAULT_MIN_SPAN_SECONDS,
+        "--min-span",
+        type=float,
+        default=DEFAULT_MIN_SPAN_SECONDS,
         help=f"seconds under which a dispatch is a refusal (default {DEFAULT_MIN_SPAN_SECONDS})",
     )
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the exit code."""
     parser = _parser()
     args = parser.parse_args(argv)

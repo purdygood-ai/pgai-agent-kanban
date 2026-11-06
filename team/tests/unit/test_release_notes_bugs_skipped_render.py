@@ -123,12 +123,10 @@ _SHIP_POLICY_LIB = "scripts/lib/cm/release_ship_policy.sh"
 _SHIP_POLICY_REPORT_LIB = "scripts/lib/cm/release_ship_policy_report.sh"
 
 _BUGS_SKIPPED_HEADER = (
-    "| Substance (what was wrong) | Public ID (if disclosed) | Severity | "
-    "Rationale for Skipping |"
+    "| Substance (what was wrong) | Public ID (if disclosed) | Severity | " "Rationale for Skipping |"
 )
 _BUGS_SKIPPED_SEPARATOR = (
-    "|------------------------------|---------------------------|----------"
-    "|-------------------------|"
+    "|------------------------------|---------------------------|----------" "|-------------------------|"
 )
 
 _BUG_TEMPLATE = """# {bug_id}-{slug}
@@ -201,16 +199,16 @@ def _generate_notes(
     repo_root.mkdir(exist_ok=True)
 
     argv = [
-        bundle_file,             # bundle_file_arg
-        str(repo_root),          # repo_root
-        active_rc,                # active_rc
-        "FUNCTIONAL",              # status
-        "2026-09-10",                # release_date
-        "test-project",                # project_name
-        "none",                          # merge_base
-        "rc/" + active_rc,                 # rc_branch
-        "",                                  # known_issue_block
-        bugs_skipped_block,                    # bugs_skipped_block
+        bundle_file,  # bundle_file_arg
+        str(repo_root),  # repo_root
+        active_rc,  # active_rc
+        "FUNCTIONAL",  # status
+        "2026-09-10",  # release_date
+        "test-project",  # project_name
+        "none",  # merge_base
+        "rc/" + active_rc,  # rc_branch
+        "",  # known_issue_block
+        bugs_skipped_block,  # bugs_skipped_block
     ]
     rc = release_notes_main(argv)
     assert rc == 0, f"release-notes generator returned {rc}"
@@ -222,9 +220,7 @@ def _generate_notes(
 
 def _parse_section(text: str, heading: str) -> str:
     """Same section-extraction convention the generator itself uses."""
-    pattern = re.compile(
-        r"^##\s+" + re.escape(heading) + r"\s*$", re.IGNORECASE | re.MULTILINE
-    )
+    pattern = re.compile(r"^##\s+" + re.escape(heading) + r"\s*$", re.IGNORECASE | re.MULTILINE)
     match = pattern.search(text)
     assert match, f"'## {heading}' heading not found in generated notes"
     start = match.end()
@@ -291,9 +287,7 @@ def test_six_agent_prefix_task_ids_in_rationale_do_not_survive_render(tmp_path):
         assert task_id not in bugs_skipped_block
 
     bundle = _make_bundle(tmp_path, [])
-    notes = _generate_notes(
-        tmp_path, bundle_file=str(bundle), bugs_skipped_block=bugs_skipped_block
-    )
+    notes = _generate_notes(tmp_path, bundle_file=str(bundle), bugs_skipped_block=bugs_skipped_block)
 
     assert "## Bugs Skipped" in notes
     for prefix, task_id in zip(_SIX_AGENT_PREFIXES, task_ids):
@@ -328,14 +322,10 @@ def test_empty_block_renders_explicit_empty_state_with_no_table_artefacts(tmp_pa
 def test_non_empty_block_header_and_separator_pass_through_unchanged(tmp_path):
     bugs_dir = tmp_path / "bugs"
     bug_path = _write_bug(bugs_dir, "BUG-0600", "single-finding", "A minor rendering glitch.")
-    bugs_skipped_block = _build_bugs_skipped_block(
-        tmp_path, (bug_path, "Low impact; deferred to next release.")
-    )
+    bugs_skipped_block = _build_bugs_skipped_block(tmp_path, (bug_path, "Low impact; deferred to next release."))
 
     bundle = _make_bundle(tmp_path, [])
-    notes = _generate_notes(
-        tmp_path, bundle_file=str(bundle), bugs_skipped_block=bugs_skipped_block
-    )
+    notes = _generate_notes(tmp_path, bundle_file=str(bundle), bugs_skipped_block=bugs_skipped_block)
 
     section_body = _parse_section(notes, "Bugs Skipped")
     assert _BUGS_SKIPPED_HEADER in section_body
@@ -377,9 +367,7 @@ def test_abbreviated_task_refs_do_not_survive_render(tmp_path):
     section_body = _parse_section(notes, "Bugs Skipped")
     assert "another item" in section_body
     assert "Step 6.3 documentation-layer review." in section_body
-    assert not _SHORT_TASK_REF_RE.search(notes), (
-        f"an abbreviated task reference survived the render:\n{section_body}"
-    )
+    assert not _SHORT_TASK_REF_RE.search(notes), f"an abbreviated task reference survived the render:\n{section_body}"
 
 
 def test_requirements_document_path_does_not_survive_render(tmp_path):
@@ -505,9 +493,7 @@ def _render_bugs_skipped_from_report(tmp_path: pathlib.Path) -> tuple[str, str]:
     block = result.stdout.strip("\n")
     assert block, f"cm_build_bugs_skipped_ship_block rendered nothing.\nstderr:\n{result.stderr}"
 
-    notes = _generate_notes(
-        tmp_path, bundle_file=str(_make_bundle(tmp_path, [])), bugs_skipped_block=block
-    )
+    notes = _generate_notes(tmp_path, bundle_file=str(_make_bundle(tmp_path, [])), bugs_skipped_block=block)
     return block, _parse_section(notes, "Bugs Skipped")
 
 
@@ -516,7 +502,8 @@ def _rationale_cells(section_body: str) -> list[str]:
     literal '|' inside a cell is escaped as '\\|' by the renderer, so only an
     unescaped '|' is a column boundary."""
     rows = [
-        line for line in section_body.splitlines()
+        line
+        for line in section_body.splitlines()
         if line.startswith("|") and line != _BUGS_SKIPPED_HEADER and line != _BUGS_SKIPPED_SEPARATOR
     ]
     cells = []
@@ -539,15 +526,9 @@ def test_rationale_cells_from_traces_first_report_are_readable_prose(tmp_path):
     assert len(rationales) == len(_TRACES_FIRST_BUG_IDS), section_body
     for rationale in rationales:
         assert rationale, f"empty Rationale for Skipping cell:\n{section_body}"
-        assert not rationale.startswith("- "), (
-            f"rationale is a list bullet, not prose: {rationale!r}"
-        )
-        assert "Traces to" not in rationale, (
-            f"rationale is the finding's Traces-to detail line: {rationale!r}"
-        )
-        assert "another item" not in rationale, (
-            f"rationale carries a scrubbed identifier stand-in: {rationale!r}"
-        )
+        assert not rationale.startswith("- "), f"rationale is a list bullet, not prose: {rationale!r}"
+        assert "Traces to" not in rationale, f"rationale is the finding's Traces-to detail line: {rationale!r}"
+        assert "another item" not in rationale, f"rationale carries a scrubbed identifier stand-in: {rationale!r}"
 
 
 def test_rationale_cells_state_why_each_finding_shipped_unfixed(tmp_path):
@@ -604,8 +585,12 @@ None.
     "regression_line, lead",
     [
         pytest.param("", "Predates this release and was found during its verification", id="no-regression-line"),
-        pytest.param("**Regression:** no", "Predates this release and was found during its verification", id="regression-no"),
-        pytest.param("**Regression:** yes", "Introduced by this release and found during its verification", id="regression-yes"),
+        pytest.param(
+            "**Regression:** no", "Predates this release and was found during its verification", id="regression-no"
+        ),
+        pytest.param(
+            "**Regression:** yes", "Introduced by this release and found during its verification", id="regression-yes"
+        ),
     ],
 )
 def test_filed_pre_existing_bug_finding_gets_a_bugs_skipped_row(tmp_path, regression_line, lead):
@@ -618,8 +603,7 @@ def test_filed_pre_existing_bug_finding_gets_a_bugs_skipped_row(tmp_path, regres
     rows = _skipped_bug_pairs(tmp_path, report_text, "pre-existing.md")
 
     assert rows == (
-        f"{bug_file}\t{lead}, rated fix effort small and systemic risk medium; "
-        "deferred to a follow-up release.\n"
+        f"{bug_file}\t{lead}, rated fix effort small and systemic risk medium; " "deferred to a follow-up release.\n"
     )
 
 
@@ -639,9 +623,7 @@ def test_pre_existing_bug_row_renders_into_the_release_notes(tmp_path):
     assert result.returncode == 0, result.stderr
     block = result.stdout.strip("\n")
 
-    notes = _generate_notes(
-        tmp_path, bundle_file=str(_make_bundle(tmp_path, [])), bugs_skipped_block=block
-    )
+    notes = _generate_notes(tmp_path, bundle_file=str(_make_bundle(tmp_path, [])), bugs_skipped_block=block)
     rationales = _rationale_cells(_parse_section(notes, "Bugs Skipped"))
 
     assert rationales == [
@@ -719,8 +701,7 @@ def _skipped_bug_pairs(tmp_path: pathlib.Path, report_text: str, name: str) -> s
     report.write_text(report_text, encoding="utf-8")
     result = run_bash(
         tmp_path,
-        f"source {_KNOWN_ISSUE_LIB} && "
-        f"read_ship_policy_skipped_bug_pairs '{report}' '{tmp_path / 'bugs'}'",
+        f"source {_KNOWN_ISSUE_LIB} && " f"read_ship_policy_skipped_bug_pairs '{report}' '{tmp_path / 'bugs'}'",
     )
     assert result.returncode == 0, result.stderr
     return result.stdout
@@ -757,8 +738,7 @@ def test_shallower_step_heading_ends_a_level_four_finding_block(tmp_path):
     rows = _skipped_bug_pairs(tmp_path, _STEP_ENDS_FINDING_REPORT, "report.md")
 
     assert str(step_bug) not in rows, (
-        "the Filed As line under '### Step 6.5' was read as part of the "
-        f"preceding '#### Finding 1' block:\n{rows}"
+        "the Filed As line under '### Step 6.5' was read as part of the " f"preceding '#### Finding 1' block:\n{rows}"
     )
     assert rows == (
         f"{filed_bug}\tIntroduced by this release and found during its verification, "
@@ -831,9 +811,7 @@ None.
 """
 
 
-@pytest.mark.parametrize(
-    "heading, nested, opens", _READER_AGREEMENT_CASES, ids=_READER_AGREEMENT_IDS
-)
+@pytest.mark.parametrize("heading, nested, opens", _READER_AGREEMENT_CASES, ids=_READER_AGREEMENT_IDS)
 def test_every_report_reader_agrees_on_each_heading_shape(tmp_path, heading, nested, opens):
     """The Bugs Skipped reader, the Known Issues stop list, the
     SHIP-KNOWN-ISSUE bug resolver, the ship-policy dimensions reader and
@@ -842,20 +820,16 @@ def test_every_report_reader_agrees_on_each_heading_shape(tmp_path, heading, nes
     including when a finding heading is nested inside it (*nested*)."""
     bug_file = _write_bug(tmp_path / "bugs", "BUG-0003", "probe", "A probe defect.")
     report = tmp_path / "report.md"
-    report.write_text(
-        _HEADING_SHAPE_REPORT.format(heading=heading, nested=nested), encoding="utf-8"
-    )
+    report.write_text(_HEADING_SHAPE_REPORT.format(heading=heading, nested=nested), encoding="utf-8")
 
     bugs_skipped = run_bash(
         tmp_path,
-        f"source {_KNOWN_ISSUE_LIB} && "
-        f"read_ship_policy_skipped_bug_pairs '{report}' '{tmp_path / 'bugs'}'",
+        f"source {_KNOWN_ISSUE_LIB} && " f"read_ship_policy_skipped_bug_pairs '{report}' '{tmp_path / 'bugs'}'",
     )
     assert bugs_skipped.returncode == 0, bugs_skipped.stderr
     known_issue = run_bash(
         tmp_path,
-        f"source {_KNOWN_ISSUE_LIB} && "
-        f"read_ship_policy_known_issue_bug_files '{report}' '{tmp_path / 'bugs'}'",
+        f"source {_KNOWN_ISSUE_LIB} && " f"read_ship_policy_known_issue_bug_files '{report}' '{tmp_path / 'bugs'}'",
     )
     assert known_issue.returncode == 0, known_issue.stderr
     dims = run_bash(
@@ -863,9 +837,7 @@ def test_every_report_reader_agrees_on_each_heading_shape(tmp_path, heading, nes
         f"source {_SHIP_POLICY_REPORT_LIB} && read_ship_policy_finding_dimensions '{report}'",
     )
     assert dims.returncode == 0, dims.stderr
-    stop_list = resolve_stop_bug_files(
-        str(report), str(tmp_path / "bugs"), CAUSE_SYSTEMIC_RISK_HIGH
-    )
+    stop_list = resolve_stop_bug_files(str(report), str(tmp_path / "bugs"), CAUSE_SYSTEMIC_RISK_HIGH)
     overwatch_findings = matrix_findings(parse_report(report))
 
     read_by = {
@@ -873,9 +845,7 @@ def test_every_report_reader_agrees_on_each_heading_shape(tmp_path, heading, nes
         _STOP_LIST_READER: stop_list == [str(bug_file.resolve())],
         _KNOWN_ISSUE_READER: known_issue.stdout.splitlines() == [str(bug_file)],
         _SHIP_POLICY_READER: dims.stdout.strip() == "no none",
-        _OVERWATCH_READER: (
-            bool(overwatch_findings) and overwatch_findings[0]["filed_as"] == "BUG-0003"
-        ),
+        _OVERWATCH_READER: (bool(overwatch_findings) and overwatch_findings[0]["filed_as"] == "BUG-0003"),
     }
     assert set(read_by.values()) == {opens}, (
         f"heading {heading!r}: expected every reader to "
@@ -958,14 +928,12 @@ def test_all_four_field_readers_agree_on_each_field_line_shape(tmp_path, templat
 
     bugs_skipped = run_bash(
         tmp_path,
-        f"source {_KNOWN_ISSUE_LIB} && "
-        f"read_ship_policy_skipped_bug_pairs '{report}' '{tmp_path / 'bugs'}'",
+        f"source {_KNOWN_ISSUE_LIB} && " f"read_ship_policy_skipped_bug_pairs '{report}' '{tmp_path / 'bugs'}'",
     )
     assert bugs_skipped.returncode == 0, bugs_skipped.stderr
     known_issue = run_bash(
         tmp_path,
-        f"source {_KNOWN_ISSUE_LIB} && "
-        f"read_ship_policy_known_issue_bug_files '{report}' '{tmp_path / 'bugs'}'",
+        f"source {_KNOWN_ISSUE_LIB} && " f"read_ship_policy_known_issue_bug_files '{report}' '{tmp_path / 'bugs'}'",
     )
     assert known_issue.returncode == 0, known_issue.stderr
     matrix = run_bash(
@@ -977,9 +945,7 @@ def test_all_four_field_readers_agree_on_each_field_line_shape(tmp_path, templat
     )
     assert matrix.returncode == 0, matrix.stderr
     dims, decision = matrix.stdout.splitlines()[0], matrix.stdout.splitlines()[-1]
-    stop_list = resolve_stop_bug_files(
-        str(report), str(tmp_path / "bugs"), CAUSE_SYSTEMIC_RISK_HIGH
-    )
+    stop_list = resolve_stop_bug_files(str(report), str(tmp_path / "bugs"), CAUSE_SYSTEMIC_RISK_HIGH)
 
     read_by = {
         "ship-policy (read_ship_policy_finding_dimensions)": dims == "no none",

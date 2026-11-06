@@ -55,7 +55,7 @@ Tests cover:
 
  10. **The Key Registry parser reads the real config_loader.sh** — a
      structural read, not a hand-copied key list — and the real census
-     resolves to the documented 15 window ids / 16 rows.
+     resolves to the documented 15 window ids / 17 rows.
 
 All tests either use pytest's ``tmp_path`` for seeded fixture content or
 point ``--config-loader``/``--census`` at small, isolated fixture files —
@@ -232,9 +232,9 @@ def test_unknown_key_citation_is_flagged(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
 
     assert result == 1
-    assert "UNKNOWN CONFIG KEY: [dashboard] totally_invented_key" in out, (
-        f"Finding does not name the unknown key.\nstdout: {out!r}"
-    )
+    assert (
+        "UNKNOWN CONFIG KEY: [dashboard] totally_invented_key" in out
+    ), f"Finding does not name the unknown key.\nstdout: {out!r}"
     assert "fake.md:5" in out, f"Finding does not name the doc:line.\nstdout: {out!r}"
 
 
@@ -260,9 +260,9 @@ def test_default_mismatch_and_unknown_key_are_distinct(tmp_path, capsys) -> None
     out = capsys.readouterr().out
 
     assert result == 1
-    assert "CONFIG DEFAULT MISMATCH: [dashboard] rows_per_column" in out, (
-        f"Finding does not name the default mismatch.\nstdout: {out!r}"
-    )
+    assert (
+        "CONFIG DEFAULT MISMATCH: [dashboard] rows_per_column" in out
+    ), f"Finding does not name the default mismatch.\nstdout: {out!r}"
     assert "documented default: '99'" in out
     assert "loader default:     '21'" in out
     assert "UNKNOWN CONFIG KEY: [dashboard] totally_invented_key" in out
@@ -304,9 +304,9 @@ def test_removing_unknown_key_seed_clears_its_finding(tmp_path, capsys) -> None:
     out_after = capsys.readouterr().out
 
     assert result_after == 1, "The remaining default-mismatch seed must still fail the lint."
-    assert "UNKNOWN CONFIG KEY" not in out_after, (
-        f"Removing the unknown-key citation must clear its finding.\nstdout: {out_after!r}"
-    )
+    assert (
+        "UNKNOWN CONFIG KEY" not in out_after
+    ), f"Removing the unknown-key citation must clear its finding.\nstdout: {out_after!r}"
     assert "CONFIG DEFAULT MISMATCH: [dashboard] rows_per_column" in out_after
 
 
@@ -353,9 +353,7 @@ def test_undocumented_key_findings_name_their_own_source_registry(tmp_path: Path
     # surface as UNDOCUMENTED CONFIG KEY findings.
     doc = _write(tmp_path / "empty.md", "# Empty doc\n\nNo config keys cited here.\n")
 
-    result = _run(
-        doc, config_loader, census, tmp_path, project_key_registry=project_key_registry
-    )
+    result = _run(doc, config_loader, census, tmp_path, project_key_registry=project_key_registry)
     out = capsys.readouterr().out
     assert result == 1
 
@@ -366,15 +364,13 @@ def test_undocumented_key_findings_name_their_own_source_registry(tmp_path: Path
 
     config_loader_finding = _finding_block("UNDOCUMENTED CONFIG KEY: [dashboard] rows_per_column")
     assert str(config_loader) in config_loader_finding, (
-        f"the config_loader.sh-declared key's finding must name its own source file.\n"
-        f"{config_loader_finding!r}"
+        f"the config_loader.sh-declared key's finding must name its own source file.\n" f"{config_loader_finding!r}"
     )
     assert str(project_key_registry) not in config_loader_finding
 
     project_registry_finding = _finding_block("UNDOCUMENTED CONFIG KEY: [project] workflow_type")
     assert str(project_key_registry) in project_registry_finding, (
-        f"the project_paths.sh-declared key's finding must name its own source file.\n"
-        f"{project_registry_finding!r}"
+        f"the project_paths.sh-declared key's finding must name its own source file.\n" f"{project_registry_finding!r}"
     )
     assert str(config_loader) not in project_registry_finding
 
@@ -417,15 +413,15 @@ def test_genuinely_unknown_key_flags_but_real_project_cfg_key_does_not(tmp_path,
     out = capsys.readouterr().out
 
     assert result == 1
-    assert "UNKNOWN CONFIG KEY: [project] totally_invented_project_key" in out, (
-        f"A genuinely-unknown project.cfg key must still be flagged.\nstdout: {out!r}"
-    )
-    assert "UNKNOWN CONFIG KEY: [project] workflow_type" not in out, (
-        f"A real, correctly-documented project.cfg key must not be flagged unknown.\nstdout: {out!r}"
-    )
-    assert "CONFIG DEFAULT MISMATCH: [project] workflow_type" not in out, (
-        f"workflow_type's claimed default matches the registry; it must not mismatch either.\nstdout: {out!r}"
-    )
+    assert (
+        "UNKNOWN CONFIG KEY: [project] totally_invented_project_key" in out
+    ), f"A genuinely-unknown project.cfg key must still be flagged.\nstdout: {out!r}"
+    assert (
+        "UNKNOWN CONFIG KEY: [project] workflow_type" not in out
+    ), f"A real, correctly-documented project.cfg key must not be flagged unknown.\nstdout: {out!r}"
+    assert (
+        "CONFIG DEFAULT MISMATCH: [project] workflow_type" not in out
+    ), f"workflow_type's claimed default matches the registry; it must not mismatch either.\nstdout: {out!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -485,9 +481,9 @@ def test_ordinary_default_without_na_marker_would_mismatch(tmp_path, capsys) -> 
     out = capsys.readouterr().out
 
     assert result == 1
-    assert "CONFIG DEFAULT MISMATCH: [project] project_name" in out, (
-        f"An ordinary (non-N/A) default should mismatch a differing example value.\nstdout: {out!r}"
-    )
+    assert (
+        "CONFIG DEFAULT MISMATCH: [project] project_name" in out
+    ), f"An ordinary (non-N/A) default should mismatch a differing example value.\nstdout: {out!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -511,9 +507,9 @@ def test_unknown_pane_citation_is_flagged(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
 
     assert result == 1
-    assert "UNKNOWN DASHBOARD PANE: window 0, position 'Left'" in out, (
-        f"Finding does not name the window/pane.\nstdout: {out!r}"
-    )
+    assert (
+        "UNKNOWN DASHBOARD PANE: window 0, position 'Left'" in out
+    ), f"Finding does not name the window/pane.\nstdout: {out!r}"
     assert "nonexistent-script.sh" in out
     assert "fake.md" in out
 
@@ -548,9 +544,9 @@ def test_removing_pane_seed_clears_its_finding(tmp_path, capsys) -> None:
     result_after = _run(doc_path, config_loader, census, tmp_path)
     out_after = capsys.readouterr().out
 
-    assert "UNKNOWN DASHBOARD PANE" not in out_after, (
-        f"Correcting the pane's script must clear its finding.\nstdout: {out_after!r}"
-    )
+    assert (
+        "UNKNOWN DASHBOARD PANE" not in out_after
+    ), f"Correcting the pane's script must clear its finding.\nstdout: {out_after!r}"
     # Window 1 ('second') is still undocumented in this fixture — result stays 1 either way.
     assert result_after == 1
 
@@ -633,9 +629,9 @@ def test_real_tree_key_parity_scans_nonzero_citations(capsys) -> None:
     out = capsys.readouterr().out
 
     assert result in (0, 1), f"Unexpected exit code {result}.\nstdout: {out!r}"
-    assert "key-parity: scanned 0 key citation" not in out, (
-        f"The real key-parity scan set resolved to zero citations.\nstdout: {out!r}"
-    )
+    assert (
+        "key-parity: scanned 0 key citation" not in out
+    ), f"The real key-parity scan set resolved to zero citations.\nstdout: {out!r}"
     assert "lint_doc_command_truth: key-parity:" in out
 
 
@@ -644,27 +640,26 @@ def test_real_tree_pane_parity_scans_nonzero_citations(capsys) -> None:
     out = capsys.readouterr().out
 
     assert result in (0, 1), f"Unexpected exit code {result}.\nstdout: {out!r}"
-    assert "pane-parity: scanned 0 window/pane citation" not in out, (
-        f"The real pane-parity scan set resolved to zero citations.\nstdout: {out!r}"
-    )
+    assert (
+        "pane-parity: scanned 0 window/pane citation" not in out
+    ), f"The real pane-parity scan set resolved to zero citations.\nstdout: {out!r}"
     assert "lint_doc_command_truth: pane-parity:" in out
-    assert "15 census window id(s) (16 row(s))" in out
+    assert "15 census window id(s) (17 row(s))" in out
 
 
 # ---------------------------------------------------------------------------
 # Test 10: the registry parser reads the real config_loader.sh; the real
-# census resolves to 15 window ids across 16 rows.
+# census resolves to 15 window ids across 17 rows.
 # ---------------------------------------------------------------------------
 
 
 def test_registry_parser_reads_real_config_loader() -> None:
     registry = _lint._parse_config_loader_registry(_REAL_CONFIG_LOADER)
 
-    assert len(registry) > 40, (
-        f"Expected the real Key Registry to declare more than 40 keys; got {len(registry)}."
-    )
+    assert len(registry) > 40, f"Expected the real Key Registry to declare more than 40 keys; got {len(registry)}."
     assert registry[("dashboard", "rows_per_column")].default == "21"
     assert registry[("dashboard", "rows_per_column")].status == "OPTIONAL"
+    assert registry[("dashboard", "operator_board_agents")].default == "merged"
     assert registry[("paths", "dev_tree_path")].default == ""
     assert registry[("release", "deferred_bug_level")].default == "low"
     # The [models.<provider>] families of the shipped providers share the
@@ -678,8 +673,8 @@ def test_registry_parser_reads_real_config_loader() -> None:
 def test_real_census_resolves_to_documented_window_and_row_counts() -> None:
     windows = _lint._load_dashboard_windows(_TEAM_DIR, None)
 
-    assert len(windows) == 16, f"Expected 16 window rows (drill-N counted twice); got {len(windows)}."
+    assert len(windows) == 17, f"Expected 17 window rows (operator and drill-N counted twice); got {len(windows)}."
     unique_ids = {w.tmux_index for w in windows}
     assert len(unique_ids) == 15, f"Expected 15 unique window ids; got {len(unique_ids)}."
     total_panes = sum(len(w.panes) for w in windows)
-    assert total_panes == 47, f"Expected 47 pane (P) lines across all windows; got {total_panes}."
+    assert total_panes == 55, f"Expected 55 pane (P) lines across all windows; got {total_panes}."

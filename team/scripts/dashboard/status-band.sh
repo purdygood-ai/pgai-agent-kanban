@@ -67,10 +67,15 @@
 # every other renderer in this directory uses.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TEAM_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CRON_PARSER_LIB="${TEAM_DIR}/pm-agent/lib/cron_parser.py"
 ROSTER_ENTRIES_PY="${TEAM_DIR}/pgai_agent_kanban/dashboard/roster_entries.py"
@@ -105,12 +110,6 @@ while [[ $# -gt 0 ]]; do
     --no-color)
       NO_COLOR_ARG=true
       shift
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       # Unknown arguments silently ignored for forward compatibility,
@@ -232,6 +231,16 @@ _status_band_distill() {
       break
     fi
   done < <(tail -n 5000 "$log_file" | tac)
+
+  # The loop breaks long before the producer above reaches EOF, and the
+  # renderer exits soon after its last call here, so an un-waited process
+  # substitution would outlive the script and be left for PID 1 to reap --
+  # under a PID 1 that never reaps, one zombie per render. Waiting for it
+  # (`$!` names the process substitution) collects it here instead. The
+  # loop's input is untouched, so the distilled values are too. Its status
+  # is non-zero whenever the early break closed the pipe under it (SIGPIPE),
+  # which is expected, so it is never allowed to fail the function.
+  wait "$!" 2>/dev/null || true
 
   # The while loop's own exit status is whatever its last executed body
   # command returned (bash's documented behaviour for `while`/`until`) --

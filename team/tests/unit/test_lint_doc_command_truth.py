@@ -59,7 +59,6 @@ none is destructive.
 from __future__ import annotations
 
 import importlib.util
-import os
 import subprocess
 import sys
 import time
@@ -175,9 +174,9 @@ def test_missing_command_finding_names_doc_line_and_command(tmp_path: Path, caps
     out = capsys.readouterr().out
 
     assert result == 1
-    assert "MISSING COMMAND: team/scripts/does_not_exist.sh" in out, (
-        f"Finding does not name the missing command.\nstdout: {out!r}"
-    )
+    assert (
+        "MISSING COMMAND: team/scripts/does_not_exist.sh" in out
+    ), f"Finding does not name the missing command.\nstdout: {out!r}"
     assert "docs/fake.md:4" in out, f"Finding does not name the doc:line.\nstdout: {out!r}"
 
 
@@ -198,13 +197,11 @@ def test_broken_help_citation_is_flagged_distinctly(tmp_path: Path, capsys) -> N
     out = capsys.readouterr().out
 
     assert result == 1, "A real script whose --help exits non-zero must fail the lint."
-    assert "HELP FAILS: team/scripts/broken_help.sh" in out, (
-        f"Finding does not name the broken-help command.\nstdout: {out!r}"
-    )
+    assert (
+        "HELP FAILS: team/scripts/broken_help.sh" in out
+    ), f"Finding does not name the broken-help command.\nstdout: {out!r}"
     assert "exited 3" in out, f"Finding does not name the actual exit code.\nstdout: {out!r}"
-    assert "MISSING COMMAND" not in out, (
-        "A resolvable script with a broken --help must never be reported as missing."
-    )
+    assert "MISSING COMMAND" not in out, "A resolvable script with a broken --help must never be reported as missing."
 
 
 def test_missing_and_help_broken_findings_are_visibly_different(tmp_path: Path, capsys) -> None:
@@ -264,8 +261,7 @@ def test_removing_missing_command_seed_clears_its_finding(tmp_path: Path, capsys
 
     assert result_after == 1, "The remaining broken-help seed must still fail the lint."
     assert "MISSING COMMAND" not in out_after, (
-        "Removing the missing-command citation must clear its finding.\n"
-        f"stdout: {out_after!r}"
+        "Removing the missing-command citation must clear its finding.\n" f"stdout: {out_after!r}"
     )
     assert "HELP FAILS: team/scripts/broken_help.sh" in out_after
 
@@ -295,9 +291,9 @@ def test_removing_help_broken_seed_clears_its_finding(tmp_path: Path, capsys) ->
     out_after = capsys.readouterr().out
 
     assert result_after == 1, "The remaining missing-command seed must still fail the lint."
-    assert "HELP FAILS" not in out_after, (
-        f"Removing the broken-help citation must clear its finding.\nstdout: {out_after!r}"
-    )
+    assert (
+        "HELP FAILS" not in out_after
+    ), f"Removing the broken-help citation must clear its finding.\nstdout: {out_after!r}"
     assert "MISSING COMMAND: team/scripts/does_not_exist.sh" in out_after
 
 
@@ -429,9 +425,7 @@ def test_help_timeout_is_a_finding_not_a_crash(tmp_path: Path, capsys) -> None:
         "# Fake doc\n\n```bash\nteam/scripts/hangs_forever.sh --project demo\n```\n",
     )
 
-    result = _lint.main(
-        ["--repo-root", str(root), "--doc", str(doc), "--help-timeout", "1"]
-    )
+    result = _lint.main(["--repo-root", str(root), "--doc", str(doc), "--help-timeout", "1"])
     out = capsys.readouterr().out
 
     assert result == 1
@@ -561,9 +555,7 @@ def test_default_scan_set_covers_repo_root_and_docker_docs(capsys) -> None:
     scanned-document set that includes README.md, HOW_TO.md,
     ARCHITECTURE.md and docs/docker.md — the four documents previously
     absent from the default scan set."""
-    result = _lint.main(
-        ["--repo-root", str(_REPO_ROOT), "--help-timeout", "5", "--verbose"]
-    )
+    result = _lint.main(["--repo-root", str(_REPO_ROOT), "--help-timeout", "5", "--verbose"])
     out = capsys.readouterr().out
     assert result in (0, 1), f"Unexpected exit code {result}.\nstdout: {out!r}"
 
@@ -573,9 +565,7 @@ def test_default_scan_set_covers_repo_root_and_docker_docs(capsys) -> None:
         if line.strip().startswith("citation:")
     }
     for expected in ("README.md", "HOW_TO.md", "ARCHITECTURE.md", "docs/docker.md"):
-        assert expected in scanned_docs, (
-            f"{expected} was not in the scanned-document set: {sorted(scanned_docs)}"
-        )
+        assert expected in scanned_docs, f"{expected} was not in the scanned-document set: {sorted(scanned_docs)}"
 
 
 def test_extra_scan_manifest_is_a_separate_source_from_docs_manifest(tmp_path: Path) -> None:
@@ -642,19 +632,14 @@ def test_docs_manifest_still_documents_only_the_install_set(capsys) -> None:
     install-set closure rather than this lint's scan set."""
     manifest_path = _REPO_ROOT / "team" / "config" / "docs-manifest.txt"
     text = manifest_path.read_text(encoding="utf-8")
-    entries = {
-        line.split("#", 1)[0].strip()
-        for line in text.splitlines()
-        if line.split("#", 1)[0].strip()
-    }
+    entries = {line.split("#", 1)[0].strip() for line in text.splitlines() if line.split("#", 1)[0].strip()}
     for excluded in ("README.md", "HOW_TO.md", "ARCHITECTURE.md", "docker.md"):
         assert excluded not in entries, (
             f"{excluded} must not be added to docs-manifest.txt's install-set "
             "closure — it belongs in team/config/doc-truth-extra-scan-docs.txt instead"
         )
     assert "install.sh and upgrade.sh" in text, (
-        "docs-manifest.txt's header should still describe its install-set-closure "
-        "purpose unchanged"
+        "docs-manifest.txt's header should still describe its install-set-closure " "purpose unchanged"
     )
 
 
@@ -710,21 +695,15 @@ def test_help_exempt_list_silences_a_listed_process_internal_citation(tmp_path: 
     )
     exempt_list = _write_help_exempt_list(root, ["team/scripts/broken_help.sh"])
 
-    result = _lint.main(
-        ["--repo-root", str(root), "--doc", str(doc), "--help-exempt-list", str(exempt_list)]
-    )
+    result = _lint.main(["--repo-root", str(root), "--doc", str(doc), "--help-exempt-list", str(exempt_list)])
     out = capsys.readouterr().out
 
     assert result == 0, f"An exempted broken-help citation must not fail the lint.\nstdout: {out!r}"
     assert "HELP FAILS" not in out, f"Exempted citation must not be reported.\nstdout: {out!r}"
-    assert "1 process-internal citation(s) exempted" in out, (
-        f"Summary line must record the exemption.\nstdout: {out!r}"
-    )
+    assert "1 process-internal citation(s) exempted" in out, f"Summary line must record the exemption.\nstdout: {out!r}"
 
 
-def test_help_exempt_list_does_not_silence_a_non_exempt_broken_help_citation(
-    tmp_path: Path, capsys
-) -> None:
+def test_help_exempt_list_does_not_silence_a_non_exempt_broken_help_citation(tmp_path: Path, capsys) -> None:
     """Discrimination, direction 1: a broken-help citation whose resolved
     file is NOT on the exempt list is reported exactly as it is without the
     seam — the seam narrows nothing beyond the paths it explicitly names."""
@@ -737,15 +716,13 @@ def test_help_exempt_list_does_not_silence_a_non_exempt_broken_help_citation(
     # Exempt list exists but names an unrelated path only.
     exempt_list = _write_help_exempt_list(root, ["team/scripts/real_script.sh"])
 
-    result = _lint.main(
-        ["--repo-root", str(root), "--doc", str(doc), "--help-exempt-list", str(exempt_list)]
-    )
+    result = _lint.main(["--repo-root", str(root), "--doc", str(doc), "--help-exempt-list", str(exempt_list)])
     out = capsys.readouterr().out
 
     assert result == 1, f"A non-exempt broken-help citation must still fail the lint.\nstdout: {out!r}"
-    assert "HELP FAILS: team/scripts/broken_help.sh" in out, (
-        f"Non-exempt citation must still be reported.\nstdout: {out!r}"
-    )
+    assert (
+        "HELP FAILS: team/scripts/broken_help.sh" in out
+    ), f"Non-exempt citation must still be reported.\nstdout: {out!r}"
 
 
 def test_help_exempt_list_never_silences_the_existence_check(tmp_path: Path, capsys) -> None:
@@ -764,17 +741,13 @@ def test_help_exempt_list_never_silences_the_existence_check(tmp_path: Path, cap
     exempt_list = _write_help_exempt_list(root, ["team/scripts/deleted_but_exempt.sh"])
     assert not (root / "team" / "scripts" / "deleted_but_exempt.sh").exists()
 
-    result = _lint.main(
-        ["--repo-root", str(root), "--doc", str(doc), "--help-exempt-list", str(exempt_list)]
-    )
+    result = _lint.main(["--repo-root", str(root), "--doc", str(doc), "--help-exempt-list", str(exempt_list)])
     out = capsys.readouterr().out
 
-    assert result == 1, (
-        f"An exempt path whose file no longer exists must still fail the lint.\nstdout: {out!r}"
-    )
-    assert "MISSING COMMAND: team/scripts/deleted_but_exempt.sh" in out, (
-        f"Existence check must still fire for a deleted exempt path.\nstdout: {out!r}"
-    )
+    assert result == 1, f"An exempt path whose file no longer exists must still fail the lint.\nstdout: {out!r}"
+    assert (
+        "MISSING COMMAND: team/scripts/deleted_but_exempt.sh" in out
+    ), f"Existence check must still fire for a deleted exempt path.\nstdout: {out!r}"
     assert "HELP FAILS" not in out, (
         "A missing file was never --help-checked in the first place — only "
         f"MISSING COMMAND is expected here.\nstdout: {out!r}"
@@ -835,15 +808,12 @@ def test_real_tree_default_exempt_list_closes_the_named_process_internal_citatio
     # one-line header a plain per-line filter would keep — a failure here
     # should name the command that failed, not just report that "some HELP
     # FAILS finding" exists.
-    help_fails_blocks = [
-        block for block in out.split("\n\n") if block.lstrip().startswith("HELP FAILS")
-    ]
+    help_fails_blocks = [block for block in out.split("\n\n") if block.lstrip().startswith("HELP FAILS")]
     assert not help_fails_blocks, (
         "The default exempt list must close every HELP FAILS finding in the "
         "real tree, including the three process-internal citations named "
         "above. Each block below names the failing command, its exit "
-        "status (or timeout), and its captured stdout/stderr:\n\n"
-        + "\n\n".join(help_fails_blocks)
+        "status (or timeout), and its captured stdout/stderr:\n\n" + "\n\n".join(help_fails_blocks)
     )
     assert "process-internal citation(s) exempted from the --help check" in out
 
@@ -911,12 +881,8 @@ def _run_lint_over_follow_script(tmp_path: Path, monkeypatch, script_body: str, 
     return code, temp_root, sandbox_prefix
 
 
-def test_foreground_follow_pipeline_is_killed_with_its_process_group(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    code, temp_root, sandbox_prefix = _run_lint_over_follow_script(
-        tmp_path, monkeypatch, _FOLLOW_FOREGROUND, "1"
-    )
+def test_foreground_follow_pipeline_is_killed_with_its_process_group(tmp_path: Path, monkeypatch, capsys) -> None:
+    code, temp_root, sandbox_prefix = _run_lint_over_follow_script(tmp_path, monkeypatch, _FOLLOW_FOREGROUND, "1")
     out = capsys.readouterr().out
 
     assert code == 1
@@ -927,26 +893,19 @@ def test_foreground_follow_pipeline_is_killed_with_its_process_group(
         "the lint returned but processes from the probe's group are still "
         "alive (tail -F and awk must both be gone):\n" + "\n".join(leftover)
     )
-    assert not list((temp_root / "lint_doc_command_truth").glob("help-sandbox-*")), (
-        "the help sandbox directory must be removed when the run ends"
-    )
+    assert not list(
+        (temp_root / "lint_doc_command_truth").glob("help-sandbox-*")
+    ), "the help sandbox directory must be removed when the run ends"
 
 
-def test_backgrounded_follow_pipeline_is_killed_after_help_exits_zero(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
-    code, temp_root, sandbox_prefix = _run_lint_over_follow_script(
-        tmp_path, monkeypatch, _FOLLOW_BACKGROUND, "10"
-    )
+def test_backgrounded_follow_pipeline_is_killed_after_help_exits_zero(tmp_path: Path, monkeypatch, capsys) -> None:
+    code, temp_root, sandbox_prefix = _run_lint_over_follow_script(tmp_path, monkeypatch, _FOLLOW_BACKGROUND, "10")
     out = capsys.readouterr().out
 
     assert code == 0, out
     assert "HELP FAILS" not in out
     leftover = _wait_until_no_process_matches(sandbox_prefix)
-    assert not leftover, (
-        "--help exited 0 but the pipeline it backgrounded is still alive:\n"
-        + "\n".join(leftover)
-    )
+    assert not leftover, "--help exited 0 but the pipeline it backgrounded is still alive:\n" + "\n".join(leftover)
     assert not list((temp_root / "lint_doc_command_truth").glob("help-sandbox-*"))
 
 
@@ -968,14 +927,12 @@ _TAGGED_FENCE_OPENERS = [
     ("```python", "```"),
     ("~~~", "~~~"),
     ("~~~yaml", "~~~"),
-    ("````json title=\"x\"", "````"),
+    ('````json title="x"', "````"),
 ]
 
 
 @pytest.mark.parametrize(("opener", "closer"), _TAGGED_FENCE_OPENERS)
-def test_prose_citation_after_any_tagged_fence_is_scanned(
-    tmp_path: Path, capsys, opener: str, closer: str
-) -> None:
+def test_prose_citation_after_any_tagged_fence_is_scanned(tmp_path: Path, capsys, opener: str, closer: str) -> None:
     root = _build_fixture_tree(tmp_path)
     doc = _write_doc(
         root,
@@ -989,8 +946,7 @@ def test_prose_citation_after_any_tagged_fence_is_scanned(
     out = capsys.readouterr().out
 
     assert result == 1, (
-        f"The prose citation after a {opener!r} block must be scanned and "
-        f"reported.\nstdout: {out!r}"
+        f"The prose citation after a {opener!r} block must be scanned and " f"reported.\nstdout: {out!r}"
     )
     assert "scanned 1 citation(s)" in out, f"stdout: {out!r}"
     assert "MISSING COMMAND: team/scripts/does_not_exist.sh" in out, f"stdout: {out!r}"
@@ -1008,7 +964,7 @@ def test_non_shell_fenced_block_contents_are_not_scanned(tmp_path: Path, capsys)
         "# Fake doc\n\n"
         "```python\nteam/scripts/inside_python_block.sh\n```\n\n"
         "~~~text\n`team/scripts/inside_text_block.sh`\n~~~\n\n"
-        "```bash title=\"run it\"\nteam/scripts/inside_bash_block.sh --project demo\n```\n",
+        '```bash title="run it"\nteam/scripts/inside_bash_block.sh --project demo\n```\n',
     )
 
     result = _lint.main(["--repo-root", str(root), "--doc", str(doc)])
@@ -1017,9 +973,9 @@ def test_non_shell_fenced_block_contents_are_not_scanned(tmp_path: Path, capsys)
     assert result == 1, f"stdout: {out!r}"
     assert "scanned 1 citation(s)" in out, f"stdout: {out!r}"
     assert "MISSING COMMAND: team/scripts/inside_bash_block.sh" in out, f"stdout: {out!r}"
-    assert "inside_python_block.sh" not in out and "inside_text_block.sh" not in out, (
-        f"A non-shell fenced block's contents must not be scanned.\nstdout: {out!r}"
-    )
+    assert (
+        "inside_python_block.sh" not in out and "inside_text_block.sh" not in out
+    ), f"A non-shell fenced block's contents must not be scanned.\nstdout: {out!r}"
 
 
 def test_shorter_fence_inside_longer_fence_does_not_close_it(tmp_path: Path, capsys) -> None:
@@ -1183,7 +1139,7 @@ def test_real_tree_ships_no_undocumented_script() -> None:
 def _undocumented_names(text: str) -> set[str]:
     """The script paths named by UNDOCUMENTED SCRIPT lines in *text*."""
     prefix = "UNDOCUMENTED SCRIPT: scripts/"
-    return {line.strip()[len(prefix):] for line in text.splitlines() if line.strip().startswith(prefix)}
+    return {line.strip()[len(prefix) :] for line in text.splitlines() if line.strip().startswith(prefix)}
 
 
 def test_lint_command_line_and_test_route_report_the_same_undocumented_script(tmp_path: Path) -> None:
@@ -1277,8 +1233,7 @@ def test_fenced_ini_example_still_flags_an_unknown_key(tmp_path: Path) -> None:
 def test_prose_defaults_to_sentence_is_checked_against_the_registry(tmp_path: Path) -> None:
     findings = _key_parity_findings(
         tmp_path,
-        "# Settings\n\n"
-        "`deferred_bugs` defaults to `true`, and `deferred_bug_level` defaults to `low`.\n",
+        "# Settings\n\n" "`deferred_bugs` defaults to `true`, and `deferred_bug_level` defaults to `low`.\n",
     )
 
     assert len(findings) == 1, "\n\n".join(findings)

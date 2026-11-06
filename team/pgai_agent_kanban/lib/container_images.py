@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 __all__ = [
     "MANIFEST_RELATIVE_PATH",
@@ -59,12 +59,12 @@ _IFS_WHITESPACE = " \t"
 _FIELD_DELIMITER = re.compile(r"[ \t]*,[ \t]*|[ \t]+")
 
 
-def manifest_path(root: "pathlib.Path | str") -> pathlib.Path:
+def manifest_path(root: pathlib.Path | str) -> pathlib.Path:
     """Return the manifest path under *root*, the directory holding ``scripts/``."""
     return pathlib.Path(root) / MANIFEST_RELATIVE_PATH
 
 
-def declared_container_images(manifest: "pathlib.Path | str") -> list[str]:
+def declared_container_images(manifest: pathlib.Path | str) -> list[str]:
     """Return the image names *manifest* declares, in file order.
 
     Surrounding whitespace is stripped; blank lines and lines starting with
@@ -134,17 +134,11 @@ def split_image_request(entries: Iterable[str]) -> list[str]:
     return names
 
 
-def undeclared_image_names(
-    entries: Iterable[str], declared: Sequence[str]
-) -> list[str]:
+def undeclared_image_names(entries: Iterable[str], declared: Sequence[str]) -> list[str]:
     """Return the requested names that are neither ``all`` nor in *declared*.
 
     *entries* are request entries as :func:`split_image_request` reads them.
     The result keeps request order; an empty list means every requested
     name is acceptable.
     """
-    return [
-        name
-        for name in split_image_request(entries)
-        if name != SELECT_ALL and name not in declared
-    ]
+    return [name for name in split_image_request(entries) if name != SELECT_ALL and name not in declared]

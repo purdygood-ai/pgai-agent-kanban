@@ -42,7 +42,7 @@ from __future__ import annotations
 import argparse
 import sys
 import xml.etree.ElementTree as ET
-from typing import Optional, TextIO
+from typing import TextIO
 
 __all__ = [
     "MISSING",
@@ -95,9 +95,7 @@ def outcome_differences(forward: dict, reversed_: dict) -> list:
     return diffs
 
 
-def diff_junit_outcomes(
-    forward_path: str, reversed_path: str, out: Optional[TextIO] = None
-) -> int:
+def diff_junit_outcomes(forward_path: str, reversed_path: str, out: TextIO | None = None) -> int:
     """Diff the per-testcase outcomes of two junit-xml reports.
 
     Prints the collected counts and every divergence to *out* (stdout when
@@ -136,7 +134,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = _build_parser().parse_args(argv)
     try:

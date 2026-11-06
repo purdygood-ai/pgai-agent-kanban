@@ -64,13 +64,10 @@ class TestGetReleaseState:
         assert fields["RC Opened By Task"] == "CM-20260101-001-open"
         assert fields["Last Released"] == "v1.2.2"
 
-    def test_a_fresh_projects_all_none_shape_is_a_validated_value_not_an_absence(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_a_fresh_projects_all_none_shape_is_a_validated_value_not_an_absence(self, tmp_path: pathlib.Path) -> None:
         project_root = _make_project(tmp_path)
         (project_root / "release-state.md").write_text(
-            "## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
-            "## RC Opened By Task\nnone\n\n## Last Released\nnone\n",
+            "## Active RC\nnone\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n\n## Last Released\nnone\n",
             encoding="utf-8",
         )
         ctx = OpsContext(kanban_root=tmp_path)
@@ -90,9 +87,7 @@ class TestGetReleaseState:
         with pytest.raises(NotFound):
             get_release_state(ctx, "never-registered")
 
-    def test_malformed_field_raises_refused_naming_the_bad_value(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_malformed_field_raises_refused_naming_the_bad_value(self, tmp_path: pathlib.Path) -> None:
         project_root = _make_project(tmp_path)
         (project_root / "release-state.md").write_text(
             "## Active RC\nNOTAVERSION\n\n## RC Opened At\nnone\n\n"
@@ -106,9 +101,7 @@ class TestGetReleaseState:
 
 
 class TestGetDeepVerifyStatus:
-    def test_never_run_project_reports_empty_ledger_and_null_latest(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_never_run_project_reports_empty_ledger_and_null_latest(self, tmp_path: pathlib.Path) -> None:
         _make_project(tmp_path)
         ctx = OpsContext(kanban_root=tmp_path)
 
@@ -116,9 +109,7 @@ class TestGetDeepVerifyStatus:
 
         assert status == {"mode": "weekly", "entries": [], "latest": None}
 
-    def test_populated_ledger_reports_every_entry_and_the_correct_latest(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_populated_ledger_reports_every_entry_and_the_correct_latest(self, tmp_path: pathlib.Path) -> None:
         from pgai_agent_kanban.deep_verify.ledger import DeepVerifyRecord, append_record
 
         project_root = _make_project(tmp_path)
@@ -170,29 +161,21 @@ class TestGetDeepVerifyStatus:
     ) -> None:
         project_root = _make_project(tmp_path)
         if raw_value:
-            (project_root / "project.cfg").write_text(
-                f"[release]\ndeep_verify = {raw_value}\n", encoding="utf-8"
-            )
+            (project_root / "project.cfg").write_text(f"[release]\ndeep_verify = {raw_value}\n", encoding="utf-8")
         ctx = OpsContext(kanban_root=tmp_path)
 
         status = get_deep_verify_status(ctx, "demo")
 
         assert status["mode"] == expected_mode
 
-    def test_projects_resolve_independently_each_own_value_over_kanban_cfg(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_projects_resolve_independently_each_own_value_over_kanban_cfg(self, tmp_path: pathlib.Path) -> None:
         """Two projects with different project.cfg [release] deep_verify
         values resolve independently; a project's own value wins over the
         kanban-wide one."""
         weekly_root = _make_project(tmp_path, "weekly-project")
         off_root = _make_project(tmp_path, "off-project")
-        (weekly_root / "project.cfg").write_text(
-            "[release]\ndeep_verify = weekly\n", encoding="utf-8"
-        )
-        (off_root / "project.cfg").write_text(
-            "[release]\ndeep_verify = off\n", encoding="utf-8"
-        )
+        (weekly_root / "project.cfg").write_text("[release]\ndeep_verify = weekly\n", encoding="utf-8")
+        (off_root / "project.cfg").write_text("[release]\ndeep_verify = off\n", encoding="utf-8")
         (tmp_path / "kanban.cfg").write_text("[release]\ndeep_verify = off\n", encoding="utf-8")
         ctx = OpsContext(kanban_root=tmp_path)
 
@@ -214,19 +197,13 @@ class TestGetDeepVerifyStatus:
         """The kanban-wide [release] deep_verify is the second tier, the same
         chain pp_deep_verify_mode reads."""
         project_root = _make_project(tmp_path)
-        (project_root / "project.cfg").write_text(
-            "[project]\nproject_name = demo\n", encoding="utf-8"
-        )
-        (tmp_path / "kanban.cfg").write_text(
-            f"[release]\ndeep_verify = {kanban_value}\n", encoding="utf-8"
-        )
+        (project_root / "project.cfg").write_text("[project]\nproject_name = demo\n", encoding="utf-8")
+        (tmp_path / "kanban.cfg").write_text(f"[release]\ndeep_verify = {kanban_value}\n", encoding="utf-8")
         ctx = OpsContext(kanban_root=tmp_path)
 
         assert get_deep_verify_status(ctx, "demo")["mode"] == expected_mode
 
-    def test_kanban_cfg_value_applies_when_the_project_has_no_config_file(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_kanban_cfg_value_applies_when_the_project_has_no_config_file(self, tmp_path: pathlib.Path) -> None:
         _make_project(tmp_path)
         (tmp_path / "kanban.cfg").write_text("[release]\ndeep_verify = off\n", encoding="utf-8")
         ctx = OpsContext(kanban_root=tmp_path)
@@ -235,17 +212,13 @@ class TestGetDeepVerifyStatus:
 
     def test_project_cfg_weekly_wins_over_kanban_cfg_off(self, tmp_path: pathlib.Path) -> None:
         project_root = _make_project(tmp_path)
-        (project_root / "project.cfg").write_text(
-            "[release]\ndeep_verify = weekly\n", encoding="utf-8"
-        )
+        (project_root / "project.cfg").write_text("[release]\ndeep_verify = weekly\n", encoding="utf-8")
         (tmp_path / "kanban.cfg").write_text("[release]\ndeep_verify = off\n", encoding="utf-8")
         ctx = OpsContext(kanban_root=tmp_path)
 
         assert get_deep_verify_status(ctx, "demo")["mode"] == "weekly"
 
-    def test_unrecognized_kanban_cfg_value_raises_refused_naming_kanban_cfg(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unrecognized_kanban_cfg_value_raises_refused_naming_kanban_cfg(self, tmp_path: pathlib.Path) -> None:
         _make_project(tmp_path)
         kanban_cfg = tmp_path / "kanban.cfg"
         kanban_cfg.write_text("[release]\ndeep_verify = bogus\n", encoding="utf-8")
@@ -259,21 +232,15 @@ class TestGetDeepVerifyStatus:
         assert str(kanban_cfg) in message
         assert "deep_verify" in message
 
-    def test_unrecognized_deep_verify_value_raises_refused_rather_than_guessing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unrecognized_deep_verify_value_raises_refused_rather_than_guessing(self, tmp_path: pathlib.Path) -> None:
         project_root = _make_project(tmp_path)
-        (project_root / "project.cfg").write_text(
-            "[release]\ndeep_verify = weekly-ish\n", encoding="utf-8"
-        )
+        (project_root / "project.cfg").write_text("[release]\ndeep_verify = weekly-ish\n", encoding="utf-8")
         ctx = OpsContext(kanban_root=tmp_path)
 
         with pytest.raises(Refused, match="weekly-ish"):
             get_deep_verify_status(ctx, "demo")
 
-    def test_malformed_ledger_raises_refused_rather_than_reporting_never_run(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_malformed_ledger_raises_refused_rather_than_reporting_never_run(self, tmp_path: pathlib.Path) -> None:
         project_root = _make_project(tmp_path)
         (project_root / "deep-verify-ledger.md").write_text(
             "this is not a recognizable ledger record at all\n", encoding="utf-8"

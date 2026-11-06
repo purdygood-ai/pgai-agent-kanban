@@ -40,11 +40,11 @@ _BRACKET_RE = re.compile(r"\[(HALT|HALT-AFTER)\s+(\S+?)(?:\s+([^\]]+?))?\s*\]")
 HEADER_HALT_CASES = [
     pytest.param({}, (False, ""), id="no-sentinel"),
     pytest.param({"HALT": "halted\n"}, (True, "HALT"), id="kanban-wide-halt"),
-    pytest.param({f"projects/{PROJECT_NAME}/HALT-AFTER": "rc\n"}, (False, "HALT-AFTER rc"),
-                 id="project-halt-after"),
+    pytest.param({f"projects/{PROJECT_NAME}/HALT-AFTER": "rc\n"}, (False, "HALT-AFTER rc"), id="project-halt-after"),
     pytest.param({"HALT-AFTER": "rc\n"}, (False, "HALT-AFTER rc"), id="kanban-wide-halt-after"),
-    pytest.param({"HALT": "halted\n", "HALT-AFTER": "rc\n"}, (True, "HALT"),
-                 id="kanban-wide-halt-beats-kanban-wide-halt-after"),
+    pytest.param(
+        {"HALT": "halted\n", "HALT-AFTER": "rc\n"}, (True, "HALT"), id="kanban-wide-halt-beats-kanban-wide-halt-after"
+    ),
 ]
 
 
@@ -70,7 +70,7 @@ def build_halt_board(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) ->
     return root
 
 
-def write_sentinels(root: pathlib.Path, sentinels: "dict[str, str]") -> None:
+def write_sentinels(root: pathlib.Path, sentinels: dict[str, str]) -> None:
     """Write each sentinel body to its path relative to *root*."""
     for rel_path, body in sentinels.items():
         path = root / rel_path
@@ -78,7 +78,7 @@ def write_sentinels(root: pathlib.Path, sentinels: "dict[str, str]") -> None:
         path.write_text(body, encoding="utf-8")
 
 
-def header_halt_pair(client: Any, project: str = PROJECT_NAME) -> "tuple[bool, str]":
+def header_halt_pair(client: Any, project: str = PROJECT_NAME) -> tuple[bool, str]:
     """Return the ``(halt, halt_text)`` pair GET /dashboard/header draws for *project*.
 
     Reads the header's ``chain=`` line: no bracket is ``(False, "")``, a

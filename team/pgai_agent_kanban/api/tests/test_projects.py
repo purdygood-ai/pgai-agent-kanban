@@ -32,7 +32,7 @@ Test structure:
 from __future__ import annotations
 
 import pathlib
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -155,10 +155,7 @@ def _materialise_project_fixture(root: pathlib.Path) -> None:
     # _OPEN_TASK_1, _OPEN_TASK_2: no status.md — falls back to queue marker.
 
     # PM backlog: 1 done task (_DONE_TASK_2)
-    pm_backlog = (
-        "# PM Backlog\n\n"
-        f"- [X] {_DONE_TASK_2}\n"
-    )
+    pm_backlog = "# PM Backlog\n\n" f"- [X] {_DONE_TASK_2}\n"
     _write(project_dir / "tasks" / "queues" / "pm_backlog.md", pm_backlog)
     _write(
         project_dir / "tasks" / _DONE_TASK_2 / "status.md",
@@ -166,10 +163,7 @@ def _materialise_project_fixture(root: pathlib.Path) -> None:
     )
 
     # WRITER backlog: 1 wont-do task
-    writer_backlog = (
-        "# WRITER Backlog\n\n"
-        f"- [X] {_WONT_DO_TASK}\n"
-    )
+    writer_backlog = "# WRITER Backlog\n\n" f"- [X] {_WONT_DO_TASK}\n"
     _write(project_dir / "tasks" / "queues" / "writer_backlog.md", writer_backlog)
     _write(
         project_dir / "tasks" / _WONT_DO_TASK / "status.md",
@@ -231,27 +225,30 @@ class TestProjectMetadataEndpoint:
     # AC1: 200 with all required fields present
     # -----------------------------------------------------------------------
 
-    def test_returns_200_for_known_project(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_returns_200_for_known_project(self, meta_client: TestClient) -> None:
         """GET /projects/<fixture> returns 200."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
-        assert resp.status_code == 200, (
-            f"Expected 200, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
 
-    def test_all_required_fields_present(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_all_required_fields_present(self, meta_client: TestClient) -> None:
         """Response carries every Goal-2 field."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         assert resp.status_code == 200
         body = resp.json()
 
         required_top = {
-            "name", "workflow_type", "branch_prefix", "dev_tree_path",
-            "git_repo", "priority", "color", "ceilings", "last_released",
-            "active_rc", "halt", "queue_counts",
+            "name",
+            "workflow_type",
+            "branch_prefix",
+            "dev_tree_path",
+            "git_repo",
+            "priority",
+            "color",
+            "ceilings",
+            "last_released",
+            "active_rc",
+            "halt",
+            "queue_counts",
         }
         missing = required_top - set(body.keys())
         assert not missing, f"Response missing top-level fields: {missing}"
@@ -272,13 +269,9 @@ class TestProjectMetadataEndpoint:
         for agent, counts in queue_counts.items():
             required_buckets = {"open", "working", "done"}
             missing_buckets = required_buckets - set(counts.keys())
-            assert not missing_buckets, (
-                f"queue_counts[{agent!r}] missing buckets: {missing_buckets}"
-            )
+            assert not missing_buckets, f"queue_counts[{agent!r}] missing buckets: {missing_buckets}"
 
-    def test_field_values_match_fixture(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_field_values_match_fixture(self, meta_client: TestClient) -> None:
         """Field values match the fixture configuration."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         assert resp.status_code == 200
@@ -292,9 +285,7 @@ class TestProjectMetadataEndpoint:
         assert body["priority"] == _PROJECT_PRIORITY
         assert body["color"] == _PROJECT_COLOR
 
-    def test_ceilings_match_fixture(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_ceilings_match_fixture(self, meta_client: TestClient) -> None:
         """Version ceiling values match project.cfg [versioning]."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         body = resp.json()
@@ -329,8 +320,7 @@ class TestProjectMetadataEndpoint:
         expected = helper_value if helper_value else None
 
         assert body["last_released"] == expected, (
-            f"last_released mismatch: endpoint={body['last_released']!r}, "
-            f"helper={expected!r}"
+            f"last_released mismatch: endpoint={body['last_released']!r}, " f"helper={expected!r}"
         )
         # Also verify the concrete value from the fixture.
         assert body["last_released"] == _LAST_RELEASED_VERSION
@@ -339,9 +329,7 @@ class TestProjectMetadataEndpoint:
     # AC3: queue_counts match the fixture
     # -----------------------------------------------------------------------
 
-    def test_coder_queue_counts_match_fixture(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_coder_queue_counts_match_fixture(self, meta_client: TestClient) -> None:
         """CODER queue counts match the fixture: 1 working, 1 done, 3 open (2 open + 1 blocked).
 
         Fixture CODER queue:
@@ -356,19 +344,13 @@ class TestProjectMetadataEndpoint:
         body = resp.json()
 
         coder_counts = body["queue_counts"]["CODER"]
-        assert coder_counts["working"] == 1, (
-            f"Expected 1 working CODER task, got {coder_counts['working']}"
-        )
-        assert coder_counts["done"] == 1, (
-            f"Expected 1 done CODER task, got {coder_counts['done']}"
-        )
-        assert coder_counts["open"] == 3, (
-            f"Expected 3 open CODER tasks (2 open + 1 blocked), got {coder_counts['open']}"
-        )
+        assert coder_counts["working"] == 1, f"Expected 1 working CODER task, got {coder_counts['working']}"
+        assert coder_counts["done"] == 1, f"Expected 1 done CODER task, got {coder_counts['done']}"
+        assert (
+            coder_counts["open"] == 3
+        ), f"Expected 3 open CODER tasks (2 open + 1 blocked), got {coder_counts['open']}"
 
-    def test_pm_queue_counts_match_fixture(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_pm_queue_counts_match_fixture(self, meta_client: TestClient) -> None:
         """PM queue counts: 0 working, 1 done, 0 open."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         body = resp.json()
@@ -378,72 +360,54 @@ class TestProjectMetadataEndpoint:
         assert pm_counts["done"] == 1
         assert pm_counts["open"] == 0
 
-    def test_writer_wont_do_task_counted_as_done(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_writer_wont_do_task_counted_as_done(self, meta_client: TestClient) -> None:
         """WONT-DO tasks are counted in the 'done' bucket (completed, not active)."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         body = resp.json()
 
         writer_counts = body["queue_counts"]["WRITER"]
-        assert writer_counts["done"] == 1, (
-            f"WONT-DO task should count as 'done'; got {writer_counts['done']}"
-        )
+        assert writer_counts["done"] == 1, f"WONT-DO task should count as 'done'; got {writer_counts['done']}"
         assert writer_counts["working"] == 0
         assert writer_counts["open"] == 0
 
-    def test_empty_queue_agents_have_zero_counts(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_empty_queue_agents_have_zero_counts(self, meta_client: TestClient) -> None:
         """Agents with empty queues (tester, cm) report all-zero counts."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         body = resp.json()
 
         for agent in ("TESTER", "CM"):
             counts = body["queue_counts"][agent]
-            assert counts == {"open": 0, "working": 0, "done": 0}, (
-                f"{agent} expected all-zero counts, got {counts}"
-            )
+            assert counts == {"open": 0, "working": 0, "done": 0}, f"{agent} expected all-zero counts, got {counts}"
 
     # -----------------------------------------------------------------------
     # AC4: 404 for unknown project name
     # -----------------------------------------------------------------------
 
-    def test_unknown_project_returns_404(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_unknown_project_returns_404(self, meta_client: TestClient) -> None:
         """GET /projects/does-not-exist returns 404."""
         resp = meta_client.get("/projects/does-not-exist")
-        assert resp.status_code == 404, (
-            f"Expected 404 for unknown project, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 404, f"Expected 404 for unknown project, got {resp.status_code}: {resp.text}"
 
-    def test_404_echoes_name_in_body(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_404_echoes_name_in_body(self, meta_client: TestClient) -> None:
         """404 response echoes the requested name in the body."""
         bad_name = "does-not-exist"
         resp = meta_client.get(f"/projects/{bad_name}")
         assert resp.status_code == 404
         body = resp.json()
         assert "name" in body, f"404 body must include 'name' field: {body}"
-        assert body["name"] == bad_name, (
-            f"404 body must echo the requested name; got {body['name']!r}"
-        )
+        assert body["name"] == bad_name, f"404 body must echo the requested name; got {body['name']!r}"
 
     # -----------------------------------------------------------------------
     # AC5: active_rc is null when release-state.md has "none"
     # -----------------------------------------------------------------------
 
-    def test_active_rc_is_set_when_release_state_has_version(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_active_rc_is_set_when_release_state_has_version(self, meta_client: TestClient) -> None:
         """active_rc is the vX.Y.Z string when release-state.md has a valid version."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         body = resp.json()
-        assert body["active_rc"] == _ACTIVE_RC_VERSION, (
-            f"Expected active_rc={_ACTIVE_RC_VERSION!r}, got {body['active_rc']!r}"
-        )
+        assert (
+            body["active_rc"] == _ACTIVE_RC_VERSION
+        ), f"Expected active_rc={_ACTIVE_RC_VERSION!r}, got {body['active_rc']!r}"
 
     def test_active_rc_is_null_when_release_state_has_none(
         self,
@@ -487,8 +451,7 @@ class TestProjectMetadataEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["active_rc"] is None, (
-            f"active_rc must be null (not 'none') when release-state has 'none'; "
-            f"got {body['active_rc']!r}"
+            f"active_rc must be null (not 'none') when release-state has 'none'; " f"got {body['active_rc']!r}"
         )
 
     def test_last_released_is_null_when_release_state_has_none(
@@ -532,23 +495,18 @@ class TestProjectMetadataEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["last_released"] is None, (
-            f"last_released must be null when release-state has 'none'; "
-            f"got {body['last_released']!r}"
+            f"last_released must be null when release-state has 'none'; " f"got {body['last_released']!r}"
         )
 
     # -----------------------------------------------------------------------
     # Additional: halt flag, color, the ceilings in effect
     # -----------------------------------------------------------------------
 
-    def test_halt_false_when_no_halt_file(
-        self, meta_client: TestClient
-    ) -> None:
+    def test_halt_false_when_no_halt_file(self, meta_client: TestClient) -> None:
         """halt is false when the HALT file is absent."""
         resp = meta_client.get(f"/projects/{_PROJECT_NAME}")
         body = resp.json()
-        assert body["halt"] is False, (
-            f"halt must be False when HALT file absent; got {body['halt']!r}"
-        )
+        assert body["halt"] is False, f"halt must be False when HALT file absent; got {body['halt']!r}"
 
     def test_halt_true_when_halt_file_present(
         self,
@@ -570,29 +528,33 @@ class TestProjectMetadataEndpoint:
             resp = client.get(f"/projects/{_PROJECT_NAME}")
 
         body = resp.json()
-        assert body["halt"] is True, (
-            f"halt must be True when HALT file exists; got {body['halt']!r}"
-        )
+        assert body["halt"] is True, f"halt must be True when HALT file exists; got {body['halt']!r}"
 
     @pytest.mark.parametrize(
         "versioning, expected, warned",
         [
             pytest.param(
-                None, {"max_major": 0, "max_minor": 13, "max_patch": 21}, False,
+                None,
+                {"max_major": 0, "max_minor": 13, "max_patch": 21},
+                False,
                 id="no-project-cfg-reads-the-defaults",
             ),
             pytest.param(
-                "", {"max_major": 0, "max_minor": 13, "max_patch": 21}, False,
+                "",
+                {"max_major": 0, "max_minor": 13, "max_patch": 21},
+                False,
                 id="no-versioning-section-reads-the-defaults",
             ),
             pytest.param(
                 "[versioning]\nmax_minor = 5\nmax_major = none\n",
-                {"max_major": None, "max_minor": 5, "max_patch": 21}, False,
+                {"max_major": None, "max_minor": 5, "max_patch": 21},
+                False,
                 id="none-reports-unlimited",
             ),
             pytest.param(
                 "[versioning]\nmax_major = O\n",
-                {"max_major": None, "max_minor": 13, "max_patch": 21}, True,
+                {"max_major": None, "max_minor": 13, "max_patch": 21},
+                True,
                 id="malformed-reports-null-with-a-warning",
             ),
         ],
@@ -601,7 +563,7 @@ class TestProjectMetadataEndpoint:
         self,
         tmp_path: pathlib.Path,
         monkeypatch: pytest.MonkeyPatch,
-        versioning: "str | None",
+        versioning: str | None,
         expected: dict,
         warned: bool,
     ) -> None:
@@ -691,9 +653,7 @@ class TestProjectMetadataEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         # Should be the first palette color (index 0) since it's the first project.
-        assert body["color"] == "#378ADD", (
-            f"Expected first palette color '#378ADD', got {body['color']!r}"
-        )
+        assert body["color"] == "#378ADD", f"Expected first palette color '#378ADD', got {body['color']!r}"
 
 
 @pytest.mark.parametrize(
@@ -731,7 +691,9 @@ def test_branch_prefix_spellings(
     [
         pytest.param({"HALT": "halted\n"}, True, "HALT", id="kanban-wide-halt"),
         pytest.param(
-            {f"projects/{_PROJECT_NAME}/HALT-AFTER": "rc\n"}, False, "HALT-AFTER rc",
+            {f"projects/{_PROJECT_NAME}/HALT-AFTER": "rc\n"},
+            False,
+            "HALT-AFTER rc",
             id="project-halt-after-drains-without-halting",
         ),
         pytest.param({}, False, "", id="no-sentinel"),
@@ -764,15 +726,21 @@ def test_halt_matches_the_dashboard_halt_pair(
     [
         pytest.param({"HALT-AFTER": "rc\n"}, False, "HALT-AFTER rc", id="kanban-wide-halt-after"),
         pytest.param(
-            {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_NAME}/HALT-AFTER": "pm\n"}, False, "HALT-AFTER pm",
+            {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_NAME}/HALT-AFTER": "pm\n"},
+            False,
+            "HALT-AFTER pm",
             id="project-halt-after-beats-kanban-wide-halt-after",
         ),
         pytest.param(
-            {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_NAME}/HALT": "halted\n"}, True, "HALT",
+            {"HALT-AFTER": "rc\n", f"projects/{_PROJECT_NAME}/HALT": "halted\n"},
+            True,
+            "HALT",
             id="project-halt-beats-kanban-wide-halt-after",
         ),
         pytest.param(
-            {"HALT": "halted\n", "HALT-AFTER": "rc\n"}, True, "HALT",
+            {"HALT": "halted\n", "HALT-AFTER": "rc\n"},
+            True,
+            "HALT",
             id="kanban-wide-halt-beats-kanban-wide-halt-after",
         ),
         pytest.param({"HALT-AFTER": "not a token\n"}, False, "", id="invalid-kanban-wide-halt-after"),
@@ -826,16 +794,14 @@ def test_halt_matches_the_dashboard_header(
 
 # Registered first but second in priority order, and the reverse; neither
 # sets dashboard_color.
-_COLOURLESS_CFG = (
-    "[project:first-registered]\npriority=5\n\n"
-    "[project:second-registered]\npriority=1\n"
-)
+_COLOURLESS_CFG = "[project:first-registered]\npriority=5\n\n" "[project:second-registered]\npriority=1\n"
 # Palette slot each project holds: its ordinal in priority order.
 _PRIORITY_ORDINAL = {"second-registered": 0, "first-registered": 1}
 
 
 def test_colourless_projects_share_one_colour_rule(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A colourless project's colour is the same on GET /board, GET /projects/{name}
     and the dashboard's own registry reader: the default-palette entry at the
@@ -883,7 +849,8 @@ def test_routers_share_the_colour_and_count_functions() -> None:
 
 
 def test_queue_counts_are_the_task_counts_backlog_counts(
-    meta_client: TestClient, project_fixture_root: pathlib.Path,
+    meta_client: TestClient,
+    project_fixture_root: pathlib.Path,
 ) -> None:
     """queue_counts is task_counts.agent_queue_counts for every agent's backlog."""
     from pgai_agent_kanban.dashboard.task_counts import agent_queue_counts
@@ -892,6 +859,8 @@ def test_queue_counts_are_the_task_counts_backlog_counts(
 
     assert resp.status_code == 200
     tasks_dir = project_fixture_root / "projects" / _PROJECT_NAME / "tasks"
-    expected = {agent.upper(): agent_queue_counts(tasks_dir, agent) for agent in ("pm", "coder", "writer", "tester", "cm")}
+    expected = {
+        agent.upper(): agent_queue_counts(tasks_dir, agent) for agent in ("pm", "coder", "writer", "tester", "cm")
+    }
     assert resp.json()["queue_counts"] == expected
     assert expected["CODER"] != {"open": 0, "working": 0, "done": 0}

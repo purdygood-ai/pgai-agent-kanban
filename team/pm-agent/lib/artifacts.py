@@ -29,8 +29,8 @@ from pathlib import Path
 _TEAM_ROOT = str(Path(__file__).resolve().parents[2])
 if _TEAM_ROOT not in sys.path:
     sys.path.insert(0, _TEAM_ROOT)
+from pgai_agent_kanban.env import resolve_kanban_root_or_default as _resolve_kanban_root  # noqa: E402
 from pgai_agent_kanban.lib import ini  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -39,7 +39,7 @@ from pgai_agent_kanban.lib import ini  # noqa: E402
 # Matches the "## Next Version" heading and the integer value that follows it.
 # Liberal: allows any amount of whitespace between heading and value.
 _NEXT_VERSION_RE = re.compile(
-    r'(##\s*Next\s*Version\s*\n+\s*)(\d+)',
+    r"(##\s*Next\s*Version\s*\n+\s*)(\d+)",
     re.IGNORECASE,
 )
 
@@ -48,6 +48,7 @@ _NEXT_VERSION_RE = re.compile(
 # Exceptions
 # ---------------------------------------------------------------------------
 
+
 class ArtifactsError(Exception):
     """Raised when artifacts path helpers encounter an error."""
 
@@ -55,23 +56,6 @@ class ArtifactsError(Exception):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _resolve_kanban_root(kanban_root=None) -> Path:
-    """Resolve the kanban root path from argument or environment.
-
-    Precedence: explicit argument > PGAI_AGENT_KANBAN_ROOT_PATH (canonical) >
-    ~/pgai_agent_kanban.
-
-    The env var is read at call time on every invocation — there is no
-    module-level caching — so monkeypatch.setenv in tests produces correct
-    isolated paths without leaking the operator's live path.
-    """
-    if kanban_root is not None:
-        return Path(kanban_root)
-    return Path(
-        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-        or str(Path.home() / "pgai_agent_kanban")
-    )
 
 
 def _validate_project_name(project_name: str) -> None:
@@ -113,7 +97,7 @@ def _write_next_version_in_text(text: str, new_version: int) -> str:
     """
     m = _NEXT_VERSION_RE.search(text)
     if m:
-        return text[: m.start(2)] + str(new_version) + text[m.end(2):]
+        return text[: m.start(2)] + str(new_version) + text[m.end(2) :]
     # Append: ensure exactly one trailing newline before new section
     separator = "\n" if text.endswith("\n") else "\n\n"
     return text + separator + f"## Next Version\n{new_version}\n"
@@ -122,6 +106,7 @@ def _write_next_version_in_text(text: str, new_version: int) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def get_project_path(project_name: str, kanban_root=None) -> Path:
     """Return the project directory: $KANBAN_ROOT/artifacts/<project-name>/.
@@ -179,9 +164,7 @@ def get_version_path(project_name: str, version: int, kanban_root=None) -> Path:
         If project_name is invalid or version is not a positive integer.
     """
     if not isinstance(version, int) or version < 1:
-        raise ArtifactsError(
-            f"Version must be a positive integer, got {version!r}"
-        )
+        raise ArtifactsError(f"Version must be a positive integer, got {version!r}")
     project_path = get_project_path(project_name, kanban_root)
     return project_path / f"v{version}"
 
@@ -248,9 +231,7 @@ def get_next_version(project_name: str, kanban_root=None) -> Path:
             fh.write(new_text)
             fh.truncate()
     except OSError as exc:
-        raise ArtifactsError(
-            f"Failed to read/write PROJECT.md for project '{project_name}': {exc}"
-        ) from exc
+        raise ArtifactsError(f"Failed to read/write PROJECT.md for project '{project_name}': {exc}") from exc
 
     version_path = get_version_path(project_name, allocated, kanban_root)
     version_path.mkdir(parents=True, exist_ok=True)

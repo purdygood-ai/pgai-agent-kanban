@@ -153,9 +153,7 @@ def _clean_subprocess_env(root: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def _write_release_state(
-    root: pathlib.Path, version: str, opened_at: str, closed_at: str
-) -> None:
+def _write_release_state(root: pathlib.Path, version: str, opened_at: str, closed_at: str) -> None:
     """Write projects/<project>/release-state/<version>.json -- the same
     file aggregate_rc() reads for its opened_at/closed_at window, the
     window the ledger's blocked_minutes() reader clamps every interval
@@ -163,16 +161,12 @@ def _write_release_state(
     state_dir = root / "projects" / _PROJECT / "release-state"
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / f"{version}.json").write_text(
-        json.dumps(
-            {"opened_at": opened_at, "closed_at": closed_at, "outcome": "shipped"}
-        ),
+        json.dumps({"opened_at": opened_at, "closed_at": closed_at, "outcome": "shipped"}),
         encoding="utf-8",
     )
 
 
-def _run_show_metrics(
-    history_csv: pathlib.Path, root: pathlib.Path
-) -> subprocess.CompletedProcess:
+def _run_show_metrics(history_csv: pathlib.Path, root: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
             "bash",
@@ -240,9 +234,7 @@ class TestBlockedColumnPipelineOnGitlessInstall:
         assert cells[1] == "120.0"
         assert cells[2] == "50"
 
-    def test_rc_with_no_recorded_boundaries_renders_zero_and_matching_wall(
-        self, kanban_root: pathlib.Path
-    ) -> None:
+    def test_rc_with_no_recorded_boundaries_renders_zero_and_matching_wall(self, kanban_root: pathlib.Path) -> None:
         """An RC sharing the identical window length as the overlap
         scenario above, but with no boundaries recorded in the ledger for
         its own version, renders a real 0 -- never blank -- and the same
@@ -282,9 +274,7 @@ class TestBlockedColumnPipelineOnGitlessInstall:
         assert cells[1] == "120.0"
         assert cells[2] == "0"
 
-    def test_pre_era_row_and_blocked_row_share_one_footer_line(
-        self, kanban_root: pathlib.Path
-    ) -> None:
+    def test_pre_era_row_and_blocked_row_share_one_footer_line(self, kanban_root: pathlib.Path) -> None:
         """A row written the way a pre-v2.24.0 rollup would look -- no
         blocked_minutes key in the rollup dict at all, exactly what an
         older aggregator produced -- renders a single dash through the
@@ -301,13 +291,9 @@ class TestBlockedColumnPipelineOnGitlessInstall:
         ledger_path = ledger_path_for_project(str(kanban_root), _PROJECT)
         append_block_start(ledger_path, blocked_version, "halt:project", _HALT_START)
         append_block_end(ledger_path, blocked_version, "halt:project", _HALT_END)
-        append_block_start(
-            ledger_path, blocked_version, "task:CODER-FIXTURE-001", _TASK_BLOCK_START
-        )
+        append_block_start(ledger_path, blocked_version, "task:CODER-FIXTURE-001", _TASK_BLOCK_START)
         append_block_end(ledger_path, blocked_version, "task:CODER-FIXTURE-001", _TASK_BLOCK_END)
-        blocked_rollup_path = ma.aggregate_rc(
-            _PROJECT, blocked_version, kanban_root=kanban_root
-        )
+        blocked_rollup_path = ma.aggregate_rc(_PROJECT, blocked_version, kanban_root=kanban_root)
         blocked_rollup = json.loads(blocked_rollup_path.read_text(encoding="utf-8"))
         assert csvw.append_rc_row(history_csv, blocked_rollup) is True
 
@@ -331,12 +317,7 @@ class TestBlockedColumnPipelineOnGitlessInstall:
         pre_era_cells = _row_cells(result.stdout, "v9.8.0")
         assert pre_era_cells[2] == "-"
 
-        footer_lines = [
-            line
-            for line in result.stdout.splitlines()
-            if "Blocked untracked for 1 RC" in line
-        ]
+        footer_lines = [line for line in result.stdout.splitlines() if "Blocked untracked for 1 RC" in line]
         assert len(footer_lines) == 1, (
-            f"expected exactly one footer line across both rows, got "
-            f"{len(footer_lines)}: {footer_lines!r}"
+            f"expected exactly one footer line across both rows, got " f"{len(footer_lines)}: {footer_lines!r}"
         )

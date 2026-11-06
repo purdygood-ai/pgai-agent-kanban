@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import pathlib
 import unittest.mock
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -177,9 +177,7 @@ class TestLogTailKinds:
         resp = logs_client.get("/logs/wake")
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert "agent" in str(body).lower(), (
-            f"422 body must name the missing param 'agent': {body}"
-        )
+        assert "agent" in str(body).lower(), f"422 body must name the missing param 'agent': {body}"
 
     # -----------------------------------------------------------------------
     # kind=cm
@@ -191,9 +189,7 @@ class TestLogTailKinds:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0
-        assert "release shipped" in body["stdout"], (
-            f"Expected cm log content in stdout: {body['stdout']!r}"
-        )
+        assert "release shipped" in body["stdout"], f"Expected cm log content in stdout: {body['stdout']!r}"
 
     def test_cm_no_params_required(self, logs_client: TestClient) -> None:
         """GET /logs/cm requires no params; extra params are ignored."""
@@ -211,27 +207,21 @@ class TestLogTailKinds:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0
-        assert "task start" in body["stdout"], (
-            f"Expected agent log content in stdout: {body['stdout']!r}"
-        )
+        assert "task start" in body["stdout"], f"Expected agent log content in stdout: {body['stdout']!r}"
 
     def test_agent_missing_project_returns_422(self, logs_client: TestClient) -> None:
         """GET /logs/agent?agent=coder (no project) returns 422 naming 'project'."""
         resp = logs_client.get("/logs/agent?agent=coder")
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert "project" in str(body).lower(), (
-            f"422 body must name the missing param 'project': {body}"
-        )
+        assert "project" in str(body).lower(), f"422 body must name the missing param 'project': {body}"
 
     def test_agent_missing_agent_returns_422(self, logs_client: TestClient) -> None:
         """GET /logs/agent?project=<valid> (no agent) returns 422 naming 'agent'."""
         resp = logs_client.get(f"/logs/agent?project={_PROJECT_NAME}")
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert "agent" in str(body).lower(), (
-            f"422 body must name the missing param 'agent': {body}"
-        )
+        assert "agent" in str(body).lower(), f"422 body must name the missing param 'agent': {body}"
 
     # -----------------------------------------------------------------------
     # kind=debug
@@ -243,9 +233,7 @@ class TestLogTailKinds:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0
-        assert "reading file" in body["stdout"], (
-            f"Expected debug log content in stdout: {body['stdout']!r}"
-        )
+        assert "reading file" in body["stdout"], f"Expected debug log content in stdout: {body['stdout']!r}"
 
     def test_debug_missing_project_returns_422(self, logs_client: TestClient) -> None:
         """GET /logs/debug?agent=coder (no project) returns 422 naming 'project'."""
@@ -271,9 +259,7 @@ class TestLogTailKinds:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0
-        assert "sweep" in body["stdout"], (
-            f"Expected overwatch log content in stdout: {body['stdout']!r}"
-        )
+        assert "sweep" in body["stdout"], f"Expected overwatch log content in stdout: {body['stdout']!r}"
 
     def test_overwatch_global_returns_200(self, logs_client: TestClient) -> None:
         """GET /logs/overwatch?project=global returns 200 (global sentinel accepted)."""
@@ -281,9 +267,7 @@ class TestLogTailKinds:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0
-        assert "global overwatch" in body["stdout"], (
-            f"Expected global overwatch content: {body['stdout']!r}"
-        )
+        assert "global overwatch" in body["stdout"], f"Expected global overwatch content: {body['stdout']!r}"
 
     def test_overwatch_missing_project_returns_422(self, logs_client: TestClient) -> None:
         """GET /logs/overwatch (no project) returns 422 naming 'project'."""
@@ -302,9 +286,7 @@ class TestLogTailKinds:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0
-        assert "startup complete" in body["stdout"], (
-            f"Expected api-server log content in stdout: {body['stdout']!r}"
-        )
+        assert "startup complete" in body["stdout"], f"Expected api-server log content in stdout: {body['stdout']!r}"
 
     def test_api_server_no_params_required(self, logs_client: TestClient) -> None:
         """GET /logs/api-server requires no params."""
@@ -315,17 +297,13 @@ class TestLogTailKinds:
     # Missing log file: exit_code 1, not a 404
     # -----------------------------------------------------------------------
 
-    def test_missing_log_file_returns_200_with_exit_code_1(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_missing_log_file_returns_200_with_exit_code_1(self, logs_client: TestClient) -> None:
         """A missing log file returns HTTP 200 with exit_code=1 and populated stderr."""
         # tester has no log fixture in the project.
         resp = logs_client.get(f"/logs/debug?project={_PROJECT_NAME}&agent=tester")
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert body["exit_code"] == 1, (
-            f"Missing log file must return exit_code=1; got {body['exit_code']}"
-        )
+        assert body["exit_code"] == 1, f"Missing log file must return exit_code=1; got {body['exit_code']}"
         assert body["stdout"] == "", f"stdout must be empty on missing file: {body['stdout']!r}"
         assert body["stderr"], f"stderr must be non-empty on missing file: {body['stderr']!r}"
 
@@ -344,22 +322,15 @@ class TestTraversalConfinement:
           422 fires at validation, before any filesystem access.
     """
 
-    def _assert_422_no_open(
-        self, client: TestClient, url: str, open_mock: unittest.mock.MagicMock
-    ) -> None:
+    def _assert_422_no_open(self, client: TestClient, url: str, open_mock: unittest.mock.MagicMock) -> None:
         """Assert the request returns 422 and open() was not called."""
         resp = client.get(url)
-        assert resp.status_code == 422, (
-            f"Expected 422 for traversal attempt; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for traversal attempt; got {resp.status_code}: {resp.text}"
         assert not open_mock.called, (
-            f"open() must NOT be called for traversal attempt; "
-            f"was called with: {open_mock.call_args_list}"
+            f"open() must NOT be called for traversal attempt; " f"was called with: {open_mock.call_args_list}"
         )
 
-    def test_project_dotdot_traversal_blocked_before_open(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_project_dotdot_traversal_blocked_before_open(self, logs_client: TestClient) -> None:
         """AC3: project=../../etc/passwd → 422; open() not called."""
         with unittest.mock.patch("builtins.open") as mock_open:
             self._assert_422_no_open(
@@ -368,9 +339,7 @@ class TestTraversalConfinement:
                 mock_open,
             )
 
-    def test_project_url_encoded_traversal_blocked_before_open(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_project_url_encoded_traversal_blocked_before_open(self, logs_client: TestClient) -> None:
         """AC4: project=..%2F.. (URL-decoded traversal) → 422; open() not called."""
         with unittest.mock.patch("builtins.open") as mock_open:
             self._assert_422_no_open(
@@ -379,9 +348,7 @@ class TestTraversalConfinement:
                 mock_open,
             )
 
-    def test_agent_dotdot_traversal_blocked_before_open(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_agent_dotdot_traversal_blocked_before_open(self, logs_client: TestClient) -> None:
         """agent=../../etc/passwd → 422; open() not called."""
         with unittest.mock.patch("builtins.open") as mock_open:
             self._assert_422_no_open(
@@ -390,9 +357,7 @@ class TestTraversalConfinement:
                 mock_open,
             )
 
-    def test_agent_url_encoded_slash_blocked_before_open(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_agent_url_encoded_slash_blocked_before_open(self, logs_client: TestClient) -> None:
         """agent value with URL-encoded slash → 422; open() not called."""
         with unittest.mock.patch("builtins.open") as mock_open:
             self._assert_422_no_open(
@@ -401,9 +366,7 @@ class TestTraversalConfinement:
                 mock_open,
             )
 
-    def test_project_slash_traversal_blocked_before_open(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_project_slash_traversal_blocked_before_open(self, logs_client: TestClient) -> None:
         """project value with slash → 422; open() not called."""
         with unittest.mock.patch("builtins.open") as mock_open:
             self._assert_422_no_open(
@@ -412,9 +375,7 @@ class TestTraversalConfinement:
                 mock_open,
             )
 
-    def test_project_null_byte_blocked_before_open(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_project_null_byte_blocked_before_open(self, logs_client: TestClient) -> None:
         """project value with %00 null byte → 422; open() not called."""
         with unittest.mock.patch("builtins.open") as mock_open:
             self._assert_422_no_open(
@@ -432,9 +393,7 @@ class TestTraversalConfinement:
 class TestTailParameter:
     """Tests for tail query parameter validation."""
 
-    def test_tail_default_returns_up_to_200_lines(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_tail_default_returns_up_to_200_lines(self, logs_client: TestClient) -> None:
         """GET /logs/wake?agent=coder (no tail) returns up to 200 lines."""
         # The coder fixture has 2200 lines; default tail=200 should return 200.
         resp = logs_client.get("/logs/wake?agent=coder")
@@ -442,9 +401,7 @@ class TestTailParameter:
         body = resp.json()
         assert body["exit_code"] == 0
         lines = [ln for ln in body["stdout"].splitlines() if ln]
-        assert len(lines) == 200, (
-            f"Default tail=200 should return 200 lines; got {len(lines)}"
-        )
+        assert len(lines) == 200, f"Default tail=200 should return 200 lines; got {len(lines)}"
 
     def test_tail_5000_clamped_to_2000(self, logs_client: TestClient) -> None:
         """AC6: tail=5000 is clamped to 2000 (the hard cap)."""
@@ -453,9 +410,7 @@ class TestTailParameter:
         body = resp.json()
         assert body["exit_code"] == 0
         lines = [ln for ln in body["stdout"].splitlines() if ln]
-        assert len(lines) == 2000, (
-            f"tail=5000 clamped to 2000; got {len(lines)} lines"
-        )
+        assert len(lines) == 2000, f"tail=5000 clamped to 2000; got {len(lines)} lines"
 
     def test_tail_2001_clamped_to_2000(self, logs_client: TestClient) -> None:
         """Values above 2000 are clamped to 2000."""
@@ -463,9 +418,7 @@ class TestTailParameter:
         assert resp.status_code == 200
         body = resp.json()
         lines = [ln for ln in body["stdout"].splitlines() if ln]
-        assert len(lines) == 2000, (
-            f"tail=2001 clamped to 2000; got {len(lines)} lines"
-        )
+        assert len(lines) == 2000, f"tail=2001 clamped to 2000; got {len(lines)} lines"
 
     def test_tail_0_returns_422(self, logs_client: TestClient) -> None:
         """AC6: tail=0 returns 422."""
@@ -496,9 +449,7 @@ class TestTailParameter:
         assert len(lines) == 5, f"tail=5 should return 5 lines; got {len(lines)}"
         # Verify we got the LAST 5 lines.
         expected_last = [f"line {i}" for i in range(2196, 2201)]
-        assert lines == expected_last, (
-            f"Expected last 5 lines {expected_last!r}, got {lines!r}"
-        )
+        assert lines == expected_last, f"Expected last 5 lines {expected_last!r}, got {lines!r}"
 
     def test_tail_1_returns_1_line(self, logs_client: TestClient) -> None:
         """tail=1 returns the last single line."""
@@ -521,9 +472,7 @@ class TestUnknownKind:
     def test_unknown_kind_returns_404(self, logs_client: TestClient) -> None:
         """GET /logs/foobar returns 404."""
         resp = logs_client.get("/logs/foobar")
-        assert resp.status_code == 404, (
-            f"Expected 404 for unknown kind; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 404, f"Expected 404 for unknown kind; got {resp.status_code}: {resp.text}"
 
     def test_unknown_kind_body_echoes_kind(self, logs_client: TestClient) -> None:
         """404 body echoes the unknown kind."""
@@ -531,9 +480,7 @@ class TestUnknownKind:
         assert resp.status_code == 404
         body = resp.json()
         assert "kind" in body, f"404 body must include 'kind' field: {body}"
-        assert body["kind"] == "nonexistent", (
-            f"404 body must echo the kind; got {body['kind']!r}"
-        )
+        assert body["kind"] == "nonexistent", f"404 body must echo the kind; got {body['kind']!r}"
 
     def test_unknown_kind_with_params_returns_404(self, logs_client: TestClient) -> None:
         """GET /logs/badkind?agent=pm still returns 404 (kind check precedes param validation)."""
@@ -552,13 +499,9 @@ class TestAgentValidation:
     def test_invalid_agent_returns_422(self, logs_client: TestClient) -> None:
         """AC5: GET /logs/agent?project=<valid>&agent=<invalid> returns 422."""
         resp = logs_client.get(f"/logs/agent?project={_PROJECT_NAME}&agent=badagent")
-        assert resp.status_code == 422, (
-            f"Expected 422 for invalid agent; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for invalid agent; got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert "agent" in str(body).lower(), (
-            f"422 body must mention 'agent': {body}"
-        )
+        assert "agent" in str(body).lower(), f"422 body must mention 'agent': {body}"
 
     def test_valid_agents_accepted(self, logs_client: TestClient) -> None:
         """All valid agents in the fixed set are accepted without 422."""
@@ -567,8 +510,7 @@ class TestAgentValidation:
             resp = logs_client.get(f"/logs/wake?agent={agent_name}")
             # The log file may not exist (exit_code=1), but the HTTP status is 200.
             assert resp.status_code == 200, (
-                f"Valid agent {agent_name!r} should not return 422; "
-                f"got {resp.status_code}: {resp.text}"
+                f"Valid agent {agent_name!r} should not return 422; " f"got {resp.status_code}: {resp.text}"
             )
 
     def test_empty_agent_returns_422(self, logs_client: TestClient) -> None:
@@ -579,32 +521,22 @@ class TestAgentValidation:
     def test_unknown_project_returns_422(self, logs_client: TestClient) -> None:
         """project= an unregistered name returns 422 (project registry check)."""
         resp = logs_client.get("/logs/agent?project=does-not-exist&agent=coder")
-        assert resp.status_code == 422, (
-            f"Expected 422 for unknown project; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for unknown project; got {resp.status_code}: {resp.text}"
         body = resp.json()
-        assert "project" in str(body).lower(), (
-            f"422 body must mention 'project': {body}"
-        )
+        assert "project" in str(body).lower(), f"422 body must mention 'project': {body}"
 
-    def test_overwatch_global_sentinel_not_rejected(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_overwatch_global_sentinel_not_rejected(self, logs_client: TestClient) -> None:
         """project=global is valid for the overwatch kind (special sentinel)."""
         resp = logs_client.get("/logs/overwatch?project=global")
         assert resp.status_code == 200, (
-            f"project=global must be accepted for overwatch kind; "
-            f"got {resp.status_code}: {resp.text}"
+            f"project=global must be accepted for overwatch kind; " f"got {resp.status_code}: {resp.text}"
         )
 
-    def test_overwatch_global_rejected_for_agent_kind(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_overwatch_global_rejected_for_agent_kind(self, logs_client: TestClient) -> None:
         """project=global is not accepted for kinds other than overwatch."""
         resp = logs_client.get("/logs/agent?project=global&agent=coder")
         assert resp.status_code == 422, (
-            f"project=global must be rejected for non-overwatch kind; "
-            f"got {resp.status_code}: {resp.text}"
+            f"project=global must be rejected for non-overwatch kind; " f"got {resp.status_code}: {resp.text}"
         )
 
 
@@ -616,9 +548,7 @@ class TestAgentValidation:
 class TestEnvelopeShape:
     """The response envelope always contains exit_code, stdout, stderr."""
 
-    def test_envelope_fields_present_on_success(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_envelope_fields_present_on_success(self, logs_client: TestClient) -> None:
         """Successful response carries exit_code, stdout, stderr."""
         resp = logs_client.get("/logs/cm")
         assert resp.status_code == 200
@@ -627,9 +557,7 @@ class TestEnvelopeShape:
         assert "stdout" in body, f"Missing 'stdout' in envelope: {body}"
         assert "stderr" in body, f"Missing 'stderr' in envelope: {body}"
 
-    def test_envelope_stdout_contains_tail_text(
-        self, logs_client: TestClient
-    ) -> None:
+    def test_envelope_stdout_contains_tail_text(self, logs_client: TestClient) -> None:
         """stdout contains the tail text; stderr is empty on success."""
         resp = logs_client.get("/logs/cm")
         body = resp.json()

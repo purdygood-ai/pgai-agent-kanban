@@ -15,9 +15,26 @@
 # the dashboard is the operator's job, using the same commands as running
 # the kanban on a host.
 #
-# Usage: no arguments. The container invokes this script directly.
+# Usage:
+#   entrypoint.sh            # the container invokes this script directly
+#   entrypoint.sh --help     # print this usage and exit 0
 
 set -euo pipefail
+
+# -h/--help prints the header comment above and exits 0 before any condition
+# is checked or any shell starts. The image carries this file alone, without
+# the scripts lib tree, so the header is printed here rather than through
+# lib/header_help.sh: every line after the shebang up to the first line that
+# is not a comment.
+for _arg in "$@"; do
+    case "$_arg" in
+        -h|--help)
+            awk 'NR == 1 && /^#!/ { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"
+            exit 0
+            ;;
+    esac
+done
+unset _arg
 
 # ---------------------------------------------------------------------------
 # Condition 1: PGAI_AGENT_KANBAN_ROOT_PATH names an existing directory.

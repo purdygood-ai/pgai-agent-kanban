@@ -23,7 +23,6 @@ prompted them.
 
 from __future__ import annotations
 
-import os
 import pathlib
 import stat
 import subprocess
@@ -46,7 +45,6 @@ from pgai_agent_kanban.workflows.create_new_workflow import (  # noqa: E402
     SHIPPED_WORKFLOW_TYPES,
     WorkflowGeneratorError,
     _cli_main,
-    _resolve_workflows_dir,
     create_new_workflow,
 )
 from tests.fixtures.binary_guard import require_binary
@@ -115,8 +113,7 @@ def test_generator_refuses_shipped_type_names(
 
     # Error message must name the refused type.
     assert shipped_name in str(exc_info.value), (
-        f"WorkflowGeneratorError message did not mention the refused name "
-        f"{shipped_name!r}: {exc_info.value}"
+        f"WorkflowGeneratorError message did not mention the refused name " f"{shipped_name!r}: {exc_info.value}"
     )
 
 
@@ -127,14 +124,14 @@ def test_generator_refuses_shipped_name_via_cli(tmp_path: pathlib.Path) -> None:
 
     exit_code = _cli_main(
         [
-            "--name", "release",
-            "--workflows-dir", str(workflows_root),
+            "--name",
+            "release",
+            "--workflows-dir",
+            str(workflows_root),
         ]
     )
 
-    assert exit_code != 0, (
-        "CLI should exit non-zero when --name release (a shipped type) is given"
-    )
+    assert exit_code != 0, "CLI should exit non-zero when --name release (a shipped type) is given"
 
 
 def test_non_shipped_name_is_accepted(tmp_path: pathlib.Path) -> None:
@@ -176,9 +173,9 @@ def test_generator_refuses_existing_directory_without_force(
             workflows_dir=workflows_root,
         )
 
-    assert "already exists" in str(exc_info.value).lower(), (
-        "WorkflowGeneratorError message should mention that the directory exists"
-    )
+    assert (
+        "already exists" in str(exc_info.value).lower()
+    ), "WorkflowGeneratorError message should mention that the directory exists"
 
 
 def test_generator_overwrites_existing_directory_with_force(
@@ -211,15 +208,9 @@ def test_generator_overwrites_existing_directory_with_force(
     )
 
     assert plugin_dir2 == plugin_dir, "Returned path should be identical after --force"
-    assert not sentinel.exists(), (
-        "Sentinel file from the first scaffold should be gone after --force overwrite"
-    )
-    assert (plugin_dir2 / "workflow.cfg").exists(), (
-        "workflow.cfg must be recreated after --force overwrite"
-    )
-    assert (plugin_dir2 / "workflow.sh").exists(), (
-        "workflow.sh must be recreated after --force overwrite"
-    )
+    assert not sentinel.exists(), "Sentinel file from the first scaffold should be gone after --force overwrite"
+    assert (plugin_dir2 / "workflow.cfg").exists(), "workflow.cfg must be recreated after --force overwrite"
+    assert (plugin_dir2 / "workflow.sh").exists(), "workflow.sh must be recreated after --force overwrite"
 
 
 def test_generator_force_via_cli(tmp_path: pathlib.Path) -> None:
@@ -233,9 +224,11 @@ def test_generator_force_via_cli(tmp_path: pathlib.Path) -> None:
     # Second scaffold via CLI with --force.
     exit_code = _cli_main(
         [
-            "--name", "acme-cli-force",
+            "--name",
+            "acme-cli-force",
             "--force",
-            "--workflows-dir", str(workflows_root),
+            "--workflows-dir",
+            str(workflows_root),
         ]
     )
 
@@ -269,9 +262,7 @@ def test_generator_on_live_install_layout_creates_under_workflows_root(
     plugin_dir = create_new_workflow("acme-live", **_minimal_kwargs())
 
     expected = live_root / "workflows" / "acme-live"
-    assert plugin_dir == expected, (
-        f"Expected plugin at {expected}, got {plugin_dir}"
-    )
+    assert plugin_dir == expected, f"Expected plugin at {expected}, got {plugin_dir}"
     assert (plugin_dir / "workflow.cfg").is_file(), "workflow.cfg must exist"
     assert (plugin_dir / "workflow.sh").is_file(), "workflow.sh must exist"
     assert (plugin_dir / "contract_check.sh").is_file(), "contract_check.sh must exist"
@@ -377,9 +368,7 @@ def test_generator_on_dev_tree_layout_uses_team_workflows(
     plugin_dir = create_new_workflow("acme-dev", **_minimal_kwargs())
 
     expected = team_workflows / "acme-dev"
-    assert plugin_dir == expected, (
-        f"Expected dev-tree plugin at {expected}, got {plugin_dir}"
-    )
+    assert plugin_dir == expected, f"Expected dev-tree plugin at {expected}, got {plugin_dir}"
     assert (plugin_dir / "workflow.cfg").is_file()
 
 
@@ -414,14 +403,11 @@ def test_explicit_workflows_dir_wins_over_env_var(
     )
 
     expected = explicit_root / "acme-explicit"
-    assert plugin_dir == expected, (
-        f"Expected plugin at explicit_root/{expected.name}, got {plugin_dir}"
-    )
+    assert plugin_dir == expected, f"Expected plugin at explicit_root/{expected.name}, got {plugin_dir}"
     # Must NOT appear under the env-var root.
     env_plugin = env_root / "workflows" / "acme-explicit"
     assert not env_plugin.exists(), (
-        "Plugin must not be created under PGAI_AGENT_KANBAN_ROOT_PATH when "
-        "explicit --workflows-dir is given"
+        "Plugin must not be created under PGAI_AGENT_KANBAN_ROOT_PATH when " "explicit --workflows-dir is given"
     )
 
 
@@ -432,8 +418,10 @@ def test_explicit_workflows_dir_via_cli_wins(tmp_path: pathlib.Path) -> None:
 
     exit_code = _cli_main(
         [
-            "--name", "acme-cli-explicit",
-            "--workflows-dir", str(explicit_root),
+            "--name",
+            "acme-cli-explicit",
+            "--workflows-dir",
+            str(explicit_root),
         ]
     )
 
@@ -474,12 +462,9 @@ def test_stub_hooks_exit_nonzero_with_not_implemented(tmp_path: pathlib.Path) ->
             capture_output=True,
             text=True,
         )
-        assert result.returncode != 0, (
-            f"Hook {hook} exited 0; expected non-zero (NOT IMPLEMENTED stub)"
-        )
+        assert result.returncode != 0, f"Hook {hook} exited 0; expected non-zero (NOT IMPLEMENTED stub)"
         assert "NOT IMPLEMENTED" in result.stderr, (
-            f"Hook {hook} stderr did not contain 'NOT IMPLEMENTED': "
-            f"{result.stderr!r}"
+            f"Hook {hook} stderr did not contain 'NOT IMPLEMENTED': " f"{result.stderr!r}"
         )
 
 
@@ -511,9 +496,7 @@ def test_scaffold_creates_workflow_cfg_with_scaffold_status(
     plugin_dir = _scaffold_in(tmp_path, name="acme-cfg-status")
     cfg_text = (plugin_dir / "workflow.cfg").read_text(encoding="utf-8")
 
-    assert "status = scaffold" in cfg_text, (
-        "workflow.cfg must contain 'status = scaffold' after scaffolding"
-    )
+    assert "status = scaffold" in cfg_text, "workflow.cfg must contain 'status = scaffold' after scaffolding"
 
 
 def test_scaffold_creates_workflow_cfg_with_correct_name(
@@ -523,9 +506,7 @@ def test_scaffold_creates_workflow_cfg_with_correct_name(
     plugin_dir = _scaffold_in(tmp_path, name="acme-name-check")
     cfg_text = (plugin_dir / "workflow.cfg").read_text(encoding="utf-8")
 
-    assert "name = acme-name-check" in cfg_text, (
-        "workflow.cfg must contain the workflow name"
-    )
+    assert "name = acme-name-check" in cfg_text, "workflow.cfg must contain the workflow name"
 
 
 def test_scaffold_creates_workflow_cfg_with_capabilities(
@@ -567,17 +548,13 @@ def test_scaffold_workflow_sh_contains_all_hook_stubs(tmp_path: pathlib.Path) ->
         "wf_dashboard_render",
     ]
     for hook in expected_hooks:
-        assert f"{hook}()" in workflow_sh_text, (
-            f"workflow.sh should contain a function definition for {hook}"
-        )
+        assert f"{hook}()" in workflow_sh_text, f"workflow.sh should contain a function definition for {hook}"
 
 
 def test_scaffold_contract_check_sh_is_present(tmp_path: pathlib.Path) -> None:
     """Scaffolded plugin directory contains contract_check.sh."""
     plugin_dir = _scaffold_in(tmp_path, name="acme-contract")
-    assert (plugin_dir / "contract_check.sh").is_file(), (
-        "contract_check.sh must be created in the plugin directory"
-    )
+    assert (plugin_dir / "contract_check.sh").is_file(), "contract_check.sh must be created in the plugin directory"
 
 
 # ---------------------------------------------------------------------------
@@ -598,9 +575,7 @@ def test_contract_check_sh_fails_on_scaffold_status(tmp_path: pathlib.Path) -> N
         capture_output=True,
         text=True,
     )
-    assert result.returncode != 0, (
-        "contract_check.sh must exit non-zero on a scaffold (status=scaffold, stubs present)"
-    )
+    assert result.returncode != 0, "contract_check.sh must exit non-zero on a scaffold (status=scaffold, stubs present)"
 
 
 def test_contract_check_sh_passes_on_implemented_plugin(tmp_path: pathlib.Path) -> None:
@@ -616,7 +591,7 @@ def test_contract_check_sh_passes_on_implemented_plugin(tmp_path: pathlib.Path) 
     implemented_sh.write_text(
         "#!/usr/bin/env bash\n"
         "wf_git_mode() { echo none; }\n"
-        "wf_resolve_target_version() { echo \"${1:-}\"; }\n"
+        'wf_resolve_target_version() { echo "${1:-}"; }\n'
         "wf_pre_task() { return 0; }\n"
         "wf_post_task() { return 0; }\n"
         "wf_finalize() { echo tag; }\n"
@@ -628,9 +603,7 @@ def test_contract_check_sh_passes_on_implemented_plugin(tmp_path: pathlib.Path) 
 
     # Flip status from scaffold to ready.
     cfg = plugin_dir / "workflow.cfg"
-    cfg_text = cfg.read_text(encoding="utf-8").replace(
-        "status = scaffold", "status = ready"
-    )
+    cfg_text = cfg.read_text(encoding="utf-8").replace("status = scaffold", "status = ready")
     cfg.write_text(cfg_text, encoding="utf-8")
 
     result = subprocess.run(
@@ -659,16 +632,16 @@ def test_cli_prints_scaffolded_path_on_success(
 
     exit_code = _cli_main(
         [
-            "--name", "acme-output",
-            "--workflows-dir", str(explicit_root),
+            "--name",
+            "acme-output",
+            "--workflows-dir",
+            str(explicit_root),
         ]
     )
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "acme-output" in captured.out, (
-        "CLI stdout should mention the scaffolded plugin name"
-    )
+    assert "acme-output" in captured.out, "CLI stdout should mention the scaffolded plugin name"
 
 
 def test_cli_prints_error_to_stderr_on_refused_name(
@@ -681,13 +654,15 @@ def test_cli_prints_error_to_stderr_on_refused_name(
 
     exit_code = _cli_main(
         [
-            "--name", "document",
-            "--workflows-dir", str(explicit_root),
+            "--name",
+            "document",
+            "--workflows-dir",
+            str(explicit_root),
         ]
     )
 
     assert exit_code != 0
     captured = capsys.readouterr()
-    assert "error" in captured.err.lower() or "document" in captured.err, (
-        "CLI stderr should contain error information when a shipped name is refused"
-    )
+    assert (
+        "error" in captured.err.lower() or "document" in captured.err
+    ), "CLI stderr should contain error information when a shipped name is refused"

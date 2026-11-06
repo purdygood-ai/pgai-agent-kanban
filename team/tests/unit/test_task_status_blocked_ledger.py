@@ -149,9 +149,7 @@ def test_move_out_of_blocked_closes_the_open_interval(tmp_path: Path) -> None:
     status_file = _make_status_file(tmp_path, project="demo", key="T-1")
     _write_release_state(tmp_path, "demo", active_rc="v4.5.6")
 
-    write_task_status(
-        status_file, state="BLOCKED", needs_human="yes", project="demo", key="T-1"
-    )
+    write_task_status(status_file, state="BLOCKED", needs_human="yes", project="demo", key="T-1")
     write_task_status(status_file, state="WORKING", project="demo", key="T-1")
 
     records = _ledger_records(tmp_path, "demo")
@@ -205,9 +203,7 @@ def test_blocked_with_needs_human_no_still_opens_a_block(tmp_path: Path) -> None
     status_file = _make_status_file(tmp_path, project="demo", key="T-1")
     _write_release_state(tmp_path, "demo", active_rc="v4.5.6")
 
-    write_task_status(
-        status_file, state="BLOCKED", needs_human="no", project="demo", key="T-1"
-    )
+    write_task_status(status_file, state="BLOCKED", needs_human="no", project="demo", key="T-1")
 
     records = _ledger_records(tmp_path, "demo")
     assert [r["kind"] for r in records] == ["block-start"]
@@ -252,9 +248,7 @@ def test_working_task_given_needs_human_yes_opens_a_block(tmp_path: Path) -> Non
     status_file = _make_status_file(tmp_path, project="demo", key="T-1")
     _write_release_state(tmp_path, "demo", active_rc="v4.5.6")
 
-    write_task_status(
-        status_file, state="WORKING", needs_human="yes", project="demo", key="T-1"
-    )
+    write_task_status(status_file, state="WORKING", needs_human="yes", project="demo", key="T-1")
 
     [start] = _ledger_records(tmp_path, "demo")
     assert (start["kind"], start["source"], start["version"]) == (
@@ -267,15 +261,11 @@ def test_working_task_given_needs_human_yes_opens_a_block(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize("terminal_state", ["DONE", "WONT-DO"])
-def test_terminal_task_given_needs_human_yes_opens_no_block(
-    tmp_path: Path, terminal_state: str
-) -> None:
+def test_terminal_task_given_needs_human_yes_opens_no_block(tmp_path: Path, terminal_state: str) -> None:
     status_file = _make_status_file(tmp_path, project="demo", key="T-1")
     _write_release_state(tmp_path, "demo", active_rc="v4.5.6")
 
-    write_task_status(
-        status_file, state=terminal_state, needs_human="yes", project="demo", key="T-1"
-    )
+    write_task_status(status_file, state=terminal_state, needs_human="yes", project="demo", key="T-1")
 
     assert _ledger_records(tmp_path, "demo") == []
     assert terminal_state in status_file.read_text(encoding="utf-8")
@@ -306,9 +296,7 @@ def test_blocked_task_reaching_a_terminal_state_closes_its_block_with_class_any(
 
     write_task_status(status_file, state="BLOCKED", project="demo", key="T-1")
     # WONT-DO carries Needs Human yes by convention; it still only closes.
-    write_task_status(
-        status_file, state=terminal_state, needs_human="yes", project="demo", key="T-1"
-    )
+    write_task_status(status_file, state=terminal_state, needs_human="yes", project="demo", key="T-1")
 
     records = _ledger_records(tmp_path, "demo")
     assert [r["kind"] for r in records] == ["block-start", "block-end"]
@@ -370,9 +358,7 @@ def test_block_open_under_no_rc_is_not_reopened_under_a_later_rc(tmp_path: Path)
     write_task_status(status_file, state="BLOCKED", needs_human="yes", project="demo", key="T-1")
     write_block_record(status_file, "zero_progress", "CODER")
 
-    open_blocks = [
-        b for b in block_intervals(str(_ledger_path(tmp_path, "demo"))) if b["end"] is None
-    ]
+    open_blocks = [b for b in block_intervals(str(_ledger_path(tmp_path, "demo"))) if b["end"] is None]
     assert [(b["version"], b["source"]) for b in open_blocks] == [(NO_RC_VERSION, "task:T-1")]
 
 
@@ -386,9 +372,7 @@ def test_active_rc_none_records_the_block_under_the_no_rc_version(tmp_path: Path
     _write_role(status_file)
     _write_release_state(tmp_path, "demo", active_rc="none")
 
-    write_task_status(
-        status_file, state="BLOCKED", needs_human="yes", project="demo", key="T-1"
-    )
+    write_task_status(status_file, state="BLOCKED", needs_human="yes", project="demo", key="T-1")
 
     [start] = _ledger_records(tmp_path, "demo")
     assert (start["version"], start["source"], start["kind"]) == (
@@ -474,9 +458,7 @@ def test_ledger_stamp_failure_leaves_status_write_byte_identical_to_success(
     beside the write and never influences it."""
     ok_file = _make_status_file(tmp_path, project="ok-demo", key="T-1")
     _write_release_state(tmp_path, "ok-demo", active_rc="v4.5.6")
-    write_task_status(
-        ok_file, state="BLOCKED", needs_human="yes", project="ok-demo", key="T-1"
-    )
+    write_task_status(ok_file, state="BLOCKED", needs_human="yes", project="ok-demo", key="T-1")
 
     fail_file = _make_status_file(tmp_path, project="fail-demo", key="T-1")
     _write_release_state(tmp_path, "fail-demo", active_rc="v4.5.6")
@@ -484,9 +466,7 @@ def test_ledger_stamp_failure_leaves_status_write_byte_identical_to_success(
     fail_metrics_dir.mkdir(parents=True)
     fail_metrics_dir.chmod(0o000)
     try:
-        write_task_status(
-            fail_file, state="BLOCKED", needs_human="yes", project="fail-demo", key="T-1"
-        )
+        write_task_status(fail_file, state="BLOCKED", needs_human="yes", project="fail-demo", key="T-1")
     finally:
         fail_metrics_dir.chmod(0o755)
 

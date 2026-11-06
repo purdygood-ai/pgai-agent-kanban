@@ -86,10 +86,23 @@ _SUBPROCESS_TIMEOUT_SECONDS = 60
 # root under test. Mirrors test_provider_runtime_integration.py's own
 # _LEAK_PREFIXES (same rationale, same list).
 _LEAK_PREFIXES = (
-    "PGAI_", "PP_", "KANBAN_ROOT", "CLAUDE_", "AI_AGENT", "STOP_FILE",
-    "TMPDIR", "MAX_TASK_SECONDS", "MAX_RUNTIME_SECONDS", "MAX_TASKS_PER_WAKE",
-    "MAX_PROJECT_SECONDS", "KILL_GRACE_SECONDS", "PAUSE_BETWEEN_TASKS",
-    "STOP_ON_BLOCKED", "AI_AUTH_MODE", "BASH_MAX_TIMEOUT_MS", "DASHBOARD_",
+    "PGAI_",
+    "PP_",
+    "KANBAN_ROOT",
+    "CLAUDE_",
+    "AI_AGENT",
+    "STOP_FILE",
+    "TMPDIR",
+    "MAX_TASK_SECONDS",
+    "MAX_RUNTIME_SECONDS",
+    "MAX_TASKS_PER_WAKE",
+    "MAX_PROJECT_SECONDS",
+    "KILL_GRACE_SECONDS",
+    "PAUSE_BETWEEN_TASKS",
+    "STOP_ON_BLOCKED",
+    "AI_AUTH_MODE",
+    "BASH_MAX_TIMEOUT_MS",
+    "DASHBOARD_",
     "PM_MAX_TASKS",
 )
 
@@ -97,11 +110,7 @@ _LEAK_PREFIXES = (
 def _clean_base_env() -> dict[str, str]:
     """The host process env with every var this suite's own live-wake
     context may have exported stripped out. See module docstring."""
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)
-    }
+    return {k: v for k, v in os.environ.items() if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)}
 
 
 def _write_guard_probe_task(tasks_dir: pathlib.Path, task_id: str, role: str) -> None:
@@ -155,16 +164,12 @@ def _build_guard_probe_root(
         "[wake]\nmax_tasks_per_wake = 5\n",
         encoding="utf-8",
     )
-    (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8")
 
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {project_name}\n"
-        "workflow_type = document\n",
+        "[project]\n" f"project_name = {project_name}\n" "workflow_type = document\n",
         encoding="utf-8",
     )
 
@@ -228,9 +233,7 @@ def test_non_cm_dispatch_puts_shim_first_on_path_and_exports_guard_variables(
     task_id = "WRITER-20260101-001-guard-wiring-probe"
     tmp_scratch = tmp_path / "kanban_scratch"
     root = tmp_path / "kanban_root"
-    _build_guard_probe_root(
-        root, project_name, tmp_scratch=tmp_scratch, agent="writer", role="WRITER", task_id=task_id
-    )
+    _build_guard_probe_root(root, project_name, tmp_scratch=tmp_scratch, agent="writer", role="WRITER", task_id=task_id)
 
     bin_dir = tmp_path / "stub-bin"
     control_dir = tmp_path / "stub-control"
@@ -243,16 +246,14 @@ def test_non_cm_dispatch_puts_shim_first_on_path_and_exports_guard_variables(
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
     result = _run_wake(root, "writer", env)
-    assert result.returncode == 0, (
-        f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
-    status_text = (root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(
-        encoding="utf-8"
-    )
-    assert "## State\nDONE" in status_text, (
-        f"Expected the probe task to reach DONE through the stub provider.\nstatus.md:\n{status_text}"
-    )
+    status_text = (root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
+    assert (
+        "## State\nDONE" in status_text
+    ), f"Expected the probe task to reach DONE through the stub provider.\nstatus.md:\n{status_text}"
 
     agent_env = call_env(control_dir, 1)
 
@@ -288,9 +289,7 @@ def test_cm_dispatch_excludes_shim_from_path(tmp_path: pathlib.Path) -> None:
     task_id = "CM-20260101-001-guard-wiring-probe"
     tmp_scratch = tmp_path / "kanban_scratch"
     root = tmp_path / "kanban_root"
-    _build_guard_probe_root(
-        root, project_name, tmp_scratch=tmp_scratch, agent="cm", role="CM", task_id=task_id
-    )
+    _build_guard_probe_root(root, project_name, tmp_scratch=tmp_scratch, agent="cm", role="CM", task_id=task_id)
 
     bin_dir = tmp_path / "stub-bin"
     control_dir = tmp_path / "stub-control"
@@ -303,16 +302,14 @@ def test_cm_dispatch_excludes_shim_from_path(tmp_path: pathlib.Path) -> None:
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
     result = _run_wake(root, "cm", env)
-    assert result.returncode == 0, (
-        f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
-    status_text = (root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(
-        encoding="utf-8"
-    )
-    assert "## State\nDONE" in status_text, (
-        f"Expected the probe task to reach DONE through the stub provider.\nstatus.md:\n{status_text}"
-    )
+    status_text = (root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
+    assert (
+        "## State\nDONE" in status_text
+    ), f"Expected the probe task to reach DONE through the stub provider.\nstatus.md:\n{status_text}"
 
     agent_env = call_env(control_dir, 1)
 

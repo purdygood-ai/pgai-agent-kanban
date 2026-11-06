@@ -64,7 +64,7 @@ _ISO_UTC = "%Y-%m-%dT%H:%M:%SZ"
 
 def _iso_ago(seconds: int) -> str:
     """ISO-8601 UTC timestamp *seconds* before now, in the writer's form."""
-    then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=seconds)
+    then = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=seconds)
     return then.strftime(_ISO_UTC)
 
 
@@ -88,9 +88,7 @@ def _board(tmp_path: pathlib.Path, project: str = "demo") -> pathlib.Path:
     """A minimal kanban root with one registered project and no tasks."""
     root = tmp_path / "board"
     (root / "projects" / project / "tasks").mkdir(parents=True, exist_ok=True)
-    (root / "projects.cfg").write_text(
-        f"[project:{project}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project}]\npriority=1\nenabled=true\n", encoding="utf-8")
     return root
 
 
@@ -108,7 +106,11 @@ def _env(kanban_root: pathlib.Path) -> dict[str, str]:
 def _why_locks(kanban_root: pathlib.Path) -> str:
     result = subprocess.run(
         ["bash", str(_WHY_SH), "--project", "demo", "--details"],
-        capture_output=True, text=True, env=_env(kanban_root), timeout=30, cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        env=_env(kanban_root),
+        timeout=30,
+        cwd=str(_TEAM_DIR),
     )
     assert result.returncode in (0, 2, 3, 4, 5, 6), f"why.sh refused: {result.stderr!r}"
     marker = "== locks ==\n"
@@ -140,9 +142,9 @@ def test_acquire_records_acquired_at_set_task_names_task_and_release_removes(
         pgai_lock_release "{lock_file}" "$fd"
         [[ -e "{lock_file}" ]] && echo "STILL_THERE" || echo "GONE"
     """)
-    before = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    before = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
     result = run_bash(tmp_path, script)
-    after = datetime.datetime.now(datetime.timezone.utc)
+    after = datetime.datetime.now(datetime.UTC)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
     acquired = _fields(result.stdout.split("== acquired\n")[1].split("== dispatched")[0])
@@ -150,12 +152,10 @@ def test_acquire_records_acquired_at_set_task_names_task_and_release_removes(
     redispatched = _fields(result.stdout.split("== redispatched\n")[1].split("== size")[0])
 
     assert acquired["task"] == "none"
-    stamp = datetime.datetime.strptime(acquired["acquired_at"], _ISO_UTC).replace(
-        tzinfo=datetime.timezone.utc
-    )
-    assert before - datetime.timedelta(seconds=1) <= stamp <= after, (
-        f"acquired_at {acquired['acquired_at']!r} is not the acquisition time in UTC"
-    )
+    stamp = datetime.datetime.strptime(acquired["acquired_at"], _ISO_UTC).replace(tzinfo=datetime.UTC)
+    assert (
+        before - datetime.timedelta(seconds=1) <= stamp <= after
+    ), f"acquired_at {acquired['acquired_at']!r} is not the acquisition time in UTC"
 
     assert dispatched == {**acquired, "task": "CODER-20261001-011-a-long-task-id"}, dispatched
     # A shorter task id still leaves a complete record (padding, never a
@@ -199,13 +199,12 @@ def test_why_details_renders_held_line_and_live_verdict(tmp_path: pathlib.Path) 
     pid = os.getpid()  # alive for the whole test
     acquired_at = _iso_ago(300)
     _seed_lock(
-        root / "locks", "repo-wake-demo.lock",
+        root / "locks",
+        "repo-wake-demo.lock",
         f"holder=coder\npid={pid}\nop=wake-chain:demo\ntask=none\nacquired_at={acquired_at}\n",
     )
     locks = _why_locks(root)
-    assert (
-        f"  held: 5m (since {acquired_at}) by coder pid {pid} — chain, no task yet\n" in locks
-    ), locks
+    assert f"  held: 5m (since {acquired_at}) by coder pid {pid} — chain, no task yet\n" in locks, locks
     assert "  held verdict: live\n" in locks, locks
     assert "age:" not in locks, f"the mtime-derived age line must be gone: {locks!r}"
 
@@ -217,7 +216,8 @@ def test_why_details_renders_long_verdict_with_overage_past_floor(tmp_path: path
     # rounds the overage up to exactly 10 minutes.
     acquired_at = _iso_ago(_FLOOR_SECONDS + 600 - 30)
     _seed_lock(
-        root / "locks", "repo-wake-demo.lock",
+        root / "locks",
+        "repo-wake-demo.lock",
         f"holder=coder\npid={pid}\nop=wake-chain:demo\ntask=CODER-1\nacquired_at={acquired_at}\n",
     )
     locks = _why_locks(root)
@@ -234,13 +234,13 @@ def test_why_details_says_not_recorded_for_legacy_and_torn_records(tmp_path: pat
     for label, extra in (("legacy", ""), ("torn", "acquired_at=2026-10-01T04:2\n")):
         root = _board(tmp_path / label)
         _seed_lock(
-            root / "locks", "repo-wake-demo.lock",
+            root / "locks",
+            "repo-wake-demo.lock",
             f"holder=coder\npid={os.getpid()}\nop=wake-chain:demo\ntask=T-1\n{extra}",
         )
         locks = _why_locks(root)
         assert (
-            f"  held: acquired_at not recorded (pre-upgrade lock) by coder pid {os.getpid()} — T-1\n"
-            in locks
+            f"  held: acquired_at not recorded (pre-upgrade lock) by coder pid {os.getpid()} — T-1\n" in locks
         ), f"{label}: {locks!r}"
         assert "held verdict:" not in locks, f"{label}: no duration means no verdict: {locks!r}"
         assert "age:" not in locks, f"{label}: {locks!r}"
@@ -256,7 +256,8 @@ def test_release_locks_listing_shows_held_line_and_verdict(tmp_path: pathlib.Pat
     pid = os.getpid()
     acquired_at = _iso_ago(300)
     _seed_lock(
-        root / "locks", "repo-wake-demo.lock",
+        root / "locks",
+        "repo-wake-demo.lock",
         f"holder=coder\npid={pid}\nop=wake-chain:demo\ntask=T-7\nacquired_at={acquired_at}\n",
     )
     _seed_lock(root / "locks", "repo-wake-old.lock", f"holder=coder\npid={pid}\nop=o\ntask=none\n")
@@ -264,7 +265,11 @@ def test_release_locks_listing_shows_held_line_and_verdict(tmp_path: pathlib.Pat
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(tmp_path / "scratch")
     result = subprocess.run(
         ["bash", str(_RELEASE_LOCKS_SH)],
-        capture_output=True, text=True, env=env, timeout=30, cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        cwd=str(_TEAM_DIR),
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert f"  held: 5m (since {acquired_at}) by coder pid {pid} — T-7\n" in result.stdout
@@ -299,23 +304,30 @@ def test_orphan_holder_narration_cites_acquired_at(tmp_path: pathlib.Path) -> No
         encoding="utf-8",
     )
     holder = subprocess.Popen(
-        ["bash", "-c", textwrap.dedent(f"""\
+        [
+            "bash",
+            "-c",
+            textwrap.dedent(f"""\
             exec {{fd}}<"{lock_file}"
             flock -n "$fd"
             touch "{ready}"
             while [[ ! -f "{done}" ]]; do sleep 0.05; done
-        """)],
+        """),
+        ],
         cwd=str(_TEAM_DIR),
     )
     try:
         _wait_for(ready)
-        result = run_bash(tmp_path, textwrap.dedent(f"""\
+        result = run_bash(
+            tmp_path,
+            textwrap.dedent(f"""\
             set +e
             source {_LOCK_PROVENANCE_SH}
             fd2=""
             pgai_lock_acquire "{lock_file}" reader "$$" op TASK-2 fd2
             echo "RC=$?"
-        """))
+        """),
+        )
         # The flock is held under a dead recorded pid: deferred to, never
         # reaped, and the narration cites how long the record says it was held.
         assert "RC=1" in result.stdout, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -332,7 +344,10 @@ def test_overdue_narration_cites_acquired_at_not_mtime(tmp_path: pathlib.Path) -
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     ready, done = tmp_path / "ready", tmp_path / "done"
     holder = subprocess.Popen(
-        ["bash", "-c", textwrap.dedent(f"""\
+        [
+            "bash",
+            "-c",
+            textwrap.dedent(f"""\
             source {_LOCK_PROVENANCE_SH}
             fd=""
             pgai_lock_acquire "{lock_file}" writer "$$" real-op TASK-AGED fd
@@ -340,7 +355,8 @@ def test_overdue_narration_cites_acquired_at_not_mtime(tmp_path: pathlib.Path) -
             touch "{ready}"
             while [[ ! -f "{done}" ]]; do sleep 0.05; done
             pgai_lock_release "{lock_file}" "$fd"
-        """)],
+        """),
+        ],
         cwd=str(_TEAM_DIR),
     )
     try:

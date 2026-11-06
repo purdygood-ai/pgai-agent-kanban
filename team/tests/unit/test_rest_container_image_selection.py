@@ -49,7 +49,7 @@ import pathlib
 import re
 import sys
 import time
-from typing import Generator
+from collections.abc import Generator
 from unittest.mock import patch
 
 import pytest
@@ -171,9 +171,8 @@ def _wait_for_text(path: pathlib.Path, needle: str, timeout: float = 20.0) -> st
 
 
 def _assert_no_engine_calls(engine_log: pathlib.Path) -> None:
-    assert not engine_log.exists(), (
-        "a container engine was invoked; recorded calls:\n"
-        + engine_log.read_text(encoding="utf-8")
+    assert not engine_log.exists(), "a container engine was invoked; recorded calls:\n" + engine_log.read_text(
+        encoding="utf-8"
     )
 
 
@@ -192,9 +191,7 @@ def _assert_no_engine_calls(engine_log: pathlib.Path) -> None:
     ],
     ids=["one-name", "all", "two-names"],
 )
-def test_image_field_becomes_one_image_flag_per_entry(
-    client, sandbox, route: str, image, expected_tail: str
-) -> None:
+def test_image_field_becomes_one_image_flag_per_entry(client, sandbox, route: str, image, expected_tail: str) -> None:
     with patch("subprocess.Popen") as mock_popen, patch("subprocess.run") as mock_run:
         resp = client.post(route, json={"project": _PROJECT, "image": image, "dry_run": True})
         mock_popen.assert_not_called()
@@ -213,9 +210,7 @@ def test_image_field_becomes_one_image_flag_per_entry(
 
 @pytest.mark.parametrize("route", sorted(_ROUTES))
 @pytest.mark.parametrize("dry_run", [True, False], ids=["dry-run", "real-call"])
-def test_undeclared_image_is_refused_before_dispatch(
-    client, sandbox, route: str, dry_run: bool
-) -> None:
+def test_undeclared_image_is_refused_before_dispatch(client, sandbox, route: str, dry_run: bool) -> None:
     body = {"project": _PROJECT, "image": ["debian", "no-such-image"], "dry_run": dry_run}
     with patch("subprocess.Popen") as mock_popen, patch("subprocess.run") as mock_run:
         resp = client.post(route, json=body)
@@ -231,9 +226,7 @@ def test_undeclared_image_is_refused_before_dispatch(
     assert "'debian'" not in payload["message"], (
         "only the undeclared name should be named as refused: " + payload["message"]
     )
-    for declared in container_images.declared_container_images(
-        container_images.manifest_path(_TEAM_DIR)
-    ):
+    for declared in container_images.declared_container_images(container_images.manifest_path(_TEAM_DIR)):
         assert declared in payload["message"], payload["message"]
     assert payload["remedy"].startswith("curl "), payload["remedy"]
     assert route in payload["remedy"] and '"image": "all"' in payload["remedy"], payload["remedy"]
@@ -285,9 +278,7 @@ def test_entry_naming_no_image_is_refused(client, route: str) -> None:
 
 @pytest.mark.parametrize("route", sorted(_ROUTES))
 @pytest.mark.parametrize("body_extra", [{}, {"image": []}], ids=["omitted", "empty-list"])
-def test_body_without_image_dispatches_the_unchanged_argv(
-    client, route: str, body_extra: dict
-) -> None:
+def test_body_without_image_dispatches_the_unchanged_argv(client, route: str, body_extra: dict) -> None:
     with patch("subprocess.Popen") as mock_popen:
         mock_popen.return_value.pid = 4242
         resp = client.post(route, json={"project": _PROJECT, **body_extra})
@@ -299,9 +290,7 @@ def test_body_without_image_dispatches_the_unchanged_argv(
 
 
 @pytest.mark.parametrize("route", sorted(_ROUTES))
-def test_omitted_image_with_no_default_lists_images_and_builds_nothing(
-    client, sandbox, route: str
-) -> None:
+def test_omitted_image_with_no_default_lists_images_and_builds_nothing(client, sandbox, route: str) -> None:
     resp = client.post(route, json={"project": _PROJECT})
     assert resp.status_code == 200, resp.json()
 
@@ -394,9 +383,7 @@ class TestContainerImagesLibrary:
     def test_manifest_parse_skips_comments_blanks_and_repeats(self, tmp_path: pathlib.Path) -> None:
         manifest = container_images.manifest_path(tmp_path)
         manifest.parent.mkdir(parents=True)
-        manifest.write_text(
-            "# header\n\n  debian  \nrocky9\n#rocky8\ndebian\n", encoding="utf-8"
-        )
+        manifest.write_text("# header\n\n  debian  \nrocky9\n#rocky8\ndebian\n", encoding="utf-8")
         assert container_images.declared_container_images(manifest) == ["debian", "rocky9"]
 
     def test_missing_manifest_declares_nothing(self, tmp_path: pathlib.Path) -> None:
@@ -427,9 +414,7 @@ class TestContainerImagesLibrary:
         declared = ["debian", "rocky9"]
         assert container_images.undeclared_image_names(["all"], declared) == []
         assert container_images.undeclared_image_names(["rocky9,debian"], declared) == []
-        assert container_images.undeclared_image_names(
-            ["debian", "nope,rocky9", ""], declared
-        ) == ["nope", ""]
+        assert container_images.undeclared_image_names(["debian", "nope,rocky9", ""], declared) == ["nope", ""]
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +466,7 @@ _PARITY_CASES = [
 
 
 def _harness_decision(
-    entries: list[str], tmp_path: pathlib.Path, manifest: "pathlib.Path | None"
+    entries: list[str], tmp_path: pathlib.Path, manifest: pathlib.Path | None
 ) -> tuple[str, list[str]]:
     """Run the harness's selection step on *entries*; return its decision.
 
@@ -542,9 +527,7 @@ def _case_id(entries: list[str]) -> str:
 
 
 @pytest.mark.parametrize("entries", _PARITY_CASES, ids=[_case_id(c) for c in _PARITY_CASES])
-def test_library_decides_like_the_harness_on_a_fixture_manifest(
-    tmp_path: pathlib.Path, entries: list[str]
-) -> None:
+def test_library_decides_like_the_harness_on_a_fixture_manifest(tmp_path: pathlib.Path, entries: list[str]) -> None:
     manifest = container_images.manifest_path(tmp_path / "fixture")
     manifest.parent.mkdir(parents=True)
     manifest.write_text("a\nb\n", encoding="utf-8")
@@ -555,21 +538,14 @@ def test_library_decides_like_the_harness_on_a_fixture_manifest(
 
 
 @pytest.mark.parametrize("entries", _PARITY_CASES, ids=[_case_id(c) for c in _PARITY_CASES])
-def test_library_decides_like_the_harness_on_the_shipped_manifest(
-    tmp_path: pathlib.Path, entries: list[str]
-) -> None:
-    declared = container_images.declared_container_images(
-        container_images.manifest_path(_TEAM_DIR)
-    )
+def test_library_decides_like_the_harness_on_the_shipped_manifest(tmp_path: pathlib.Path, entries: list[str]) -> None:
+    declared = container_images.declared_container_images(container_images.manifest_path(_TEAM_DIR))
     assert len(declared) >= 2, declared
     first, second = declared[0], declared[1]
     # Swap the stand-ins "a" and "b" for the two declared names, leaving
     # words that merely contain those letters ("all", "nope") alone.
     stand_in = re.compile(r"(?<![A-Za-z])([ab])(?![A-Za-z])")
-    real = [
-        stand_in.sub(lambda m: first if m.group(1) == "a" else second, entry)
-        for entry in entries
-    ]
+    real = [stand_in.sub(lambda m: first if m.group(1) == "a" else second, entry) for entry in entries]
 
     expected = _harness_decision(real, tmp_path, None)
     assert _library_decision(real, declared) == expected, real

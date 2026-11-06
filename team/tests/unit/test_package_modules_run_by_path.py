@@ -62,13 +62,15 @@ _GUARD_EXAMPLE = _PACKAGE_DIR / "reports" / "agent_timing.py"
 # why, as behaviour. A module listed here must not advertise the by-path form
 # anywhere in its docstring or usage text
 # (test_package_only_modules_do_not_advertise_by_path_use checks this).
-_PACKAGE_ONLY_MODULES = frozenset({
-    # Its command-line verbs are served by the package entry point,
-    # ``python3 -m pgai_agent_kanban.ops``. The package imports this module
-    # eagerly to build its public facade, so started as a script it would
-    # run as a second copy beside the one the package loaded.
-    "pgai_agent_kanban.ops.write",
-})
+_PACKAGE_ONLY_MODULES = frozenset(
+    {
+        # Its command-line verbs are served by the package entry point,
+        # ``python3 -m pgai_agent_kanban.ops``. The package imports this module
+        # eagerly to build its public facade, so started as a script it would
+        # run as a second copy beside the one the package loaded.
+        "pgai_agent_kanban.ops.write",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -138,9 +140,7 @@ def _discover_by_path_modules(package_dir: pathlib.Path) -> dict[str, pathlib.Pa
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         statements = list(_module_level_statements(tree.body))
-        has_cli = any(_is_main_block(n) for n in tree.body) and any(
-            _is_package_import(n, package) for n in statements
-        )
+        has_cli = any(_is_main_block(n) for n in tree.body) and any(_is_package_import(n, package) for n in statements)
         has_guard = any(_is_self_location_guard(n) for n in tree.body)
         if has_cli or has_guard:
             dotted = ".".join((package, *relative.with_suffix("").parts))
@@ -149,9 +149,7 @@ def _discover_by_path_modules(package_dir: pathlib.Path) -> dict[str, pathlib.Pa
 
 
 _DISCOVERED = _discover_by_path_modules(_PACKAGE_DIR)
-_BY_PATH_MODULES = {
-    name: path for name, path in _DISCOVERED.items() if name not in _PACKAGE_ONLY_MODULES
-}
+_BY_PATH_MODULES = {name: path for name, path in _DISCOVERED.items() if name not in _PACKAGE_ONLY_MODULES}
 _MODULE_IDS = sorted(_BY_PATH_MODULES)
 
 
@@ -181,8 +179,13 @@ def _run(argv: list[str], tmp_path: pathlib.Path, env: dict) -> subprocess.Compl
     workdir = tmp_path / "elsewhere"
     workdir.mkdir(exist_ok=True)
     return subprocess.run(
-        argv, cwd=str(workdir), env=env,
-        capture_output=True, text=True, timeout=60, check=False,
+        argv,
+        cwd=str(workdir),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
 
 
@@ -208,9 +211,7 @@ def test_discovery_finds_the_package_command_line_modules() -> None:
 
 
 @pytest.mark.parametrize("module_name", _MODULE_IDS)
-def test_help_by_file_path_runs_without_pythonpath(
-    module_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_help_by_file_path_runs_without_pythonpath(module_name: str, tmp_path: pathlib.Path) -> None:
     module_path = _BY_PATH_MODULES[module_name]
     env = _sandboxed_env(tmp_path)
     assert "PYTHONPATH" not in env
@@ -229,12 +230,9 @@ def test_help_by_file_path_runs_without_pythonpath(
 
 
 @pytest.mark.parametrize("module_name", _MODULE_IDS)
-def test_file_load_binds_the_package_of_its_own_tree(
-    module_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_file_load_binds_the_package_of_its_own_tree(module_name: str, tmp_path: pathlib.Path) -> None:
     module_path = _BY_PATH_MODULES[module_name]
-    probe = textwrap.dedent(
-        f"""\
+    probe = textwrap.dedent(f"""\
         import importlib.util, sys
         spec = importlib.util.spec_from_file_location(
             "loaded_by_file", {str(module_path)!r})
@@ -242,8 +240,7 @@ def test_file_load_binds_the_package_of_its_own_tree(
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         print(sys.modules["pgai_agent_kanban"].__file__)
-        """
-    )
+        """)
 
     result = _run([sys.executable, "-c", probe], tmp_path, _sandboxed_env(tmp_path))
 
@@ -256,31 +253,24 @@ def test_file_load_binds_the_package_of_its_own_tree(
 
 
 @pytest.mark.parametrize("module_name", _MODULE_IDS)
-def test_package_member_import_leaves_sys_path_unchanged(
-    module_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_package_member_import_leaves_sys_path_unchanged(module_name: str, tmp_path: pathlib.Path) -> None:
     # Import the package's parent modules first so the measured window
     # covers only the target module's own top-level code.
     parent = module_name.rsplit(".", 1)[0]
-    probe = textwrap.dedent(
-        f"""\
+    probe = textwrap.dedent(f"""\
         import importlib, json, sys
         importlib.import_module({parent!r})
         before = list(sys.path)
         importlib.import_module({module_name!r})
         print(json.dumps([before, list(sys.path)]))
-        """
-    )
+        """)
     env = _sandboxed_env(tmp_path, pythonpath=str(_TEAM_DIR))
 
     result = _run([sys.executable, "-c", probe], tmp_path, env)
 
     assert result.returncode == 0, _diagnostic(result)
     before, after = json.loads(result.stdout)
-    assert after == before, (
-        f"importing {module_name} as a package member changed sys.path "
-        f"from {before} to {after}"
-    )
+    assert after == before, f"importing {module_name} as a package member changed sys.path " f"from {before} to {after}"
 
 
 # ---------------------------------------------------------------------------
@@ -397,12 +387,8 @@ def test_by_path_probe_fails_for_an_unguarded_command_line_module(
     package = _synthetic_package(tmp_path / "tree")
     env = _sandboxed_env(tmp_path)
 
-    unguarded = _run(
-        [sys.executable, str(package / "sub" / "cli_unguarded.py"), "--help"], tmp_path, env
-    )
-    guarded = _run(
-        [sys.executable, str(package / "sub" / "cli_guarded.py"), "--help"], tmp_path, env
-    )
+    unguarded = _run([sys.executable, str(package / "sub" / "cli_unguarded.py"), "--help"], tmp_path, env)
+    guarded = _run([sys.executable, str(package / "sub" / "cli_guarded.py"), "--help"], tmp_path, env)
 
     assert unguarded.returncode != 0, _diagnostic(unguarded)
     assert f"No module named '{_PACKAGE_NAME}'" in unguarded.stderr, _diagnostic(unguarded)

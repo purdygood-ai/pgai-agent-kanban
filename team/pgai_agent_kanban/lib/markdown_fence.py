@@ -46,14 +46,14 @@ Pure Python, no external dependencies.
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 FENCE_OPENER_RE = re.compile(r"^(`{3,}|~{3,})(.*)$")
 
 SHELL_FENCE_LANGS = frozenset({"bash", "sh"})
 
 
-def match_fence_opener(stripped: str) -> Optional[tuple[str, str]]:
+def match_fence_opener(stripped: str) -> tuple[str, str] | None:
     """Return ``(fence_token, lang)`` when *stripped* opens a fenced block.
 
     *fence_token* is the run of backticks or tildes (its first character and

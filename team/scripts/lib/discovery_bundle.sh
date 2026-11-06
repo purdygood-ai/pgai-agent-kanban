@@ -147,18 +147,15 @@ discovery_scan_stale_requirements() {
     #   - release-notes/                  (root-level location)
     dev_release_notes_dir=""
     local dev_release_notes_root_dir=""
-    local _rn_cfg_file
-    # Source: project.cfg [project] dev_tree_path (falls back to PROJECT.cfg)
-    _rn_cfg_file="$(_pp_project_cfg_file "$(pp_project_root "$project_name" 2>/dev/null)")"
-    if [[ -n "$_rn_cfg_file" ]]; then
-        local _dev_tree
-        _dev_tree="$(_pp_read_cfg_key "$_rn_cfg_file" project dev_tree_path "")"
-        if [[ -n "$_dev_tree" ]]; then
-            # Per-project release-notes
-            dev_release_notes_dir="${_dev_tree}/projects/${project_name}/release-notes"
-            # Root-level release-notes
-            dev_release_notes_root_dir="${_dev_tree}/release-notes"
-        fi
+    # The project's own repository (pp_dev_tree_path, project.cfg or
+    # PROJECT.cfg): its release notes live in no other.
+    local _dev_tree
+    _dev_tree="$(pp_dev_tree_path "$project_name" 2>/dev/null)" || _dev_tree=""
+    if [[ -n "$_dev_tree" ]]; then
+        # Per-project release-notes
+        dev_release_notes_dir="${_dev_tree}/projects/${project_name}/release-notes"
+        # Root-level release-notes
+        dev_release_notes_root_dir="${_dev_tree}/release-notes"
     fi
 
     [[ -d "$requirements_dir" ]] || return 0

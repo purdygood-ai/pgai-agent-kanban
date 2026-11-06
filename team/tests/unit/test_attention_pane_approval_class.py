@@ -29,7 +29,6 @@ import sys
 import textwrap
 from contextlib import redirect_stdout
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Ensure the package root is importable regardless of cwd.
@@ -43,7 +42,6 @@ from pgai_agent_kanban.dashboard.scan_attention import (
     scan_pending_approvals_attention,
     scan_overwatch_section,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture builder helpers
@@ -118,7 +116,8 @@ def test_pending_gate_renders_marker_task_id_project_and_version(
     into one test since they assert on the same render's output.
     """
     _build_project(
-        tmp_path, "pgai-agent-kanban",
+        tmp_path,
+        "pgai-agent-kanban",
         [("HUMAN-APPROVE-v1.10.0-001", "WAITING", "v1.10.0")],
     )
     scan_pending_approvals_attention(str(tmp_path), use_color=False)
@@ -136,7 +135,8 @@ def test_pending_gate_backlog_state_renders(
 ) -> None:
     """BACKLOG state is also treated as pending in the attention pane."""
     _build_project(
-        tmp_path, "pgai-agent-kanban",
+        tmp_path,
+        "pgai-agent-kanban",
         [("HUMAN-APPROVE-v1.10.0-002", "BACKLOG", "v1.10.0")],
     )
     scan_pending_approvals_attention(str(tmp_path), use_color=False)
@@ -161,7 +161,8 @@ def test_pending_approvals_rendered_before_overwatch(
     the OVERWATCH ledger as required.
     """
     _build_project(
-        tmp_path, "pgai-agent-kanban",
+        tmp_path,
+        "pgai-agent-kanban",
         [("HUMAN-APPROVE-v1.10.0-001", "WAITING", "v1.10.0")],
     )
 
@@ -257,6 +258,7 @@ def test_web_ui_passthrough_function_importable() -> None:
     from pgai_agent_kanban.dashboard.scan_attention import (
         scan_pending_approvals_attention as fn,
     )
+
     assert callable(fn)
 
 
@@ -272,7 +274,8 @@ def test_web_ui_passthrough_pane_output_contains_approval(
     Python module used by the pane script emits the expected content.
     """
     _build_project(
-        tmp_path, "pgai-agent-kanban",
+        tmp_path,
+        "pgai-agent-kanban",
         [("HUMAN-APPROVE-v1.10.0-001", "WAITING", "v1.10.0")],
     )
     scan_pending_approvals_attention(str(tmp_path), use_color=False)
@@ -322,7 +325,8 @@ def test_done_gate_excluded(
 ) -> None:
     """DONE HUMAN-APPROVE gates are excluded from the pending-approvals pane."""
     _build_project(
-        tmp_path, "pgai-agent-kanban",
+        tmp_path,
+        "pgai-agent-kanban",
         [("HUMAN-APPROVE-v1.10.0-001", "DONE", "v1.10.0")],
     )
     scan_pending_approvals_attention(str(tmp_path), use_color=False)

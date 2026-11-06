@@ -120,9 +120,7 @@ def test_discovery_finds_the_renderer_callers() -> None:
 
 
 @pytest.mark.parametrize("script_name", _CALLERS)
-def test_operator_help_describes_every_declared_flag(
-    tmp_path: pathlib.Path, script_name: str
-) -> None:
+def test_operator_help_describes_every_declared_flag(tmp_path: pathlib.Path, script_name: str) -> None:
     script = _SCRIPTS_DIR / script_name
     flags = _declared_flags(script)
 
@@ -134,8 +132,7 @@ def test_operator_help_describes_every_declared_flag(
     assert not fallback_lines, (
         f"{script_name} --help lists option(s) with no description: {fallback_lines}. "
         "Give each an OPERATOR_FLAG_HELP entry (see close.sh) or an option-shaped "
-        "help line (rule 3 in the operator_args_render_help_for_flags header).\n"
-        + _diagnostic(result)
+        "help line (rule 3 in the operator_args_render_help_for_flags header).\n" + _diagnostic(result)
     )
     for flag in flags:
         if flag == "h":

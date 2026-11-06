@@ -136,9 +136,12 @@ def _seeded_tree(tmp_path: pathlib.Path) -> pathlib.Path:
         scripts / "dashboard" / "git-status.sh",
         '#!/usr/bin/env bash\ngit -C "$dev_tree" fetch origin --tags\n',
     )
+    # Answers --help so the recursive help-presence scan does not count it:
+    # this seed is the env_bootstrap lint's alone.
     _write(
         scripts / "dashboard" / "rootpeek.sh",
-        '#!/usr/bin/env bash\necho "$PGAI_AGENT_KANBAN_ROOT_PATH"\n',
+        '#!/usr/bin/env bash\ncase "${1:-}" in --help|-h) echo "Usage: rootpeek.sh"; exit 0 ;; esac\n'
+        'echo "$PGAI_AGENT_KANBAN_ROOT_PATH"\n',
         executable=True,
     )
     _write(scripts / "lib" / "discovery.sh", "".join(f"# line {n}\n" for n in range(900)))
@@ -167,9 +170,7 @@ def _sandbox_env(tmp_path: pathlib.Path) -> dict:
     )
 
 
-def _run_merge_harness(
-    tmp_path: pathlib.Path, workdir: pathlib.Path, body: str, out: pathlib.Path
-) -> list[dict]:
+def _run_merge_harness(tmp_path: pathlib.Path, workdir: pathlib.Path, body: str, out: pathlib.Path) -> list[dict]:
     """Run *body* in bash with the real gated_runner_lint.sh sourced, from
     *workdir*, then write the aggregate findings file to *out* and return
     its findings."""
@@ -188,9 +189,9 @@ def _run_merge_harness(
         timeout=300,
     )
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert "quality-class finding(s) (exit" not in result.stderr, (
-        f"a converted lint exited non-zero inside the runner block:\n{result.stderr}"
-    )
+    assert (
+        "quality-class finding(s) (exit" not in result.stderr
+    ), f"a converted lint exited non-zero inside the runner block:\n{result.stderr}"
     return json.loads(out.read_text(encoding="utf-8"))["findings"]
 
 
@@ -200,9 +201,9 @@ def _assert_per_instance(findings: list[dict], expected: dict[str, tuple[str, in
         mine = [f for f in findings if f["lint"] == lint]
         assert by_lint[lint] == count, (lint, mine)
         for finding in mine:
-            assert "exit_code" not in finding and "detail" not in finding, (
-                f"{lint} reached the aggregate as a coarse pass/fail entry: {finding}"
-            )
+            assert (
+                "exit_code" not in finding and "detail" not in finding
+            ), f"{lint} reached the aggregate as a coarse pass/fail entry: {finding}"
             assert finding["severity"] == "quality", finding
             assert finding.get("cause") and finding.get("remedy"), finding
 
@@ -242,7 +243,8 @@ def test_lib_function_dedupe_findings_merge_per_instance(tmp_path: pathlib.Path)
         [
             sys.executable,
             str(tree / "team" / "scripts" / "lint_lib_function_dedupe.py"),
-            "--findings-file", str(lint_out),
+            "--findings-file",
+            str(lint_out),
         ],
         capture_output=True,
         text=True,

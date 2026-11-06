@@ -364,9 +364,7 @@ def test_stop_bug_paths_keep_the_bugs_dir_form_and_resolve_matches_them(tmp_path
     monkeypatch.chdir(tmp_path)
     kept = stop_bug_paths(str(report), "bugs", CAUSE_FIX_EFFORT_LARGE)
     assert [str(p) for p in kept] == ["bugs/BUG-0043-some-defect.md", "bugs/BUG-0042-some-defect.md"]
-    assert resolve_stop_bug_files(str(report), "bugs", CAUSE_FIX_EFFORT_LARGE) == [
-        str(p.resolve()) for p in kept
-    ]
+    assert resolve_stop_bug_files(str(report), "bugs", CAUSE_FIX_EFFORT_LARGE) == [str(p.resolve()) for p in kept]
 
 
 def test_cli_keep_path_form_prints_stop_bug_paths(tmp_path, monkeypatch, capsys):

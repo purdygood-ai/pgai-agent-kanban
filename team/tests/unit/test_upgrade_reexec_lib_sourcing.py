@@ -48,6 +48,8 @@ import textwrap
 
 import pytest
 
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
+
 # ---------------------------------------------------------------------------
 # Paths to the real scripts (dev tree layout, relative to this test file)
 # ---------------------------------------------------------------------------
@@ -65,6 +67,8 @@ _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 _REAL_CONFIG_LOADER_SH = _TEAM_SCRIPTS_DIR / "lib" / "config_loader.sh"
+_REAL_DEV_TREE_SH = _TEAM_SCRIPTS_DIR / "lib" / "dev_tree.sh"
+_REAL_PP_RUN_OPS_SH = _TEAM_SCRIPTS_DIR / "lib" / "pp_run_ops.sh"
 
 _SANDBOX_VERSION = "v1.7.0-sandbox-converted-reexec"
 
@@ -115,9 +119,19 @@ def _build_upgrade_sandbox(
     installed_lib.mkdir(parents=True)
 
     for lib_src in [
-        _REAL_ARGPARSE_SH, _REAL_ENV_BOOTSTRAP_SH, _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH, _REAL_ERROR_CONTRACT_SH, _REAL_TEMP_SH,
-        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_ARGPARSE_SH,
+        _REAL_ENV_BOOTSTRAP_SH,
+        _REAL_INI_PARSER_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_ERROR_CONTRACT_SH,
+        _REAL_TEMP_SH,
+        _REAL_VERSION_STAMP_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, installed_lib / lib_src.name)
@@ -136,12 +150,10 @@ def _build_upgrade_sandbox(
 
     # --- Kanban root: kanban.cfg with dev_tree_path ---
     (kanban_root / "kanban.cfg").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             [paths]
             dev_tree_path = {dev_tree}
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -151,13 +163,11 @@ def _build_upgrade_sandbox(
     # --- Dev tree: install.sh stub ---
     dev_install_sh = dev_tree / "install.sh"
     dev_install_sh.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             # Stub install.sh for sandbox tests — no side effects.
             exit 0
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     dev_install_sh.chmod(0o755)
@@ -172,12 +182,23 @@ def _build_upgrade_sandbox(
     dev_upgrade.chmod(0o755)
 
     for lib_src in [
-        _REAL_ARGPARSE_SH, _REAL_ENV_BOOTSTRAP_SH, _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH, _REAL_ERROR_CONTRACT_SH, _REAL_TEMP_SH,
-        _REAL_VERSION_STAMP_SH, _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_ARGPARSE_SH,
+        _REAL_ENV_BOOTSTRAP_SH,
+        _REAL_INI_PARSER_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_ERROR_CONTRACT_SH,
+        _REAL_TEMP_SH,
+        _REAL_VERSION_STAMP_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
     ]:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_team_lib / lib_src.name)
+    seed_provider_home_rule(dev_tree / "team")
 
     # --- Dev tree: subagents/MANIFEST.txt stub ---
     (dev_tree / "subagents").mkdir()
@@ -190,8 +211,7 @@ def _build_upgrade_sandbox(
     for item_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / item_name).write_text(f"# {item_name} stub\n", encoding="utf-8")
 
-    for sub in ["roles", "pm-agent", "workflows", "pgai_agent_kanban",
-                "halt_after", "templates", "demos"]:
+    for sub in ["roles", "pm-agent", "workflows", "pgai_agent_kanban", "halt_after", "templates", "demos"]:
         (dev_tree / "team" / sub).mkdir(exist_ok=True)
         (dev_tree / "team" / sub / ".gitkeep").write_text("", encoding="utf-8")
 
@@ -258,8 +278,7 @@ def _assert_no_leaked_self_copies(pgai_temp: pathlib.Path) -> None:
     assert not leaked, (
         f"Unexpected upgrade_self.* file(s) found under {pgai_temp}.  "
         f"The two-phase architecture must not create temp self-copy files.  "
-        f"Found {len(leaked)} file(s):\n"
-        + "\n".join(f"  {f}" for f in leaked)
+        f"Found {len(leaked)} file(s):\n" + "\n".join(f"  {f}" for f in leaked)
     )
 
 

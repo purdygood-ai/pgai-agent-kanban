@@ -99,12 +99,9 @@ def _run_derivation(
     log_output:   everything the stubbed log() function was called with.
     """
     preset_line = (
-        f'BASH_MAX_TIMEOUT_MS="{preset_ceiling}"\n'
-        if preset_ceiling is not None
-        else "unset BASH_MAX_TIMEOUT_MS\n"
+        f'BASH_MAX_TIMEOUT_MS="{preset_ceiling}"\n' if preset_ceiling is not None else "unset BASH_MAX_TIMEOUT_MS\n"
     )
-    script = textwrap.dedent(
-        f"""
+    script = textwrap.dedent(f"""
         set -euo pipefail
         log() {{ echo "LOG: $*" >&2; }}
         MAX_TASK_SECONDS={max_task_seconds}
@@ -112,12 +109,10 @@ def _run_derivation(
         {preset_line}
         {_derivation_block_text()}
         echo "RESULT=${{BASH_MAX_TIMEOUT_MS:-<unset>}}"
-        """
-    )
+        """)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, (
-        f"derivation block exited non-zero:\nstdout: {result.stdout!r}\n"
-        f"stderr: {result.stderr!r}"
+        f"derivation block exited non-zero:\nstdout: {result.stdout!r}\n" f"stderr: {result.stderr!r}"
     )
     value = result.stdout.strip().removeprefix("RESULT=")
     return value, result.stderr
@@ -130,13 +125,11 @@ def _run_derivation(
 
 def test_default_budget_derives_5430000(tmp_path: pathlib.Path) -> None:
     """MAX_TASK_SECONDS=5400 + KILL_GRACE_SECONDS=30, no override → 5430000ms."""
-    value, log_output = _run_derivation(
-        tmp_path, max_task_seconds="5400", kill_grace_seconds="30"
-    )
+    value, log_output = _run_derivation(tmp_path, max_task_seconds="5400", kill_grace_seconds="30")
     assert value == "5430000", f"expected 5430000, got {value!r}\nlog: {log_output!r}"
-    assert "derived BASH_MAX_TIMEOUT_MS=5430000" in log_output, (
-        f"expected a derivation log line naming the value; got: {log_output!r}"
-    )
+    assert (
+        "derived BASH_MAX_TIMEOUT_MS=5430000" in log_output
+    ), f"expected a derivation log line naming the value; got: {log_output!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -151,9 +144,7 @@ def test_derivation_tracks_both_terms(tmp_path: pathlib.Path) -> None:
     not a literal or a single-term derivation — changing both inputs changes
     the output in the way the formula predicts.
     """
-    value, log_output = _run_derivation(
-        tmp_path, max_task_seconds="600", kill_grace_seconds="60"
-    )
+    value, log_output = _run_derivation(tmp_path, max_task_seconds="600", kill_grace_seconds="60")
     assert value == "660000", f"expected 660000, got {value!r}\nlog: {log_output!r}"
 
 
@@ -163,12 +154,8 @@ def test_derivation_tracks_grace_term_alone(tmp_path: pathlib.Path) -> None:
     Guards against a derivation that only reads MAX_TASK_SECONDS and ignores
     the grace term.
     """
-    value_low, _ = _run_derivation(
-        tmp_path, max_task_seconds="100", kill_grace_seconds="10"
-    )
-    value_high, _ = _run_derivation(
-        tmp_path, max_task_seconds="100", kill_grace_seconds="50"
-    )
+    value_low, _ = _run_derivation(tmp_path, max_task_seconds="100", kill_grace_seconds="10")
+    value_high, _ = _run_derivation(tmp_path, max_task_seconds="100", kill_grace_seconds="50")
     assert value_low == "110000"
     assert value_high == "150000"
     assert value_low != value_high
@@ -187,16 +174,12 @@ def test_operator_override_left_untouched(tmp_path: pathlib.Path) -> None:
         kill_grace_seconds="30",
         preset_ceiling="999999",
     )
-    assert value == "999999", (
-        f"operator override was overwritten: expected 999999, got {value!r}"
-    )
-    assert "operator override in force" in log_output, (
-        f"expected an operator-override log line; got: {log_output!r}"
-    )
+    assert value == "999999", f"operator override was overwritten: expected 999999, got {value!r}"
+    assert "operator override in force" in log_output, f"expected an operator-override log line; got: {log_output!r}"
     # The derivation must not have also logged a "derived" line for this run.
-    assert "derived BASH_MAX_TIMEOUT_MS=" not in log_output, (
-        f"derivation ran despite an operator override being present: {log_output!r}"
-    )
+    assert (
+        "derived BASH_MAX_TIMEOUT_MS=" not in log_output
+    ), f"derivation ran despite an operator override being present: {log_output!r}"
 
 
 def test_operator_override_of_empty_string_is_not_an_override(
@@ -227,20 +210,13 @@ def test_disabled_watchdog_does_not_derive_from_grace_alone(
     tmp_path: pathlib.Path,
 ) -> None:
     """MAX_TASK_SECONDS=0 → BASH_MAX_TIMEOUT_MS stays unset, not 30000ms."""
-    value, log_output = _run_derivation(
-        tmp_path, max_task_seconds="0", kill_grace_seconds="30"
-    )
+    value, log_output = _run_derivation(tmp_path, max_task_seconds="0", kill_grace_seconds="30")
     assert value == "<unset>", (
         f"expected BASH_MAX_TIMEOUT_MS to remain unset when the watchdog is "
         f"disabled, got {value!r}\nlog: {log_output!r}"
     )
-    assert value != "30000", (
-        "derivation must not fall back to KILL_GRACE_SECONDS alone when "
-        "MAX_TASK_SECONDS=0"
-    )
-    assert "watchdog disabled" in log_output, (
-        f"expected a disabled-watchdog log line; got: {log_output!r}"
-    )
+    assert value != "30000", "derivation must not fall back to KILL_GRACE_SECONDS alone when " "MAX_TASK_SECONDS=0"
+    assert "watchdog disabled" in log_output, f"expected a disabled-watchdog log line; got: {log_output!r}"
 
 
 def test_disabled_watchdog_respects_existing_override(tmp_path: pathlib.Path) -> None:
@@ -280,8 +256,7 @@ def test_no_hardcoded_ceiling_literal_in_watchdog() -> None:
     """The per-task watchdog file also carries no pinned millisecond ceiling."""
     content = _WAKE_DRIVER_INVOKE_SH.read_text(encoding="utf-8")
     assert "5430000" not in content, (
-        f"{_WAKE_DRIVER_INVOKE_SH} contains the literal default-derived "
-        "millisecond value 5430000."
+        f"{_WAKE_DRIVER_INVOKE_SH} contains the literal default-derived " "millisecond value 5430000."
     )
 
 
@@ -301,6 +276,6 @@ def test_derivation_uses_arithmetic_not_literal_assignment() -> None:
 def test_derivation_checks_unset_or_empty_before_deriving() -> None:
     """Structural: the no-masking guard is `[[ -z ... ]]`, matching env_bootstrap.sh."""
     block_text = _derivation_block_text()
-    assert 'if [[ -z "${BASH_MAX_TIMEOUT_MS:-}" ]]; then' in block_text, (
-        f"derivation block does not open with the expected no-masking guard:\n{block_text}"
-    )
+    assert (
+        'if [[ -z "${BASH_MAX_TIMEOUT_MS:-}" ]]; then' in block_text
+    ), f"derivation block does not open with the expected no-masking guard:\n{block_text}"

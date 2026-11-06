@@ -113,13 +113,20 @@ def _run_all_classes(
     directory. Returns (exit_code, findings)."""
     findings_path = tmp_path / "corpus_findings.json"
     argv = [
-        "--code-dirs", str(code_dir or _empty_dir(tmp_path, "empty_code")),
-        "--test-tree-dirs", str(test_tree_dir or _empty_dir(tmp_path, "empty_test_tree")),
-        "--prose-dirs", str(prose_dir or _empty_dir(tmp_path, "empty_prose")),
-        "--classes", *_ALL_CLASSES,
-        "--repo-root", str(tmp_path),
-        "--sidecar", str(sidecar or (tmp_path / "sidecar.json")),
-        "--findings-file", str(findings_path),
+        "--code-dirs",
+        str(code_dir or _empty_dir(tmp_path, "empty_code")),
+        "--test-tree-dirs",
+        str(test_tree_dir or _empty_dir(tmp_path, "empty_test_tree")),
+        "--prose-dirs",
+        str(prose_dir or _empty_dir(tmp_path, "empty_prose")),
+        "--classes",
+        *_ALL_CLASSES,
+        "--repo-root",
+        str(tmp_path),
+        "--sidecar",
+        str(sidecar or (tmp_path / "sidecar.json")),
+        "--findings-file",
+        str(findings_path),
     ]
     result = _lint.main(argv)
     findings = json.loads(findings_path.read_text(encoding="utf-8")) if findings_path.exists() else []
@@ -162,9 +169,7 @@ def _build_false_positive_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
     _write(
         code_dir,
         "dotted_config.py",
-        "def load():\n"
-        '    slug = "config.v2.16.0.yaml"  # embedded, not a citation\n'
-        "    return slug\n",
+        "def load():\n" '    slug = "config.v2.16.0.yaml"  # embedded, not a citation\n' "    return slug\n",
     )
 
     # Shape 4: a version-or-identifier-shaped string used as an ordinary
@@ -182,8 +187,7 @@ def _build_false_positive_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
     _write(
         test_tree_dir,
         "test_version_comparator.py",
-        "def test_compares_v2_16_0_against_v2_15_4_correctly():\n"
-        '    assert compare("v2.16.0", "v2.15.4") == 1\n',
+        "def test_compares_v2_16_0_against_v2_15_4_correctly():\n" '    assert compare("v2.16.0", "v2.15.4") == 1\n',
     )
 
     # Shape 6 (comment-drift false-positive risk, part A): a general
@@ -218,7 +222,7 @@ def _build_false_positive_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
         "    # The evidence file resolves under the task's own logs/ directory.\n"
         "    # determine_source_branch returns the task's own source_branch.\n"
         "    # TASK-1 holds the lock while TASK-2 waits.\n"
-        "    expected = \"Covers the task's acceptance criteria:\"\n"
+        '    expected = "Covers the task\'s acceptance criteria:"\n'
         "    assert expected\n",
     )
 
@@ -249,9 +253,7 @@ def _build_false_positive_corpus(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_false_positive_corpus_runs_clean(tmp_path: Path) -> None:
     code_dir, test_tree_dir, prose_dir = _build_false_positive_corpus(tmp_path)
 
-    result, findings = _run_all_classes(
-        tmp_path, code_dir=code_dir, test_tree_dir=test_tree_dir, prose_dir=prose_dir
-    )
+    result, findings = _run_all_classes(tmp_path, code_dir=code_dir, test_tree_dir=test_tree_dir, prose_dir=prose_dir)
 
     assert result == 0
     assert findings == [], f"every corpus shape must run clean across the corpus classes: {findings}"

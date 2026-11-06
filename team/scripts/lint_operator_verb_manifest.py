@@ -84,7 +84,6 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-
 # ---------------------------------------------------------------------------
 # Router route scanning
 # ---------------------------------------------------------------------------
@@ -154,9 +153,7 @@ _CENSUS_EXEMPT_RELPATH = Path("config") / "operator_verb_census_exempt.txt"
 
 # A route entry: an HTTP method, whitespace, then a path. Anything else that
 # is not blank or a comment is a script-basename entry, which check 6 ignores.
-_ROUTE_ENTRY_RE = re.compile(
-    r"^\s*(GET|POST|PUT|PATCH|DELETE|HEAD)\s+(/\S*)\s*$", re.IGNORECASE
-)
+_ROUTE_ENTRY_RE = re.compile(r"^\s*(GET|POST|PUT|PATCH|DELETE|HEAD)\s+(/\S*)\s*$", re.IGNORECASE)
 # A reason line: a comment carrying at least one word character, so a bare
 # "# ------" separator does not count as a reason.
 _REASON_LINE_RE = re.compile(r"^\s*#.*\w")
@@ -297,9 +294,7 @@ def check_rest_twin_forward(verbs: dict, declared_routes: list[_RouteDecl]) -> l
 def check_operations_reverse(verbs: dict, declared_routes: list[_RouteDecl]) -> list[str]:
     """Check 4: every operations.py route fronting a script names a manifest verb."""
     violations: list[str] = []
-    active_scripts = {
-        Path(v.script).name for v in verbs.values() if v.status == "active" and v.script
-    }
+    active_scripts = {Path(v.script).name for v in verbs.values() if v.status == "active" and v.script}
     for decl in declared_routes:
         if not decl.route.startswith("/operations/"):
             continue
@@ -329,10 +324,7 @@ def check_impl_schema(verbs: dict, ovm_module) -> list[str]:
                 "an active row carries 'module:<dotted.module.function>' or 'shell'"
             )
         elif verb.status == "planned" and parsed.kind != "planned":
-            violations.append(
-                f"verb '{verb.name}': a planned row carries impl '-'; "
-                f"got {verb.impl!r}"
-            )
+            violations.append(f"verb '{verb.name}': a planned row carries impl '-'; " f"got {verb.impl!r}")
     return violations
 
 
@@ -433,8 +425,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--verbose",
         "-v",
         action="store_true",
-        help="Print each verb as it is checked, and every registered route "
-        "with what covers it.",
+        help="Print each verb as it is checked, and every registered route " "with what covers it.",
     )
     return parser.parse_args(argv)
 
@@ -472,9 +463,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     manifest_path = Path(args.manifest).resolve() if args.manifest else None
-    scanned_manifest_path = (
-        manifest_path if manifest_path is not None else ovm.default_manifest_path()
-    )
+    scanned_manifest_path = manifest_path if manifest_path is not None else ovm.default_manifest_path()
 
     try:
         verbs = ovm.load_manifest(manifest_path)
@@ -487,8 +476,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  verb: {name}", flush=True)
 
     print(
-        f"lint_operator_verb_manifest: scanning against team dir: {team_dir} "
-        f"({len(verbs)} verb(s) declared)",
+        f"lint_operator_verb_manifest: scanning against team dir: {team_dir} " f"({len(verbs)} verb(s) declared)",
         flush=True,
     )
 
@@ -514,8 +502,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if all_violations:
         print(
-            f"\nlint_operator_verb_manifest: FAIL — {len(all_violations)} "
-            "drift finding(s):\n",
+            f"\nlint_operator_verb_manifest: FAIL — {len(all_violations)} " "drift finding(s):\n",
             flush=True,
         )
         for v in all_violations:
@@ -526,9 +513,7 @@ def main(argv: list[str] | None = None) -> int:
             f"disagrees with the tree in {len(all_violations)} place(s); "
             "see the findings printed above"
         )
-        rerun_manifest_flag = (
-            f" --manifest {scanned_manifest_path}" if args.manifest else ""
-        )
+        rerun_manifest_flag = f" --manifest {scanned_manifest_path}" if args.manifest else ""
         remedy = (
             "update team/config/operator_verbs.manifest (or the script/router "
             "it disagrees with) so the two describe the same verb -- or, for a "

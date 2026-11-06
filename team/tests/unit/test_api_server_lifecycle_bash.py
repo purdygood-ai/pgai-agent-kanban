@@ -121,9 +121,7 @@ def _find_free_port() -> int:
             port = sock.getsockname()[1]
         if port != _PRODUCTION_DEFAULT_PORT:
             return port
-    raise RuntimeError(
-        f"Could not obtain a free port that is not {_PRODUCTION_DEFAULT_PORT} after 10 attempts."
-    )
+    raise RuntimeError(f"Could not obtain a free port that is not {_PRODUCTION_DEFAULT_PORT} after 10 attempts.")
 
 
 def _fake_process_argv(script: str, as_api_server: bool = True) -> list[str]:
@@ -147,9 +145,7 @@ def _start_idle_process(as_api_server: bool = True) -> subprocess.Popen:
     Stands in for the tracked (pidfile) server process in tests that do not
     need a bound port.  The caller must terminate and wait on it.
     """
-    return subprocess.Popen(
-        _fake_process_argv("import time\nwhile True:\n    time.sleep(1)\n", as_api_server)
-    )
+    return subprocess.Popen(_fake_process_argv("import time\nwhile True:\n    time.sleep(1)\n", as_api_server))
 
 
 def _start_fake_listener(port: int, as_api_server: bool = True) -> subprocess.Popen:
@@ -185,9 +181,7 @@ def _start_fake_listener(port: int, as_api_server: bool = True) -> subprocess.Po
     # Wait for the READY signal.
     assert proc.stdout is not None
     line = proc.stdout.readline().decode("utf-8", errors="replace").strip()
-    assert line.startswith("READY:"), (
-        f"fake listener did not emit READY; got: {line!r}"
-    )
+    assert line.startswith("READY:"), f"fake listener did not emit READY; got: {line!r}"
     return proc
 
 
@@ -197,7 +191,7 @@ def _invoke_api_server(
     subcommand: str,
     port: int | None,
     extra_env: dict[str, str] | None = None,
-) -> "run_bash.__class__":  # type: ignore[name-defined]
+) -> run_bash.__class__:  # type: ignore[name-defined]
     """Invoke api-server.sh with the given subcommand against a synthetic root.
 
     Args:
@@ -266,9 +260,9 @@ def test_status_reports_running_when_pidfile_points_to_live_process(
             f"status returned {result.returncode} (expected 0); "
             f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert f"running (pid {sleeper.pid})" in result.stdout, (
-            f"Expected 'running (pid {sleeper.pid})' in stdout; got: {result.stdout!r}"
-        )
+        assert (
+            f"running (pid {sleeper.pid})" in result.stdout
+        ), f"Expected 'running (pid {sleeper.pid})' in stdout; got: {result.stdout!r}"
     finally:
         sleeper.terminate()
         sleeper.wait(timeout=5)
@@ -295,20 +289,15 @@ def test_stop_terminates_tracked_process_and_removes_pidfile(
         result = _invoke_api_server(tmp_path, kanban_root, "stop", port)
 
         assert result.returncode == 0, (
-            f"stop returned {result.returncode}; "
-            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+            f"stop returned {result.returncode}; " f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "stopped" in result.stdout.lower() or "stopping" in result.stdout.lower(), (
-            f"Expected stop confirmation in stdout; got: {result.stdout!r}"
-        )
+        assert (
+            "stopped" in result.stdout.lower() or "stopping" in result.stdout.lower()
+        ), f"Expected stop confirmation in stdout; got: {result.stdout!r}"
         # Process should be dead.
-        assert sleeper.poll() is not None, (
-            f"Tracked process {sleeper.pid} is still running after stop."
-        )
+        assert sleeper.poll() is not None, f"Tracked process {sleeper.pid} is still running after stop."
         # Pidfile should be gone.
-        assert not pidfile.exists(), (
-            f"Pidfile {pidfile} still exists after stop."
-        )
+        assert not pidfile.exists(), f"Pidfile {pidfile} still exists after stop."
     finally:
         # Safety cleanup: kill the sleeper if it somehow survived.
         if sleeper.poll() is None:
@@ -337,12 +326,11 @@ def test_start_is_noop_when_tracked_server_is_running(
         result = _invoke_api_server(tmp_path, kanban_root, "start", port)
 
         assert result.returncode == 0, (
-            f"start returned {result.returncode}; "
-            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+            f"start returned {result.returncode}; " f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "already running" in result.stderr.lower(), (
-            f"Expected 'already running' message; stderr: {result.stderr!r}"
-        )
+        assert (
+            "already running" in result.stderr.lower()
+        ), f"Expected 'already running' message; stderr: {result.stderr!r}"
     finally:
         sleeper.terminate()
         sleeper.wait(timeout=5)
@@ -385,12 +373,9 @@ def test_pidfile_lives_in_kanban_root_run_directory(
         pidfile.write_text(str(server_pid) + "\n", encoding="utf-8")
 
         # Verify pidfile is in kanban_root, not in temp_root.
-        assert pidfile.parent.is_relative_to(kanban_root), (
-            f"Pidfile {pidfile} is not inside kanban_root {kanban_root}."
-        )
+        assert pidfile.parent.is_relative_to(kanban_root), f"Pidfile {pidfile} is not inside kanban_root {kanban_root}."
         assert not str(pidfile).startswith(str(temp_root)), (
-            f"Pidfile {pidfile} is inside the temp root {temp_root} — "
-            "it must be in the durable state directory."
+            f"Pidfile {pidfile} is inside the temp root {temp_root} — " "it must be in the durable state directory."
         )
 
         # Now delete the pidfile to simulate a temp-cleanup event.
@@ -416,8 +401,7 @@ def test_pidfile_lives_in_kanban_root_run_directory(
             "The port probe failed to detect the orphan."
         )
         assert str(server_pid) in result.stdout, (
-            f"status did not mention the orphan PID {server_pid} in stdout; "
-            f"got: {result.stdout!r}"
+            f"status did not mention the orphan PID {server_pid} in stdout; " f"got: {result.stdout!r}"
         )
 
     finally:
@@ -453,13 +437,11 @@ def test_status_reports_orphan_pid_when_port_occupied_without_pidfile(
 
         # Must NOT say "not running".
         assert "not running" not in result.stdout, (
-            f"status said 'not running' when orphan PID {orphan_pid} "
-            f"holds port {port}.  stdout: {result.stdout!r}"
+            f"status said 'not running' when orphan PID {orphan_pid} " f"holds port {port}.  stdout: {result.stdout!r}"
         )
         # Must mention the orphan PID.
         assert str(orphan_pid) in result.stdout, (
-            f"Orphan PID {orphan_pid} not mentioned in status output; "
-            f"stdout: {result.stdout!r}"
+            f"Orphan PID {orphan_pid} not mentioned in status output; " f"stdout: {result.stdout!r}"
         )
 
     finally:
@@ -488,13 +470,11 @@ def test_stop_kills_orphan_process_holding_port(
         result = _invoke_api_server(tmp_path, kanban_root, "stop", port)
 
         assert result.returncode == 0, (
-            f"stop returned {result.returncode} (expected 0); "
-            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+            f"stop returned {result.returncode} (expected 0); " f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
         # The orphan PID should be mentioned.
         assert str(orphan_pid) in result.stdout, (
-            f"stop did not mention the orphan PID {orphan_pid}; "
-            f"stdout: {result.stdout!r}"
+            f"stop did not mention the orphan PID {orphan_pid}; " f"stdout: {result.stdout!r}"
         )
 
         # Wait briefly for the process to actually exit.
@@ -504,15 +484,11 @@ def test_stop_kills_orphan_process_holding_port(
                 break
             time.sleep(0.2)
 
-        assert fake_listener.poll() is not None, (
-            f"Orphan process {orphan_pid} is still running after stop killed it."
-        )
+        assert fake_listener.poll() is not None, f"Orphan process {orphan_pid} is still running after stop killed it."
         # Port should now be free.
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=1):
-                pytest.fail(
-                    f"Port {port} is still accepting connections after stop killed the orphan."
-                )
+                pytest.fail(f"Port {port} is still accepting connections after stop killed the orphan.")
         except (ConnectionRefusedError, OSError):
             pass  # Port is free — expected.
 
@@ -549,13 +525,12 @@ def test_start_names_squatter_pid_when_port_busy_without_pidfile(
         )
         # The squatter PID must be mentioned.
         assert str(squatter_pid) in result.stderr, (
-            f"start did not mention squatter PID {squatter_pid}; "
-            f"stderr: {result.stderr!r}"
+            f"start did not mention squatter PID {squatter_pid}; " f"stderr: {result.stderr!r}"
         )
         # The 'address already in use' cause must appear.
-        assert "address already in use" in result.stderr.lower(), (
-            f"'address already in use' not in start stderr; got: {result.stderr!r}"
-        )
+        assert (
+            "address already in use" in result.stderr.lower()
+        ), f"'address already in use' not in start stderr; got: {result.stderr!r}"
 
     finally:
         if fake_listener is not None and fake_listener.poll() is None:
@@ -574,12 +549,9 @@ def test_status_returns_not_running_when_port_is_free_and_no_pidfile(
     result = _invoke_api_server(tmp_path, kanban_root, "status", port)
 
     assert result.returncode == 1, (
-        f"status returned {result.returncode} (expected 1) when nothing is running; "
-        f"stdout: {result.stdout!r}"
+        f"status returned {result.returncode} (expected 1) when nothing is running; " f"stdout: {result.stdout!r}"
     )
-    assert "not running" in result.stdout, (
-        f"Expected 'not running' in stdout; got: {result.stdout!r}"
-    )
+    assert "not running" in result.stdout, f"Expected 'not running' in stdout; got: {result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -640,9 +612,9 @@ def test_start_exits_nonzero_with_message_when_root_env_absent(
     # env_bootstrap.sh emits the fail-loud message when the root var is unset and
     # no shell-env exists at the candidate location derived from BASH_SOURCE[1].
     expected_fragment = "PGAI_AGENT_KANBAN_ROOT_PATH not set — shell-env missing or broken at"
-    assert expected_fragment in result.stderr, (
-        f"Expected fragment {expected_fragment!r} in stderr; got: {result.stderr!r}"
-    )
+    assert (
+        expected_fragment in result.stderr
+    ), f"Expected fragment {expected_fragment!r} in stderr; got: {result.stderr!r}"
 
 
 def test_no_pidfile_created_when_root_env_absent(
@@ -749,16 +721,11 @@ def test_health_kanban_root_is_absolute_path() -> None:
     client = TestClient(app, raise_server_exceptions=True)
     response = client.get("/health")
 
-    assert response.status_code == 200, (
-        f"/health returned {response.status_code}; body: {response.text!r}"
-    )
+    assert response.status_code == 200, f"/health returned {response.status_code}; body: {response.text!r}"
     body = response.json()
-    assert "kanban_root" in body, (
-        f"/health response missing 'kanban_root' field; body: {body!r}"
-    )
+    assert "kanban_root" in body, f"/health response missing 'kanban_root' field; body: {body!r}"
     assert body["kanban_root"].startswith("/"), (
-        f"/health kanban_root is not absolute: {body['kanban_root']!r}; "
-        "the value must start with '/'."
+        f"/health kanban_root is not absolute: {body['kanban_root']!r}; " "the value must start with '/'."
     )
 
 
@@ -857,9 +824,7 @@ def _start_fake_group_listener(port: int) -> subprocess.Popen:
     )
     assert proc.stdout is not None
     line = proc.stdout.readline().decode("utf-8", errors="replace").strip()
-    assert line.startswith("READY:"), (
-        f"group-leader did not emit READY; got: {line!r}"
-    )
+    assert line.startswith("READY:"), f"group-leader did not emit READY; got: {line!r}"
     return proc
 
 
@@ -902,12 +867,9 @@ def test_tracked_stop_confirms_port_free_before_reporting_success(
             pass  # Port is free — expected.
 
         assert result.returncode == 0, (
-            f"stop returned {result.returncode} (expected 0); "
-            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+            f"stop returned {result.returncode} (expected 0); " f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "stopped" in result.stdout.lower(), (
-            f"Expected 'stopped' confirmation in stdout; got: {result.stdout!r}"
-        )
+        assert "stopped" in result.stdout.lower(), f"Expected 'stopped' confirmation in stdout; got: {result.stdout!r}"
 
     finally:
         if fake_server is not None and fake_server.poll() is None:
@@ -956,14 +918,14 @@ def test_tracked_stop_kills_whole_process_group(
             pass  # Port is free — the whole group was killed.
 
         assert result.returncode == 0, (
-            f"stop returned {result.returncode} (expected 0); "
-            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+            f"stop returned {result.returncode} (expected 0); " f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
 
     finally:
         if group_leader is not None and group_leader.poll() is None:
             import os
             import signal
+
             try:
                 os.killpg(os.getpgid(group_leader.pid), signal.SIGKILL)
             except (ProcessLookupError, OSError):
@@ -1012,9 +974,7 @@ def test_stop_reports_failure_and_exits_nonzero_when_port_stays_bound(
         )
         assert stubborn.stdout is not None
         line = stubborn.stdout.readline().decode("utf-8", errors="replace").strip()
-        assert line.startswith("READY:"), (
-            f"stubborn listener did not emit READY; got: {line!r}"
-        )
+        assert line.startswith("READY:"), f"stubborn listener did not emit READY; got: {line!r}"
 
         pidfile.write_text(str(stubborn.pid) + "\n", encoding="utf-8")
 
@@ -1027,18 +987,18 @@ def test_stop_reports_failure_and_exits_nonzero_when_port_stays_bound(
         )
         # Must name the surviving PID.
         assert str(stubborn.pid) in result.stderr, (
-            f"stop failure message does not name the surviving PID {stubborn.pid}; "
-            f"stderr: {result.stderr!r}"
+            f"stop failure message does not name the surviving PID {stubborn.pid}; " f"stderr: {result.stderr!r}"
         )
         # Must mention 'stop failed' or 'still bound'.
-        assert "stop failed" in result.stderr.lower() or "still bound" in result.stderr.lower(), (
-            f"stop stderr does not describe the failure clearly; got: {result.stderr!r}"
-        )
+        assert (
+            "stop failed" in result.stderr.lower() or "still bound" in result.stderr.lower()
+        ), f"stop stderr does not describe the failure clearly; got: {result.stderr!r}"
 
     finally:
         if stubborn is not None and stubborn.poll() is None:
             import os
             import signal
+
             try:
                 os.killpg(os.getpgid(stubborn.pid), signal.SIGKILL)
             except (ProcessLookupError, OSError):
@@ -1083,8 +1043,7 @@ def test_orphan_stop_confirms_port_free_before_reporting_success(
             f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
         assert "stopped" in result.stdout.lower(), (
-            f"Expected 'stopped' confirmation in stdout after orphan stop; "
-            f"got: {result.stdout!r}"
+            f"Expected 'stopped' confirmation in stdout after orphan stop; " f"got: {result.stdout!r}"
         )
 
     finally:
@@ -1103,7 +1062,7 @@ def _launched_pythonpath_entries(pid: int) -> list[str]:
     environ = pathlib.Path(f"/proc/{pid}/environ").read_bytes()
     for item in environ.split(b"\0"):
         if item.startswith(b"PYTHONPATH="):
-            return item.decode("utf-8", errors="replace")[len("PYTHONPATH="):].split(os.pathsep)
+            return item.decode("utf-8", errors="replace")[len("PYTHONPATH=") :].split(os.pathsep)
     return []
 
 
@@ -1123,9 +1082,7 @@ def test_start_launches_server_with_exported_pythonpath_preserved(
     # PGAI_API_PORT (set by _invoke_api_server) wins over kanban.cfg for the
     # script and the server alike; kanban.cfg names the same port so the
     # server's host setting is explicit.
-    (kanban_root / "kanban.cfg").write_text(
-        f"[api]\nhost = 127.0.0.1\nport = {port}\n", encoding="utf-8"
-    )
+    (kanban_root / "kanban.cfg").write_text(f"[api]\nhost = 127.0.0.1\nport = {port}\n", encoding="utf-8")
     pidfile = kanban_root / "run" / "api" / "api-server.pid"
 
     # A decoy dev tree that must NOT reach the launched process, and an
@@ -1142,8 +1099,7 @@ def test_start_launches_server_with_exported_pythonpath_preserved(
     try:
         result = _invoke_api_server(tmp_path, kanban_root, "start", port, launch_env)
         assert result.returncode == 0, (
-            f"start returned {result.returncode} (expected 0); "
-            f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
+            f"start returned {result.returncode} (expected 0); " f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
         assert pidfile.exists(), f"start did not write the pidfile {pidfile}"
         server_pid = int(pidfile.read_text(encoding="utf-8").strip())
@@ -1158,9 +1114,9 @@ def test_start_launches_server_with_exported_pythonpath_preserved(
             f"the inherited PYTHONPATH entry {inherited_entry!r} was dropped at launch; "
             f"launched PYTHONPATH: {entries!r}"
         )
-        assert str(decoy_dev_tree / "team") not in entries, (
-            f"PGAI_DEV_TREE_PATH reached the launched PYTHONPATH: {entries!r}"
-        )
+        assert (
+            str(decoy_dev_tree / "team") not in entries
+        ), f"PGAI_DEV_TREE_PATH reached the launched PYTHONPATH: {entries!r}"
     finally:
         stop = _invoke_api_server(tmp_path, kanban_root, "stop", port, launch_env)
         if server_pid is not None:
@@ -1203,24 +1159,22 @@ def test_stop_refuses_unrelated_listener_on_port_and_leaves_it_alive(
             f"stop returned 0 (expected non-zero) against an unrelated listener; "
             f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "error:   api-server.stop.target_not_api_server" in result.stderr, (
-            f"stop did not refuse with the dual-channel error key; stderr: {result.stderr!r}"
-        )
-        assert "remedy:" in result.stderr, (
-            f"stop's refusal carries no remedy line; stderr: {result.stderr!r}"
-        )
-        assert str(unrelated.pid) in result.stderr, (
-            f"refusal does not name the pid {unrelated.pid}; stderr: {result.stderr!r}"
-        )
+        assert (
+            "error:   api-server.stop.target_not_api_server" in result.stderr
+        ), f"stop did not refuse with the dual-channel error key; stderr: {result.stderr!r}"
+        assert "remedy:" in result.stderr, f"stop's refusal carries no remedy line; stderr: {result.stderr!r}"
+        assert (
+            str(unrelated.pid) in result.stderr
+        ), f"refusal does not name the pid {unrelated.pid}; stderr: {result.stderr!r}"
         assert sys.executable in result.stderr, (
             f"refusal does not quote the target's command line (expected {sys.executable!r}); "
             f"stderr: {result.stderr!r}"
         )
 
         time.sleep(0.5)
-        assert unrelated.poll() is None, (
-            f"unrelated listener {unrelated.pid} is dead after stop; stop must not signal it."
-        )
+        assert (
+            unrelated.poll() is None
+        ), f"unrelated listener {unrelated.pid} is dead after stop; stop must not signal it."
         with socket.create_connection(("127.0.0.1", port), timeout=1):
             pass  # Still accepting connections — expected.
     finally:
@@ -1254,15 +1208,11 @@ def test_status_reports_not_running_when_pidfile_pid_is_reused_by_non_api_proces
             f"status returned {result.returncode} (expected 1) for a reused pid; "
             f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "not running" in result.stdout, (
-            f"status did not report 'not running' for a reused pid; stdout: {result.stdout!r}"
-        )
-        assert not pidfile.exists(), (
-            f"stale pidfile {pidfile} survived status although the port is free."
-        )
-        assert bystander.poll() is None, (
-            f"process {bystander.pid} died during status; status must signal nothing."
-        )
+        assert (
+            "not running" in result.stdout
+        ), f"status did not report 'not running' for a reused pid; stdout: {result.stdout!r}"
+        assert not pidfile.exists(), f"stale pidfile {pidfile} survived status although the port is free."
+        assert bystander.poll() is None, f"process {bystander.pid} died during status; status must signal nothing."
     finally:
         if bystander.poll() is None:
             bystander.terminate()
@@ -1294,9 +1244,9 @@ def test_stop_signals_nothing_when_pidfile_pid_is_reused_by_non_api_process(
             f"stop returned {result.returncode} (expected 0) for a reused pid; "
             f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "not running" in result.stdout, (
-            f"stop did not report the server as not running; stdout: {result.stdout!r}"
-        )
+        assert (
+            "not running" in result.stdout
+        ), f"stop did not report the server as not running; stdout: {result.stdout!r}"
         time.sleep(0.5)
         assert bystander.poll() is None, (
             f"process {bystander.pid} died during stop; stop must signal nothing "
@@ -1316,9 +1266,7 @@ def test_stop_signals_nothing_when_pidfile_pid_is_reused_by_non_api_process(
 def _write_api_port_cfg(kanban_root: pathlib.Path, port: int) -> None:
     """Write <kanban_root>/kanban.cfg with a loopback [api] host and *port*."""
     kanban_root.mkdir(parents=True, exist_ok=True)
-    (kanban_root / "kanban.cfg").write_text(
-        f"[api]\nhost = 127.0.0.1\nport = {port}\n", encoding="utf-8"
-    )
+    (kanban_root / "kanban.cfg").write_text(f"[api]\nhost = 127.0.0.1\nport = {port}\n", encoding="utf-8")
 
 
 def _port_accepts_connections(port: int) -> bool:
@@ -1373,8 +1321,7 @@ def test_status_and_stop_find_orphan_on_kanban_cfg_port_when_env_override_unset(
     try:
         start = _invoke_api_server(tmp_path, kanban_root, "start", None)
         assert start.returncode == 0, (
-            f"start returned {start.returncode}; "
-            f"stdout: {start.stdout!r}; stderr: {start.stderr!r}"
+            f"start returned {start.returncode}; " f"stdout: {start.stdout!r}; stderr: {start.stderr!r}"
         )
         server_pid = int(pidfile.read_text(encoding="utf-8").strip())
         assert _wait_until_port_accepts(port), (
@@ -1395,22 +1342,19 @@ def test_status_and_stop_find_orphan_on_kanban_cfg_port_when_env_override_unset(
             f"port {port}; stdout: {status.stdout!r}"
         )
         assert f"port {port} held by PID {server_pid}" in status.stdout, (
-            f"status did not report the orphan PID {server_pid} on port {port}; "
-            f"stdout: {status.stdout!r}"
+            f"status did not report the orphan PID {server_pid} on port {port}; " f"stdout: {status.stdout!r}"
         )
 
         stop = _invoke_api_server(tmp_path, kanban_root, "stop", None)
         assert stop.returncode == 0, (
-            f"stop returned {stop.returncode}; "
-            f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
+            f"stop returned {stop.returncode}; " f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
         )
         assert f"port {port} held by unmanaged PID {server_pid}" in stop.stdout, (
-            f"stop did not act on the orphan on the kanban.cfg port {port}; "
-            f"stdout: {stop.stdout!r}"
+            f"stop did not act on the orphan on the kanban.cfg port {port}; " f"stdout: {stop.stdout!r}"
         )
-        assert not _port_accepts_connections(port), (
-            f"port {port} still accepts connections after stop; the orphan survived."
-        )
+        assert not _port_accepts_connections(
+            port
+        ), f"port {port} still accepts connections after stop; the orphan survived."
     finally:
         _kill_server_group(pidfile, server_pid)
 
@@ -1433,17 +1377,14 @@ def test_env_port_override_is_bound_by_server_and_probed_by_status_and_stop(
     try:
         start = _invoke_api_server(tmp_path, kanban_root, "start", env_port)
         assert start.returncode == 0, (
-            f"start returned {start.returncode}; "
-            f"stdout: {start.stdout!r}; stderr: {start.stderr!r}"
+            f"start returned {start.returncode}; " f"stdout: {start.stdout!r}; stderr: {start.stderr!r}"
         )
         server_pid = int(pidfile.read_text(encoding="utf-8").strip())
         assert _wait_until_port_accepts(env_port), (
-            f"the server did not bind the PGAI_API_PORT override {env_port}; "
-            f"stderr: {start.stderr!r}"
+            f"the server did not bind the PGAI_API_PORT override {env_port}; " f"stderr: {start.stderr!r}"
         )
         assert not _port_accepts_connections(cfg_port), (
-            f"the server bound the kanban.cfg port {cfg_port} although "
-            f"PGAI_API_PORT={env_port} was set."
+            f"the server bound the kanban.cfg port {cfg_port} although " f"PGAI_API_PORT={env_port} was set."
         )
 
         pidfile.unlink()
@@ -1456,15 +1397,12 @@ def test_env_port_override_is_bound_by_server_and_probed_by_status_and_stop(
 
         stop = _invoke_api_server(tmp_path, kanban_root, "stop", env_port)
         assert stop.returncode == 0, (
-            f"stop returned {stop.returncode}; "
-            f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
+            f"stop returned {stop.returncode}; " f"stdout: {stop.stdout!r}; stderr: {stop.stderr!r}"
         )
-        assert f"port {env_port} held by unmanaged PID {server_pid}" in stop.stdout, (
-            f"stop did not probe the override port {env_port}; stdout: {stop.stdout!r}"
-        )
-        assert not _port_accepts_connections(env_port), (
-            f"port {env_port} still accepts connections after stop."
-        )
+        assert (
+            f"port {env_port} held by unmanaged PID {server_pid}" in stop.stdout
+        ), f"stop did not probe the override port {env_port}; stdout: {stop.stdout!r}"
+        assert not _port_accepts_connections(env_port), f"port {env_port} still accepts connections after stop."
     finally:
         _kill_server_group(pidfile, server_pid)
 
@@ -1490,16 +1428,14 @@ def test_stop_refuses_unrelated_listener_on_kanban_cfg_port(
             f"listener on the kanban.cfg port {port}; "
             f"stdout: {result.stdout!r}; stderr: {result.stderr!r}"
         )
-        assert "error:   api-server.stop.target_not_api_server" in result.stderr, (
-            f"stop did not refuse with the dual-channel error key; stderr: {result.stderr!r}"
-        )
-        assert f"on port {port}" in result.stderr, (
-            f"the refusal does not name the kanban.cfg port {port}; stderr: {result.stderr!r}"
-        )
+        assert (
+            "error:   api-server.stop.target_not_api_server" in result.stderr
+        ), f"stop did not refuse with the dual-channel error key; stderr: {result.stderr!r}"
+        assert (
+            f"on port {port}" in result.stderr
+        ), f"the refusal does not name the kanban.cfg port {port}; stderr: {result.stderr!r}"
         time.sleep(0.5)
-        assert unrelated.poll() is None, (
-            f"the unrelated listener {unrelated.pid} was killed by a refused stop."
-        )
+        assert unrelated.poll() is None, f"the unrelated listener {unrelated.pid} was killed by a refused stop."
     finally:
         if unrelated is not None and unrelated.poll() is None:
             unrelated.terminate()
@@ -1509,11 +1445,11 @@ def test_stop_refuses_unrelated_listener_on_kanban_cfg_port(
 @pytest.mark.parametrize(
     ("env_value", "cfg_port", "expected"),
     [
-        (None, 18411, 18411),      # no override: kanban.cfg wins
-        ("18412", 18411, 18412),   # override set: it wins over kanban.cfg
-        ("  ", 18411, 18411),      # blank override reads as unset
+        (None, 18411, 18411),  # no override: kanban.cfg wins
+        ("18412", 18411, 18412),  # override set: it wins over kanban.cfg
+        ("  ", 18411, 18411),  # blank override reads as unset
         ("not-a-port", 18411, 18411),  # non-integer override is ignored
-        ("18412", None, 18412),    # override with no kanban.cfg at all
+        ("18412", None, 18412),  # override with no kanban.cfg at all
         (None, None, _PRODUCTION_DEFAULT_PORT),  # neither: built-in default
     ],
 )
@@ -1545,8 +1481,8 @@ def test_load_api_config_port_precedence(
 
     stderr = capsys.readouterr().err
     if env_value == "not-a-port":
-        assert "PGAI_API_PORT='not-a-port' is not an integer port" in stderr, (
-            f"a non-integer override was ignored silently; stderr: {stderr!r}"
-        )
+        assert (
+            "PGAI_API_PORT='not-a-port' is not an integer port" in stderr
+        ), f"a non-integer override was ignored silently; stderr: {stderr!r}"
     else:
         assert "PGAI_API_PORT" not in stderr, f"unexpected warning: {stderr!r}"

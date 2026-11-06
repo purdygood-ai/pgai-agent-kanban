@@ -98,6 +98,17 @@ if ! declare -F pp_run_ops >/dev/null 2>&1; then
     # shellcheck source=pp_run_ops.sh
     source "$(dirname "${BASH_SOURCE[0]}")/pp_run_ops.sh"
 fi
+# config_export_tunables (config_loader.sh) resolves the settle window and
+# the reject threshold: environment first, then kanban.cfg [discovery].
+if ! declare -F config_export_tunables >/dev/null 2>&1; then
+    # shellcheck source=config_loader.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/config_loader.sh"
+fi
+
+# This file's directory with symlinks resolved, as an absolute path resolved
+# once at load: no function depends on the caller's current directory or on
+# whether this file was named by a relative path.
+_DISC_ITEMS_LIB_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 # _disc_check_bug_id_collisions <bugs_dir>
 #
@@ -112,12 +123,12 @@ _disc_check_bug_id_collisions() {
     # Locate the bug_scanner module.  Search order:
     #   1. ${TEAM_ROOT}/pm-agent  — live install layout
     #   2. ${_disc_this_dir}/../../../team/pm-agent — dev-tree layout when sourced
-    #      from team/scripts/lib/ (BASH_SOURCE[0] resolves 3 levels up to repo root,
+    #      from team/scripts/lib/ (this file's directory; 3 levels up is the repo root,
     #      then descend into team/pm-agent)
     #   3. ${_disc_this_dir}/../pm-agent — alternate dev-tree layout
     # The first directory whose lib/bug_scanner.py exists is used.
     local _disc_this_dir _scanner_dir
-    _disc_this_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+    _disc_this_dir="${_DISC_ITEMS_LIB_DIR}"
 
     local _candidate
     for _candidate in \
@@ -196,7 +207,8 @@ _disc_maybe_quarantine() {
     # Guard: source file must still exist (could have been moved by a concurrent call)
     [[ -f "$source_file" ]] || return 0
 
-    local threshold="${PGAI_DISCOVERY_REJECT_THRESHOLD:-3}"
+    [[ -n "${PGAI_DISCOVERY_REJECT_THRESHOLD:-}" ]] || config_export_tunables
+    local threshold="$PGAI_DISCOVERY_REJECT_THRESHOLD"
 
     # Ensure state directory exists
     mkdir -p "$state_dir"
@@ -535,7 +547,8 @@ _disc_settle_guard_active() {
     # Disabled when state_dir is absent (settle tracking not configured).
     [[ -z "$state_dir" ]] && return 1
 
-    local settle_window="${PGAI_DISCOVERY_SETTLE_SECONDS:-60}"
+    [[ -n "${PGAI_DISCOVERY_SETTLE_SECONDS:-}" ]] || config_export_tunables
+    local settle_window="$PGAI_DISCOVERY_SETTLE_SECONDS"
 
     # A window of 0 means "disabled" — skip the check entirely.
     # This prevents divide-by-zero and provides a test escape hatch.

@@ -91,7 +91,7 @@ _SHAPES = {
 _SHAPE_IDS = sorted(_SHAPES)
 
 
-def _project(tmp_path: pathlib.Path, text: "str | None") -> pathlib.Path:
+def _project(tmp_path: pathlib.Path, text: str | None) -> pathlib.Path:
     """A projects/demo directory holding *text* as release-state.md (or none)."""
     proj = tmp_path / "kanban" / "projects" / "demo"
     proj.mkdir(parents=True)
@@ -145,9 +145,7 @@ release_state_section '{rs}' 'RC Opened At' 'Active RC' 'Last Released'
     ],
     ids=["empty-field-is-an-empty-line", "absent-heading-returns-1", "missing-file-returns-1-silently"],
 )
-def test_section_keeps_empty_absent_and_missing_apart(
-    tmp_path: pathlib.Path, text: "str | None", expected: str
-) -> None:
+def test_section_keeps_empty_absent_and_missing_apart(tmp_path: pathlib.Path, text: str | None, expected: str) -> None:
     rs = _project(tmp_path, text) / "release-state.md"
     out = _bash(
         tmp_path,
@@ -272,9 +270,8 @@ _csarc_do_reset
 """,
     )
     after = rs.read_text(encoding="utf-8")
-    expected = (
-        before.replace("## Active RC\nv1.2.0\n", "## Active RC\nnone\n", 1)
-        .replace("## RC Opened At\n2026-01-03T00:00:00Z\n", "## RC Opened At\nnone\n", 1)
+    expected = before.replace("## Active RC\nv1.2.0\n", "## Active RC\nnone\n", 1).replace(
+        "## RC Opened At\n2026-01-03T00:00:00Z\n", "## RC Opened At\nnone\n", 1
     )
     assert after == expected
 

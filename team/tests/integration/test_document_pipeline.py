@@ -41,9 +41,7 @@ import os
 import pathlib
 import re
 import subprocess
-from typing import Optional
 
-import pytest
 from tests.fixtures.section_reader_modules import copy_section_reader_modules
 
 # ---------------------------------------------------------------------------
@@ -163,9 +161,7 @@ def _build_doc_kanban_root(
     src_cm_dir = _KANBAN_PY_DIR / "cm"
     if src_cm_dir.is_dir():
         for py_file in src_cm_dir.glob("*.py"):
-            (cm_py_dir / py_file.name).write_text(
-                py_file.read_text(encoding="utf-8"), encoding="utf-8"
-            )
+            (cm_py_dir / py_file.name).write_text(py_file.read_text(encoding="utf-8"), encoding="utf-8")
     copy_section_reader_modules(cm_py_dir.parent)
 
     # Also copy metrics_aggregator.py and metrics_csv_writer.py into scripts/lib/
@@ -178,9 +174,7 @@ def _build_doc_kanban_root(
         for metrics_script in ("metrics_aggregator.py", "metrics_csv_writer.py"):
             src = src_metrics_dir / metrics_script
             if src.is_file():
-                (scripts_lib_dir / metrics_script).write_text(
-                    src.read_text(encoding="utf-8"), encoding="utf-8"
-                )
+                (scripts_lib_dir / metrics_script).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 
     return root
 
@@ -230,8 +224,8 @@ def _run_cm_script(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    extra_env: Optional[dict] = None,
-    pgai_temp_dir: Optional[pathlib.Path] = None,
+    extra_env: dict | None = None,
+    pgai_temp_dir: pathlib.Path | None = None,
     timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     """Run a CM script against a temporary kanban root.
@@ -283,9 +277,7 @@ def _run_cm_script(
 
 def _read_release_state(kanban_root: pathlib.Path, project_name: str) -> str:
     """Read the project's release-state.md content."""
-    return (kanban_root / "projects" / project_name / "release-state.md").read_text(
-        encoding="utf-8"
-    )
+    return (kanban_root / "projects" / project_name / "release-state.md").read_text(encoding="utf-8")
 
 
 def _active_rc_value(release_state_text: str) -> str:
@@ -316,9 +308,7 @@ def _last_released_value(release_state_text: str) -> str:
 class TestOpenDocScratchDirectories:
     """cm-open-doc.sh creates the expected working directory structure."""
 
-    def test_open_doc_creates_input_working_output_directories(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_open_doc_creates_input_working_output_directories(self, tmp_path: pathlib.Path) -> None:
         """cm-open-doc.sh creates input/, working/, and output/ dirs under the temp root.
 
         These directories are the pipeline's scratch space: WRITER reads from
@@ -331,34 +321,29 @@ class TestOpenDocScratchDirectories:
 
         root = _build_doc_kanban_root(tmp_path, project_name)
         result = _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
 
-        assert result.returncode == 0, (
-            f"cm-open-doc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-open-doc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         # Derive the expected working dir path (mirrors open-doc.sh logic).
         # Layout: PGAI_AGENT_KANBAN_TEMP_DIR/projects/<project>/doc/<version>/
         doc_scratch = pgai_temp / "projects" / project_name / "doc" / version
         assert (doc_scratch / "input").is_dir(), (
-            f"Expected input/ at {doc_scratch / 'input'}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected input/ at {doc_scratch / 'input'}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert (doc_scratch / "working").is_dir(), (
-            f"Expected working/ at {doc_scratch / 'working'}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected working/ at {doc_scratch / 'working'}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert (doc_scratch / "output").is_dir(), (
-            f"Expected output/ at {doc_scratch / 'output'}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected output/ at {doc_scratch / 'output'}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_open_doc_sets_active_rc_in_release_state(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_open_doc_sets_active_rc_in_release_state(self, tmp_path: pathlib.Path) -> None:
         """cm-open-doc.sh records the target version as Active RC in release-state.md.
 
         The discovery pipeline reads Active RC to defer bundling while a document
@@ -370,14 +355,14 @@ class TestOpenDocScratchDirectories:
 
         root = _build_doc_kanban_root(tmp_path, project_name)
         result = _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
 
-        assert result.returncode == 0, (
-            f"cm-open-doc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"cm-open-doc.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         state_text = _read_release_state(root, project_name)
         active_rc = _active_rc_value(state_text)
@@ -391,9 +376,7 @@ class TestOpenDocScratchDirectories:
 class TestFinalizePipelineEnd:
     """cm-finalize.sh publishes the deliverable and updates project state."""
 
-    def test_full_document_pipeline_publishes_artifact_to_artifacts_dir(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_full_document_pipeline_publishes_artifact_to_artifacts_dir(self, tmp_path: pathlib.Path) -> None:
         """open-doc → polish stub → finalize publishes the document to artifacts/.
 
         The canonical end-of-pipeline proof: a versioned artifact file must exist
@@ -410,13 +393,15 @@ class TestFinalizePipelineEnd:
 
         # Step 1: Open the document — creates working dirs, writes Active RC.
         open_result = _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
-        assert open_result.returncode == 0, (
-            f"cm-open-doc.sh failed.\nstdout: {open_result.stdout}\nstderr: {open_result.stderr}"
-        )
+        assert (
+            open_result.returncode == 0
+        ), f"cm-open-doc.sh failed.\nstdout: {open_result.stdout}\nstderr: {open_result.stderr}"
 
         # Step 2: Simulate WRITER polish output.
         # finalize.sh reads polished.md from PGAI_WRITER_POLISH_TASK_ARTIFACTS.
@@ -424,15 +409,16 @@ class TestFinalizePipelineEnd:
         writer_artifacts.mkdir(parents=True, exist_ok=True)
         polished_md = writer_artifacts / "polished.md"
         polished_md.write_text(
-            "# My Test Document\n\n"
-            "This is the polished integration-test document.\n",
+            "# My Test Document\n\n" "This is the polished integration-test document.\n",
             encoding="utf-8",
         )
 
         # Step 3: Finalize — packages the polished content and publishes to artifacts/.
         finalize_result = _run_cm_script(
-            _FINALIZE_SCRIPT, [project_name, version],
-            root, project_name,
+            _FINALIZE_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
             extra_env={
                 "PGAI_WRITER_POLISH_TASK_ARTIFACTS": str(writer_artifacts),
@@ -440,23 +426,18 @@ class TestFinalizePipelineEnd:
             },
         )
         assert finalize_result.returncode == 0, (
-            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n"
-            f"stderr: {finalize_result.stderr}"
+            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n" f"stderr: {finalize_result.stderr}"
         )
 
         # Assert: the published artifact exists in projects/<project>/artifacts/.
-        expected_artifact = (
-            root / "projects" / project_name / "artifacts" / f"{version}-{artifact_name}.md"
-        )
+        expected_artifact = root / "projects" / project_name / "artifacts" / f"{version}-{artifact_name}.md"
         assert expected_artifact.is_file(), (
             f"Expected published artifact at {expected_artifact}.\n"
             f"artifacts/ contents: {list((root / 'projects' / project_name / 'artifacts').iterdir())}\n"
             f"finalize stdout: {finalize_result.stdout}\nfinalize stderr: {finalize_result.stderr}"
         )
 
-    def test_full_document_pipeline_artifact_contains_polished_content(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_full_document_pipeline_artifact_contains_polished_content(self, tmp_path: pathlib.Path) -> None:
         """The artifact published by finalize contains the WRITER's polished content.
 
         finalize must copy the polished content faithfully — not an empty file,
@@ -472,13 +453,15 @@ class TestFinalizePipelineEnd:
         _make_requirements_file(root, project_name, version, artifact_name)
 
         open_result = _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
-        assert open_result.returncode == 0, (
-            f"cm-open-doc.sh failed.\nstdout: {open_result.stdout}\nstderr: {open_result.stderr}"
-        )
+        assert (
+            open_result.returncode == 0
+        ), f"cm-open-doc.sh failed.\nstdout: {open_result.stdout}\nstderr: {open_result.stderr}"
 
         writer_artifacts = tmp_path / "writer_polish_artifacts"
         writer_artifacts.mkdir(parents=True, exist_ok=True)
@@ -489,8 +472,10 @@ class TestFinalizePipelineEnd:
         )
 
         finalize_result = _run_cm_script(
-            _FINALIZE_SCRIPT, [project_name, version],
-            root, project_name,
+            _FINALIZE_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
             extra_env={
                 "PGAI_WRITER_POLISH_TASK_ARTIFACTS": str(writer_artifacts),
@@ -498,14 +483,11 @@ class TestFinalizePipelineEnd:
             },
         )
         assert finalize_result.returncode == 0, (
-            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n"
-            f"stderr: {finalize_result.stderr}"
+            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n" f"stderr: {finalize_result.stderr}"
         )
 
         artifact = root / "projects" / project_name / "artifacts" / f"{version}-{artifact_name}.md"
-        assert artifact.is_file(), (
-            f"Expected artifact at {artifact}.\nstdout: {finalize_result.stdout}"
-        )
+        assert artifact.is_file(), f"Expected artifact at {artifact}.\nstdout: {finalize_result.stdout}"
 
         artifact_text = artifact.read_text(encoding="utf-8")
         assert sentinel_text in artifact_text, (
@@ -513,9 +495,7 @@ class TestFinalizePipelineEnd:
             f"Actual artifact content:\n{artifact_text}"
         )
 
-    def test_finalize_clears_active_rc_after_publishing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_finalize_clears_active_rc_after_publishing(self, tmp_path: pathlib.Path) -> None:
         """cm-finalize.sh clears Active RC to 'none' in release-state.md after publishing.
 
         Active RC being cleared is the signal that allows the discovery pipeline to
@@ -531,27 +511,28 @@ class TestFinalizePipelineEnd:
         _make_requirements_file(root, project_name, version, artifact_name)
 
         _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
 
         # Confirm Active RC was set by open-doc.
         state_after_open = _read_release_state(root, project_name)
         assert _active_rc_value(state_after_open) == version, (
-            f"Expected Active RC = '{version}' after cm-open-doc.sh.\n"
-            f"release-state.md:\n{state_after_open}"
+            f"Expected Active RC = '{version}' after cm-open-doc.sh.\n" f"release-state.md:\n{state_after_open}"
         )
 
         writer_artifacts = tmp_path / "writer_polish_artifacts"
         writer_artifacts.mkdir(parents=True, exist_ok=True)
-        (writer_artifacts / "polished.md").write_text(
-            "# RC Clear Test\n\nContent.\n", encoding="utf-8"
-        )
+        (writer_artifacts / "polished.md").write_text("# RC Clear Test\n\nContent.\n", encoding="utf-8")
 
         finalize_result = _run_cm_script(
-            _FINALIZE_SCRIPT, [project_name, version],
-            root, project_name,
+            _FINALIZE_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
             extra_env={
                 "PGAI_WRITER_POLISH_TASK_ARTIFACTS": str(writer_artifacts),
@@ -559,8 +540,7 @@ class TestFinalizePipelineEnd:
             },
         )
         assert finalize_result.returncode == 0, (
-            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n"
-            f"stderr: {finalize_result.stderr}"
+            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n" f"stderr: {finalize_result.stderr}"
         )
 
         state_after_finalize = _read_release_state(root, project_name)
@@ -571,9 +551,7 @@ class TestFinalizePipelineEnd:
             f"finalize stdout: {finalize_result.stdout}\nfinalize stderr: {finalize_result.stderr}"
         )
 
-    def test_finalize_records_last_released_version_in_release_state(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_finalize_records_last_released_version_in_release_state(self, tmp_path: pathlib.Path) -> None:
         """cm-finalize.sh records the published version in ## Last Released.
 
         Document projects have no git repo, so release-state.md is the canonical
@@ -589,20 +567,22 @@ class TestFinalizePipelineEnd:
         _make_requirements_file(root, project_name, version, artifact_name)
 
         _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
 
         writer_artifacts = tmp_path / "writer_polish_artifacts"
         writer_artifacts.mkdir(parents=True, exist_ok=True)
-        (writer_artifacts / "polished.md").write_text(
-            "# Last Released Test\n\nContent.\n", encoding="utf-8"
-        )
+        (writer_artifacts / "polished.md").write_text("# Last Released Test\n\nContent.\n", encoding="utf-8")
 
         finalize_result = _run_cm_script(
-            _FINALIZE_SCRIPT, [project_name, version],
-            root, project_name,
+            _FINALIZE_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
             extra_env={
                 "PGAI_WRITER_POLISH_TASK_ARTIFACTS": str(writer_artifacts),
@@ -610,8 +590,7 @@ class TestFinalizePipelineEnd:
             },
         )
         assert finalize_result.returncode == 0, (
-            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n"
-            f"stderr: {finalize_result.stderr}"
+            f"cm-finalize.sh failed.\nstdout: {finalize_result.stdout}\n" f"stderr: {finalize_result.stderr}"
         )
 
         state_text = _read_release_state(root, project_name)
@@ -626,9 +605,7 @@ class TestFinalizePipelineEnd:
 class TestFinalizeGuardBehavior:
     """cm-finalize.sh guard conditions: missing env var, missing polished.md."""
 
-    def test_finalize_exits_nonzero_when_writer_artifacts_env_not_set(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_finalize_exits_nonzero_when_writer_artifacts_env_not_set(self, tmp_path: pathlib.Path) -> None:
         """cm-finalize.sh fails when PGAI_WRITER_POLISH_TASK_ARTIFACTS is not set.
 
         finalize must not fall back silently to any working-dir content when the
@@ -643,15 +620,19 @@ class TestFinalizeGuardBehavior:
         _make_requirements_file(root, project_name, version)
 
         _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
 
         # Run finalize WITHOUT PGAI_WRITER_POLISH_TASK_ARTIFACTS.
         result = _run_cm_script(
-            _FINALIZE_SCRIPT, [project_name, version],
-            root, project_name,
+            _FINALIZE_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
             # Deliberately omit PGAI_WRITER_POLISH_TASK_ARTIFACTS.
         )
@@ -667,9 +648,7 @@ class TestFinalizeGuardBehavior:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_finalize_exits_nonzero_when_polished_md_is_absent(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_finalize_exits_nonzero_when_polished_md_is_absent(self, tmp_path: pathlib.Path) -> None:
         """cm-finalize.sh fails when polished.md is missing from the writer artifacts dir.
 
         PGAI_WRITER_POLISH_TASK_ARTIFACTS may point at an existing directory, but
@@ -684,8 +663,10 @@ class TestFinalizeGuardBehavior:
         _make_requirements_file(root, project_name, version)
 
         _run_cm_script(
-            _OPEN_DOC_SCRIPT, [project_name, version],
-            root, project_name,
+            _OPEN_DOC_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
         )
 
@@ -694,8 +675,10 @@ class TestFinalizeGuardBehavior:
         writer_artifacts.mkdir(parents=True, exist_ok=True)
 
         result = _run_cm_script(
-            _FINALIZE_SCRIPT, [project_name, version],
-            root, project_name,
+            _FINALIZE_SCRIPT,
+            [project_name, version],
+            root,
+            project_name,
             pgai_temp_dir=pgai_temp,
             extra_env={
                 "PGAI_WRITER_POLISH_TASK_ARTIFACTS": str(writer_artifacts),
@@ -708,6 +691,5 @@ class TestFinalizeGuardBehavior:
         )
         combined = result.stdout + result.stderr
         assert "polished.md" in combined, (
-            "Expected error output to reference 'polished.md'.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            "Expected error output to reference 'polished.md'.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )

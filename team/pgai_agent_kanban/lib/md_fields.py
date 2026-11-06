@@ -75,7 +75,7 @@ import os
 import pathlib
 import re
 import sys
-from typing import Optional, Union
+from typing import Union
 
 # Run by file path (``python3 .../md_fields.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -113,7 +113,7 @@ _BOLD_VALUE_RE = re.compile(r"^(\*\*|__)(.+?)\1$")
 _INLINE_RE = re.compile(r"^[^\S\n]*:(.*)$", re.S)
 
 
-def _section_regex(header: str) -> "re.Pattern[str]":
+def _section_regex(header: str) -> re.Pattern[str]:
     """Return the compiled regex for one ``## <header>`` section.
 
     Groups: (1) the heading line, including any inline ``: value`` and
@@ -133,7 +133,7 @@ def _inline_value(heading_line: str, heading: str) -> str:
     name_end = re.match(r"##\s+" + re.escape(heading), heading_line, re.IGNORECASE)
     if name_end is None:  # unreachable for a line the section regex matched
         return ""
-    m = _INLINE_RE.match(heading_line[name_end.end():])
+    m = _INLINE_RE.match(heading_line[name_end.end() :])
     return m.group(1).strip() if m else ""
 
 
@@ -166,17 +166,17 @@ def field_value(text: str, heading: str) -> str:
     return ""
 
 
-def _read_text(path: PathLike) -> Optional[str]:
+def _read_text(path: PathLike) -> str | None:
     if not os.path.isfile(path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             return handle.read()
     except (OSError, UnicodeDecodeError):
         return None
 
 
-def read_body(path: PathLike, heading: str) -> Optional[str]:
+def read_body(path: PathLike, heading: str) -> str | None:
     """Return the ``## <heading>`` section body of the file at *path*.
 
     Returns:
@@ -290,7 +290,7 @@ def set_value_line(text: str, heading: str, value: str) -> str:
             line = body_lines[target]
             body_lines[target] = line[: len(line) - len(line.lstrip())] + value
             new_body = "\n".join(body_lines)
-    return text[: m.start()] + heading_line + new_body + separator + text[m.end():]
+    return text[: m.start()] + heading_line + new_body + separator + text[m.end() :]
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +309,7 @@ _USAGE = (
 def _render(path: str, rewrite) -> int:
     """Print *rewrite* applied to the text of *path*; write nothing."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             text = handle.read()
     except (OSError, UnicodeDecodeError) as exc:
         print(f"cannot read {path}: {exc}", file=sys.stderr)
@@ -318,7 +318,7 @@ def _render(path: str, rewrite) -> int:
     return 0
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run one command-line command; return its exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("-h", "--help"):
@@ -329,7 +329,7 @@ def main(argv: Optional[list] = None) -> int:
         # Undecodable bytes read as U+FFFD rather than as an absent field, so
         # one stray byte cannot make a done intake file read as missing.
         try:
-            with open(rest[0], "r", encoding="utf-8", errors="replace") as handle:
+            with open(rest[0], encoding="utf-8", errors="replace") as handle:
                 text = handle.read()
         except OSError:
             return EXIT_FIELD_ABSENT

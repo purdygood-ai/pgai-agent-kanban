@@ -41,7 +41,6 @@ from __future__ import annotations
 import io
 import pathlib
 from dataclasses import dataclass
-from typing import Optional
 
 import pytest
 
@@ -69,8 +68,8 @@ class PostureCase:
     """
 
     id: str
-    project_cfg: Optional[str]
-    kanban_cfg: Optional[str]
+    project_cfg: str | None
+    kanban_cfg: str | None
     expected: str
     warn_must_name: tuple = ()
     project_cfg_name: str = "project.cfg"
@@ -86,8 +85,18 @@ _CASES = [
     PostureCase("absent_with_empty_files", "[project]\n", "[release]\n", SHIP_POSTURE_MATRIX),
     PostureCase("absent_everywhere_local_lane", _LOCAL, None, SHIP_POSTURE_ALWAYS),
     PostureCase("absent_with_empty_kanban_cfg_local_lane", _LOCAL, "[release]\n", SHIP_POSTURE_ALWAYS),
-    PostureCase("blank_in_both_local_lane", _LOCAL + "[release]\nship_posture =\n", "[release]\nship_posture =\n", SHIP_POSTURE_ALWAYS),
-    PostureCase("project_matrix_opts_local_lane_out_of_default", _LOCAL + "[release]\nship_posture = matrix\n", None, SHIP_POSTURE_MATRIX),
+    PostureCase(
+        "blank_in_both_local_lane",
+        _LOCAL + "[release]\nship_posture =\n",
+        "[release]\nship_posture =\n",
+        SHIP_POSTURE_ALWAYS,
+    ),
+    PostureCase(
+        "project_matrix_opts_local_lane_out_of_default",
+        _LOCAL + "[release]\nship_posture = matrix\n",
+        None,
+        SHIP_POSTURE_MATRIX,
+    ),
     PostureCase("absent_everywhere_remote_lane_unconfirmed", _REMOTE, None, SHIP_POSTURE_MATRIX),
     PostureCase(
         "absent_everywhere_remote_lane_confirm_false",
@@ -253,7 +262,7 @@ def _build_root(tmp_path: pathlib.Path, case: PostureCase) -> dict:
 
 def _warning_bodies(text: str, prefix: str) -> list:
     """Every warning line in *text*, with the resolver's own prefix removed."""
-    return [line[len(prefix):] for line in text.splitlines() if line.startswith(prefix)]
+    return [line[len(prefix) :] for line in text.splitlines() if line.startswith(prefix)]
 
 
 def _run_bash_resolver(tmp_path: pathlib.Path, root: pathlib.Path) -> Resolved:

@@ -70,10 +70,15 @@
 # every other renderer in this directory uses.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source shared ANSI color primitive (single home for the color-name ->
 # escape-code table — see team/scripts/lib/script_common.sh).
@@ -84,6 +89,8 @@ source "${SCRIPT_DIR}/../lib/script_common.sh"
 # framework temp root, never bare /tmp.
 # shellcheck source=../lib/temp.sh
 source "${SCRIPT_DIR}/../lib/temp.sh"
+# shellcheck source=../lib/exit_trap.sh
+source "${SCRIPT_DIR}/../lib/exit_trap.sh"
 
 # Source the single shared signal/boilerplate classifier. Line
 # classification is delegated entirely to this library — this script
@@ -112,12 +119,6 @@ while [[ $# -gt 0 ]]; do
     --no-color)
       NO_COLOR_ARG=true
       shift
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       # Unknown arguments silently ignored for forward compatibility,
@@ -180,7 +181,7 @@ MERGE_FILE="$(pgai_mktemp event-band)"
 # of that loop for why a real file replaces the process-substitution
 # pipe it used to read from directly.
 SIGNAL_FILE="$(pgai_mktemp event-band-signal)"
-trap 'rm -f "$MERGE_FILE" "$SIGNAL_FILE"' EXIT
+exit_trap_add 'rm -f "$MERGE_FILE" "$SIGNAL_FILE"'
 
 # READ_BOUND caps each agent's log to its last N lines via `tail -n`,
 # which (GNU coreutils) seeks backward from the end of a regular file
@@ -527,7 +528,7 @@ fi
 # know its EVENTUAL total count -- including occurrences later in the
 # stream -- at the moment it is printed.
 SORTED_FILE="$(pgai_mktemp event-band-sorted)"
-trap 'rm -f "$MERGE_FILE" "$SORTED_FILE"' EXIT
+exit_trap_add 'rm -f "$SORTED_FILE"'
 # The MERGE_SEQ suffix folded into field 1 (see the printf above) makes
 # every row's sort key distinct, so this sort never has a tie to break:
 # rows land in ascending date+time order, and rows that share a

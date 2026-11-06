@@ -33,10 +33,11 @@ this order::
                       ``none`` when the site gave none.
     resume            ``branch`` to re-dispatch onto the existing feature
                       branch, ``fresh`` to start a new one.
-    requeues          how many times triage has returned the task to its
-                      owner over the whole life of this record, across
-                      every re-block and block epoch; triage compares it
-                      with ``[overwatch] requeue_budget``.
+    requeues          how many times triage, or the wake after a per-task
+                      timeout that left commits on the feature branch, has
+                      returned the task to its owner over the whole life of
+                      this record, across every re-block and block epoch;
+                      both compare it with ``[overwatch] requeue_budget``.
     requeue_reasons   the reason_code of each of those requeues, oldest
                       first, ``, ``-joined; ``none`` before the first.
 
@@ -166,7 +167,8 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, NoReturn, Optional, Sequence
+from typing import NoReturn
+from collections.abc import Callable, Iterable, Sequence
 
 # Run by file path (``python3 .../block_record.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -383,19 +385,19 @@ def parse_fields(body: str) -> dict[str, str]:
     return fields
 
 
-def _canonical_iso(value: str) -> Optional[str]:
+def _canonical_iso(value: str) -> str | None:
     """Return *value* as canonical UTC ISO-8601, or None when it does not parse."""
     parsed = try_parse_iso(value)
     return format_iso(parsed) if parsed is not None else None
 
 
-def _canonical_cooldown(value: str) -> Optional[str]:
+def _canonical_cooldown(value: str) -> str | None:
     if value.strip().lower() == NONE_VALUE:
         return NONE_VALUE
     return _canonical_iso(value)
 
 
-def _parse_attempts(value: str) -> Optional[int]:
+def _parse_attempts(value: str) -> int | None:
     text = value.strip()
     return int(text) if text.isdigit() else None
 
@@ -418,7 +420,7 @@ def format_requeue_reasons(codes: Iterable[str]) -> str:
     return REQUEUE_REASONS_SEPARATOR.join(cleaned) if cleaned else NONE_VALUE
 
 
-def record_from_fields(fields: dict[str, str], status_file: "Path | str | None" = None) -> BlockRecord:
+def record_from_fields(fields: dict[str, str], status_file: Path | str | None = None) -> BlockRecord:
     """Build a BlockRecord from parsed fields, refusing a malformed one.
 
     ``reason_code`` and ``owner_role`` are normalised but not checked
@@ -478,7 +480,7 @@ def record_from_fields(fields: dict[str, str], status_file: "Path | str | None" 
     )
 
 
-def _record_body(text: str) -> Optional[str]:
+def _record_body(text: str) -> str | None:
     """The section body, or None when status.md carries no live record.
 
     An empty body or the literal ``none`` reads as no record.
@@ -489,7 +491,7 @@ def _record_body(text: str) -> Optional[str]:
     return body
 
 
-def read_block_record(text: str, status_file: "Path | str | None" = None) -> Optional[BlockRecord]:
+def read_block_record(text: str, status_file: Path | str | None = None) -> BlockRecord | None:
     """Return the Block Record in status.md *text*, or None when there is none.
 
     *status_file*, when given, is named in a refusal's remedy.
@@ -572,7 +574,9 @@ ACTION_VERBS: dict[str, tuple[ActionArgSpec, ...]] = {
         # rather than at import.
         ActionArgSpec("project", ini.is_project_name, "a project name, e.g. pgai-agent-kanban"),
         ActionArgSpec("version", re.compile(r"^v\d+\.\d+\.\d+$").match, "a release version, vX.Y.Z"),
-        ActionArgSpec("bugs", re.compile(r"^BUG-\d{4}(?:,BUG-\d{4})*$").match, "comma-separated bug IDs, BUG-NNNN[,BUG-NNNN]"),
+        ActionArgSpec(
+            "bugs", re.compile(r"^BUG-\d{4}(?:,BUG-\d{4})*$").match, "comma-separated bug IDs, BUG-NNNN[,BUG-NNNN]"
+        ),
     ),
 }
 
@@ -667,7 +671,7 @@ def parse_action_args(values: Iterable[str]) -> dict[str, str]:
     return ordered  # type: ignore[return-value]
 
 
-def format_action_args(args: "dict[str, str]") -> list[str]:
+def format_action_args(args: dict[str, str]) -> list[str]:
     """Return validated action arguments as ``key=value`` evidence tokens."""
     return [f"{key}={value}" for key, value in args.items()]
 
@@ -702,8 +706,7 @@ def _read_status(status_file: Path) -> str:
     if not status_file.is_file():
         _refuse(
             "block-record.missing-status-file",
-            f"no status.md found at {status_file}; a Block Record is only "
-            "written into an existing task status file",
+            f"no status.md found at {status_file}; a Block Record is only " "written into an existing task status file",
             f"ls -l {shlex.quote(str(status_file.parent))}",
         )
     try:
@@ -737,7 +740,7 @@ def _apply(status_file: Path, text: str, record: BlockRecord) -> BlockRecord:
     return record
 
 
-def load_block_record(status_file: "Path | str") -> Optional[BlockRecord]:
+def load_block_record(status_file: Path | str) -> BlockRecord | None:
     """Read *status_file*'s Block Record; None when it carries none.
 
     Raises:
@@ -751,10 +754,7 @@ def _validated_code_and_role(status_file: Path, reason_code: str, owner_role: st
     role = normalize_owner_role(owner_role or "")
     example_role = role if role in OWNER_ROLES else "CODER"
     example_code = code if code in REASON_CODES else "agent_unclassified"
-    example = (
-        f"python3 {_MODULE_FILE} write {shlex.quote(str(status_file))} "
-        f"{example_code} {example_role}"
-    )
+    example = f"python3 {_MODULE_FILE} write {shlex.quote(str(status_file))} " f"{example_code} {example_role}"
     if code not in REASON_CODES:
         _refuse(
             "block-record.unknown-reason-code",
@@ -765,16 +765,15 @@ def _validated_code_and_role(status_file: Path, reason_code: str, owner_role: st
     if role not in OWNER_ROLES:
         _refuse(
             "block-record.unknown-owner-role",
-            f"owner_role {owner_role!r} is not one of {'|'.join(OWNER_ROLES)}; "
-            "nothing was written",
+            f"owner_role {owner_role!r} is not one of {'|'.join(OWNER_ROLES)}; " "nothing was written",
             f"python3 {_MODULE_FILE} codes --owner-roles; {example}",
         )
     return code, role
 
 
-def _now_iso(now: "datetime.datetime | str | None", status_file: Path) -> str:
+def _now_iso(now: datetime.datetime | str | None, status_file: Path) -> str:
     if now is None:
-        return format_iso(datetime.datetime.now(datetime.timezone.utc))
+        return format_iso(datetime.datetime.now(datetime.UTC))
     if isinstance(now, datetime.datetime):
         return format_iso(now)
     canonical = _canonical_iso(now)
@@ -820,12 +819,12 @@ def _salvaged(body: str) -> dict[str, str]:
 
 
 def write_block_record(
-    status_file: "Path | str",
+    status_file: Path | str,
     reason_code: str,
     owner_role: str,
-    evidence: "Sequence[str] | str" = (),
+    evidence: Sequence[str] | str = (),
     *,
-    now: "datetime.datetime | str | None" = None,
+    now: datetime.datetime | str | None = None,
 ) -> BlockRecord:
     """Write (first block) or re-write (re-block) the Block Record.
 
@@ -858,7 +857,7 @@ def write_block_record(
     return record
 
 
-def _stamp_ledger(path: Path, *, opening: bool, reason_code: str, timestamp: Optional[str] = None) -> None:
+def _stamp_ledger(path: Path, *, opening: bool, reason_code: str, timestamp: str | None = None) -> None:
     """Open (or close) the task's block on the blocked ledger beside a
     record write or removal. Best-effort and never raises -- CENSUS CLASS
     CONVERT (docs/blocking-site-census.md): see "Blocked ledger" in the
@@ -874,9 +873,7 @@ def _stamp_ledger(path: Path, *, opening: bool, reason_code: str, timestamp: Opt
         stamp_ledger_block_end(kanban_root, project, source, reason_code=reason_code)
 
 
-def _block_write_record(
-    text: str, code: str, role: str, evidence: "Sequence[str] | str", stamp: str
-) -> BlockRecord:
+def _block_write_record(text: str, code: str, role: str, evidence: Sequence[str] | str, stamp: str) -> BlockRecord:
     """The record a block write at *stamp* leaves, given status.md *text*.
 
     A first block starts the triage fields fresh; a re-block keeps what
@@ -903,10 +900,10 @@ def render_block_record(
     text: str,
     reason_code: str,
     owner_role: str,
-    evidence: "Sequence[str] | str" = (),
+    evidence: Sequence[str] | str = (),
     *,
-    now: "datetime.datetime | str | None" = None,
-    status_file: "Path | str | None" = None,
+    now: datetime.datetime | str | None = None,
+    status_file: Path | str | None = None,
 ) -> tuple[str, BlockRecord]:
     """Text-level block write: return *text* carrying the new record, and the record.
 
@@ -947,14 +944,14 @@ def strip_block_record(text: str) -> str:
 
 
 def update_block_record(
-    status_file: "Path | str",
+    status_file: Path | str,
     *,
-    attempts: Optional[int] = None,
+    attempts: int | None = None,
     bump_attempts: bool = False,
-    cooldown_until: "datetime.datetime | str | None" = None,
-    resume: Optional[str] = None,
+    cooldown_until: datetime.datetime | str | None = None,
+    resume: str | None = None,
     restart_epoch: bool = False,
-    record_requeue: Optional[str] = None,
+    record_requeue: str | None = None,
 ) -> BlockRecord:
     """Update the triage fields of an existing Block Record.
 
@@ -987,8 +984,12 @@ def update_block_record(
     path = Path(status_file)
     example = f"python3 {_MODULE_FILE} update {shlex.quote(str(path))} --bump-attempts --cooldown-until none"
     if (
-        attempts is None and not bump_attempts and cooldown_until is None and resume is None
-        and not restart_epoch and record_requeue is None
+        attempts is None
+        and not bump_attempts
+        and cooldown_until is None
+        and resume is None
+        and not restart_epoch
+        and record_requeue is None
     ):
         _refuse(
             "block-record.nothing-to-update",
@@ -1007,7 +1008,7 @@ def update_block_record(
             f"attempts {attempts!r} is not a whole number of zero or more",
             example,
         )
-    new_cooldown: Optional[str] = None
+    new_cooldown: str | None = None
     if cooldown_until is not None:
         new_cooldown = (
             format_iso(cooldown_until)
@@ -1020,7 +1021,7 @@ def update_block_record(
                 f"cooldown_until {cooldown_until!r} is neither an ISO-8601 time nor none",
                 example,
             )
-    new_resume: Optional[str] = None
+    new_resume: str | None = None
     if resume is not None:
         new_resume = resume.strip().lower()
         if new_resume not in RESUME_MODES:
@@ -1029,7 +1030,7 @@ def update_block_record(
                 f"resume {resume!r} is not one of {'|'.join(RESUME_MODES)}",
                 f"python3 {_MODULE_FILE} update {shlex.quote(str(path))} --resume branch",
             )
-    requeue_code: Optional[str] = None
+    requeue_code: str | None = None
     if record_requeue is not None:
         requeue_code = normalize_reason_code(record_requeue)
         if requeue_code not in REASON_CODES:
@@ -1051,9 +1052,7 @@ def update_block_record(
         )
     changes: dict = {}
     if restart_epoch:
-        changes.update(
-            first_blocked_at=current.last_blocked_at, attempts=INITIAL_ATTEMPTS, cooldown_until=NONE_VALUE
-        )
+        changes.update(first_blocked_at=current.last_blocked_at, attempts=INITIAL_ATTEMPTS, cooldown_until=NONE_VALUE)
     if attempts is not None:
         changes["attempts"] = attempts
     if bump_attempts:
@@ -1068,7 +1067,7 @@ def update_block_record(
     return _apply(path, text, dataclasses.replace(current, **changes))
 
 
-def remove_block_record(status_file: "Path | str") -> bool:
+def remove_block_record(status_file: Path | str) -> bool:
     """Remove the ``## Block Record`` section from *status_file*.
 
     A removal that removed a record (the task reached DONE or WONT-DO)
@@ -1127,7 +1126,9 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("reason_code", metavar="REASON_CODE", nargs="?", help="a code from 'codes'")
     w.add_argument("owner_role", metavar="OWNER_ROLE", nargs="?", help="one of " + "|".join(OWNER_ROLES))
     w.add_argument(
-        "evidence", metavar="EVIDENCE", nargs="*",
+        "evidence",
+        metavar="EVIDENCE",
+        nargs="*",
         help="evidence tokens such as worktree=gone branch=NAME ahead=2; joined with '; '",
     )
 
@@ -1151,7 +1152,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     u.add_argument("status_file", metavar="STATUS_FILE", help="the task's status.md (must carry a record)")
     u.add_argument(
-        "--restart-epoch", action="store_true",
+        "--restart-epoch",
+        action="store_true",
         help="start a new block epoch at the latest block: first_blocked_at becomes last_blocked_at, "
         "attempts 0 and cooldown_until none (applied before the other options); requeues and "
         "requeue_reasons are kept",
@@ -1162,7 +1164,8 @@ def _parser() -> argparse.ArgumentParser:
     u.add_argument("--cooldown-until", metavar="ISO|none", help="no triage action before this time")
     u.add_argument("--resume", metavar="branch|fresh", help="how the next dispatch treats the feature branch")
     u.add_argument(
-        "--record-requeue", metavar="REASON_CODE",
+        "--record-requeue",
+        metavar="REASON_CODE",
         help="record one requeue for this reason code: requeues goes up by one and the code is appended to "
         "requeue_reasons",
     )
@@ -1186,11 +1189,13 @@ def _parser() -> argparse.ArgumentParser:
     listing = c.add_mutually_exclusive_group()
     listing.add_argument("--owner-roles", action="store_true", help="print the owner roles instead")
     listing.add_argument(
-        "--agent", action="store_true",
+        "--agent",
+        action="store_true",
         help="print only the agent_<...> codes the status-writer tool's --reason-code accepts",
     )
     listing.add_argument(
-        "--action-verbs", action="store_true",
+        "--action-verbs",
+        action="store_true",
         help="print each allowlisted --action-args verb with its typed arguments",
     )
     return parser
@@ -1228,7 +1233,7 @@ def _run(args: argparse.Namespace) -> int:
         return EXIT_OK
 
     if args.command == "update":
-        attempts: Optional[int] = None
+        attempts: int | None = None
         if args.attempts is not None:
             if not args.attempts.strip().isdigit():
                 _refuse(
@@ -1253,7 +1258,7 @@ def _run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """CLI entry point; returns the exit code."""
     parser = _parser()
     args = parser.parse_args(argv)

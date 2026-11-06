@@ -79,11 +79,11 @@
 # --- Bootstrap: self-locate → source shell-env → fail loud ---
 # shellcheck source=lib/env_bootstrap.sh
 # CENSUS-ANCHOR: run-cold-build-tests-01
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve kanban root and script directory ---
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
-_RCB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RCB_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # --- Source optional config files ---
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
@@ -116,7 +116,7 @@ set -euo pipefail
 
 # --- Clean exit handling ---
 # shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Release this invocation's pytest basetemp on every exit path ---
@@ -134,7 +134,7 @@ CLEANUP_ON_EXIT_PRE_HOOK=_rcb_release_basetemp_on_exit
 # Run from a checkout (team/scripts/), the root is that checkout; run from an
 # install (scripts/), it is the resolved dev tree, PGAI_DEV_TREE_PATH
 # (resolve_runner_repo_root in lib/dev_tree.sh).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(resolve_runner_repo_root "$SCRIPT_DIR" "$TEAM_ROOT/kanban.cfg")"
 
 # shellcheck source=lib/error_contract.sh
@@ -229,24 +229,10 @@ EOF
       exit 0
       ;;
     *)
-      # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
-      # diagnose"): the offending argument is named deterministically, but
-      # which valid flag the operator meant to pass is user intent this
-      # runner cannot resolve — --help names every accepted flag as the
-      # next step. Operator-CLI argument dispatch: out of the census's
-      # loop-bearing scope (the autonomous loop always invokes this runner
-      # with well-formed arguments), so no CENSUS-ANCHOR here.
-      echo "FAIL: unrecognized argument '$1'." >&2
-      echo "" >&2
-      echo "Cause(s):" >&2
-      echo "  - '$1' does not match any flag this runner accepts." >&2
-      echo "" >&2
-      echo "To fix:" >&2
-      echo "  1. bash \"${BASH_SOURCE[0]}\" --help          # list every accepted flag" >&2
-      echo "  2. Re-run with the corrected flag, e.g.: $(container_tier_operator_command "${BASH_SOURCE[0]}" --image all --verbose)" >&2
-      echo "" >&2
-      echo "Rule: this runner accepts only the flags listed in its --help output; an" >&2
-      echo "unrecognized argument is rejected rather than silently ignored." >&2
+      # Operator-CLI argument dispatch: out of the census's loop-bearing scope
+      # (the autonomous loop always invokes this runner with well-formed
+      # arguments), so no CENSUS-ANCHOR here.
+      gated_runner_reject_unknown_arg "${BASH_SOURCE[0]}" "$1" "$(container_tier_operator_command "${BASH_SOURCE[0]}" --image all --verbose)"
       exit 1
       ;;
   esac
@@ -260,21 +246,8 @@ container_tier_select_images "${BASH_SOURCE[0]}" ${_RCB_ORIG_ARGS[@]+"${_RCB_ORI
 unset _RCB_ORIG_ARGS
 
 # --- Check pytest is available ---
-# Full remedy (docs/coding-standards.md "Gates prescribe, not just diagnose"):
-# pytest's absence has one universal, verbatim-runnable fix.
-if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/null 2>&1; then
-  echo "FAIL: pytest is not installed in this Python environment." >&2
-  echo "" >&2
-  echo "Cause(s):" >&2
-  echo "  - no 'pytest' executable found on PATH" >&2
-  echo "  - 'python3 -m pytest --version' also failed (pytest not importable)" >&2
-  echo "" >&2
-  echo "To fix:" >&2
-  echo "  1. pip install pytest" >&2
-  echo "  2. $(container_tier_operator_command "${BASH_SOURCE[0]}" --image all)" >&2
-  echo "" >&2
-  echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
-  echo "the cold-build lane without it." >&2
+if ! gated_runner_pytest_available; then
+  gated_runner_report_pytest_missing "$(container_tier_operator_command "${BASH_SOURCE[0]}" --image all)" "the cold-build lane"
   # BLOCK-WORTHY: verification unable to run at all -- pytest missing means
   # the cold-build sweep cannot execute, not that it ran clean.
   # CENSUS-ANCHOR: run-cold-build-tests-02

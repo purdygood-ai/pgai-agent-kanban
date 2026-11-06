@@ -50,7 +50,10 @@ def _require_git() -> None:
 
 def _git(repo: pathlib.Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
         timeout=_TIMEOUT_SECONDS,
     ).stdout
 
@@ -85,17 +88,21 @@ def _mktemp_shim(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     log = tmp_path / "mktemp.log"
     shim = bin_dir / "mktemp"
     shim.write_text(
-        "#!/bin/bash\n"
-        f"printf '%s\\n' \"$*\" >> '{log}'\n"
-        f"exec '{real}' \"$@\"\n",
+        "#!/bin/bash\n" f"printf '%s\\n' \"$*\" >> '{log}'\n" f"exec '{real}' \"$@\"\n",
         encoding="utf-8",
     )
     shim.chmod(0o755)
     return bin_dir, log
 
 
-def _run(script: pathlib.Path, tmp_path: pathlib.Path, root: pathlib.Path, repo: pathlib.Path,
-         env_extra: dict[str, str], shim_dir: pathlib.Path) -> subprocess.CompletedProcess:
+def _run(
+    script: pathlib.Path,
+    tmp_path: pathlib.Path,
+    root: pathlib.Path,
+    repo: pathlib.Path,
+    env_extra: dict[str, str],
+    shim_dir: pathlib.Path,
+) -> subprocess.CompletedProcess:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     cwd = tmp_path / "elsewhere"
@@ -107,8 +114,13 @@ def _run(script: pathlib.Path, tmp_path: pathlib.Path, root: pathlib.Path, repo:
     )
     proc = subprocess.Popen(
         ["bash", str(script), "--worktree", str(repo), "--kanban-root", str(root)],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(cwd), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         out, err = proc.communicate(timeout=_TIMEOUT_SECONDS)
@@ -137,8 +149,14 @@ def test_scratch_lands_under_the_temp_dir_override(tmp_path: pathlib.Path) -> No
     other_tmpdir.mkdir()
     shim_dir, log = _mktemp_shim(tmp_path)
 
-    result = _run(_SMOKE_SH, tmp_path, root, repo,
-                  {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)}, shim_dir)
+    result = _run(
+        _SMOKE_SH,
+        tmp_path,
+        root,
+        repo,
+        {"PGAI_AGENT_KANBAN_TEMP_DIR": str(sandbox), "TMPDIR": str(other_tmpdir)},
+        shim_dir,
+    )
 
     assert result.returncode == 0, _diag(result)
     assert "0 failed" in result.stdout, _diag(result)
@@ -164,8 +182,7 @@ def test_missing_temp_sh_refuses_before_any_branch_is_made(tmp_path: pathlib.Pat
     repo = _scratch_repo(tmp_path)
     branches_before = _git(repo, "branch", "--list")
     scripts = tmp_path / "broken_install" / "scripts"
-    shutil.copytree(_SCRIPTS_DIR / "lib", scripts / "lib",
-                    ignore=shutil.ignore_patterns("temp.sh", "__pycache__"))
+    shutil.copytree(_SCRIPTS_DIR / "lib", scripts / "lib", ignore=shutil.ignore_patterns("temp.sh", "__pycache__"))
     (scripts / "cleanup").mkdir()
     shutil.copy2(_CLEANUP_SH, scripts / _CLEANUP_SH.name)
     broken = scripts / "cleanup" / _SMOKE_SH.name

@@ -86,7 +86,8 @@ import os
 import pathlib
 import shlex
 import sys
-from typing import Callable, ContextManager, Iterable, Optional, Union
+from typing import Union
+from collections.abc import Callable, Iterable
 
 from pgai_agent_kanban.archive.layout import (
     CATEGORY_REQUIREMENTS,
@@ -243,9 +244,7 @@ def _stderr_line(line: str) -> None:
 class _Run:
     """The state one apply or restore run accumulates."""
 
-    def __init__(
-        self, kanban_root: pathlib.Path, project: str, op: str, log: Optional[Callable[[str], None]]
-    ) -> None:
+    def __init__(self, kanban_root: pathlib.Path, project: str, op: str, log: Callable[[str], None] | None) -> None:
         self.root = kanban_root
         self.project = project
         self.op = op
@@ -285,7 +284,7 @@ class _Run:
 
 def _take_repo_lock(
     run: _Run, task: str, accept_chain_lock: bool = False
-) -> Union[ContextManager[object], RunResult]:
+) -> contextlib.AbstractContextManager[object] | RunResult:
     """The repo lock to work under, or the skipped/failed result to return instead.
 
     Returns a context manager to run inside: the ``ops.locks.HeldLock`` this
@@ -319,9 +318,7 @@ def _take_repo_lock(
             shlex.quote(str(run.root / "scripts" / "release-locks.sh")),
         )
         run.say(block)
-        return run.result(
-            RESULT_SKIPPED, error=block, lock_holder=(busy.holder, busy.pid, busy.op, busy.task)
-        )
+        return run.result(RESULT_SKIPPED, error=block, lock_holder=(busy.holder, busy.pid, busy.op, busy.task))
     except OpsError as exc:
         block = _failure_block(run, "", exc, f"ls -ld {shlex.quote(str(lock_file.parent))}")
         run.say(block)
@@ -430,7 +427,7 @@ def apply(
     plan: ArchivePlan,
     *,
     task: str = NO_TASK,
-    log: Optional[Callable[[str], None]] = None,
+    log: Callable[[str], None] | None = None,
     accept_chain_lock: bool = False,
 ) -> RunResult:
     """Move *plan*'s items, queue lines and training logs into the archive.
@@ -491,9 +488,7 @@ def _apply_locked(run: _Run, planned: ArchivePlan) -> RunResult:
                 run, item.item_id, item.path, run.archive.root / item.relpath, fresh.last_released, item.category
             )
         except _RUN_ERRORS as exc:
-            return _fail(
-                run, item.item_id, exc, f"ls -ld {shlex.quote(str(item.path))}", dropped=tuple(dropped)
-            )
+            return _fail(run, item.item_id, exc, f"ls -ld {shlex.quote(str(item.path))}", dropped=tuple(dropped))
 
     run.say(
         f"archive: project '{run.project}': moved {len(run.rows)} item(s), "
@@ -511,9 +506,7 @@ def _apply_locked(run: _Run, planned: ArchivePlan) -> RunResult:
 def _refuse_not_archived(run: _Run, item_id: str) -> ArchiveRestoreError:
     parsed = classify_item_id(item_id)
     listing = run.archive.category_dir(parsed.category) if parsed is not None else run.archive.root
-    shape = "" if parsed is not None else (
-        " It is not a BUG-NNNN, PRIORITY-NNNN, vX.Y.Z-slug or task ID either."
-    )
+    shape = "" if parsed is not None else (" It is not a BUG-NNNN, PRIORITY-NNNN, vX.Y.Z-slug or task ID either.")
     return ArchiveRestoreError(
         "archive.restore_not_archived",
         f"archive: cannot restore '{item_id}' for project '{run.project}': "
@@ -558,9 +551,9 @@ def restore(
     project: str,
     item_id: str,
     *,
-    kanban_root: Optional[PathLike] = None,
+    kanban_root: PathLike | None = None,
     task: str = NO_TASK,
-    log: Optional[Callable[[str], None]] = None,
+    log: Callable[[str], None] | None = None,
     accept_chain_lock: bool = False,
 ) -> RunResult:
     """Move one archived item, its queue lines and its training logs back live.

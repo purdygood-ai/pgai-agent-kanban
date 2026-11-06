@@ -119,8 +119,6 @@ required
 - Existing HTTP API lives at team/pgai_agent_kanban/api/.
 - Task state transitions currently happen in
   team/pgai_agent_kanban/ops/write.py.
-- The dashboard already subscribes to a similar in-process signal —
-  see team/pgai_agent_kanban/dashboard/subscribe.py for prior art.
 
 ## Notes
 

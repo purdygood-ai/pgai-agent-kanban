@@ -64,7 +64,7 @@ def cors_client(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Test
 
     cfg = ApiConfig(
         host="127.0.0.1",
-        port=0,          # ephemeral; TestClient does not open a real socket
+        port=0,  # ephemeral; TestClient does not open a real socket
         kanban_root=_TEAM_DIR,
     )
     app = create_app(cfg=cfg)
@@ -171,8 +171,7 @@ def test_cors_preflight_operations_halt(cors_client: TestClient) -> None:
     )
 
     assert response.status_code in (200, 204), (
-        f"Expected 200 or 204 for CORS preflight, got {response.status_code}. "
-        f"Response body: {response.text!r}"
+        f"Expected 200 or 204 for CORS preflight, got {response.status_code}. " f"Response body: {response.text!r}"
     )
     assert "access-control-allow-origin" in response.headers, (
         "Expected Access-Control-Allow-Origin header in preflight response, "
@@ -185,6 +184,5 @@ def test_cors_preflight_operations_halt(cors_client: TestClient) -> None:
     # The CORS middleware should include POST in the allowed methods.
     allow_methods_header = response.headers.get("access-control-allow-methods", "")
     assert "POST" in allow_methods_header, (
-        f"Expected 'POST' in Access-Control-Allow-Methods, "
-        f"got {allow_methods_header!r}"
+        f"Expected 'POST' in Access-Control-Allow-Methods, " f"got {allow_methods_header!r}"
     )

@@ -135,10 +135,7 @@ def _build_kanban_root(tmp_path: pathlib.Path, *, stop_on_blocked: str | None) -
         encoding="utf-8",
     )
     (root / "projects.cfg").write_text(
-        "".join(
-            f"[project:{name}]\npriority={i}\nenabled=true\n\n"
-            for i, name in enumerate(_QUEUES, start=1)
-        ),
+        "".join(f"[project:{name}]\npriority={i}\nenabled=true\n\n" for i, name in enumerate(_QUEUES, start=1)),
         encoding="utf-8",
     )
 
@@ -175,8 +172,7 @@ def _install_stub_provider(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathli
     bin_dir = tmp_path / "stub_provider_bin"
     bin_dir.mkdir()
     ledger = tmp_path / "dispatches.log"
-    script = textwrap.dedent(
-        f"""\
+    script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         # Test-only stand-in for the provider CLI: blocks the task whose ID
         # carries -blocks-, completes every other one. Never reaches a model.
@@ -222,8 +218,7 @@ def _install_stub_provider(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathli
         fi
         echo '{{"type":"result","result":"stub","usage":{{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}'
         exit 0
-        """
-    )
+        """)
     stub = bin_dir / "claude"
     stub.write_text(script, encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -312,31 +307,32 @@ def test_default_blocked_task_parks_itself_and_batch_continues(tmp_path: pathlib
     # A blocked, and B -- the independent task right behind it -- dispatched
     # in the same batch; C, which names A as a prerequisite, never did.
     assert _state(root, _FIRST, _TASK_A) == "BLOCKED", context
-    assert _state(root, _FIRST, _TASK_B) == "DONE", (
-        f"the independent task behind the block must be dispatched in the same batch.{context}"
-    )
-    assert _state(root, _FIRST, _TASK_C) == "WAITING", (
-        f"the task whose prerequisite is the BLOCKED task must stay WAITING.{context}"
-    )
+    assert (
+        _state(root, _FIRST, _TASK_B) == "DONE"
+    ), f"the independent task behind the block must be dispatched in the same batch.{context}"
+    assert (
+        _state(root, _FIRST, _TASK_C) == "WAITING"
+    ), f"the task whose prerequisite is the BLOCKED task must stay WAITING.{context}"
     assert _TASK_C not in _dispatched(ledger), f"the dependant task was dispatched.{context}"
 
     # The second project's batch ran its own task unaffected.
     assert _state(root, _SECOND, _TASK_D) == "DONE", context
-    assert _dispatched(ledger) == [_TASK_A, _TASK_B, _TASK_D], (
-        f"expected exactly A, B, then the second project's task to dispatch.{context}"
-    )
+    assert _dispatched(ledger) == [
+        _TASK_A,
+        _TASK_B,
+        _TASK_D,
+    ], f"expected exactly A, B, then the second project's task to dispatch.{context}"
 
     # No BLOCKED stop reason anywhere in the batch log; the first project's
     # chain ended because its queue ran dry, and narrated the continue.
     assert _BLOCKED_STOP_TEXT not in log, f"the batch stopped on the BLOCKED task.{context}"
     first_done = [line for line in _project_lines(log, _FIRST) if ": done:" in line]
-    assert first_done and 'reason="no more BACKLOG tasks' in first_done[-1], (
-        f"expected the first project's chain to end on an empty queue.{context}"
-    )
-    assert any("a task ended BLOCKED; stop_on_blocked=false -- continuing" in line
-               for line in _project_lines(log, _FIRST)), (
-        f"expected the chain to narrate that it continued past the BLOCKED task.{context}"
-    )
+    assert (
+        first_done and 'reason="no more BACKLOG tasks' in first_done[-1]
+    ), f"expected the first project's chain to end on an empty queue.{context}"
+    assert any(
+        "a task ended BLOCKED; stop_on_blocked=false -- continuing" in line for line in _project_lines(log, _FIRST)
+    ), f"expected the chain to narrate that it continued past the BLOCKED task.{context}"
     assert any("beginning chain" in line for line in _project_lines(log, _SECOND)), context
 
 
@@ -374,9 +370,9 @@ def test_stop_on_blocked_true_stops_the_project_batch_after_the_blocked_task(tmp
     # The first project's chain stopped right after A with the existing
     # stop reason; neither B nor C was dispatched.
     first_done = [line for line in _project_lines(log, _FIRST) if ": done:" in line]
-    assert first_done and _STOP_ON_BLOCKED_REASON in first_done[-1], (
-        f"expected the first project's chain to stop with {_STOP_ON_BLOCKED_REASON}.{context}"
-    )
+    assert (
+        first_done and _STOP_ON_BLOCKED_REASON in first_done[-1]
+    ), f"expected the first project's chain to stop with {_STOP_ON_BLOCKED_REASON}.{context}"
     assert _TASK_B not in _dispatched(ledger), f"the independent task was dispatched after the stop.{context}"
     assert _TASK_C not in _dispatched(ledger), context
     assert _state(root, _FIRST, _TASK_B) == "BACKLOG", context

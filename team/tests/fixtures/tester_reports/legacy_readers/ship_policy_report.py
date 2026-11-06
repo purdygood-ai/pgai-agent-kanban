@@ -26,10 +26,10 @@ from __future__ import annotations
 import re
 import sys
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def first_word(value):
     """The first letters-and-dashes word of *value*, lowercased, with
@@ -97,6 +97,7 @@ def read_report_text(report_path):
 # Mode: dims — regression/integrity for the systemic_risk=high row
 # ---------------------------------------------------------------------------
 
+
 def finding_dimensions(report_path):
     """The "dims" mode: returns the "<regression> <integrity>" line it printed."""
     text = read_report_text(report_path)
@@ -144,13 +145,16 @@ def finding_dimensions(report_path):
 # Mode: values — normalized Recommendation / Systemic Risk + large-fix flag
 # ---------------------------------------------------------------------------
 
+
 def report_values(report_path):
     """The "values" mode: returns its five "key=value" lines as a dict, in
     the order it printed them."""
     text = read_report_text(report_path)
     if text is None:
-        print(f"report not readable at {report_path}: recommendation and "
-              f"systemic risk defaulted to none", file=sys.stderr)
+        print(
+            f"report not readable at {report_path}: recommendation and " f"systemic risk defaulted to none",
+            file=sys.stderr,
+        )
         sys.stderr.flush()
         rec_raw = risk_raw = None
         large = "no"
@@ -175,11 +179,9 @@ def report_values(report_path):
         ("Systemic Risk", risk_raw, systemic_risk),
     ):
         if token == "unparseable":
-            print(f"{label} in {report_path} could not be parsed: {raw!r}",
-                  file=sys.stderr)
+            print(f"{label} in {report_path} could not be parsed: {raw!r}", file=sys.stderr)
         elif raw is not None and raw.strip().lower() != token:
-            print(f"{label} in {report_path} normalized: {raw!r} -> {token}",
-                  file=sys.stderr)
+            print(f"{label} in {report_path} normalized: {raw!r} -> {token}", file=sys.stderr)
     sys.stderr.flush()
 
     return {

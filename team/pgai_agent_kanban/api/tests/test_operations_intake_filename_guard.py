@@ -40,7 +40,7 @@ import json
 import os
 import pathlib
 import shlex
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -176,14 +176,14 @@ def _assert_no_path_outside_intake_dir(envelope: dict, box: _Sandbox) -> None:
     root = box.intake_dir.resolve()
     for path in _absolute_paths(envelope):
         resolved = path.resolve()
-        assert resolved != root and resolved.is_relative_to(root), (
-            f"the envelope names {path}, outside the intake temp directory {root}: {envelope}"
-        )
+        assert resolved != root and resolved.is_relative_to(
+            root
+        ), f"the envelope names {path}, outside the intake temp directory {root}: {envelope}"
 
 
 def _resend_body(remedy: str) -> dict:
     """The JSON body a remedy's curl line re-sends, parsed as a shell command."""
-    argv = shlex.split(remedy[remedy.index("curl "):])
+    argv = shlex.split(remedy[remedy.index("curl ") :])
     assert argv[:4] == ["curl", "-sS", "-X", "POST"], argv
     assert argv[4].endswith("/operations/intake"), argv
     return json.loads(argv[argv.index("-d") + 1])
@@ -261,9 +261,9 @@ def test_not_bare_remedy_keeps_the_routing_prefix_and_resends_into_its_directory
     deposited = box.root / "projects" / _PROJECT / subdir / example
     assert deposited.read_text(encoding="utf-8") == resend["content"]
     for other in {"bugs", "priority", "requirements"} - {subdir}:
-        assert list((box.root / "projects" / _PROJECT / other).iterdir()) == [], (
-            f"re-sending the {subdir} remedy also wrote into {other}/"
-        )
+        assert (
+            list((box.root / "projects" / _PROJECT / other).iterdir()) == []
+        ), f"re-sending the {subdir} remedy also wrote into {other}/"
 
 
 def test_dry_run_for_an_accepted_name_names_only_a_path_inside_the_intake_dir(
@@ -360,7 +360,7 @@ def test_unroutable_bare_name_remedy_is_a_runnable_resend_naming_no_temp_file(
 
     # The remedy's curl line parses as a shell command and re-sends a body
     # whose name routes; sending that body exactly as printed is accepted.
-    argv = shlex.split(remedy[remedy.index("curl "):])
+    argv = shlex.split(remedy[remedy.index("curl ") :])
     assert argv[:4] == ["curl", "-sS", "-X", "POST"], argv
     assert argv[4].endswith("/operations/intake"), argv
     resend = json.loads(argv[argv.index("-d") + 1])

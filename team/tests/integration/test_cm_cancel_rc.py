@@ -58,7 +58,6 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -200,7 +199,10 @@ def _git(repo: pathlib.Path, *args: str) -> str:
     env = {**os.environ, **_GIT_ENV}
     done = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True, env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
     )
     return done.stdout
 
@@ -237,15 +239,16 @@ def _seed_root(base: pathlib.Path, repo: pathlib.Path, spec: dict) -> pathlib.Pa
     (root / "logs").mkdir()
     (root / "tmp").mkdir()
     (root / "kanban.cfg").write_text("[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8")
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     if spec.get("cfg", True):
         lines = ["[project]", f"project_name = {_PROJECT}"]
         if spec.get("dev_tree", True):
             lines.append(f"dev_tree_path = {repo}")
-        lines += ["workflow_type = release", f"branch_prefix = {spec.get('prefix', '')}",
-                  f"push_to_remote = {spec.get('push', 'false')}  # sandbox"]
+        lines += [
+            "workflow_type = release",
+            f"branch_prefix = {spec.get('prefix', '')}",
+            f"push_to_remote = {spec.get('push', 'false')}  # sandbox",
+        ]
         (proj / "project.cfg").write_text("\n".join(lines) + "\n", encoding="utf-8")
     active = spec.get("active", _VERSION)
     if active is not None:
@@ -259,9 +262,7 @@ def _seed_root(base: pathlib.Path, repo: pathlib.Path, spec: dict) -> pathlib.Pa
     for task_id, release, state in _TASKS:
         task_dir = proj / "tasks" / task_id
         task_dir.mkdir()
-        (task_dir / "README.md").write_text(
-            f"# Task: {task_id}\n\n## Release Version\n{release}\n", encoding="utf-8"
-        )
+        (task_dir / "README.md").write_text(f"# Task: {task_id}\n\n## Release Version\n{release}\n", encoding="utf-8")
         state_block = f"## State\n{state}\n\n" if state is not None else ""
         (task_dir / "status.md").write_text(
             f"# Status\n\n## Task\n{task_id}\n\n{state_block}## Summary\nfixture\n",
@@ -315,7 +316,9 @@ def snapshot(root: pathlib.Path, repo: pathlib.Path) -> dict:
     refs = _git(repo, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
     head = subprocess.run(
         ["git", "-C", str(repo), "symbolic-ref", "--short", "HEAD"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
     return {"files": files, "refs": refs.splitlines(), "head": head}
 
@@ -354,8 +357,11 @@ def _run_cli(script: pathlib.Path, base, root, repo, spec) -> subprocess.Complet
         ["bash", str(script), *spec.get("args", _default_args())],
         input=stdin if stdin is not None else None,
         stdin=None if stdin is not None else subprocess.DEVNULL,
-        capture_output=True, text=True, env=_cli_env(base, root, repo, spec),
-        cwd=str(cwd), timeout=_TIMEOUT_SECONDS,
+        capture_output=True,
+        text=True,
+        env=_cli_env(base, root, repo, spec),
+        cwd=str(cwd),
+        timeout=_TIMEOUT_SECONDS,
     )
 
 
@@ -467,12 +473,8 @@ def test_route_and_cli_reach_cm_cancel_cancel_rc(tmp_path: pathlib.Path) -> None
     body = result.response.json()
     assert result.response.status_code == 500, body
     assert body["exit_code"] == result.cli.completed.returncode == 1
-    assert normalise(body["stdout"], rest_root, rest_repo) == normalise(
-        result.cli.completed.stdout, cli_root, cli_repo
-    )
-    assert normalise(body["stderr"], rest_root, rest_repo) == normalise(
-        result.cli.completed.stderr, cli_root, cli_repo
-    )
+    assert normalise(body["stdout"], rest_root, rest_repo) == normalise(result.cli.completed.stdout, cli_root, cli_repo)
+    assert normalise(body["stderr"], rest_root, rest_repo) == normalise(result.cli.completed.stderr, cli_root, cli_repo)
     assert body["error"] == "cancel_rc.refused"
 
 
@@ -572,8 +574,12 @@ class _CancelGateCase:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(_SCRIPT), *_default_args()],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env,
-            cwd=str(cwd), timeout=_TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(cwd),
+            timeout=_TIMEOUT_SECONDS,
         )
 
     def network_calls(self) -> list[str]:
@@ -602,8 +608,11 @@ class TestCancelPushGate:
             ("no-dev-tree-path", "missing dev-tree-path", {"PGAI_DEV_TREE_PATH": "{REPO}"}, 1),
         ],
         ids=[
-            "no-project-cfg-repo-root", "not-registered-repo-root", "no-dev-tree-path-repo-root",
-            "no-project-cfg-env-only", "no-dev-tree-path-env-only",
+            "no-project-cfg-repo-root",
+            "not-registered-repo-root",
+            "no-dev-tree-path-repo-root",
+            "no-project-cfg-env-only",
+            "no-dev-tree-path-env-only",
         ],
     )
     def test_unresolved_project_contacts_no_remote(
@@ -616,9 +625,9 @@ class TestCancelPushGate:
         assert run.returncode == rc, f"{shape}: unexpected exit\n{_cancel_out(run)}"
         assert case.network_calls() == [], f"{shape}: cancel-rc made a git network call\n{_cancel_out(run)}"
         skips = _gate_skip_lines(_cancel_out(run))
-        assert len(skips) == 1 and token in skips[0], (
-            f"{shape}: expected one {_PUSH_GATE_SKIP} line naming {token!r}\n{_cancel_out(run)}"
-        )
+        assert (
+            len(skips) == 1 and token in skips[0]
+        ), f"{shape}: expected one {_PUSH_GATE_SKIP} line naming {token!r}\n{_cancel_out(run)}"
         assert skips[0].startswith("[cm-cancel-rc] "), skips[0]
         branches = _git(case.repo, "for-each-ref", "--format=%(refname)", "refs/heads")
         assert (f"refs/heads/rc/{_VERSION}" in branches) is (rc != 0), branches

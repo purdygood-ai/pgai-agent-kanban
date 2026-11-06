@@ -452,17 +452,17 @@ class RcSpan:
             )
 
     @classmethod
-    def last(cls, count: int) -> "RcSpan":
+    def last(cls, count: int) -> RcSpan:
         """The newest `count` shipped rollups (`count` >= 1)."""
         return cls(kind=_SPAN_LAST, count=count)
 
     @classmethod
-    def all_shipped(cls) -> "RcSpan":
+    def all_shipped(cls) -> RcSpan:
         """Every shipped rollup in the directory."""
         return cls(kind=_SPAN_ALL)
 
     @classmethod
-    def since_version(cls, version: str) -> "RcSpan":
+    def since_version(cls, version: str) -> RcSpan:
         """Every shipped rollup at or above `version` (``vX.Y.Z`` or
         ``X.Y.Z``) by semantic-version order."""
         if isinstance(version, str):

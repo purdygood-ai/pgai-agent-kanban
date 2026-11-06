@@ -4,12 +4,15 @@
 # (pgai_agent_kanban.lib.push_decision): whether an out-of-band push site
 # may push a project's refs to its remote.
 #
-# Every out-of-band push site (OVERWATCH check-push-lag.sh, CM
-# push-watchdog.sh) decides through pp_push_decision, so all of them apply
-# one rule. The rule lives in the Python module's docstring; in short, a
-# project resolves only when it is registered in projects.cfg, its own
-# project.cfg (or legacy PROJECT.cfg) exists, and that file names a
-# dev_tree_path. An inherited PGAI_DEV_TREE_PATH is never consulted.
+# Every out-of-band push site (CM push-watchdog.sh, OVERWATCH
+# check-orphan-rc-branches.sh and check-push-lag.sh) asks pp_push_decision
+# whether the project resolves. The rule lives in the Python module's
+# docstring; in short, a project resolves only when it is registered in
+# projects.cfg, its own project.cfg (or legacy PROJECT.cfg) exists, and that
+# file names a dev_tree_path. An inherited PGAI_DEV_TREE_PATH is never
+# consulted. The resolver answers "push" for an absent push_to_remote key;
+# push-watchdog.sh and check-orphan-rc-branches.sh act on that answer, while
+# check-push-lag.sh pushes only on an explicit push_to_remote = true.
 #
 # Source this file to get pp_push_decision:
 #   source "$(dirname "${BASH_SOURCE[0]}")/push_decision.sh"

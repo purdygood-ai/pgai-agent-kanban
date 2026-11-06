@@ -122,7 +122,7 @@ def _script(impl: str, calls: str) -> str:
     )
 
 
-def _run(impl: str, root: pathlib.Path, text: "str | None", calls: str) -> dict:
+def _run(impl: str, root: pathlib.Path, text: str | None, calls: str) -> dict:
     """Write *text* to ``root/status.md`` (unless None), run *calls* with
     *impl*, and return the exit code, both streams and the file bytes."""
     shutil.rmtree(root, ignore_errors=True)
@@ -161,17 +161,16 @@ def _run(impl: str, root: pathlib.Path, text: "str | None", calls: str) -> dict:
     }
 
 
-def _both(tmp_path: pathlib.Path, text: "str | None", calls: str) -> tuple[dict, dict]:
+def _both(tmp_path: pathlib.Path, text: str | None, calls: str) -> tuple[dict, dict]:
     module = _run("module", tmp_path / "root", text, calls)
     reference = _run("reference", tmp_path / "root", text, calls)
     return module, reference
 
 
-def _assert_parity(tmp_path: pathlib.Path, text: "str | None", calls: str) -> dict:
+def _assert_parity(tmp_path: pathlib.Path, text: str | None, calls: str) -> dict:
     module, reference = _both(tmp_path, text, calls)
     assert module == reference, (
-        f"module and heredoc reference disagree\n--- module ---\n{module}\n"
-        f"--- reference ---\n{reference}"
+        f"module and heredoc reference disagree\n--- module ---\n{module}\n" f"--- reference ---\n{reference}"
     )
     return module
 
@@ -186,8 +185,7 @@ _STATUS_SHAPES = {
         "## Blockers\nsomething broke\n\n## Labels\nfoo\n\n## Blocked Reason\nprovider error\n"
     ),
     "blank-lines-before-values": (
-        "## State\n\n\nBLOCKED\n\n## Summary\n\n\nold\n\n## Needs Human\n\nyes\n\n"
-        "## Blockers\n\nx\n"
+        "## State\n\n\nBLOCKED\n\n## Summary\n\n\nold\n\n## Needs Human\n\nyes\n\n" "## Blockers\n\nx\n"
     ),
     "bold-and-trailing-text": (
         "## State\n**BLOCKED**\n\n## Summary\nold (see log)\n\n## Needs Human\nyes - waiting\n\n"
@@ -250,8 +248,16 @@ def test_record_readers_match_the_heredoc_reference(tmp_path: pathlib.Path, shap
         "## Transient Retry\nxretry_count: 8\nretry_count: 3\n",
         "## State\nx\n## Transient Retry\nretry_count: 6\n## Summary\nretry_count: 9\n",
     ],
-    ids=["empty-value-runs-on", "tab-and-trailing-space", "blank-line-runs", "heading-trailing-spaces",
-         "uppercase-none", "repeated-field", "prefixed-key", "no-blank-separators"],
+    ids=[
+        "empty-value-runs-on",
+        "tab-and-trailing-space",
+        "blank-line-runs",
+        "heading-trailing-spaces",
+        "uppercase-none",
+        "repeated-field",
+        "prefixed-key",
+        "no-blank-separators",
+    ],
 )
 def test_record_field_variants_match_the_heredoc_reference(tmp_path: pathlib.Path, record: str) -> None:
     _assert_parity(tmp_path, record, _READS)
@@ -300,8 +306,12 @@ def test_zero_progress_cap_counting_matches_the_heredoc_reference(tmp_path: path
     """)
     out = _assert_parity(tmp_path, _STATUS_SHAPES["canonical"], cycle)
     assert out["stdout"].splitlines() == [
-        "cycle 1 BACKLOG", "cycle 2 BACKLOG", "cycle 3 BLOCKED", "cycle 4 BLOCKED",
-        "after reset: 0", "cycle 1 BACKLOG",
+        "cycle 1 BACKLOG",
+        "cycle 2 BACKLOG",
+        "cycle 3 BLOCKED",
+        "cycle 4 BLOCKED",
+        "after reset: 0",
+        "cycle 1 BACKLOG",
     ]
 
 
@@ -386,10 +396,7 @@ def test_requeue_and_escalate_on_a_missing_file_fail_alike(tmp_path: pathlib.Pat
 # ---------------------------------------------------------------------------
 
 
-_HARNESS_CALLS = (
-    '_harness_write_state_done "$S"; echo "RC=$?"\n'
-    '_harness_write_summary "$S"; echo "RC=$?"'
-)
+_HARNESS_CALLS = '_harness_write_state_done "$S"; echo "RC=$?"\n' '_harness_write_summary "$S"; echo "RC=$?"'
 
 
 # An empty file has no final newline and no ## State: the append there is the
@@ -408,9 +415,7 @@ def test_harness_appends_an_absent_state(tmp_path: pathlib.Path) -> None:
 def test_harness_on_a_state_last_without_newline(tmp_path: pathlib.Path) -> None:
     # ## State present, so the no-newline append difference does not arise.
     out = _assert_parity(tmp_path, "## Summary\nold\n\n## State\nWORKING", _HARNESS_CALLS)
-    assert out["file"] == (
-        b"## Summary\nHarness stub: task completed by integration test harness.\n\n## State\nDONE\n"
-    )
+    assert out["file"] == (b"## Summary\nHarness stub: task completed by integration test harness.\n\n## State\nDONE\n")
 
 
 # ---------------------------------------------------------------------------

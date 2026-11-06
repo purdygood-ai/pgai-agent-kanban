@@ -47,14 +47,13 @@ _DISCOVERY_SH = _SCRIPTS_LIB / "discovery.sh"
 # ceiling; the structural import check below follows the move.
 _DISCOVERY_STATE_SH = _SCRIPTS_LIB / "discovery_eligibility.sh"
 _WRITE_PY = _TEAM_DIR / "pgai_agent_kanban" / "ops" / "write.py"
-_FILENAME_CONTRACT_PY = (
-    _TEAM_DIR / "pgai_agent_kanban" / "lib" / "filename_contract.py"
-)
+_FILENAME_CONTRACT_PY = _TEAM_DIR / "pgai_agent_kanban" / "lib" / "filename_contract.py"
 
 
 # ---------------------------------------------------------------------------
 # Helpers to run _disc_list_all_eligible_requirements in a subprocess
 # ---------------------------------------------------------------------------
+
 
 def _run_eligibility(
     req_dir: pathlib.Path,
@@ -78,6 +77,7 @@ def _run_eligibility(
     """)
 
     import os
+
     env = dict(os.environ)
     env["KANBAN_ROOT"] = str(_TEAM_DIR.parent)
     env["TEAM_ROOT"] = str(_TEAM_DIR)
@@ -132,16 +132,18 @@ class TestFilenameContractPatterns:
     def test_intake_requirements_re_matches_dotted_semver_filename(self) -> None:
         """INTAKE_REQUIREMENTS_RE matches a dotted semver filename."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import INTAKE_REQUIREMENTS_RE
 
-        assert INTAKE_REQUIREMENTS_RE.match("v1.20.10-bugfix-bundle.md"), (
-            "INTAKE_REQUIREMENTS_RE must match dotted semver filenames like v1.20.10-slug.md"
-        )
+        assert INTAKE_REQUIREMENTS_RE.match(
+            "v1.20.10-bugfix-bundle.md"
+        ), "INTAKE_REQUIREMENTS_RE must match dotted semver filenames like v1.20.10-slug.md"
 
     def test_intake_requirements_re_matches_dotless_label_filename(self) -> None:
         """INTAKE_REQUIREMENTS_RE matches the an earlier defect fixture filename (no dots)."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import INTAKE_REQUIREMENTS_RE
 
@@ -154,16 +156,18 @@ class TestFilenameContractPatterns:
     def test_semver_requirements_re_matches_dotted_filename(self) -> None:
         """SEMVER_REQUIREMENTS_RE matches a properly-shaped dotted semver filename."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import SEMVER_REQUIREMENTS_RE
 
-        assert SEMVER_REQUIREMENTS_RE.match("v1.20.10-bugfix-bundle.md"), (
-            "SEMVER_REQUIREMENTS_RE must match vX.Y.Z-slug.md filenames"
-        )
+        assert SEMVER_REQUIREMENTS_RE.match(
+            "v1.20.10-bugfix-bundle.md"
+        ), "SEMVER_REQUIREMENTS_RE must match vX.Y.Z-slug.md filenames"
 
     def test_semver_requirements_re_rejects_dotless_filename(self) -> None:
         """SEMVER_REQUIREMENTS_RE rejects a dotless label-shaped filename."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import SEMVER_REQUIREMENTS_RE
 
@@ -175,19 +179,20 @@ class TestFilenameContractPatterns:
     def test_filename_semantics_eligible_label_accepts_dotless(self) -> None:
         """filename_semantics_eligible returns eligible=True for dotless under label."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import filename_semantics_eligible
 
         eligible, reason = filename_semantics_eligible("v20260712-my-app-fieldtest.md", "label")
         assert eligible, (
-            "filename_semantics_eligible must return eligible=True for a dotless "
-            "filename under label semantics."
+            "filename_semantics_eligible must return eligible=True for a dotless " "filename under label semantics."
         )
         assert reason is None
 
     def test_filename_semantics_eligible_semver_rejects_dotless(self) -> None:
         """filename_semantics_eligible returns eligible=False for dotless under semver."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import (
             filename_semantics_eligible,
@@ -196,16 +201,16 @@ class TestFilenameContractPatterns:
 
         eligible, reason = filename_semantics_eligible("v20260712-my-app-fieldtest.md", "semver")
         assert not eligible, (
-            "filename_semantics_eligible must return eligible=False for a dotless "
-            "filename under semver semantics."
+            "filename_semantics_eligible must return eligible=False for a dotless " "filename under semver semantics."
         )
-        assert reason == SKIP_REASON_SEMVER_SHAPE_REQUIRED, (
-            f"Expected reason={SKIP_REASON_SEMVER_SHAPE_REQUIRED!r}; got {reason!r}"
-        )
+        assert (
+            reason == SKIP_REASON_SEMVER_SHAPE_REQUIRED
+        ), f"Expected reason={SKIP_REASON_SEMVER_SHAPE_REQUIRED!r}; got {reason!r}"
 
     def test_filename_semantics_eligible_semver_accepts_dotted(self) -> None:
         """filename_semantics_eligible returns eligible=True for dotted under semver."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import filename_semantics_eligible
 
@@ -219,13 +224,14 @@ class TestFilenameContractPatterns:
     def test_skip_log_line_format(self) -> None:
         """skip_log_line produces the canonical discovery skip format."""
         import sys
+
         sys.path.insert(0, str(_TEAM_DIR))
         from pgai_agent_kanban.lib.filename_contract import skip_log_line
 
         line = skip_log_line("v20260712-my-app-fieldtest.md", "semver-shape-required")
-        assert line == "discovery: skipping v20260712-my-app-fieldtest.md: semver-shape-required", (
-            f"skip_log_line produced unexpected format: {line!r}"
-        )
+        assert (
+            line == "discovery: skipping v20260712-my-app-fieldtest.md: semver-shape-required"
+        ), f"skip_log_line produced unexpected format: {line!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +258,17 @@ class TestIntakeDestination:
 
     @pytest.mark.parametrize(
         "name",
-        ["/tmp/x.md", "../x.md", "a/b.md", "..", "BUG-0001/../../x.md",
-         "BUG-0001..x.md", "BUG-0001\\x.md", "BUG-0001%2fx.md", "BUG-0001\x00.md"],
+        [
+            "/tmp/x.md",
+            "../x.md",
+            "a/b.md",
+            "..",
+            "BUG-0001/../../x.md",
+            "BUG-0001..x.md",
+            "BUG-0001\\x.md",
+            "BUG-0001%2fx.md",
+            "BUG-0001\x00.md",
+        ],
     )
     def test_name_that_is_a_path_is_refused_as_not_bare(self, name: str) -> None:
         from pgai_agent_kanban.lib.filename_contract import (
@@ -316,15 +331,14 @@ class TestSingleSourceStructural:
         """write.py routes intake names with filename_contract's check, not a local table."""
         text = _WRITE_PY.read_text(encoding="utf-8")
         # Must import from filename_contract
-        assert "from pgai_agent_kanban.lib.filename_contract import" in text, (
-            "write.py must import from pgai_agent_kanban.lib.filename_contract"
-        )
-        assert "intake_destination" in text, (
-            "write.py must route intake names with intake_destination from filename_contract"
-        )
+        assert (
+            "from pgai_agent_kanban.lib.filename_contract import" in text
+        ), "write.py must import from pgai_agent_kanban.lib.filename_contract"
+        assert (
+            "intake_destination" in text
+        ), "write.py must route intake names with intake_destination from filename_contract"
         assert not re.search(r"""re\.compile\s*\(\s*r?['"]\^(BUG|PRIORITY)-""", text), (
-            "write.py must not compile its own intake routing patterns; "
-            "INTAKE_ROUTES lives in filename_contract"
+            "write.py must not compile its own intake routing patterns; " "INTAKE_ROUTES lives in filename_contract"
         )
 
     def test_write_py_does_not_duplicate_intake_pattern_inline(self) -> None:
@@ -334,9 +348,7 @@ class TestSingleSourceStructural:
         # It must not appear as a standalone literal (only allowed in the import line
         # or comments, not as an argument to re.compile).
         # We search for the literal inside re.compile() calls specifically.
-        inline_re_pattern = re.compile(
-            r"""re\.compile\s*\(\s*r?['"](\^v\[0-9\].*\\\.md\$)['"]"""
-        )
+        inline_re_pattern = re.compile(r"""re\.compile\s*\(\s*r?['"](\^v\[0-9\].*\\\.md\$)['"]""")
         matches = inline_re_pattern.findall(text)
         assert not matches, (
             f"write.py must not define the intake pattern inline via re.compile(); "
@@ -357,8 +369,7 @@ class TestSingleSourceStructural:
             encoding="utf-8"
         )
         assert "pgai_agent_kanban.lib.filename_contract" in module_text, (
-            "pgai_agent_kanban.discovery.eligibility must import from "
-            "pgai_agent_kanban.lib.filename_contract."
+            "pgai_agent_kanban.discovery.eligibility must import from " "pgai_agent_kanban.lib.filename_contract."
         )
 
     def test_discovery_sh_does_not_contain_old_bundle_re_with_semver_arm(self) -> None:
@@ -371,7 +382,7 @@ class TestSingleSourceStructural:
         """
         text = _DISCOVERY_SH.read_text(encoding="utf-8")
         # The old BUNDLE_RE assigned the combined pattern to a variable named BUNDLE_RE.
-        old_assignment = re.compile(r'\bBUNDLE_RE\s*=\s*re\.compile\s*\(')
+        old_assignment = re.compile(r"\bBUNDLE_RE\s*=\s*re\.compile\s*\(")
         assert not old_assignment.search(text), (
             "discovery.sh still contains a BUNDLE_RE = re.compile(...) assignment. "
             "Bundle patterns must be imported from filename_contract."
@@ -405,8 +416,8 @@ class TestEligibilityFilenameGateSemantics:
         req_dir = tmp_path / "requirements"
         _make_requirements_file(
             req_dir,
-            "v20260712-my-app-fieldtest.md",   # an earlier defect fixture filename — NO dots
-            "v20260712-my-app-fieldtest",       # label Target Version
+            "v20260712-my-app-fieldtest.md",  # an earlier defect fixture filename — NO dots
+            "v20260712-my-app-fieldtest",  # label Target Version
         )
 
         result = _run_eligibility(req_dir, "label")
@@ -415,11 +426,7 @@ class TestEligibilityFilenameGateSemantics:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        output_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        ]
+        output_names = [pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()]
         assert "v20260712-my-app-fieldtest.md" in output_names, (
             f"Expected v20260712-my-app-fieldtest.md in eligible list under label semantics; "
             f"got {output_names!r}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -457,14 +464,12 @@ class TestEligibilityFilenameGateSemantics:
             f"stderr: {result.stderr}\nstdout: {result.stdout}"
         )
         assert "v20260712-dotless-semver-project.md" in result.stderr, (
-            f"Expected the filename to appear in the skip log line.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the filename to appear in the skip log line.\n" f"stderr: {result.stderr}"
         )
 
         # The file must NOT appear in eligible output.
         assert "v20260712-dotless-semver-project.md" not in result.stdout, (
-            f"Dotless file must not appear in eligible list on semver project.\n"
-            f"stdout: {result.stdout}"
+            f"Dotless file must not appear in eligible list on semver project.\n" f"stdout: {result.stdout}"
         )
 
     def test_dotted_semver_filename_is_still_selected_under_semver_semantics(
@@ -491,11 +496,7 @@ class TestEligibilityFilenameGateSemantics:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        output_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        ]
+        output_names = [pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()]
         assert "v0.0.1-bugfix-bundle-test.md" in output_names, (
             f"Dotted semver file must still be selected on semver project.\n"
             f"got {output_names!r}\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -523,20 +524,12 @@ class TestEligibilityFilenameGateSemantics:
         )
 
         result = _run_eligibility(req_dir, "label")
-        assert result.returncode == 0, (
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
-        output_names = [
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        ]
+        output_names = [pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()]
         assert "v20260712-my-app-fieldtest.md" in output_names, (
-            f"Dotless label filename must be selected under label semantics; "
-            f"got {output_names!r}"
+            f"Dotless label filename must be selected under label semantics; " f"got {output_names!r}"
         )
         assert "v1.0.0-another-bundle.md" in output_names, (
-            f"Dotted filename must also be selected under label semantics; "
-            f"got {output_names!r}"
+            f"Dotted filename must also be selected under label semantics; " f"got {output_names!r}"
         )

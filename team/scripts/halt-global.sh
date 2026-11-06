@@ -21,10 +21,10 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # --- Locate lib directory relative to this script ---
-_HALT_GLOBAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_HALT_GLOBAL_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _HALT_GLOBAL_LIB_DIR="${_HALT_GLOBAL_SCRIPT_DIR}/lib"
 
 # --- Source the standard argument layer ---

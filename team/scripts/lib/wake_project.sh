@@ -25,7 +25,8 @@
 # run_overwatch_resolution_stage, run_overwatch_block_triage,
 # fire_block_triage_nudge — are shared primitives, not private
 # helpers of _check_halt_after_for_project alone. Both wake provider scripts
-# call all of them directly at their own points in run_project_chain:
+# reach them through the shared pipeline (run_project_chain in
+# lib/wake_driver.sh, and its stage files), which calls each at its own point:
 #   _build_feature_branch           — produces the prefixed feature-branch
 #                                      name for a new CODER/WRITER task.
 #   _update_readme_feature_branch   — rewrites a task README's

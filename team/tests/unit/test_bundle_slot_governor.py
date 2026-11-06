@@ -156,9 +156,7 @@ def test_a_live_bundle_beside_a_superseded_one_still_holds_the_slot(tmp_path) ->
 
 
 @pytest.mark.parametrize("pm_state", ["WONT-DO", "DONE"])
-def test_a_running_bundle_whose_pm_task_ended_outside_the_active_rc_is_reported_stuck(
-    tmp_path, pm_state: str
-) -> None:
+def test_a_running_bundle_whose_pm_task_ended_outside_the_active_rc_is_reported_stuck(tmp_path, pm_state: str) -> None:
     project = _root(tmp_path, active_rc="none")
     bundle = _bundle(project)
     _pm_task(project, pm_state)
@@ -184,8 +182,12 @@ def test_the_stuck_remedy_run_as_printed_closes_the_bundle_and_frees_its_items(t
     remedy = parse_error_contract(_query(tmp_path, project).stderr)["remedy"]
 
     run = subprocess.run(
-        ["bash", "-c", remedy], capture_output=True, text=True, env=_env(project),
-        cwd=str(tmp_path), timeout=60,
+        ["bash", "-c", remedy],
+        capture_output=True,
+        text=True,
+        env=_env(project),
+        cwd=str(tmp_path),
+        timeout=60,
     )
 
     assert run.returncode == 0, run.stdout + run.stderr
@@ -215,9 +217,9 @@ def test_a_stuck_bundle_does_not_hide_a_later_pending_one(tmp_path) -> None:
 @pytest.mark.parametrize(
     ("active_rc", "pm_state", "make_task"),
     [
-        ("none", "WORKING", True),     # PM still decomposing
-        ("v1.2.3", "DONE", True),      # its RC is open
-        ("none", "DONE", False),       # PM task folder gone: unknown
+        ("none", "WORKING", True),  # PM still decomposing
+        ("v1.2.3", "DONE", True),  # its RC is open
+        ("none", "DONE", False),  # PM task folder gone: unknown
     ],
     ids=["pm-task-live", "version-is-the-active-rc", "pm-task-folder-missing"],
 )
@@ -260,9 +262,19 @@ def test_pending_command_prints_stuck_lines_then_the_holder(tmp_path) -> None:
     _bundle(project, "v1.2.5-priority-bundle-20260104.md", status="open", target="v1.2.5")
 
     run = subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.lib.bundle_items", "pending",
-         str(project / "requirements"), "bugfix"],
-        capture_output=True, text=True, cwd=str(_TEAM_DIR), env=_env(project), timeout=60,
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.lib.bundle_items",
+            "pending",
+            str(project / "requirements"),
+            "bugfix",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(_TEAM_DIR),
+        env=_env(project),
+        timeout=60,
     )
 
     assert run.returncode == 0, run.stderr

@@ -28,7 +28,6 @@ so they fail if the templates are missing or malformed.
 
 from __future__ import annotations
 
-import io
 import os
 import pathlib
 import re
@@ -55,6 +54,7 @@ _PSEUDOCRON_SCRIPT = pathlib.Path(__file__).parent.parent.parent / "scripts" / "
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _dev_tree_root() -> pathlib.Path:
     """Return the dev tree root, honouring PGAI_DEV_TREE_PATH when set."""
@@ -278,7 +278,9 @@ def test_spawned_job_runs_in_the_given_directory_with_the_given_environment(tmp_
     """spawn_job() keeps the root-relative contract: cwd and env reach the job."""
     out = tmp_path / "job-cwd.txt"
     env = dict(os.environ, PSEUDOCRON_JOB_MARKER="marker-value")
-    job = spawn_job(f'printf "%s %s" "$PWD" "$PSEUDOCRON_JOB_MARKER" > {shlex.quote(str(out))}', env=env, cwd=str(tmp_path))
+    job = spawn_job(
+        f'printf "%s %s" "$PWD" "$PSEUDOCRON_JOB_MARKER" > {shlex.quote(str(out))}', env=env, cwd=str(tmp_path)
+    )
     assert job.wait(timeout=30) == 0
     assert out.read_text(encoding="utf-8") == f"{tmp_path.resolve()} marker-value"
 
@@ -299,9 +301,7 @@ def test_parse_args_help_flag_exits_zero(flag: str) -> None:
     """
     with pytest.raises(SystemExit) as exc_info:
         _parse_args([flag])
-    assert exc_info.value.code == 0, (
-        f"_parse_args([{flag!r}]) must exit with code 0, got {exc_info.value.code!r}."
-    )
+    assert exc_info.value.code == 0, f"_parse_args([{flag!r}]) must exit with code 0, got {exc_info.value.code!r}."
 
 
 def test_parse_args_no_arguments_returns_namespace() -> None:
@@ -333,15 +333,11 @@ def test_help_invocation_exits_zero_within_one_second() -> None:
         env=env,
     )
     assert result.returncode == 0, (
-        f"pseudocron.py --help must exit 0. Got {result.returncode}. "
-        f"stderr: {result.stderr!r}"
+        f"pseudocron.py --help must exit 0. Got {result.returncode}. " f"stderr: {result.stderr!r}"
     )
-    assert "usage" in result.stdout.lower(), (
-        f"pseudocron.py --help must print a usage block. stdout: {result.stdout!r}"
-    )
+    assert "usage" in result.stdout.lower(), f"pseudocron.py --help must print a usage block. stdout: {result.stdout!r}"
     assert "-h" in result.stdout or "--help" in result.stdout, (
-        f"pseudocron.py --help must name the --help/-h argument in its usage "
-        f"block. stdout: {result.stdout!r}"
+        f"pseudocron.py --help must name the --help/-h argument in its usage " f"block. stdout: {result.stdout!r}"
     )
 
 
@@ -412,9 +408,7 @@ def _tier_template_path(tier: str) -> pathlib.Path:
 @pytest.mark.parametrize("tier", ["small", "medium", "large"])
 def test_tier_template_exists(tier: str) -> None:
     """Each pseudocron-<tier>.cfg.example exists at team/templates/install/."""
-    assert _tier_template_path(tier).exists(), (
-        f"Missing {tier} tier template at: {_tier_template_path(tier)}"
-    )
+    assert _tier_template_path(tier).exists(), f"Missing {tier} tier template at: {_tier_template_path(tier)}"
 
 
 @pytest.mark.parametrize("tier", ["small", "medium", "large"])
@@ -426,9 +420,7 @@ def test_tier_template_parses_to_jobs(tier: str) -> None:
     """
     text = _tier_template_path(tier).read_text(encoding="utf-8")
     jobs = parse_config(text, source=f"pseudocron-{tier}.cfg.example")
-    assert len(jobs) >= 1, (
-        f"{tier.capitalize()} tier template parsed to zero jobs; template may be empty or malformed."
-    )
+    assert len(jobs) >= 1, f"{tier.capitalize()} tier template parsed to zero jobs; template may be empty or malformed."
     # All minute values must be valid (0-59 range is enforced by parse_config).
     for minute, _cmd in jobs:
         assert 0 <= minute <= 59, f"Minute {minute} out of range in {tier} template"
@@ -510,6 +502,7 @@ def test_tier_template_commands_are_root_relative() -> None:
 # mount root.  The test simulates two independent kanban installations at
 # different paths and confirms each produces its own marker file.
 
+
 def test_relocation_relative_cfg_fires_from_two_mounts(tmp_path: pathlib.Path) -> None:
     """Relocation fixture: identical relative cfg fires correctly from two mount paths.
 
@@ -544,12 +537,11 @@ def test_relocation_relative_cfg_fires_from_two_mounts(tmp_path: pathlib.Path) -
             cwd=str(mount_root),
             timeout=10,
         )
-        assert result.returncode == 0, (
-            f"Job failed for {mount_label} with cwd={mount_root}: returncode={result.returncode}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"Job failed for {mount_label} with cwd={mount_root}: returncode={result.returncode}"
         assert marker_file.exists(), (
-            f"Marker file not created for {mount_label}; "
-            f"relative command did not resolve under cwd={mount_root}"
+            f"Marker file not created for {mount_label}; " f"relative command did not resolve under cwd={mount_root}"
         )
 
 
@@ -566,6 +558,7 @@ def test_relocation_relative_cfg_fires_from_two_mounts(tmp_path: pathlib.Path) -
 # correctly when the kanban is mounted at /pgai_agent_kanban rather than at
 # an arbitrary host path.  The test simulates the container mount under
 # tmp_path so it runs without Docker.
+
 
 def test_relocation_container_mount_path_fires_correctly(
     tmp_path: pathlib.Path,
@@ -588,9 +581,7 @@ def test_relocation_container_mount_path_fires_correctly(
     marker_file = container_mount / "marker-container-mount.txt"
     marker_sh = scripts_dir / "marker.sh"
     marker_sh.write_text(f"#!/bin/bash\ntouch {marker_file}\n")
-    marker_sh.chmod(
-        marker_sh.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH
-    )
+    marker_sh.chmod(marker_sh.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
     cfg_text = "0 scripts/marker.sh\n"
     jobs = parse_config(cfg_text, source="test-container-mount.cfg")
@@ -605,8 +596,7 @@ def test_relocation_container_mount_path_fires_correctly(
         timeout=10,
     )
     assert result.returncode == 0, (
-        f"Job failed for container-mount path with cwd={container_mount}: "
-        f"returncode={result.returncode}"
+        f"Job failed for container-mount path with cwd={container_mount}: " f"returncode={result.returncode}"
     )
     assert marker_file.exists(), (
         "Marker file not created for container-mount path variant; "
@@ -621,6 +611,7 @@ def test_relocation_container_mount_path_fires_correctly(
 # Confirms that an existing pseudocron.cfg with absolute-path commands
 # continues to work after the ROOT-RELATIVE migration.  Absolute paths
 # are independent of cwd, so they fire correctly regardless of the setting.
+
 
 def test_legacy_absolute_path_cfg_still_fires(tmp_path: pathlib.Path) -> None:
     """Legacy fixture: an absolute-path cfg still fires after the ROOT-RELATIVE migration.
@@ -650,12 +641,8 @@ def test_legacy_absolute_path_cfg_still_fires(tmp_path: pathlib.Path) -> None:
         cwd=unrelated_cwd,
         timeout=10,
     )
-    assert result.returncode == 0, (
-        f"Legacy absolute-path job failed: returncode={result.returncode}"
-    )
-    assert marker_file.exists(), (
-        "Marker file not created; absolute-path command did not fire as expected."
-    )
+    assert result.returncode == 0, f"Legacy absolute-path job failed: returncode={result.returncode}"
+    assert marker_file.exists(), "Marker file not created; absolute-path command did not fire as expected."
 
 
 # ---------------------------------------------------------------------------
@@ -730,7 +717,7 @@ def _launch_arguments(text: str) -> list[tuple[str, list[str]]]:
             words = shlex.split(command.rstrip("'\""))
         script_index = next(i for i, w in enumerate(words) if w.endswith("pseudocron.py"))
         args: list[str] = []
-        rest = iter(words[script_index + 1:])
+        rest = iter(words[script_index + 1 :])
         for word in rest:
             if word in _REDIRECT_WITH_TARGET:
                 next(rest, None)
@@ -795,16 +782,15 @@ def test_template_and_installer_show_the_same_launch_command() -> None:
     installer_commands = {command for command, _args in _launch_arguments(installer_text)}
     assert template_commands, "pseudocron.cfg.example shows no launch command"
     assert template_commands == installer_commands, (
-        f"template shows {sorted(template_commands)}, "
-        f"installer shows {sorted(installer_commands)}"
+        f"template shows {sorted(template_commands)}, " f"installer shows {sorted(installer_commands)}"
     )
 
     for name, text in (("pseudocron.cfg.example", template_text), ("install-pseudocron.sh", installer_text)):
         prose = " ".join(" ".join(_logical_lines(text)).split())
         assert "takes no options" in prose, f"{name} must say pseudocron.py takes no options"
-        assert "PGAI_AGENT_KANBAN_ROOT_PATH, which is required in the" in prose, (
-            f"{name} must say PGAI_AGENT_KANBAN_ROOT_PATH is required in the launching environment"
-        )
+        assert (
+            "PGAI_AGENT_KANBAN_ROOT_PATH, which is required in the" in prose
+        ), f"{name} must say PGAI_AGENT_KANBAN_ROOT_PATH is required in the launching environment"
         assert "has no default" in prose, f"{name} must say the root has no default"
         assert "--config" not in text and "--env " not in text, f"{name} still shows a rejected option"
 
@@ -814,11 +800,7 @@ def test_unset_kanban_root_exits_one_naming_the_variable(tmp_path: pathlib.Path)
     message names the variable — there is no default root to fall back on."""
     workdir = tmp_path / "launch-dir"
     workdir.mkdir()
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if k not in ("PGAI_AGENT_KANBAN_ROOT_PATH", "KANBAN_ROOT")
-    }
+    env = {k: v for k, v in os.environ.items() if k not in ("PGAI_AGENT_KANBAN_ROOT_PATH", "KANBAN_ROOT")}
     result = subprocess.run(
         [sys.executable, str(_PSEUDOCRON_SCRIPT)],
         capture_output=True,

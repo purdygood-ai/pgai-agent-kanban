@@ -281,6 +281,7 @@ Usage (CLI):
         [--triage-enabled true|false] [--status-backup PATH] \\
         [--queue-backup PATH] [--now ISO] [--table YAML_FILE] \\
         [--worktree-base DIR] [--defer-only]
+    python3 -m pgai_agent_kanban.overwatch.block_triage requeue-budget STATUS_FILE
 
 ``plan`` prints one tab-separated line per candidate task::
 
@@ -299,6 +300,11 @@ backup for it, since nothing of the task is written): when the plan under
 the lock is anything else, ``apply`` writes nothing and reports ``skip``.
 Both commands read ``[overwatch] requeue_budget`` first; a value that is not
 a whole number refuses the call before anything is planned.
+``requeue-budget`` prints that budget for the project holding STATUS_FILE
+(``<kanban_root>/projects/<project>/tasks/<task_id>/status.md``; the file
+need not exist) as one whole number, refusing a value that is not one. The
+wake reads it to bound its own requeue of a timed-out task that committed
+work (``requeue_after_timeout_with_commits``, wake_task_budget.sh).
 Exit codes: 0 success; 1 refused (dual-channel error printed, nothing
 written); 2 usage error.
 """
@@ -314,7 +320,8 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any
+from collections.abc import Callable, Mapping
 
 # Run by file path (``python3 .../block_triage.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -649,7 +656,7 @@ class TriageContext:
     decision: Decision
     evidence_dir: Path
     now: datetime.datetime
-    worktree_base: Optional[Path] = None
+    worktree_base: Path | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -669,9 +676,9 @@ class HandlerResult:
     """
 
     mutation: str = MUTATION_PROMOTE
-    note: Optional[str] = None
+    note: str | None = None
     evidence: tuple[str, ...] = ()
-    verdict: Optional[Verdict] = None
+    verdict: Verdict | None = None
 
 
 ActionHandler = Callable[[TriageContext], HandlerResult]
@@ -774,7 +781,9 @@ def _prune_worktree(ctx: TriageContext) -> HandlerResult:
         raise HandlerRefused(f"the stale worktree was not cleared: {exc}") from exc
     note = str(ctx.decision.params.get("note", "")) or ctx.decision.detail
     removed = f"removed {', '.join(cleared.removed)}; " if cleared.removed else ""
-    pruned = f"pruned the registration(s) of {', '.join(cleared.pruned)}" if cleared.pruned else "ran git worktree prune"
+    pruned = (
+        f"pruned the registration(s) of {', '.join(cleared.pruned)}" if cleared.pruned else "ran git worktree prune"
+    )
     return HandlerResult(
         mutation=MUTATION_PROMOTE,
         note=f"{note} ({removed}{pruned}; no branch or commit was deleted)",
@@ -787,7 +796,7 @@ def _kanban_root_of(task_dir: Path) -> Path:
     return task_dir.parent.parent.parent.parent
 
 
-def _write_verb_evidence(ctx: TriageContext, runs: "tuple[VerbRun, ...]") -> Path:
+def _write_verb_evidence(ctx: TriageContext, runs: tuple[VerbRun, ...]) -> Path:
     """Write the verb's run(s) to ``verb-<verb>-<UTC>.txt`` (never overwriting)."""
     base = f"verb-{runs[0].verb}-{compact_utc_stamp(ctx.now)}"
     target = ctx.evidence_dir / f"{base}.txt"
@@ -858,12 +867,12 @@ ACTION_HANDLERS: dict[str, ActionHandler] = {
 }
 
 
-def handler_for(handlers: Mapping[str, ActionHandler], action: str, reason_code: str) -> Optional[ActionHandler]:
+def handler_for(handlers: Mapping[str, ActionHandler], action: str, reason_code: str) -> ActionHandler | None:
     """The handler for *action* on a *reason_code* block, or None."""
     return handlers.get(f"{action}:{reason_code}") or handlers.get(action)
 
 
-def handler_code(decision: Optional[Decision], reason_code: str) -> str:
+def handler_code(decision: Decision | None, reason_code: str) -> str:
     """The code a handler is looked up under: :data:`PIPELINE_LADDER_HANDLER`
     for a decision made on the pipeline ladder, else *reason_code*."""
     return PIPELINE_LADDER_HANDLER if decision is not None and decision.pipeline_ladder else reason_code
@@ -901,13 +910,13 @@ class Plan:
     detail: str
     needs_human: str = "yes"
     epoch: str = "unknown"
-    decision: Optional[Decision] = None
-    record: Optional[BlockRecord] = None
+    decision: Decision | None = None
+    record: BlockRecord | None = None
     raw_record: str = ""
     cause: str = ""
     candidate: bool = True
-    verdict: Optional[Verdict] = None
-    pending_index: Optional[int] = None
+    verdict: Verdict | None = None
+    pending_index: int | None = None
     restart_epoch: bool = False
     option: str = ""
 
@@ -917,7 +926,7 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _code_token(value: Optional[str]) -> str:
+def _code_token(value: str | None) -> str:
     """A reason_code as it appears in a log action (``none`` when absent)."""
     code = normalize_reason_code(value or "")
     code = re.sub(r"[^a-z0-9_]", "", code)
@@ -932,7 +941,7 @@ def epoch_token(value: str) -> str:
     return _clean(value) or "unknown"
 
 
-def diagnosis_epoch(status_text: str) -> Optional[str]:
+def diagnosis_epoch(status_text: str) -> str | None:
     """The epoch an existing ``## OVERWATCH Diagnosis`` names, or None."""
     body = read_section(status_text, DIAGNOSIS_HEADING)
     if not body:
@@ -948,7 +957,7 @@ def _not_implemented_cause(decision: Decision) -> str:
     )
 
 
-def _fleet_cause(record: Optional[BlockRecord], attempts: int) -> str:
+def _fleet_cause(record: BlockRecord | None, attempts: int) -> str:
     """Why a provider refusal that outlasted its attempts is a fleet-level matter."""
     evidence = parse_evidence(record.evidence) if record is not None else {}
     return (
@@ -960,7 +969,7 @@ def _fleet_cause(record: Optional[BlockRecord], attempts: int) -> str:
 
 
 def _escalation_cause(
-    decision: Decision, code: str, record: Optional[BlockRecord] = None, facts: Optional[Mapping] = None
+    decision: Decision, code: str, record: BlockRecord | None = None, facts: Mapping | None = None
 ) -> str:
     if decision.why == WHY_ALWAYS_HUMAN and code in _ALWAYS_HUMAN_GUIDANCE:
         return _ALWAYS_HUMAN_GUIDANCE[code][0]
@@ -1006,7 +1015,7 @@ def _retry_allowed(pending: PendingCheck, record: BlockRecord) -> bool:
 
 
 def classifier_facts(
-    code: str, text: str, record: Optional[BlockRecord], task_dir: Path, worktree_base: Optional[Path] = None
+    code: str, text: str, record: BlockRecord | None, task_dir: Path, worktree_base: Path | None = None
 ) -> dict:
     """What the classifier needs and the record does not carry: precondition
     facts read from the repository (read-only git) and note placeholder values.
@@ -1046,7 +1055,7 @@ def blockers_quote(status_text: str) -> str:
     return text
 
 
-def _operator_action_facts(record: Optional[BlockRecord], task_dir: Path) -> dict:
+def _operator_action_facts(record: BlockRecord | None, task_dir: Path) -> dict:
     """``action_targets_verified`` for an operator data action, and, when it
     is unmet, ``action_refusal`` naming why (arguments or targets)."""
     if record is None:
@@ -1090,7 +1099,7 @@ def _budget_cause(record: BlockRecord, budget: int, code: str) -> str:
     return cause
 
 
-def _operator_data_action_option(kanban_root: "Path | str") -> str:
+def _operator_data_action_option(kanban_root: Path | str) -> str:
     """The first option for an operator data action that ends with a human.
 
     Names the installed restamp script under *kanban_root*
@@ -1105,7 +1114,7 @@ def _operator_data_action_option(kanban_root: "Path | str") -> str:
     )
 
 
-def _option_for(code: str, kanban_root: "Path | str") -> str:
+def _option_for(code: str, kanban_root: Path | str) -> str:
     """The first option an escalation's diagnosis names for *code*; a script
     it names is the one installed under *kanban_root*."""
     if code in _ALWAYS_HUMAN_GUIDANCE:
@@ -1118,14 +1127,14 @@ def _option_for(code: str, kanban_root: "Path | str") -> str:
 
 
 def plan_task(
-    status_file: "Path | str",
+    status_file: Path | str,
     *,
     triage_enabled: bool = True,
-    now: "datetime.datetime | str | None" = None,
-    table_path: "str | Path | None" = None,
-    handlers: Optional[Mapping[str, ActionHandler]] = None,
-    worktree_base: "Path | str | None" = None,
-    requeue_budget: Optional[int] = None,
+    now: datetime.datetime | str | None = None,
+    table_path: str | Path | None = None,
+    handlers: Mapping[str, ActionHandler] | None = None,
+    worktree_base: Path | str | None = None,
+    requeue_budget: int | None = None,
 ) -> Plan:
     """Decide what ``apply`` would do about one task. Reads only.
 
@@ -1161,8 +1170,13 @@ def plan_task(
     state = (read_section(text, "State") or "").strip().upper()
     if state != "BLOCKED":
         return Plan(
-            task_id, path, OUTCOME_SKIP, _code_token(raw_fields.get("reason_code")), NOT_YET,
-            f"## State reads {state or 'nothing'}, not BLOCKED", candidate=False,
+            task_id,
+            path,
+            OUTCOME_SKIP,
+            _code_token(raw_fields.get("reason_code")),
+            NOT_YET,
+            f"## State reads {state or 'nothing'}, not BLOCKED",
+            candidate=False,
         )
 
     needs_human = section_value(text, "Needs Human").strip().lower() or "yes"
@@ -1176,7 +1190,11 @@ def plan_task(
 
     if needs_human == "yes" and diagnosis_epoch(text) == epoch:
         return Plan(
-            task_id, path, OUTCOME_SKIP, code, ESCALATE,
+            task_id,
+            path,
+            OUTCOME_SKIP,
+            code,
+            ESCALATE,
             f"block epoch {epoch} is already escalated (Needs Human yes, OVERWATCH Diagnosis present)",
             **common,
         )
@@ -1225,7 +1243,11 @@ def plan_task(
             )
             return Plan(task_id, path, OUTCOME_ESCALATE, code, ESCALATE, cause, cause=cause, **common)
         return Plan(
-            task_id, path, OUTCOME_SKIP, code, decision.action,
+            task_id,
+            path,
+            OUTCOME_SKIP,
+            code,
+            decision.action,
             f"transient retry {count} of {ceiling}: the block is left to the handler that recorded it (the "
             "transient-error auto-retry and the OVERWATCH transient check requeue it after their backoff)",
             **common,
@@ -1234,8 +1256,13 @@ def plan_task(
     if decision.action == NOT_YET:
         if decision.cooldown_until is not None:
             return Plan(
-                task_id, path, OUTCOME_RECORD, code, NOT_YET,
-                f"first sighting: cool-down recorded until {decision.cooldown_until}", **common,
+                task_id,
+                path,
+                OUTCOME_RECORD,
+                code,
+                NOT_YET,
+                f"first sighting: cool-down recorded until {decision.cooldown_until}",
+                **common,
             )
         return Plan(task_id, path, OUTCOME_SKIP, code, NOT_YET, decision.detail, **common)
 
@@ -1249,7 +1276,11 @@ def plan_task(
     if handler_for(handlers, decision.action, handler_code(decision, code)) is None:
         if needs_human == "no":
             return Plan(
-                task_id, path, OUTCOME_SKIP, code, decision.action,
+                task_id,
+                path,
+                OUTCOME_SKIP,
+                code,
+                decision.action,
                 f"the classifier chose {decision.action}, which this executor does not perform yet; "
                 "Needs Human is no, so the block is left to the handler that recorded it",
                 **common,
@@ -1259,8 +1290,13 @@ def plan_task(
 
     if not triage_enabled:
         return Plan(
-            task_id, path, OUTCOME_SKIP, code, decision.action,
-            f"[overwatch] block_triage is false: {decision.action} not taken ({decision.detail})", **common,
+            task_id,
+            path,
+            OUTCOME_SKIP,
+            code,
+            decision.action,
+            f"[overwatch] block_triage is false: {decision.action} not taken ({decision.detail})",
+            **common,
         )
 
     # The requeue budget: bounds requeues across epoch restarts, which the
@@ -1275,23 +1311,31 @@ def plan_task(
     return Plan(task_id, path, OUTCOME_ACT, code, decision.action, decision.detail, **common)
 
 
-def _plan_deferral(
-    task_id: str, path: Path, code: str, decision: Decision, triage_enabled: bool, common: dict
-) -> Plan:
+def _plan_deferral(task_id: str, path: Path, code: str, decision: Decision, triage_enabled: bool, common: dict) -> Plan:
     """The plan for a block the classifier defers to the resolution stage:
     ``defer`` when the project's HALT is a ship-policy HALT the stage can
     resolve, else ``skip`` (the block stays with a human). Reads only."""
     if not triage_enabled:
         return Plan(
-            task_id, path, OUTCOME_SKIP, code, decision.action,
-            f"[overwatch] block_triage is false: {decision.action} not taken ({decision.detail})", **common,
+            task_id,
+            path,
+            OUTCOME_SKIP,
+            code,
+            decision.action,
+            f"[overwatch] block_triage is false: {decision.action} not taken ({decision.detail})",
+            **common,
         )
     project_root = path.parent.parent.parent
     ready, why = ship_policy_halt_state(project_root.parent.parent, project_root.name)
     if not ready:
         return Plan(
-            task_id, path, OUTCOME_SKIP, code, decision.action,
-            f"{why}; the block stays with a human", **common,
+            task_id,
+            path,
+            OUTCOME_SKIP,
+            code,
+            decision.action,
+            f"{why}; the block stays with a human",
+            **common,
         )
     return Plan(task_id, path, OUTCOME_DEFER, code, decision.action, f"{decision.detail} ({why})", **common)
 
@@ -1302,15 +1346,13 @@ def _queue_files(project_root: Path) -> list[Path]:
     return [q for q in found if q.is_file()]
 
 
-def _key_ok(key: str, id_pattern: "re.Pattern[str] | None") -> bool:
+def _key_ok(key: str, id_pattern: re.Pattern[str] | None) -> bool:
     if not _SAFE_KEY_RE.match(key) or ".." in key:
         return False
     return id_pattern is None or id_pattern.match(key) is not None
 
 
-def blocked_candidates(
-    project_root: "Path | str", *, id_pattern: Optional[str] = None
-) -> list[tuple[str, Path]]:
+def blocked_candidates(project_root: Path | str, *, id_pattern: str | None = None) -> list[tuple[str, Path]]:
     """``(task_id, queue_file)`` for every ``[B]`` line whose task carries a
     status.md, in queue-file then line order, each task once."""
     root = Path(project_root)
@@ -1337,22 +1379,26 @@ def blocked_candidates(
 
 
 def plan_project(
-    project_root: "Path | str",
+    project_root: Path | str,
     *,
-    id_pattern: Optional[str] = None,
+    id_pattern: str | None = None,
     triage_enabled: bool = True,
-    now: "datetime.datetime | str | None" = None,
-    table_path: "str | Path | None" = None,
-    worktree_base: "Path | str | None" = None,
-    requeue_budget: Optional[int] = None,
+    now: datetime.datetime | str | None = None,
+    table_path: str | Path | None = None,
+    worktree_base: Path | str | None = None,
+    requeue_budget: int | None = None,
 ) -> list[tuple[Plan, Path]]:
     """Plan every ``[B]`` task of a project that is BLOCKED with a Block Record."""
     root = Path(project_root)
     plans = []
     for key, queue in blocked_candidates(root, id_pattern=id_pattern):
         plan = plan_task(
-            root / "tasks" / key / "status.md", triage_enabled=triage_enabled, now=now, table_path=table_path,
-            worktree_base=worktree_base, requeue_budget=requeue_budget,
+            root / "tasks" / key / "status.md",
+            triage_enabled=triage_enabled,
+            now=now,
+            table_path=table_path,
+            worktree_base=worktree_base,
+            requeue_budget=requeue_budget,
         )
         if plan.candidate:
             plans.append((plan, queue))
@@ -1417,7 +1463,7 @@ def render_diagnosis(
     plan: Plan,
     *,
     project: str,
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     evidence_file: str,
     backups: Mapping[str, str],
 ) -> str:
@@ -1489,7 +1535,7 @@ class ApplyResult:
         )
 
 
-def _refuse(error_key: str, message: str, remedy: str) -> "TriageError":
+def _refuse(error_key: str, message: str, remedy: str) -> TriageError:
     return TriageError(error_key=error_key, message=message, remedy=remedy)
 
 
@@ -1499,7 +1545,7 @@ def _refuse(error_key: str, message: str, remedy: str) -> "TriageError":
 # ---------------------------------------------------------------------------
 
 
-def _ledger_reason_code(plan: Plan) -> Optional[str]:
+def _ledger_reason_code(plan: Plan) -> str | None:
     """The Block Record's reason_code as the ledger records it; None when
     the record names none."""
     return plan.reason_code if plan.reason_code and plan.reason_code != NO_CODE else None
@@ -1515,31 +1561,38 @@ def _ledger_block_began(plan: Plan, moment: datetime.datetime) -> str:
     return format_iso(moment)
 
 
-def _stamp_ledger_opened(plan: Plan, *, project: str, kanban_root: "Path | str", moment: datetime.datetime) -> None:
+def _stamp_ledger_opened(plan: Plan, *, project: str, kanban_root: Path | str, moment: datetime.datetime) -> None:
     """Open the task's block on the blocked ledger beside an evidence write,
     with the record's reason_code, unless one is already open."""
     try:
         stamp_ledger_block_start(
-            kanban_root, project, task_ledger_source(plan.task_id),
-            reason_code=_ledger_reason_code(plan), timestamp=_ledger_block_began(plan, moment),
+            kanban_root,
+            project,
+            task_ledger_source(plan.task_id),
+            reason_code=_ledger_reason_code(plan),
+            timestamp=_ledger_block_began(plan, moment),
         )
     except Exception as exc:  # noqa: BLE001 - the shared stamp never raises; belt and braces
         _warn_ledger("block-start", project, plan.task_id, exc)
 
 
-def _stamp_ledger_requeued(plan: Plan, *, project: str, kanban_root: "Path | str", moment: datetime.datetime) -> None:
+def _stamp_ledger_requeued(plan: Plan, *, project: str, kanban_root: Path | str, moment: datetime.datetime) -> None:
     """Close the task's open block, class any: triage returned it to its
     owner without a human."""
     try:
         stamp_ledger_block_end(
-            kanban_root, project, task_ledger_source(plan.task_id),
-            block_class="any", reason_code=REQUEUE_LEDGER_REASON_CODE, timestamp=format_iso(moment),
+            kanban_root,
+            project,
+            task_ledger_source(plan.task_id),
+            block_class="any",
+            reason_code=REQUEUE_LEDGER_REASON_CODE,
+            timestamp=format_iso(moment),
         )
     except Exception as exc:  # noqa: BLE001 - the shared stamp never raises; belt and braces
         _warn_ledger("block-end", project, plan.task_id, exc)
 
 
-def _stamp_ledger_escalated(plan: Plan, *, project: str, kanban_root: "Path | str", moment: datetime.datetime) -> None:
+def _stamp_ledger_escalated(plan: Plan, *, project: str, kanban_root: Path | str, moment: datetime.datetime) -> None:
     """Mark the task's open block escalated (class human) by appending one
     block-escalate line under the version it was opened with; a block that
     already reads human, or none open, writes nothing."""
@@ -1585,22 +1638,36 @@ def _warn_ledger(kind: str, project: str, task_id: str, exc: BaseException) -> N
 
 
 def _escalate(
-    plan: Plan, status_file: Path, *, project: str, kanban_root: "Path | str", evidence_file: Path,
-    backups: Mapping[str, str], moment: datetime.datetime, escalate: bool = True,
+    plan: Plan,
+    status_file: Path,
+    *,
+    project: str,
+    kanban_root: Path | str,
+    evidence_file: Path,
+    backups: Mapping[str, str],
+    moment: datetime.datetime,
+    escalate: bool = True,
 ) -> ApplyResult:
     rel = _relative_to_task(evidence_file, status_file.parent)
     if not escalate:
         # The caller parks the question itself (the decision executor's
         # inbox): no Needs Human, no Diagnosis, no block-escalate line.
         return ApplyResult(
-            OUTCOME_ESCALATE, plan.reason_code, ESCALATE, MUTATION_NONE,
-            f"not carried out: {plan.cause or plan.detail}; evidence {rel}", str(evidence_file),
+            OUTCOME_ESCALATE,
+            plan.reason_code,
+            ESCALATE,
+            MUTATION_NONE,
+            f"not carried out: {plan.cause or plan.detail}; evidence {rel}",
+            str(evidence_file),
         )
     body = render_diagnosis(plan, project=project, kanban_root=kanban_root, evidence_file=rel, backups=backups)
     write_diagnosis(status_file, body)
     _stamp_ledger_escalated(plan, project=project, kanban_root=kanban_root, moment=moment)
     return ApplyResult(
-        OUTCOME_ESCALATE, plan.reason_code, ESCALATE, MUTATION_NONE,
+        OUTCOME_ESCALATE,
+        plan.reason_code,
+        ESCALATE,
+        MUTATION_NONE,
         f"escalated: Needs Human yes, OVERWATCH Diagnosis written ({plan.cause or plan.detail}); evidence {rel}",
         str(evidence_file),
     )
@@ -1614,20 +1681,20 @@ def _relative_to_task(path: Path, task_dir: Path) -> str:
 
 
 def apply_task(
-    status_file: "Path | str",
-    queue_file: "Path | str",
+    status_file: Path | str,
+    queue_file: Path | str,
     *,
     project: str,
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     triage_enabled: bool = True,
-    backups: Optional[Mapping[str, str]] = None,
-    now: "datetime.datetime | str | None" = None,
-    table_path: "str | Path | None" = None,
-    handlers: Optional[Mapping[str, ActionHandler]] = None,
-    worktree_base: "Path | str | None" = None,
+    backups: Mapping[str, str] | None = None,
+    now: datetime.datetime | str | None = None,
+    table_path: str | Path | None = None,
+    handlers: Mapping[str, ActionHandler] | None = None,
+    worktree_base: Path | str | None = None,
     defer_only: bool = False,
-    stage_runner: Optional[StageRunner] = None,
-    requeue_budget: Optional[int] = None,
+    stage_runner: StageRunner | None = None,
+    requeue_budget: int | None = None,
     escalate: bool = True,
 ) -> ApplyResult:
     """Re-plan one task and make its writes (see the module docstring).
@@ -1660,12 +1727,20 @@ def apply_task(
     backups = dict(backups or {})
     base = Path(worktree_base) if worktree_base else None
     plan = plan_task(
-        path, triage_enabled=triage_enabled, now=moment, table_path=table_path, handlers=handlers, worktree_base=base,
+        path,
+        triage_enabled=triage_enabled,
+        now=moment,
+        table_path=table_path,
+        handlers=handlers,
+        worktree_base=base,
         requeue_budget=requeue_budget,
     )
     if defer_only and plan.outcome != OUTCOME_DEFER:
         return ApplyResult(
-            OUTCOME_SKIP, plan.reason_code, plan.action, MUTATION_NONE,
+            OUTCOME_SKIP,
+            plan.reason_code,
+            plan.action,
+            MUTATION_NONE,
             f"planned as a deferral, but under the lock the plan is {plan.outcome} ({plan.detail}); nothing "
             "written, left for the next sweep",
         )
@@ -1690,14 +1765,29 @@ def apply_task(
             )
         if plan.outcome == OUTCOME_ESCALATE:
             return _escalate(
-                plan, path, project=project, kanban_root=kanban_root, evidence_file=evidence_file, backups=backups,
-                moment=moment, escalate=escalate,
+                plan,
+                path,
+                project=project,
+                kanban_root=kanban_root,
+                evidence_file=evidence_file,
+                backups=backups,
+                moment=moment,
+                escalate=escalate,
             )
         handler = handler_for(handlers, plan.action, handler_code(plan.decision, plan.reason_code))
         assert handler is not None  # an act plan is only made when a handler exists
         return _act(
-            plan, path, Path(queue_file), handler, moment, evidence_file,
-            project=project, kanban_root=kanban_root, backups=backups, worktree_base=base, escalate=escalate,
+            plan,
+            path,
+            Path(queue_file),
+            handler,
+            moment,
+            evidence_file,
+            project=project,
+            kanban_root=kanban_root,
+            backups=backups,
+            worktree_base=base,
+            escalate=escalate,
         )
     except (OSError, UnicodeDecodeError, BlockRecordError, ValueError) as exc:
         raise _refuse(
@@ -1709,17 +1799,32 @@ def apply_task(
 
 
 def _act(
-    plan: Plan, status_file: Path, queue_file: Path, handler: ActionHandler, moment: datetime.datetime,
-    evidence_file: Path, *, project: str, kanban_root: "Path | str", backups: Mapping[str, str],
-    worktree_base: Optional[Path] = None, escalate: bool = True,
+    plan: Plan,
+    status_file: Path,
+    queue_file: Path,
+    handler: ActionHandler,
+    moment: datetime.datetime,
+    evidence_file: Path,
+    *,
+    project: str,
+    kanban_root: Path | str,
+    backups: Mapping[str, str],
+    worktree_base: Path | None = None,
+    escalate: bool = True,
 ) -> ApplyResult:
     decision = plan.decision
     record = plan.record
     assert decision is not None and record is not None  # an act plan always carries both
     task_dir = status_file.parent
     context = TriageContext(
-        task_id=plan.task_id, task_dir=task_dir, status_file=status_file, queue_file=queue_file,
-        record=record, decision=decision, evidence_dir=evidence_file.parent, now=moment,
+        task_id=plan.task_id,
+        task_dir=task_dir,
+        status_file=status_file,
+        queue_file=queue_file,
+        record=record,
+        decision=decision,
+        evidence_dir=evidence_file.parent,
+        now=moment,
         worktree_base=worktree_base,
     )
     try:
@@ -1729,8 +1834,14 @@ def _act(
             plan, outcome=OUTCOME_ESCALATE, cause=f"{decision.action} refused at execution time: {exc}"
         )
         return _escalate(
-            refused, status_file, project=project, kanban_root=kanban_root, evidence_file=evidence_file,
-            backups=backups, moment=moment, escalate=escalate,
+            refused,
+            status_file,
+            project=project,
+            kanban_root=kanban_root,
+            evidence_file=evidence_file,
+            backups=backups,
+            moment=moment,
+            escalate=escalate,
         )
     mutation = result.mutation
     if mutation != MUTATION_PROMOTE and not mutation.startswith(MUTATION_TRANSITION_PREFIX):
@@ -1811,14 +1922,18 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--kanban-root", required=True, metavar="DIR", help="the kanban root holding projects/")
         p.add_argument("--project", required=True, metavar="NAME", help="the project whose tasks are triaged")
         p.add_argument(
-            "--triage-enabled", type=true_false_arg, default=True, metavar="true|false",
+            "--triage-enabled",
+            type=true_false_arg,
+            default=True,
+            metavar="true|false",
             help="the resolved [overwatch] block_triage value; false keeps triage to records and diagnoses "
             "(default: true)",
         )
         p.add_argument("--now", metavar="ISO", help="the decision time (ISO-8601); default: the current UTC time")
         p.add_argument("--table", metavar="YAML_FILE", help="the classifier table; default: the shipped table")
         p.add_argument(
-            "--worktree-base", metavar="DIR",
+            "--worktree-base",
+            metavar="DIR",
             help="the directory task worktrees live under (worktree.sh pgai_worktree_base); without it a "
             "worktree_create_failed block cannot be shown to have residue inside it and escalates",
         )
@@ -1834,7 +1949,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     _common(plan)
     plan.add_argument(
-        "--id-pattern", metavar="REGEX",
+        "--id-pattern",
+        metavar="REGEX",
         help="a regex every task key must match from its start; other keys are skipped (default: any safe key)",
     )
 
@@ -1858,14 +1974,29 @@ def _parser() -> argparse.ArgumentParser:
     apply.add_argument("--status-backup", default="", metavar="PATH", help="the status.md backup, named in evidence")
     apply.add_argument("--queue-backup", default="", metavar="PATH", help="the queue-file backup, named in evidence")
     apply.add_argument(
-        "--defer-only", action="store_true",
+        "--defer-only",
+        action="store_true",
         help="the plan named this task defer (no backup was taken): run the resolution stage when the plan "
         "under the lock is still defer, otherwise write nothing and report skip",
+    )
+    budget = sub.add_parser(
+        "requeue-budget",
+        help="print [overwatch] requeue_budget for the project holding a task's status.md",
+        description=(
+            "Print [overwatch] requeue_budget (project.cfg, then kanban.cfg; default 3) for the project "
+            "holding STATUS_FILE, as one whole number. A configured value that is not a whole number "
+            "refuses (exit 1). Reads only."
+        ),
+    )
+    budget.add_argument(
+        "status_file",
+        metavar="STATUS_FILE",
+        help="the task's status.md (<kanban_root>/projects/<project>/tasks/<task_id>/status.md; need not exist)",
     )
     return parser
 
 
-def _emit(exc: TriageError, project: Optional[str]) -> int:
+def _emit(exc: TriageError, project: str | None) -> int:
     # CONVERT: a refused triage call leaves the task's state untouched (the
     # calling check performs no mutation after a failed apply) and the sweep
     # carries on; the cost is one task not triaged this firing, never a
@@ -1875,12 +2006,18 @@ def _emit(exc: TriageError, project: Optional[str]) -> int:
     return 1
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point; returns the exit code."""
     parser = _parser()
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
+        return 0
+    if args.command == "requeue-budget":
+        try:
+            sys.stdout.write(f"{_budget_for(Path(args.status_file))}\n")
+        except RequeueBudgetError as exc:
+            return _emit(_refuse(exc.error_key, exc.message, exc.remedy), None)
         return 0
     if args.now is not None and try_parse_iso(args.now) is None:
         parser.error(f"--now {args.now!r} is not an ISO-8601 time (e.g. 2026-01-01T00:00:00+00:00)")
@@ -1900,8 +2037,12 @@ def main(argv: Optional[list] = None) -> int:
             raise _refuse(exc.error_key, exc.message, exc.remedy) from exc
         if args.command == "plan":
             for plan, queue in plan_project(
-                project_root, id_pattern=args.id_pattern, triage_enabled=args.triage_enabled,
-                now=args.now, table_path=args.table, worktree_base=args.worktree_base,
+                project_root,
+                id_pattern=args.id_pattern,
+                triage_enabled=args.triage_enabled,
+                now=args.now,
+                table_path=args.table,
+                worktree_base=args.worktree_base,
                 requeue_budget=requeue_budget,
             ):
                 fields = (plan.task_id, str(queue), plan.outcome, plan.reason_code, plan.action, plan.detail)
@@ -1922,11 +2063,17 @@ def main(argv: Optional[list] = None) -> int:
                 f"ls -l {shlex.quote(str(status.parent))}",
             )
         result = apply_task(
-            status, args.queue_file, project=args.project, kanban_root=args.kanban_root,
+            status,
+            args.queue_file,
+            project=args.project,
+            kanban_root=args.kanban_root,
             triage_enabled=args.triage_enabled,
             backups={"status.md": args.status_backup, "queue": args.queue_backup},
-            now=args.now, table_path=args.table, worktree_base=args.worktree_base,
-            defer_only=args.defer_only, requeue_budget=requeue_budget,
+            now=args.now,
+            table_path=args.table,
+            worktree_base=args.worktree_base,
+            defer_only=args.defer_only,
+            requeue_budget=requeue_budget,
         )
         sys.stdout.write(result.as_tsv() + "\n")
         return 0

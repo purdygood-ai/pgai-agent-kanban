@@ -45,9 +45,7 @@ _RECORD = (
 
 _STATUS = (
     "# Status\n\n## Task\n" + _TASK_ID + "\n\n## Role\nCODER\n\n## State\nBLOCKED\n\n"
-    "## Summary\nBlocked on a dirty worktree.\n\n"
-    + _RECORD
-    + "## Needs Human\nyes\n\n## Instruction Conflicts\nnone\n"
+    "## Summary\nBlocked on a dirty worktree.\n\n" + _RECORD + "## Needs Human\nyes\n\n## Instruction Conflicts\nnone\n"
 )
 
 
@@ -69,7 +67,10 @@ def _transition(tmp_path: pathlib.Path, status: pathlib.Path, state: str) -> sub
     )
     return subprocess.run(
         ["bash", "-c", script, "transition", _TASK_ID, str(status), state],
-        capture_output=True, text=True, env=env, timeout=120,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
     )
 
 
@@ -119,9 +120,16 @@ def test_failed_record_removal_never_fails_the_transition(tmp_path: pathlib.Path
         BACKLOG="{queue}"
         transition_task_state "$1" "$2" DONE
     """)
-    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "tmp")})
-    result = subprocess.run(["bash", "-c", script, "transition", _TASK_ID, str(status)],
-                            capture_output=True, text=True, env=env, timeout=120)
+    env = build_scrubbed_env(
+        home_dir=tmp_path / "home", extra_env={"PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "tmp")}
+    )
+    result = subprocess.run(
+        ["bash", "-c", script, "transition", _TASK_ID, str(status)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
     assert result.returncode == 0, result.stderr
     assert "Block Record not removed" in result.stderr
     assert "## State\nDONE\n" in status.read_text(encoding="utf-8")

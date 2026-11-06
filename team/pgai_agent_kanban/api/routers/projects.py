@@ -72,7 +72,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -149,7 +148,7 @@ def _cfg_get(
         return fallback
 
 
-def _resolve_ceilings(project_dir: pathlib.Path) -> tuple[dict[str, Optional[int]], list[str]]:
+def _resolve_ceilings(project_dir: pathlib.Path) -> tuple[dict[str, int | None], list[str]]:
     """Return the ceilings in effect for *project_dir* and any unreadable-value warnings.
 
     Each value is the configured number, the documented default for an
@@ -158,7 +157,7 @@ def _resolve_ceilings(project_dir: pathlib.Path) -> tuple[dict[str, Optional[int
     value -- the same line the bash accessors print.
     """
     cfg_file = project_cfg_file(project_dir)
-    ceilings: dict[str, Optional[int]] = {}
+    ceilings: dict[str, int | None] = {}
     problems: list[str] = []
     for key in CEILING_KEYS:
         try:
@@ -182,10 +181,7 @@ def _read_projects_registry(
     Each entry contains:
       - priority: int
     """
-    return {
-        entry.name: {"priority": entry.priority}
-        for entry in ini.projects_registry(kanban_root)
-    }
+    return {entry.name: {"priority": entry.priority} for entry in ini.projects_registry(kanban_root)}
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +189,7 @@ def _read_projects_registry(
 # ---------------------------------------------------------------------------
 
 
-def _normalize_active_rc(raw: str) -> Optional[str]:
+def _normalize_active_rc(raw: str) -> str | None:
     """Return the active RC version string, or None when none/absent.
 
     Normalises the release-state.md value: returns None when the value is
@@ -309,12 +305,12 @@ def get_project_metadata(
     # as pp_last_released_version's release-state.md fallback path).
     last_released_raw = get_last_released_for_project(project_dir)
     # get_last_released_for_project returns "" for sentinels; convert to None.
-    last_released: Optional[str] = last_released_raw if last_released_raw else None
+    last_released: str | None = last_released_raw if last_released_raw else None
 
     # active_rc: read via the canonical pgai_agent_kanban.board helper, then normalize
     # "none" and non-semver values to null (never emit the string "none").
     active_rc_raw = get_active_rc_for_project(project_dir)
-    active_rc: Optional[str] = _normalize_active_rc(active_rc_raw)
+    active_rc: str | None = _normalize_active_rc(active_rc_raw)
 
     # --- HALT: the dashboard header's flag and text (project, else kanban-wide) ---
     halt_flag, halt_text = effective_halt_flag_and_text(project_dir, kanban_root)
@@ -355,10 +351,7 @@ def get_project_metadata(
 
 def _reliability_refresh_command(kanban_root: pathlib.Path, name: str) -> str:
     """The command that (re)writes *name*'s reliability.json under *kanban_root*."""
-    return (
-        f"python3 -m pgai_agent_kanban.metrics.reliability refresh --project {name}"
-        f" --kanban-root {kanban_root}"
-    )
+    return f"python3 -m pgai_agent_kanban.metrics.reliability refresh --project {name}" f" --kanban-root {kanban_root}"
 
 
 @router.get(

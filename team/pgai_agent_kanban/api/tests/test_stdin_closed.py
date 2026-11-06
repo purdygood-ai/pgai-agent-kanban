@@ -36,7 +36,8 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Generator
+from typing import Any
+from collections.abc import Callable, Generator
 from unittest.mock import patch
 
 import pytest
@@ -190,9 +191,7 @@ def test_shell_out_prompting_script_returns_with_its_own_refusal(
     """shell_out returns promptly, non-zero, with the script's stderr, when the script prompts."""
     stub = _write_prompting_stub(tmp_path / "prompts.sh")
 
-    result = _call_with_timeout(
-        lambda: shell_out(stub, flags={}), held_open_stdin, "shell_out()"
-    )
+    result = _call_with_timeout(lambda: shell_out(stub, flags={}), held_open_stdin, "shell_out()")
 
     assert isinstance(result, ShellResult)
     assert result.exit_code == _STUB_EXIT_CODE
@@ -298,9 +297,7 @@ def test_route_fronting_prompting_script_returns_500_with_its_stderr(
     monkeypatch.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(tmp_path / "tmp"))
 
     with _client_fronting(scratch_root) as client:
-        response = _call_with_timeout(
-            lambda: client.post(route, json=body), held_open_stdin, f"POST {route}"
-        )
+        response = _call_with_timeout(lambda: client.post(route, json=body), held_open_stdin, f"POST {route}")
 
     assert response.status_code == 500, response.text
     envelope = response.json()

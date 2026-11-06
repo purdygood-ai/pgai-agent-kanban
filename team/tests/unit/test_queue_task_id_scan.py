@@ -42,28 +42,33 @@ _TASK_IDS = _LIB / "task_ids.sh"
 _GATE = _LIB / "wake_task_id_gate.sh"
 _MODULE = "pgai_agent_kanban.lib.queue_task_id_scan"
 
-_QUEUE = "\n".join([
-    "# Coder Backlog",
-    "",
-    "## Queue",
-    "- [ ] CODER-20261018-001-well-formed — description",
-    "- [] ../escape",
-    "-[ ]  bad.id",
-    "  [B] a.b blocked entry",
-    "- [W] Upper_Slug-20261018-001",
-    "- [W] CODER-20261018-002-waiting",
-    "- [x] ..",
-    "- [ ] CLAUDE-PM-20260101-001-legacy-form",
-    "- [Q] not-a-marker",
-    "",
-])
+_QUEUE = "\n".join(
+    [
+        "# Coder Backlog",
+        "",
+        "## Queue",
+        "- [ ] CODER-20261018-001-well-formed — description",
+        "- [] ../escape",
+        "-[ ]  bad.id",
+        "  [B] a.b blocked entry",
+        "- [W] Upper_Slug-20261018-001",
+        "- [W] CODER-20261018-002-waiting",
+        "- [x] ..",
+        "- [ ] CLAUDE-PM-20260101-001-legacy-form",
+        "- [Q] not-a-marker",
+        "",
+    ]
+)
 
 
 @pytest.fixture(scope="module")
 def canonical_pattern() -> str:
     result = subprocess.run(
         ["bash", "-c", f"source '{_TASK_IDS}'; kanban_task_id_pattern"],
-        capture_output=True, text=True, timeout=30, check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert result.returncode == 0 and result.stdout.strip(), result.stderr
     return result.stdout.strip()
@@ -73,7 +78,12 @@ def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProce
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, "--", *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -118,11 +128,7 @@ def test_command_line_prints_number_and_line_per_finding(tmp_path: pathlib.Path,
     queue.write_text(_QUEUE, encoding="utf-8")
     result = _run_module(tmp_path, str(queue), "W ", canonical_pattern)
     assert result.returncode == 0, result.stderr
-    assert result.stdout == (
-        "5\t- [] ../escape\n"
-        "6\t-[ ]  bad.id\n"
-        "8\t- [W] Upper_Slug-20261018-001\n"
-    )
+    assert result.stdout == ("5\t- [] ../escape\n" "6\t-[ ]  bad.id\n" "8\t- [W] Upper_Slug-20261018-001\n")
 
 
 def test_gate_refusal_names_the_line_when_the_caller_defined_its_own_runner(tmp_path: pathlib.Path) -> None:
@@ -137,8 +143,13 @@ def test_gate_refusal_names_the_line_when_the_caller_defined_its_own_runner(tmp_
     """)
     env = build_scrubbed_env(home_dir=tmp_path / "home")
     result = subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(tmp_path), timeout=60, check=False,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert result.stdout == "rc=0\n", f"the scan must not print on stdout\nstdout={result.stdout}"

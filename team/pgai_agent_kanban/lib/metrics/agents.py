@@ -151,7 +151,7 @@ _COL_WIDTHS = (12, 20, 17, 16, 14, 12)
 
 
 def _fmt_row(values: tuple[str, ...]) -> str:
-    fmt = "{:<%d}" % _COL_WIDTHS[0] + "".join(" {:>%d}" % w for w in _COL_WIDTHS[1:])
+    fmt = f"{{:<{_COL_WIDTHS[0]}}}" + "".join(f" {{:>{w}}}" for w in _COL_WIDTHS[1:])
     return fmt.format(*values)
 
 
@@ -190,10 +190,7 @@ def span_footer(span: RcSpan | int, shipped_count: int, excluded_count: int) -> 
         label = f"since {span.since}"
     else:
         label = "window"
-    return (
-        f"{label}: {format_int(shipped_count)} shipped RCs "
-        f"({format_int(excluded_count)} cancelled excluded)"
-    )
+    return f"{label}: {format_int(shipped_count)} shipped RCs " f"({format_int(excluded_count)} cancelled excluded)"
 
 
 def render_project_block(
@@ -287,7 +284,7 @@ class _ArgumentParser(argparse.ArgumentParser):
     shape every flag check in this module uses) instead of argparse's own
     exit 2."""
 
-    def error(self, message: str) -> "NoReturn":  # type: ignore[override]
+    def error(self, message: str) -> NoReturn:  # type: ignore[override]
         raise _UsageError(message)
 
 
@@ -312,15 +309,12 @@ def span_from_args(
     """
     given = [
         flag
-        for flag, present in zip(
-            _SPAN_FLAGS, (window is not None, last is not None, all_shipped, since is not None)
-        )
+        for flag, present in zip(_SPAN_FLAGS, (window is not None, last is not None, all_shipped, since is not None))
         if present
     ]
     if len(given) > 1:
         raise _UsageError(
-            "--window, --last, --all and --since are mutually exclusive; give at most one "
-            f"(got: {' '.join(given)})"
+            "--window, --last, --all and --since are mutually exclusive; give at most one " f"(got: {' '.join(given)})"
         )
     if window is not None:
         return RcSpan.last(_positive_int("--window", window))
@@ -463,16 +457,12 @@ def _run(argv: list[str] | None) -> int:
         root = pathlib.Path(args.kanban_root).expanduser()
         projects_dir = root / "projects"
         if args.project:
-            descriptors = [
-                {"name": args.project, "rc_dir": str(projects_dir / args.project / "metrics" / "rc")}
-            ]
+            descriptors = [{"name": args.project, "rc_dir": str(projects_dir / args.project / "metrics" / "rc")}]
         else:
             if projects_dir.is_dir():
                 for entry in sorted(projects_dir.iterdir()):
                     if entry.is_dir():
-                        descriptors.append(
-                            {"name": entry.name, "rc_dir": str(entry / "metrics" / "rc")}
-                        )
+                        descriptors.append({"name": entry.name, "rc_dir": str(entry / "metrics" / "rc")})
 
     if not descriptors:
         print(f"{colors['cyan']}{colors['bold']}=== Agent Metrics ==={colors['reset']}")
@@ -489,4 +479,3 @@ def _run(argv: list[str] | None) -> int:
             print(line)
 
     return 0
-

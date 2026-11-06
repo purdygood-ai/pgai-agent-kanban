@@ -71,7 +71,7 @@ import hashlib
 import importlib.util
 import re
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pgai_agent_kanban.lib.atomic_write import atomic_write
 from pgai_agent_kanban.lib.timeutil import format_iso
@@ -115,7 +115,7 @@ class GateTriageError(Exception):
 # ---------------------------------------------------------------------------
 
 
-def _ok(repo: Path, *args: str) -> Optional[bool]:
+def _ok(repo: Path, *args: str) -> bool | None:
     """True / False for a git call's exit 0 / 1; None when it could not run."""
     result = run_readonly_git(repo, *args)
     if result is None or result.returncode not in (0, 1):
@@ -128,7 +128,7 @@ def _rev(repo: Path, rev: str) -> str:
     return result.stdout.strip() if result is not None and result.ok else ""
 
 
-def is_ancestor(repo: Path, ancestor: str, descendant: str) -> Optional[bool]:
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool | None:
     """Whether *ancestor* is an ancestor of *descendant* (None: unreadable)."""
     return _ok(repo, "merge-base", "--is-ancestor", ancestor, descendant)
 
@@ -145,14 +145,19 @@ def _target(task_dir: Path, record: BlockRecord) -> GitTarget:
 # ---------------------------------------------------------------------------
 
 
-def merge_tree_conflicts(target: GitTarget) -> Optional[list[str]]:
+def merge_tree_conflicts(target: GitTarget) -> list[str] | None:
     """The paths ``merge-tree --write-tree`` of the source branch and the
     feature branch reports in conflict: ``[]`` for a clean merge, None when it could not be computed."""
     if not target.branch_present or target.source is None:
         return None
     result = run_readonly_git(
-        target.repo, "merge-tree", "--write-tree", "--name-only", "--no-messages",
-        f"refs/heads/{target.source}", f"refs/heads/{target.branch}",
+        target.repo,
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        f"refs/heads/{target.source}",
+        f"refs/heads/{target.branch}",
     )
     if result is None or result.returncode not in (0, 1):
         return None
@@ -162,7 +167,7 @@ def merge_tree_conflicts(target: GitTarget) -> Optional[list[str]]:
     return [line for line in result.stdout.splitlines()[1:] if line.strip()]
 
 
-def gate_merge_facts(task_dir: Path, record: Optional[BlockRecord]) -> dict:
+def gate_merge_facts(task_dir: Path, record: BlockRecord | None) -> dict:
     """The classifier facts for a ``gate_merge_not_found`` block.
 
     ``branch_ancestor_of_source`` is always supplied (False when unreadable,
@@ -207,7 +212,7 @@ def _load_empty_commit_finder() -> Callable:
     return module.find_empty_commits
 
 
-def _own_merge_range(target: GitTarget) -> Optional[str]:
+def _own_merge_range(target: GitTarget) -> str | None:
     """``<source>^..<branch>`` when the source tip is this branch's own merge
     (second parent == branch tip), the gate's precondition for its
     empty-commit check; None otherwise."""
@@ -220,7 +225,7 @@ def _own_merge_range(target: GitTarget) -> Optional[str]:
     return None
 
 
-def gate_empty_commits(target: GitTarget) -> Optional[list[str]]:
+def gate_empty_commits(target: GitTarget) -> list[str] | None:
     """The empty non-merge commits the gate's empty-commit check finds:
     ``[]`` when none (or the check does not apply), None when it cannot run."""
     span = _own_merge_range(target)
@@ -256,7 +261,9 @@ def _merge_check(target: GitTarget) -> GateVerdict:
         head_commit = _rev(target.worktree, "HEAD")
         if head_commit and is_ancestor(repo, head_commit, f"refs/heads/{source}") is True:
             return GateVerdict(True, CHECK_MERGE, f"the worktree's commit {head_commit} is an ancestor of {source}")
-    return GateVerdict(False, CHECK_MERGE, f"{branch} no longer exists and no evidence of its merge into {source} was found")
+    return GateVerdict(
+        False, CHECK_MERGE, f"{branch} no longer exists and no evidence of its merge into {source} was found"
+    )
 
 
 def recompute_gate(target: GitTarget) -> GateVerdict:
@@ -284,7 +291,7 @@ def recompute_gate(target: GitTarget) -> GateVerdict:
     return GateVerdict(True, CHECK_ALL, "; ".join(details))
 
 
-def landing_merge(target: GitTarget) -> Optional[str]:
+def landing_merge(target: GitTarget) -> str | None:
     """The merge commit on the source branch's first-parent history that
     brings the branch tip in as a non-first parent, or None."""
     if not target.branch_present or target.source is None:
@@ -293,7 +300,11 @@ def landing_merge(target: GitTarget) -> Optional[str]:
     if not tip:
         return None
     merges = run_readonly_git(
-        target.repo, "rev-list", "--first-parent", "--merges", "--parents",
+        target.repo,
+        "rev-list",
+        "--first-parent",
+        "--merges",
+        "--parents",
         f"{tip}..refs/heads/{target.source}",
     )
     if merges is None or not merges.ok:
@@ -321,14 +332,18 @@ def recompute_gate_for_task(task_dir: Path, record: BlockRecord) -> str:
         raise GateTriageError(f"the feature branch {target.branch} no longer exists, so its merge cannot be recomputed")
     verdict = recompute_gate(target)
     if not verdict.passed:
-        raise GateTriageError(f"the recomputed completion gate still refuses at its {verdict.check} check: {verdict.detail}")
+        raise GateTriageError(
+            f"the recomputed completion gate still refuses at its {verdict.check} check: {verdict.detail}"
+        )
     merge = landing_merge(target)
     if merge is None:
         raise GateTriageError(
             f"{target.branch} is an ancestor of {target.source}, but no merge commit on {target.source} brings it in "
             "(a fast-forward, or a branch that never moved), so the task's work is not shown to have landed"
         )
-    return f"completion gate recomputed read-only and passes ({verdict.detail}); merge commit {merge} on {target.source}"
+    return (
+        f"completion gate recomputed read-only and passes ({verdict.detail}); merge commit {merge} on {target.source}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -429,8 +444,13 @@ def snapshot_dirty_worktree(
     atomic_write(untracked_path, header + "".join(f"{line}\n" for line in untracked_lines), prefix=_ATOMIC_PREFIX)
     atomic_write(checksum_path, f"{digest}  {patch_path.name}\n", prefix=_ATOMIC_PREFIX)
     return DirtySnapshot(
-        patch=patch_path, untracked=untracked_path, checksum=checksum_path, sha256=digest,
-        tracked_changes=bool(tracked.stdout), untracked_saved=saved, untracked_skipped=skipped,
+        patch=patch_path,
+        untracked=untracked_path,
+        checksum=checksum_path,
+        sha256=digest,
+        tracked_changes=bool(tracked.stdout),
+        untracked_saved=saved,
+        untracked_skipped=skipped,
     )
 
 
@@ -439,7 +459,7 @@ def snapshot_dirty_worktree(
 # ---------------------------------------------------------------------------
 
 
-def empty_commit_shas(task_dir: Path, record: Optional[BlockRecord], status_text: str) -> list[str]:
+def empty_commit_shas(task_dir: Path, record: BlockRecord | None, status_text: str) -> list[str]:
     """The empty commits behind a ``gate_empty_commit`` block, oldest reading first.
 
     Recomputed with the gate's own finder when the source tip is still the
@@ -457,7 +477,7 @@ def empty_commit_shas(task_dir: Path, record: Optional[BlockRecord], status_text
     return list(dict.fromkeys(_SHA_RE.findall(blockers)))
 
 
-def gate_empty_commit_facts(task_dir: Path, record: Optional[BlockRecord], status_text: str) -> dict:
+def gate_empty_commit_facts(task_dir: Path, record: BlockRecord | None, status_text: str) -> dict:
     """The note value ``shas`` for a ``gate_empty_commit`` block (absent when none is known)."""
     shas = empty_commit_shas(task_dir, record, status_text)
     return {"shas": ", ".join(shas)} if shas else {}

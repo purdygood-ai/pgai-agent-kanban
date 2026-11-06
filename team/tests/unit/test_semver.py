@@ -18,7 +18,9 @@ import pytest
 try:
     from pm_agent.lib import semver
 except ImportError:
-    import sys, pathlib
+    import sys
+    import pathlib
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib import semver  # type: ignore[no-redef]
 

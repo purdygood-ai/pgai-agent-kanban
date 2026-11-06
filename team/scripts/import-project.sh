@@ -29,8 +29,26 @@
 #                     Default: project name embedded in the archive.
 #   --register        Optional. Add the project to projects.cfg using the
 #                     registration data from the archive's MANIFEST file.
-#                     Without this flag a notice is printed with the line the
-#                     operator must add manually.
+#                     Exactly one entry is appended: the block's first
+#                     [project:NAME] header whose NAME the registry accepts,
+#                     renamed to the final name, and the lines under it up
+#                     to the next [project:...] header.  A section header of
+#                     another kind inside it (such as [release]) is removed,
+#                     with a warning naming it, so the keys after it stay in
+#                     the project's section.  A block holding only a legacy
+#                     NAME:PRIORITY[:COLOR] line is appended as that line
+#                     (renamed) when projects.cfg is in the legacy format,
+#                     and converted to a [project:<final-name>] section when
+#                     it is INI.  A block with neither is refused (exit 5)
+#                     and nothing is appended.  Everything else in the
+#                     block -- non-comment lines before its first header,
+#                     sections whose NAME the registry rejects, and any
+#                     further accepted section -- is left out with a warning
+#                     naming it; comment lines are dropped silently.
+#                     Without this flag a notice is printed with the entry
+#                     the operator must add manually, built the same way;
+#                     for a block with no usable entry a warning is printed
+#                     instead and nothing is offered.
 #   --force           Optional. Allow overwriting an existing
 #                     projects/<final-name>/ (and, when the export carries an
 #                     archive, an existing archive/<final-name>/).
@@ -63,7 +81,7 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve kanban root
@@ -79,7 +97,7 @@ fi
 # ---------------------------------------------------------------------------
 # Source helpers
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/operator_args.sh
 source "${SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/project_paths.sh
@@ -544,13 +562,174 @@ fi
 # Registration: --register merges the [project:<final-name>] INI section into
 # projects.cfg.  Without --register, print the exact block for copy/paste.
 #
-# When --name was supplied, rewrite the section header from [project:<orig>]
-# to [project:<final-name>] before appending.
+# Both paths build the one entry through _registration_entry, so they treat
+# the same MANIFEST block the same way:
+#   - a block with neither an accepted header nor a legacy NAME:PRIORITY line
+#     is refused under --register (exit 5) and, without it, reported with a
+#     warning and nothing offered to paste (exit 0);
+#   - a legacy line is offered or appended as a legacy line when projects.cfg
+#     is legacy, and as a converted [project:<final-name>] section when it is
+#     INI;
+#   - otherwise only one section is appended or offered: the first accepted
+#     header, as [project:<final-name>], and the lines under it up to the
+#     next [project:...] header, any other kind of section header inside it
+#     removed.  Non-comment lines before the first header, sections whose
+#     header the registry rejects, and every further accepted section are
+#     left out, with a warning naming them (exit 0 on both paths).  No
+#     section the registry would ignore, no line it would attribute to
+#     another project and no second project is ever appended or offered.
 #
 # Guard: if projects.cfg already registers the final name (projects_cfg_has),
 # warn and skip (do NOT duplicate it).
 # ---------------------------------------------------------------------------
 PROJECTS_CFG="${KANBAN_ROOT}/projects.cfg"
+
+# _registration_entry_target — "colon-legacy" when projects.cfg exists in
+# the legacy NAME:PRIORITY[:COLOR] format (projects_cfg_format) and already
+# holds a data line; "ini" otherwise, a missing or empty registry included.
+_registration_entry_target() {
+    if [[ -f "$PROJECTS_CFG" ]] \
+        && [[ "$(projects_cfg_format "$PROJECTS_CFG")" == "colon-legacy" ]] \
+        && grep -qvE '^[[:space:]]*([#;]|$)' "$PROJECTS_CFG"; then
+        echo "colon-legacy"
+    else
+        echo "ini"
+    fi
+}
+
+# _registration_entry BLOCK TARGET — print the one entry to register for
+# BLOCK and return its kind; this is the one place a usable header is found.
+#
+#   0  An INI section: BLOCK's first [project:NAME] header whose NAME the
+#      registry accepts (project_header in PROJECTS_CFG_AWK_HEADER,
+#      lib/projects_cfg.sh), printed as [project:<final-name>], and the lines
+#      under it up to the next [project:...] header.  A section header of
+#      any other kind inside it is dropped (the registry would end the
+#      project's section there and lose the keys after it);
+#      _warn_foreign_section_headers names it.  Also returned when BLOCK
+#      has no such header but a legacy NAME:PRIORITY[:COLOR] line whose NAME
+#      the registry accepts and TARGET is "ini": the line converted to a
+#      [project:<final-name>] section with priority= and dashboard_color=.
+#   3  That legacy line with TARGET "colon-legacy": printed as
+#      <final-name>:PRIORITY[:COLOR], the form a legacy registry reads.
+#   1  Nothing usable; nothing printed.
+#
+# Lines before the header would be read as part of whichever section
+# precedes them in projects.cfg, and any later section would register or
+# overwrite a project other than <final-name>, so neither is printed;
+# _warn_left_out_registration_content names them.
+_registration_entry() {
+    printf '%s\n' "$1" | \
+        awk -v final="${FINAL_NAME}" -v target="${2:-ini}" "${PROJECTS_CFG_AWK_HEADER}"'
+            project_section($0) {
+                if (kept) { done = 1 }
+                else if (project_header($0) != "") {
+                    print "[project:" final "]"
+                    kept = 1
+                    next
+                }
+            }
+            kept && !done {
+                if ($0 ~ /^[[:space:]]*\[.*\][[:space:]]*$/) next
+                print
+                next
+            }
+            !kept && legacy == "" && $0 ~ /^[[:space:]]*[^#;[[:space:]][^=]*$/ && index($0, ":") > 0 {
+                legacy = $0
+            }
+            END {
+                if (kept) exit 0
+                if (legacy == "") exit 1
+                n = split(legacy, field, ":")
+                for (i = 1; i <= n; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", field[i])
+                if (project_header("[project:" field[1] "]") == "" || field[2] == "") exit 1
+                if (target == "colon-legacy") {
+                    print final ":" field[2] (n >= 3 && field[3] != "" ? ":" field[3] : "")
+                    exit 3
+                }
+                print "[project:" final "]"
+                print "priority=" field[2]
+                if (n >= 3 && field[3] != "") print "dashboard_color=" field[3]
+                exit 0
+            }
+        '
+}
+
+# _warn_foreign_section_headers BLOCK — on stderr, name each section header
+# of a kind other than [project:...] that sits inside the section
+# _registration_entry keeps (and drops).  Prints nothing when there is none.
+_warn_foreign_section_headers() {
+    local foreign
+    foreign="$(awk "${PROJECTS_CFG_AWK_HEADER}"'
+            project_section($0) {
+                if (kept) exit
+                if (project_header($0) != "") kept = 1
+                next
+            }
+            kept && $0 ~ /^[[:space:]]*\[.*\][[:space:]]*$/ { print "    " $0 }
+        ' <<< "$1")"
+    [[ -n "$foreign" ]] || return 0
+    echo "WARNING: the MANIFEST registration block holds a section header that is not [project:NAME] inside the section registered for '${FINAL_NAME}';" >&2
+    echo "  projects.cfg readers would end the project's section there and drop the keys after it, so the header is removed and those keys stay in [project:${FINAL_NAME}]:" >&2
+    printf '%s\n' "$foreign" >&2
+}
+
+# _warn_rejected_registration_sections BLOCK — on stderr, name each
+# [project:NAME] section of BLOCK whose NAME the registry rejects (sections
+# _registration_entry leaves out), and say where their keys still
+# are.  Prints nothing when every section is accepted.
+_warn_rejected_registration_sections() {
+    local rejected
+    rejected="$(awk "${PROJECTS_CFG_AWK_HEADER}"'
+            project_section($0) && project_header($0) == "" {
+                print "    [project:" project_section_name($0) "]"
+            }
+        ' <<< "$1")"
+    [[ -n "$rejected" ]] || return 0
+    echo "WARNING: the MANIFEST registration block holds [project:NAME] sections the registry does not accept" >&2
+    echo "  (NAME must match ${PROJECTS_CFG_NAME_RE}); they are left out of the section registered for '${FINAL_NAME}':" >&2
+    printf '%s\n' "$rejected" >&2
+    echo "  Their keys remain in '${MANIFEST_FILE}'; copy any you need into the [project:${FINAL_NAME}] section by hand." >&2
+}
+
+# _warn_left_out_registration_content BLOCK — on stderr, name the rest of
+# what _registration_entry leaves out of an INI BLOCK, beside the
+# rejected-name sections _warn_rejected_registration_sections names: every
+# non-blank, non-comment line before BLOCK's first [project:...] header (a
+# comment line is read by no registry reader, so it is dropped without a
+# warning), and the header
+# of every section after the first accepted one whose NAME the registry also
+# accepts.  Prints nothing when BLOCK holds neither.
+_warn_left_out_registration_content() {
+    local left_out stray extra
+    left_out="$(awk "${PROJECTS_CFG_AWK_HEADER}"'
+            project_section($0) {
+                in_section = 1
+                if (project_header($0) != "") {
+                    if (accepted) print "extra\t    [project:" project_header($0) "]"
+                    accepted = 1
+                }
+                next
+            }
+            !in_section && /[^[:space:]]/ && !/^[[:space:]]*[#;]/ { print "stray\t    " $0 }
+        ' <<< "$1")"
+    stray="$(sed -n 's/^stray\t//p' <<< "$left_out")"
+    extra="$(sed -n 's/^extra\t//p' <<< "$left_out")"
+    if [[ -n "$stray" ]]; then
+        echo "WARNING: the MANIFEST registration block holds lines before its first [project:NAME] header;" >&2
+        echo "  in projects.cfg they would be read as part of whichever section precedes them, so they are" >&2
+        echo "  left out of the section registered for '${FINAL_NAME}':" >&2
+        printf '%s\n' "$stray" >&2
+        echo "  Copy any you need into the [project:${FINAL_NAME}] section by hand." >&2
+    fi
+    if [[ -n "$extra" ]]; then
+        echo "WARNING: the MANIFEST registration block holds more than one [project:NAME] section the registry accepts;" >&2
+        echo "  only the first is registered, as [project:${FINAL_NAME}], and these are left out:" >&2
+        printf '%s\n' "$extra" >&2
+        echo "  Their keys remain in '${MANIFEST_FILE}'; copy any you need into the [project:${FINAL_NAME}] section by hand." >&2
+    fi
+    return 0
+}
 
 if [[ "$REGISTER" == true ]]; then
     # Registration block is required when --register is given.
@@ -561,24 +740,18 @@ if [[ "$REGISTER" == true ]]; then
         exit 5
     fi
 
-    # Rewrite the section header to the final name (handles --name rename case).
-    # The block from MANIFEST carries the archive's original project name; replace
-    # the first [project:*] header line with the canonical final name.
-    REWRITTEN_BLOCK="$(printf '%s\n' "$MANIFEST_REGISTRATION_BLOCK" | \
-        awk -v final="${FINAL_NAME}" '
-            /^\[project:[a-zA-Z0-9_-]+\]$/ && !replaced {
-                print "[project:" final "]"
-                replaced = 1
-                next
-            }
-            { print }
-        ')"
-
-    # Verify the rewritten block has a valid header.
-    if ! grep -qE '^\[project:[a-zA-Z0-9_-]+\]$' <<< "$REWRITTEN_BLOCK"; then
-        echo "ERROR: registration block from MANIFEST does not contain a valid [project:NAME] header." >&2
+    # Build the one entry to register: the first section whose header the
+    # registry accepts, renamed to the final name (handles the --name rename
+    # case; the block from MANIFEST carries the archive's original project
+    # name), or a legacy line in the registry's own format.  A block with
+    # neither is refused rather than appended, and printed as it stands.
+    ENTRY_TARGET="$(_registration_entry_target)"
+    ENTRY_STATUS=0
+    REWRITTEN_BLOCK="$(_registration_entry "$MANIFEST_REGISTRATION_BLOCK" "$ENTRY_TARGET")" || ENTRY_STATUS=$?
+    if [[ "$ENTRY_STATUS" -eq 1 ]]; then
+        echo "ERROR: registration block from MANIFEST does not contain a valid [project:NAME] header or NAME:PRIORITY line." >&2
         echo "  Block content:" >&2
-        printf '%s\n' "$REWRITTEN_BLOCK" | sed 's/^/    /' >&2
+        printf '%s\n' "$MANIFEST_REGISTRATION_BLOCK" | sed 's/^/    /' >&2
         exit 5
     fi
 
@@ -596,7 +769,11 @@ if [[ "$REGISTER" == true ]]; then
             }
         fi
 
-        # Append the registration block.  Ensure a trailing newline separates it
+        _warn_rejected_registration_sections "$MANIFEST_REGISTRATION_BLOCK"
+        _warn_left_out_registration_content "$MANIFEST_REGISTRATION_BLOCK"
+        _warn_foreign_section_headers "$MANIFEST_REGISTRATION_BLOCK"
+
+        # Append the registration entry.  Ensure a trailing newline separates it
         # from any existing content by adding a blank line before the block.
         {
             printf '\n'
@@ -608,24 +785,37 @@ if [[ "$REGISTER" == true ]]; then
         echo "Registered project '${FINAL_NAME}' in: ${PROJECTS_CFG}"
     fi
 else
-    # --register not supplied: print the block the operator must paste manually.
-    # Rewrite the header to the final name even in the print path.
+    # --register not supplied: print the block the operator must paste manually,
+    # rewritten exactly as --register would append it -- the one section to
+    # register, header renamed to the final name, everything else in the
+    # block left out with a warning.  A block with no header the registry
+    # accepts is never offered for pasting: a warning says so instead.
+    # Either way the import still exits 0 -- the project is already in
+    # place, only its registration is left to do.
     if [[ -n "$MANIFEST_REGISTRATION_BLOCK" ]]; then
-        REWRITTEN_BLOCK="$(printf '%s\n' "$MANIFEST_REGISTRATION_BLOCK" | \
-            awk -v final="${FINAL_NAME}" '
-                /^\[project:[a-zA-Z0-9_-]+\]$/ && !replaced {
-                    print "[project:" final "]"
-                    replaced = 1
-                    next
-                }
-                { print }
-            ')"
-        echo ""
-        echo "NOTICE: To register this project, add the following section to: ${PROJECTS_CFG}"
-        echo ""
-        printf '%s\n' "$REWRITTEN_BLOCK"
-        echo ""
-        echo "  Or re-run with --register to have it added automatically."
+        ENTRY_STATUS=0
+        REWRITTEN_BLOCK="$(_registration_entry "$MANIFEST_REGISTRATION_BLOCK" "$(_registration_entry_target)")" || ENTRY_STATUS=$?
+        if [[ "$ENTRY_STATUS" -ne 1 ]]; then
+            _warn_rejected_registration_sections "$MANIFEST_REGISTRATION_BLOCK"
+            _warn_left_out_registration_content "$MANIFEST_REGISTRATION_BLOCK"
+            _warn_foreign_section_headers "$MANIFEST_REGISTRATION_BLOCK"
+            echo ""
+            if [[ "$ENTRY_STATUS" -eq 3 ]]; then
+                echo "NOTICE: To register this project, add the following line to: ${PROJECTS_CFG}"
+            else
+                echo "NOTICE: To register this project, add the following section to: ${PROJECTS_CFG}"
+            fi
+            echo ""
+            printf '%s\n' "$REWRITTEN_BLOCK"
+            echo ""
+            echo "  Or re-run with --register to have it added automatically."
+        else
+            echo "" >&2
+            echo "WARNING: the MANIFEST registration block has no [project:NAME] header or NAME:PRIORITY line the registry accepts" >&2
+            echo "  (NAME must match ${PROJECTS_CFG_NAME_RE}), so nothing is offered to paste and --register would refuse it." >&2
+            echo "  To register project '${FINAL_NAME}', add a [project:${FINAL_NAME}] section to ${PROJECTS_CFG} by hand," >&2
+            echo "  taking its keys from the registration block in '${MANIFEST_FILE}'." >&2
+        fi
     fi
 fi
 

@@ -90,16 +90,12 @@ def test_missing_kanban_root_env_var_refuses_naming_variable_and_remedy(
         extra_env={"HOME": str(home)},
     )
 
-    assert result.returncode != 0, (
-        f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, (
-        f"variable name not named in stderr:\n{result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, f"variable name not named in stderr:\n{result.stderr!r}"
     assert "Remedy" in result.stderr, f"no remedy printed:\n{result.stderr!r}"
-    assert "container-shell.sh" in result.stderr or "--kanban-root" in result.stderr, (
-        f"remedy does not name a host-runnable fix:\n{result.stderr!r}"
-    )
+    assert (
+        "container-shell.sh" in result.stderr or "--kanban-root" in result.stderr
+    ), f"remedy does not name a host-runnable fix:\n{result.stderr!r}"
 
 
 def test_kanban_root_pointing_at_absent_directory_refuses_naming_path(
@@ -117,12 +113,8 @@ def test_kanban_root_pointing_at_absent_directory_refuses_naming_path(
         extra_env={"HOME": str(home), "PGAI_AGENT_KANBAN_ROOT_PATH": str(missing_root)},
     )
 
-    assert result.returncode != 0, (
-        f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert str(missing_root) in result.stderr, (
-        f"missing root path not named in stderr:\n{result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert str(missing_root) in result.stderr, f"missing root path not named in stderr:\n{result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -144,14 +136,10 @@ def test_missing_home_env_var_refuses_naming_variable_and_remedy(
         extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": str(root)},
     )
 
-    assert result.returncode != 0, (
-        f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "HOME" in result.stderr, f"HOME not named in stderr:\n{result.stderr!r}"
     assert "Remedy" in result.stderr, f"no remedy printed:\n{result.stderr!r}"
-    assert "container-shell.sh" in result.stderr, (
-        f"remedy does not point back at the launcher:\n{result.stderr!r}"
-    )
+    assert "container-shell.sh" in result.stderr, f"remedy does not point back at the launcher:\n{result.stderr!r}"
 
 
 def test_home_pointing_at_absent_directory_refuses_naming_path(
@@ -169,12 +157,8 @@ def test_home_pointing_at_absent_directory_refuses_naming_path(
         extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": str(root), "HOME": str(missing_home)},
     )
 
-    assert result.returncode != 0, (
-        f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert str(missing_home) in result.stderr, (
-        f"missing HOME path not named in stderr:\n{result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert str(missing_home) in result.stderr, f"missing HOME path not named in stderr:\n{result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -199,21 +183,13 @@ def test_checkout_mounted_as_kanban_root_refuses_naming_checkout_and_install_rem
         extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": str(root), "HOME": str(home)},
     )
 
-    assert result.returncode != 0, (
-        f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert str(root) in result.stderr, (
-        f"offending kanban-root path not named in stderr:\n{result.stderr!r}"
-    )
-    assert "checkout" in result.stderr, (
-        f"error does not name the repository-checkout condition:\n{result.stderr!r}"
-    )
-    assert "team/scripts" in result.stderr, (
-        f"error does not explain the checkout-vs-install layout difference:\n{result.stderr!r}"
-    )
-    assert "install.sh" in result.stderr, (
-        f"remedy does not name the install.sh invocation:\n{result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert str(root) in result.stderr, f"offending kanban-root path not named in stderr:\n{result.stderr!r}"
+    assert "checkout" in result.stderr, f"error does not name the repository-checkout condition:\n{result.stderr!r}"
+    assert (
+        "team/scripts" in result.stderr
+    ), f"error does not explain the checkout-vs-install layout difference:\n{result.stderr!r}"
+    assert "install.sh" in result.stderr, f"remedy does not name the install.sh invocation:\n{result.stderr!r}"
 
 
 def test_kanban_root_missing_install_artifact_refuses_even_without_checkout_layout(
@@ -233,15 +209,9 @@ def test_kanban_root_missing_install_artifact_refuses_even_without_checkout_layo
         extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": str(root), "HOME": str(home)},
     )
 
-    assert result.returncode != 0, (
-        f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert str(root) in result.stderr, (
-        f"offending kanban-root path not named in stderr:\n{result.stderr!r}"
-    )
-    assert "install.sh" in result.stderr, (
-        f"remedy does not name the install.sh invocation:\n{result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected non-zero exit; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert str(root) in result.stderr, f"offending kanban-root path not named in stderr:\n{result.stderr!r}"
+    assert "install.sh" in result.stderr, f"remedy does not name the install.sh invocation:\n{result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -269,12 +239,8 @@ def test_satisfied_contract_lands_in_kanban_root_via_login_shell(
         stdin="pwd\n",
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert result.stdout.strip() == str(root), (
-        f"login shell did not land in the kanban root:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert result.stdout.strip() == str(root), f"login shell did not land in the kanban root:\n{result.stdout!r}"
 
 
 def test_satisfied_contract_produces_no_error_output(tmp_path: pathlib.Path) -> None:
@@ -291,7 +257,5 @@ def test_satisfied_contract_produces_no_error_output(tmp_path: pathlib.Path) -> 
         stdin="exit 0\n",
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "ERROR" not in result.stderr, f"unexpected error output:\n{result.stderr!r}"

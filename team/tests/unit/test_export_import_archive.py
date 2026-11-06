@@ -75,9 +75,7 @@ _IMPORT_REWRITTEN = {"project.cfg"}  # env-specific fields blanked on import
 
 def _register(root: pathlib.Path, project: str) -> None:
     """Register *project* in *root*'s projects.cfg and give the root a VERSION."""
-    (root / "projects.cfg").write_text(
-        f"[project:{project}]\npriority = 1\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project}]\npriority = 1\n", encoding="utf-8")
     (root / "VERSION").write_text("v9.9.9\n", encoding="utf-8")
 
 
@@ -136,8 +134,13 @@ def _run(script: pathlib.Path, root: pathlib.Path, tmp_path: pathlib.Path, *args
         },
     )
     return subprocess.run(
-        [str(script), *args], capture_output=True, text=True, env=env, cwd=str(foreign_cwd),
-        timeout=120, stdin=subprocess.DEVNULL,
+        [str(script), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(foreign_cwd),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -154,7 +157,9 @@ def _export(box: ArchiveSandbox, tmp_path: pathlib.Path) -> pathlib.Path:
     return out
 
 
-def _import(root: pathlib.Path, export: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+def _import(
+    root: pathlib.Path, export: pathlib.Path, tmp_path: pathlib.Path, *args: str
+) -> subprocess.CompletedProcess:
     return _run(_IMPORT_SH, root, tmp_path, "--archive", str(export), *args)
 
 
@@ -184,16 +189,16 @@ def test_export_carries_the_archive_and_ledger_and_leaves_the_source_untouched(t
     embedded = f"{box.project}/{_EMBEDDED}"
     with tarfile.open(export, "r:gz") as tar:
         members = {m.name: m for m in tar.getmembers()}
-        assert f"{embedded}/{LEDGER_FILE_NAME}" in members, (
-            f"the export carries no {embedded}/{LEDGER_FILE_NAME}; members: {sorted(members)[:20]}"
-        )
+        assert (
+            f"{embedded}/{LEDGER_FILE_NAME}" in members
+        ), f"the export carries no {embedded}/{LEDGER_FILE_NAME}; members: {sorted(members)[:20]}"
         for relative, content in _tree(archive_dir).items():
             member = members.get(f"{embedded}/{relative}")
             assert member is not None, f"archive/{box.project}/{relative} is missing from the export"
             if content != "dir":
-                assert tar.extractfile(member).read() == content, (
-                    f"archive/{box.project}/{relative} differs inside the export"
-                )
+                assert (
+                    tar.extractfile(member).read() == content
+                ), f"archive/{box.project}/{relative} differs inside the export"
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +217,9 @@ def test_round_trip_restores_the_archive_and_ledger_byte_for_byte(tmp_path):
 
     assert result.returncode == 0, _say(result)
     imported_archive = archive_layout(target, box.project).root
-    assert _tree(imported_archive) == source_archive, (
-        f"archive/{box.project}/ did not survive the round trip byte for byte\n{_say(result)}"
-    )
+    assert (
+        _tree(imported_archive) == source_archive
+    ), f"archive/{box.project}/ did not survive the round trip byte for byte\n{_say(result)}"
     imported_project = target / "projects" / box.project
     assert not (imported_project / _EMBEDDED).exists(), "the embedded ARCHIVE/ was left inside the imported project"
     ignored = _IMPORT_ADDED | _IMPORT_REWRITTEN
@@ -233,9 +238,9 @@ def test_import_under_a_new_name_places_the_archive_under_that_name(tmp_path):
     result = _import(target, export, tmp_path, "--name", "renamed-demo")
 
     assert result.returncode == 0, _say(result)
-    assert _tree(archive_layout(target, "renamed-demo").root) == source_archive, (
-        "archive/renamed-demo/ is not the exported archive byte for byte (ledger rows included)"
-    )
+    assert (
+        _tree(archive_layout(target, "renamed-demo").root) == source_archive
+    ), "archive/renamed-demo/ is not the exported archive byte for byte (ledger rows included)"
     assert not (target / "archive" / box.project).exists(), "the archive was also placed under the exported name"
 
 
@@ -371,7 +376,9 @@ def test_import_under_a_new_name_leaves_the_original_project_untouched(tmp_path,
     result = _import(box.root, export, tmp_path, "--name", "alpha-copy", *(["--force"] if force else []))
 
     assert result.returncode == 0, _say(result)
-    assert _state(box.project_root) == original, f"projects/alpha changed on an import under another name\n{_say(result)}"
+    assert (
+        _state(box.project_root) == original
+    ), f"projects/alpha changed on an import under another name\n{_say(result)}"
     copy = box.root / "projects" / "alpha-copy"
     assert (copy / "MANIFEST").is_file(), f"projects/alpha-copy was not created from the export\n{_say(result)}"
     assert "project_name = alpha-copy" in (copy / "project.cfg").read_text(encoding="utf-8")
@@ -491,7 +498,9 @@ def _next_step(result: subprocess.CompletedProcess, number: int) -> tuple[str, s
     raise AssertionError(f"no suggested next step {number} in the import output\n{_say(result)}")
 
 
-@pytest.mark.parametrize("args, final", [((), "alpha"), (("--name", "alpha-copy"), "alpha-copy")], ids=["own-name", "new-name"])
+@pytest.mark.parametrize(
+    "args, final", [((), "alpha"), (("--name", "alpha-copy"), "alpha-copy")], ids=["own-name", "new-name"]
+)
 def test_the_init_step_names_the_imported_project_by_flag(tmp_path, args, final):
     export = _env_specific_export(tmp_path)
     target = _target_root(tmp_path)
@@ -501,9 +510,11 @@ def test_the_init_step_names_the_imported_project_by_flag(tmp_path, args, final)
     assert result.returncode == 0, _say(result)
     assert "have been blanked" in result.stdout, f"the import blanked no fields\n{_say(result)}"
     _narration, command = _next_step(result, 2)
-    assert command.split() == ["init-project-git-repo.sh", "--project", final], (
-        f"step 2 does not print a runnable init command for {final!r}: {command!r}\n{_say(result)}"
-    )
+    assert command.split() == [
+        "init-project-git-repo.sh",
+        "--project",
+        final,
+    ], f"step 2 does not print a runnable init command for {final!r}: {command!r}\n{_say(result)}"
 
 
 @pytest.mark.parametrize(
@@ -525,7 +536,9 @@ def test_the_init_step_names_the_imported_projects_remote(tmp_path, remote_line,
         assert "origin" not in words, f"step 2 names origin for a project whose remote is {remote!r}: {narration!r}"
 
 
-@pytest.mark.parametrize("args, final", [((), "alpha"), (("--name", "alpha-copy"), "alpha-copy")], ids=["own-name", "new-name"])
+@pytest.mark.parametrize(
+    "args, final", [((), "alpha"), (("--name", "alpha-copy"), "alpha-copy")], ids=["own-name", "new-name"]
+)
 def test_the_ceiling_step_names_the_imported_project_by_flag(tmp_path, args, final):
     export = _env_specific_export(tmp_path)
     target = _target_root(tmp_path)
@@ -535,6 +548,10 @@ def test_the_ceiling_step_names_the_imported_project_by_flag(tmp_path, args, fin
     assert result.returncode == 0, _say(result)
     assert "have been blanked" in result.stdout, f"the import blanked no fields\n{_say(result)}"
     _narration, command = _next_step(result, 3)
-    assert command.split() == ["set-version-ceiling.sh", "--project", final, "--minor", "<N>"], (
-        f"step 3 does not print a runnable ceiling command for {final!r}: {command!r}\n{_say(result)}"
-    )
+    assert command.split() == [
+        "set-version-ceiling.sh",
+        "--project",
+        final,
+        "--minor",
+        "<N>",
+    ], f"step 3 does not print a runnable ceiling command for {final!r}: {command!r}\n{_say(result)}"

@@ -91,9 +91,7 @@ def _run_step(tmp_path: pathlib.Path, root: pathlib.Path, cap: str, body: str):
     script = (
         "set -uo pipefail\n"
         f"TEAM_ROOT='{tmp_path}'\n"
-        f"source {_DISCOVERY_LIB}\n"
-        + _stubs(root, cap)
-        + textwrap.dedent(body)
+        f"source {_DISCOVERY_LIB}\n" + _stubs(root, cap) + textwrap.dedent(body)
     )
     return run_bash(tmp_path, script)
 
@@ -103,10 +101,15 @@ def test_cap_zero_disables_priority_ingest_and_touches_nothing(tmp_path):
     item = root / "priority" / "PRIORITY-0001-a.md"
     before = item.read_text(encoding="utf-8")
 
-    result = _run_step(tmp_path, root, "0", """\
+    result = _run_step(
+        tmp_path,
+        root,
+        "0",
+        """\
         discovery_step_priority project-a
         echo "RC=$?"
-        """)
+        """,
+    )
 
     assert "RC=1" in result.stdout, _diagnostic(result)
     assert "priority ingest is disabled" in result.stderr, _diagnostic(result)
@@ -122,7 +125,11 @@ def test_cap_zero_lets_the_pipeline_reach_the_requirements_step(tmp_path):
     root = _fixture(tmp_path, ("PRIORITY-0001-a.md",))
     (root / "project.cfg").write_text("[versioning]\nmax_priorities_per_run = 0\n", encoding="utf-8")
 
-    result = _run_step(tmp_path, root, "0", f"""\
+    result = _run_step(
+        tmp_path,
+        root,
+        "0",
+        f"""\
         _pp_project_cfg_file() {{ printf '%s\\n' '{root}/project.cfg'; }}
         pp_project_halted() {{ return 1; }}
         _disc_pm_ticket_in_flight() {{ return 1; }}
@@ -135,7 +142,8 @@ def test_cap_zero_lets_the_pipeline_reach_the_requirements_step(tmp_path):
         DISCOVERY_LAST_STATUS=""
         _disc_run_pipeline_once project-a
         echo "STATUS=$DISCOVERY_LAST_STATUS"
-        """)
+        """,
+    )
 
     assert "REQUIREMENTS_STEP_REACHED" in result.stderr, _diagnostic(result)
     assert "STATUS=produced_work" not in result.stdout, _diagnostic(result)
@@ -146,10 +154,15 @@ def test_cap_zero_lets_the_pipeline_reach_the_requirements_step(tmp_path):
 def test_cap_one_bundles_only_the_lowest_numbered_priority(tmp_path):
     root = _fixture(tmp_path, ("PRIORITY-0002-b.md", "PRIORITY-0001-a.md"))
 
-    result = _run_step(tmp_path, root, "1", """\
+    result = _run_step(
+        tmp_path,
+        root,
+        "1",
+        """\
         discovery_step_priority project-a
         echo "RC=$?"
-        """)
+        """,
+    )
 
     assert "RC=0" in result.stdout, _diagnostic(result)
     bundles = list((root / "requirements").iterdir())
@@ -164,11 +177,16 @@ def test_cap_one_bundles_only_the_lowest_numbered_priority(tmp_path):
 def test_refused_priority_bundle_write_is_not_reported_as_written(tmp_path):
     root = _fixture(tmp_path, ("PRIORITY-0001-a.md",))
 
-    result = _run_step(tmp_path, root, "1", """\
+    result = _run_step(
+        tmp_path,
+        root,
+        "1",
+        """\
         _disc_write_bundle() { log "_disc_write_bundle: refusing (stub)"; return 1; }
         discovery_step_priority project-a
         echo "RC=$?"
-        """)
+        """,
+    )
 
     assert "RC=1" in result.stdout, _diagnostic(result)
     assert "discovery_step_priority: bundle write refused" in result.stderr, _diagnostic(result)
@@ -180,13 +198,18 @@ def test_refused_bug_bundle_write_is_not_reported_as_written(tmp_path):
     root = _fixture(tmp_path, ())
     (root / "bugs" / "BUG-0001-a.md").write_text("# BUG-0001\n\n## Status\nopen\n", encoding="utf-8")
 
-    result = _run_step(tmp_path, root, "1", """\
+    result = _run_step(
+        tmp_path,
+        root,
+        "1",
+        """\
         _disc_check_bug_id_collisions() { :; }
         _disc_bug_deferral_filter() { printf '%s\n' "$2"; }
         _disc_write_bundle() { log "_disc_write_bundle: refusing (stub)"; return 1; }
         discovery_step_bugs project-a
         echo "RC=$?"
-        """)
+        """,
+    )
 
     assert "RC=1" in result.stdout, _diagnostic(result)
     assert "discovery_step_bugs: bundle write refused" in result.stderr, _diagnostic(result)
@@ -228,9 +251,10 @@ def test_workflow_plugin_load_failure_leaves_the_item_open_and_unticked(tmp_path
     item_before, backlog_before = item.read_bytes(), backlog.read_bytes()
 
     result = _run_step(
-        tmp_path, root, "1",
-        'wf_load_plugin() { WF_LOAD_ERROR="stubbed load failure"; return 1; }\n'
-        + textwrap.dedent(_STEP_CALLS[kind]),
+        tmp_path,
+        root,
+        "1",
+        'wf_load_plugin() { WF_LOAD_ERROR="stubbed load failure"; return 1; }\n' + textwrap.dedent(_STEP_CALLS[kind]),
     )
 
     assert "RC=1" in result.stdout, _diagnostic(result)

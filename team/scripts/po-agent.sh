@@ -38,7 +38,7 @@
 # Explicit operator exports (PGAI_AGENT_KANBAN_ROOT_PATH set in the calling
 # shell) win: env_bootstrap.sh honours them via its idempotency guard.
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve kanban root ---
 # PGAI_AGENT_KANBAN_ROOT_PATH is now set (by env_bootstrap.sh above or by the
@@ -61,11 +61,11 @@ fi
 [[ -f "$TEAM_ROOT/env" ]] && source "$TEAM_ROOT/env"
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/config_loader.sh"
 config_startup_prelude "$TEAM_ROOT"
 # Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh directly since project_paths.sh has not been sourced yet.
-_PO_SCRIPT_DIR_TMP="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_PO_SCRIPT_DIR_TMP="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 [[ -f "${_PO_SCRIPT_DIR_TMP}/lib/ini_parser.sh" ]] && source "${_PO_SCRIPT_DIR_TMP}/lib/ini_parser.sh"
 # shellcheck source=lib/dev_tree.sh
 source "${_PO_SCRIPT_DIR_TMP}/lib/dev_tree.sh"
@@ -80,7 +80,7 @@ set -euo pipefail
 # --- Source project paths helper ---
 KANBAN_ROOT="$TEAM_ROOT"
 export KANBAN_ROOT
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 if [[ -f "$_SCRIPT_DIR/lib/project_paths.sh" ]]; then
     source "$_SCRIPT_DIR/lib/project_paths.sh"
 fi

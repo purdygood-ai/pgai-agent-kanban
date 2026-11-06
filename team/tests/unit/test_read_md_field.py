@@ -52,9 +52,9 @@ _DOC = (
 def _read(
     tmp_path: pathlib.Path,
     *args: str,
-    text: "str | None" = _DOC,
+    text: str | None = _DOC,
     name: str = "doc.md",
-    data: "bytes | None" = None,
+    data: bytes | None = None,
 ):
     """Run ``read_md_field ARGS`` with ``doc.md`` (holding *text*) as the file.
 
@@ -225,8 +225,8 @@ def test_discovery_bundle_field_read_tolerates_an_invalid_utf8_byte(tmp_path: pa
         "set -euo pipefail\n"
         f"source {shlex.quote(str(_DISCOVERY_STATE))}\n"
         "rc=0\n"
-        f"value=\"$(_disc_read_bundle_field {shlex.quote(str(bundle))} Status)\" || rc=$?\n"
-        "printf '%s<rc=%s>' \"$value\" \"$rc\"\n",
+        f'value="$(_disc_read_bundle_field {shlex.quote(str(bundle))} Status)" || rc=$?\n'
+        'printf \'%s<rc=%s>\' "$value" "$rc"\n',
         timeout=60,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
@@ -288,19 +288,16 @@ _CALLER_RUNNER = "pp_run_ops() { echo CALLER_RUNNER; }"
 
 
 @pytest.mark.parametrize("order", ["defined-before-loading", "defined-after-loading"])
-def test_a_caller_pp_run_ops_stays_defined_and_never_answers_for_the_reader(
-    tmp_path: pathlib.Path, order: str
-) -> None:
+def test_a_caller_pp_run_ops_stays_defined_and_never_answers_for_the_reader(tmp_path: pathlib.Path, order: str) -> None:
     doc = tmp_path / "doc.md"
     doc.write_text(_DOC, encoding="utf-8")
     load = f"source {shlex.quote(str(_MD_FIELD))}\n"
-    define = f"{_CALLER_RUNNER}\nbefore=\"$(declare -f pp_run_ops)\"\n"
+    define = f'{_CALLER_RUNNER}\nbefore="$(declare -f pp_run_ops)"\n'
     setup = define + load if order == "defined-before-loading" else load + define
     result = run_bash(
         tmp_path,
-        "set -euo pipefail\n" + setup
-        + "after=\"$(declare -f pp_run_ops)\"\n"
-        "[[ \"$before\" == \"$after\" ]] && echo same-definition || echo replaced-definition\n"
+        "set -euo pipefail\n" + setup + 'after="$(declare -f pp_run_ops)"\n'
+        '[[ "$before" == "$after" ]] && echo same-definition || echo replaced-definition\n'
         f"read_md_field --value {shlex.quote(str(doc))} Owner\n"
         "pp_run_ops anything\n",
         timeout=60,

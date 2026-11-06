@@ -25,7 +25,6 @@ import json
 import os
 import pathlib
 import subprocess
-import sys
 
 import pytest
 
@@ -90,9 +89,12 @@ def fixture_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
 def _run_show_metrics(history_csv: pathlib.Path, kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            "bash", str(_SHOW_METRICS_SH),
-            "--history-csv", str(history_csv),
-            "--project", "demo-project",
+            "bash",
+            str(_SHOW_METRICS_SH),
+            "--history-csv",
+            str(history_csv),
+            "--project",
+            "demo-project",
             "--no-color",
         ],
         capture_output=True,
@@ -163,9 +165,7 @@ class TestHistoryTableBlockedColumn:
     def test_no_pre_era_row_prints_no_footer_line(self, fixture_kanban_root, tmp_path):
         csv_path = tmp_path / "history.csv"
         csv_path.write_text(
-            _HISTORY_HEADER + "\n"
-            + _history_row("v2.24.0", "0") + "\n"
-            + _history_row("v2.24.1", "50") + "\n",
+            _HISTORY_HEADER + "\n" + _history_row("v2.24.0", "0") + "\n" + _history_row("v2.24.1", "50") + "\n",
             encoding="utf-8",
         )
         result = _run_show_metrics(csv_path, fixture_kanban_root)
@@ -201,10 +201,14 @@ class TestHistoryTableBlockedColumn:
         a plural count, and it names no release version."""
         csv_path = tmp_path / "history.csv"
         csv_path.write_text(
-            _HISTORY_HEADER + "\n"
-            + _history_row("v1.0.0", "") + "\n"
-            + _history_row("v1.0.1", "") + "\n"
-            + _history_row("v1.1.0", "12") + "\n",
+            _HISTORY_HEADER
+            + "\n"
+            + _history_row("v1.0.0", "")
+            + "\n"
+            + _history_row("v1.0.1", "")
+            + "\n"
+            + _history_row("v1.1.0", "12")
+            + "\n",
             encoding="utf-8",
         )
         result = _run_show_metrics(csv_path, fixture_kanban_root)
@@ -261,9 +265,7 @@ class TestCurrentRcBlockedFigure:
             encoding="utf-8",
         )
         if rc_json is not None:
-            (proj_root / "metrics" / "rc" / "v2.24.0.json").write_text(
-                json.dumps(rc_json), encoding="utf-8"
-            )
+            (proj_root / "metrics" / "rc" / "v2.24.0.json").write_text(json.dumps(rc_json), encoding="utf-8")
 
     def _run_metrics(self, kanban_root: pathlib.Path) -> subprocess.CompletedProcess:
         return subprocess.run(

@@ -192,15 +192,29 @@ def test_block_record_cli_write_opens_the_block(root: pathlib.Path, tmp_path: pa
         },
     )
     result = subprocess.run(
-        ["python3", "-m", "pgai_agent_kanban.overwatch.block_record", "write",
-         str(status), "per_task_timeout", "CODER", "worktree=gone"],
-        capture_output=True, text=True, timeout=60, cwd=str(tmp_path), env=env,
+        [
+            "python3",
+            "-m",
+            "pgai_agent_kanban.overwatch.block_record",
+            "write",
+            str(status),
+            "per_task_timeout",
+            "CODER",
+            "worktree=gone",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        env=env,
     )
 
     assert result.returncode == 0, result.stderr
     [start] = _records(root)
     assert (start["source"], start["reason_code"], start["cause"]) == (
-        f"task:{_TASK_ID}", "per_task_timeout", "chain",
+        f"task:{_TASK_ID}",
+        "per_task_timeout",
+        "chain",
     )
 
 
@@ -263,7 +277,10 @@ def test_reset_of_a_blocked_task_closes_its_block_with_class_human(root: pathlib
     assert [r["kind"] for r in records] == ["block-start", "block-end"]
     end = records[1]
     assert (end["version"], end["source"], end["class"], end["reason_code"]) == (
-        _RC, f"task:{_TASK_ID}", "human", "reset",
+        _RC,
+        f"task:{_TASK_ID}",
+        "human",
+        "reset",
     )
     [block] = block_intervals(str(_ledger(root)))
     assert block["class"] == "human"
@@ -313,7 +330,11 @@ def test_unhalt_of_a_chain_halt_closes_halt_project_with_class_human(root: pathl
     assert [r["kind"] for r in records] == ["block-start", "block-end"]
     end = records[1]
     assert (end["version"], end["source"], end["class"], end["cause"], end["reason_code"]) == (
-        _RC, "halt:project", "human", "chain", "unhalt",
+        _RC,
+        "halt:project",
+        "human",
+        "chain",
+        "unhalt",
     )
     [block] = block_intervals(str(_ledger(root)))
     assert (block["class"], block["cause"]) == ("human", "chain")

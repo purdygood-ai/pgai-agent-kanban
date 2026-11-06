@@ -27,28 +27,25 @@ team/pgai_agent_kanban/cm/notes_status_section.py	section-writer	status_sections
 team/pgai_agent_kanban/cm/release_notes_blocks.py	section-writer	stamp_carry_forward writes the ## Known Issue Carry Forward marker into a bug file	_CARRY_FORWARD_RE = re.compile(r"(^##\s+Known Issue Carry Forward\s*$)([\s\S]*?)(?=^##\s+|\Z)", re.MULTILINE)
 team/pgai_agent_kanban/cm/release_notes_blocks.py	section-writer	_replace_or_append replaces or appends a release-notes section	pattern = re.compile(rf"(^##\s+{re.escape(heading)}\s*$)([\s\S]*?)(?=^##\s+|\Z)", re.MULTILINE)
 team/pgai_agent_kanban/cm/release_notes_generator.py	heading-counter	ends a summary paragraph at a heading line inside a body task_status.read_section returned	_SUBHEADING_RE = re.compile(r"^\s*#{1,6}\s")
-team/pgai_agent_kanban/cm/shipped_bundle_items.py	section-writer	promote_shipped_bundle_items rewrites a shipped item's ## Status value from running to done	r'^(##\s+Status\s*\n\s*)running(\s*)$',
+team/pgai_agent_kanban/cm/shipped_bundle_items.py	section-writer	promote_shipped_bundle_items rewrites a shipped item's ## Status value from running to done	r"^(##\s+Status\s*\n\s*)running(\s*)$",
 team/pgai_agent_kanban/cm/unwind.py	section-writer	guards the timestamped ## Cancellation Note append against a second write	_CANCELLATION_NOTE_RE = re.compile(r"^## Cancellation Note", re.M)
-team/pgai_agent_kanban/cm/write_rc_state.py	section-writer	render_release_state rewrites release-state.md field lines in place	_LEVEL2_HEADING_RE = re.compile(r'^##\s+(.*?)\s*$')
-team/pgai_agent_kanban/cm/write_rc_state.py	section-writer	render_release_state finds where each release-state.md field it rewrites ends	_SECTION_BOUNDARY_RE = re.compile(r'^\s*##')
-team/pgai_agent_kanban/deep_verify/ledger.py	ledger-heading	the ## Deep-Verify Run: entry heading of the deep-verify ledger	r"^##\s+Deep-Verify Run:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+"
+team/pgai_agent_kanban/cm/write_rc_state.py	section-writer	render_release_state rewrites release-state.md field lines in place	_LEVEL2_HEADING_RE = re.compile(r"^##\s+(.*?)\s*$")
+team/pgai_agent_kanban/cm/write_rc_state.py	section-writer	render_release_state finds where each release-state.md field it rewrites ends	_SECTION_BOUNDARY_RE = re.compile(r"^\s*##")
+team/pgai_agent_kanban/deep_verify/ledger.py	ledger-heading	the ## Deep-Verify Run: entry heading of the deep-verify ledger	r"^##\s+Deep-Verify Run:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+" r"(?P<version>\S+)\s*$"
 team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line rewrites one value line of a section	r"(^##\s+" + re.escape(header) + r"(?:[^\S\n]*:[^\n]*)?[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)",
 team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line splits an inline value off the heading it rewrites	name_end = re.match(r"##\s+" + re.escape(heading), heading_line, re.IGNORECASE)
 team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line finds where to insert a section that is absent	other = re.search(r"^##\s+(?!Status\b)", text, re.M | re.IGNORECASE)
 team/pgai_agent_kanban/lib/md_fields.py	section-writer	set_value_line drops the inline value from the heading it rewrites	name_end = re.match(r"##\s+" + re.escape(heading), heading_line, re.IGNORECASE)
-team/pgai_agent_kanban/lib/refusal_ledger.py	ledger-heading	the ## Refusal: entry heading of the refusal ledger	r"^##\s+Refusal:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+"
+team/pgai_agent_kanban/lib/refusal_ledger.py	ledger-heading	the ## Refusal: entry heading of the refusal ledger	r"^##\s+Refusal:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+" r"(?P<surface>.+?)\s*$"
 team/pgai_agent_kanban/ops/locks.py	remedy-text	a grep command printed in a refusal remedy	"grep -n -A4 '^## Lock Provenance' \"$PGAI_AGENT_KANBAN_ROOT_PATH/SOP-core.md\"",
 team/pgai_agent_kanban/overwatch/block_stage_deferral.py	heading-counter	counts the ## OVERWATCH Decision events in release-state.md	_DECISION_EVENT_RE = re.compile(r"^##[ \t]+OVERWATCH[ \t]+Decision[ \t]*$", re.MULTILINE)
 team/pgai_agent_kanban/overwatch/block_storm.py	remedy-text	builds the grep command printed as a block-storm remedy	patterns = " ".join(f"-e {shlex.quote('^## ' + name)}" for name in _REMEDY_SECTIONS)
 team/pgai_agent_kanban/overwatch/ledger.py	ledger-heading	the ## Entry: heading of the OVERWATCH resolution ledger	r"^##\s+Entry:\s*(?P<timestamp>\S+)\s+—\s+(?P<rc>\S+)\s+—\s+attempt\s+"
-team/pgai_agent_kanban/overwatch/pm_task_wont_do.py	section-writer	replace_block rewrites status.md sections when OVERWATCH closes the task	return rf'(^## {re.escape(heading)}[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)'
-team/pgai_agent_kanban/overwatch/pm_task_wont_do.py	section-writer	decides whether the Blocked Reason section it writes replaces an existing one	if re.search(r'^## Blocked Reason\s*$', new_text, flags=re.M):
-team/pgai_agent_kanban/overwatch/pm_task_wont_do.py	section-writer	decides whether the Blocked Reason section it writes goes after ## Blockers	elif re.search(r'^## Blockers\s*$', new_text, flags=re.M):
 team/pgai_agent_kanban/reports/tester_report.py	ledger-heading	classifies a TESTER report's headings to find its per-entry Finding headings	_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 team/pgai_agent_kanban/reports/tester_report.py	ledger-heading	the per-entry Finding heading of a TESTER report written with no space after its hashes	_NOSPACE_FINDING_HEADING_RE = re.compile(r"^ {0,3}(#{2,6})((?i:finding)(?![A-Za-z0-9_]).*?)[ \t]*$")
 team/pm-agent/pm_materialize.py	section-writer	_apply_rename_map_to_prerequisites rewrites task IDs inside prerequisite sections	if stripped.startswith("##"):
-team/pm-agent/pm_status.py	heading-counter	lists a status.md's headings; each body is read by task_status.read_section	headings = [h.strip() for h in re.findall(r'^## (.+)$', text, re.M)]
-team/scripts/cm/promote_bundled_items.py	section-writer	promote_item rewrites a bundled item's ## Status value from running to done	r'^(##\s+Status\s*\n\s*)running(\s*)$',
+team/pm-agent/pm_status.py	heading-counter	lists a status.md's headings; each body is read by task_status.read_section	headings = [h.strip() for h in re.findall(r"^## (.+)$", text, re.M)]
+team/scripts/cm/promote_bundled_items.py	section-writer	promote_item rewrites a bundled item's ## Status value from running to done	r"^(##\s+Status\s*\n\s*)running(\s*)$",
 team/scripts/harness/lib/doc_step_extract.py	structure-lint	finds a documented step's heading, at any level, and its same-level end to extract fenced commands	heading_re = re.compile(r"^(#+)\s+(.*)$")
 team/scripts/lint_api_route_docs.py	structure-lint	finds the endpoint-table section of the API route reference it lints	_ENDPOINT_SECTION_RE = re.compile(r"^##\s+.*\bEndpoint\s+table\b", re.IGNORECASE)
 team/scripts/lint_api_route_docs.py	structure-lint	finds the curl-examples section of the API route reference it lints	_CURL_SECTION_RE = re.compile(r"^##\s+.*\bcurl\s+examples\b", re.IGNORECASE)

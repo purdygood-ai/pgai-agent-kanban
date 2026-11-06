@@ -42,7 +42,6 @@ import pathlib
 import subprocess
 import textwrap
 
-import pytest
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _SCRIPTS_LIB = _TEAM_DIR / "scripts" / "lib"
@@ -120,9 +119,7 @@ def _write_backlog(
     entries: list[str],
 ) -> pathlib.Path:
     """Overwrite <agent>_backlog.md with the given entry lines (already formatted)."""
-    backlog_file = (
-        kanban_root / "projects" / project_name / "tasks" / "queues" / f"{agent}_backlog.md"
-    )
+    backlog_file = kanban_root / "projects" / project_name / "tasks" / "queues" / f"{agent}_backlog.md"
     backlog_file.parent.mkdir(parents=True, exist_ok=True)
     header = f"# {agent.upper()} Backlog\n\n"
     backlog_file.write_text(header + "\n".join(entries) + "\n", encoding="utf-8")
@@ -142,7 +139,9 @@ class TestChainIdleReadsTaskStatus:
         _write_task_status(root, "project-a", "CODER-1", "DONE")
         _write_task_status(root, "project-a", "CODER-2", "WONT-DO")
         _write_backlog(
-            root, "project-a", "coder",
+            root,
+            "project-a",
+            "coder",
             [
                 "- [ ] CODER-1 -- stale marker, task actually done",
                 "- [B] CODER-2 -- stale marker, task actually wont-do",
@@ -157,9 +156,7 @@ class TestChainIdleReadsTaskStatus:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_terminal_marker_with_working_task_is_judged_not_idle(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_terminal_marker_with_working_task_is_judged_not_idle(self, two_project_root: pathlib.Path) -> None:
         """An [x] marker does not open the gate when the task it names is
         genuinely still in flight (status.md reads WORKING).
 
@@ -169,7 +166,9 @@ class TestChainIdleReadsTaskStatus:
         root = two_project_root
         _write_task_status(root, "project-a", "CODER-3", "WORKING")
         _write_backlog(
-            root, "project-a", "coder",
+            root,
+            "project-a",
+            "coder",
             ["- [x] CODER-3 -- marker says done, task is not"],
         )
 
@@ -186,9 +185,7 @@ class TestChainIdleReadsTaskStatus:
             f"that closed the gate.\ncombined output: {combined}"
         )
 
-    def test_queue_entry_naming_missing_task_folder_does_not_block_idle(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_queue_entry_naming_missing_task_folder_does_not_block_idle(self, two_project_root: pathlib.Path) -> None:
         """A backlog entry naming a task with no task folder is a real case
         with a documented answer: since task folders are never deleted once
         created, a missing folder has nothing left to verify and is treated
@@ -198,7 +195,9 @@ class TestChainIdleReadsTaskStatus:
         """
         root = two_project_root
         _write_backlog(
-            root, "project-a", "coder",
+            root,
+            "project-a",
+            "coder",
             ["- [x] CODER-9999-ghost -- no task folder exists for this id"],
         )
 
@@ -211,20 +210,19 @@ class TestChainIdleReadsTaskStatus:
         )
         combined = result.stdout + result.stderr
         assert "no task folder" in combined.lower(), (
-            f"Expected the log line to name the missing-task-folder outcome.\n"
-            f"combined output: {combined}"
+            f"Expected the log line to name the missing-task-folder outcome.\n" f"combined output: {combined}"
         )
 
-    def test_backlog_entry_with_unparseable_status_is_judged_not_idle(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_backlog_entry_with_unparseable_status_is_judged_not_idle(self, two_project_root: pathlib.Path) -> None:
         """A status.md with no parseable ## State block blocks idle rather
         than falling through to whatever the marker happened to say.
         """
         root = two_project_root
         _write_task_status(root, "project-a", "CODER-4", None, parseable=False)
         _write_backlog(
-            root, "project-a", "coder",
+            root,
+            "project-a",
+            "coder",
             ["- [x] CODER-4 -- status.md has no ## State block"],
         )
 
@@ -232,13 +230,11 @@ class TestChainIdleReadsTaskStatus:
 
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert "GUARD_EXIT=1" in result.stdout, (
-            f"Expected an unparseable status.md to block idle.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected an unparseable status.md to block idle.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
         assert "unparseable" in combined.lower(), (
-            f"Expected the log line to name the unparseable-status outcome.\n"
-            f"combined output: {combined}"
+            f"Expected the log line to name the unparseable-status outcome.\n" f"combined output: {combined}"
         )
 
     def test_empty_backlog_is_judged_idle(self, two_project_root: pathlib.Path) -> None:
@@ -273,7 +269,9 @@ class TestChainIdleReadsTaskStatus:
         _write_task_status(root, "project-a", "CODER-5", "WORKING")
         _write_task_status(root, "project-a", "CODER-6", "DONE")
         _write_backlog(
-            root, "project-a", "coder",
+            root,
+            "project-a",
+            "coder",
             [
                 "- [x] CODER-5 -- still working despite stale [x] marker",
                 "- [x] CODER-6 -- correctly done, appended after CODER-5",
@@ -289,17 +287,13 @@ class TestChainIdleReadsTaskStatus:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "CODER-5" in combined, (
-            f"Expected the log line to name the earlier in-flight task.\ncombined: {combined}"
-        )
+        assert "CODER-5" in combined, f"Expected the log line to name the earlier in-flight task.\ncombined: {combined}"
 
 
 class TestPmTicketInFlightReadsTaskStatus:
     """_disc_pm_ticket_in_flight decides from status.md, never the marker."""
 
-    def test_stale_pending_marker_with_done_pm_task_is_not_in_flight(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_stale_pending_marker_with_done_pm_task_is_not_in_flight(self, two_project_root: pathlib.Path) -> None:
         """A [ ] decompose-v* entry whose PM task already reached DONE is not
         treated as in-flight, even though its queue marker was never flipped.
         """
@@ -307,7 +301,9 @@ class TestPmTicketInFlightReadsTaskStatus:
         task_id = "PM-20260601-001-decompose-v0-0-2-test-feature"
         _write_task_status(root, "project-a", task_id, "DONE")
         _write_backlog(
-            root, "project-a", "pm",
+            root,
+            "project-a",
+            "pm",
             [f"- [ ] {task_id} -- stale marker, PM task actually done"],
         )
 
@@ -319,9 +315,7 @@ class TestPmTicketInFlightReadsTaskStatus:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_x_marker_with_working_pm_task_is_in_flight(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_x_marker_with_working_pm_task_is_in_flight(self, two_project_root: pathlib.Path) -> None:
         """An [x] decompose-v* entry whose PM task is genuinely still WORKING
         is treated as in-flight — the marker never overrides status.md.
         """
@@ -329,7 +323,9 @@ class TestPmTicketInFlightReadsTaskStatus:
         task_id = "PM-20260601-002-decompose-v0-0-3-test-feature"
         _write_task_status(root, "project-a", task_id, "WORKING")
         _write_backlog(
-            root, "project-a", "pm",
+            root,
+            "project-a",
+            "pm",
             [f"- [x] {task_id} -- marker says done, PM task is not"],
         )
 
@@ -341,13 +337,9 @@ class TestPmTicketInFlightReadsTaskStatus:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert task_id in combined, (
-            f"Expected the log line to name the in-flight PM task.\ncombined: {combined}"
-        )
+        assert task_id in combined, f"Expected the log line to name the in-flight PM task.\ncombined: {combined}"
 
-    def test_decompose_entry_naming_missing_task_folder_is_not_in_flight(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_decompose_entry_naming_missing_task_folder_is_not_in_flight(self, two_project_root: pathlib.Path) -> None:
         """A decompose-v* entry naming a task with no task folder has nothing
         left to verify and is treated as terminal (not in flight) — the same
         documented answer as the chain-idle gate, and for the same reason:
@@ -357,7 +349,9 @@ class TestPmTicketInFlightReadsTaskStatus:
         root = two_project_root
         task_id = "PM-20260601-003-decompose-v0-0-4-ghost-task"
         _write_backlog(
-            root, "project-a", "pm",
+            root,
+            "project-a",
+            "pm",
             [f"- [x] {task_id} -- no task folder exists for this id"],
         )
 
@@ -369,13 +363,11 @@ class TestPmTicketInFlightReadsTaskStatus:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "no task folder" in combined.lower(), (
-            f"Expected the log line to name the missing-task-folder outcome.\ncombined: {combined}"
-        )
+        assert (
+            "no task folder" in combined.lower()
+        ), f"Expected the log line to name the missing-task-folder outcome.\ncombined: {combined}"
 
-    def test_decompose_entry_with_unparseable_status_is_in_flight(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_decompose_entry_with_unparseable_status_is_in_flight(self, two_project_root: pathlib.Path) -> None:
         """A decompose-v* entry whose status.md has no parseable ## State
         block is active corruption of a file the wake toolchain owns, and is
         treated as in-flight (blocking) rather than falling through to
@@ -385,7 +377,9 @@ class TestPmTicketInFlightReadsTaskStatus:
         task_id = "PM-20260601-004-decompose-v0-0-5-corrupt-status"
         _write_task_status(root, "project-a", task_id, None, parseable=False)
         _write_backlog(
-            root, "project-a", "pm",
+            root,
+            "project-a",
+            "pm",
             [f"- [x] {task_id} -- status.md has no ## State block"],
         )
 
@@ -397,6 +391,6 @@ class TestPmTicketInFlightReadsTaskStatus:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         combined = result.stdout + result.stderr
-        assert "unparseable" in combined.lower(), (
-            f"Expected the log line to name the unparseable-status outcome.\ncombined: {combined}"
-        )
+        assert (
+            "unparseable" in combined.lower()
+        ), f"Expected the log line to name the unparseable-status outcome.\ncombined: {combined}"

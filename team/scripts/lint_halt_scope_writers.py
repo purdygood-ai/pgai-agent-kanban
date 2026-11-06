@@ -119,7 +119,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -159,7 +159,7 @@ _BASH_FUNC_CLOSE_RE = re.compile(r"^\}\s*$")
 # "/HALT" not immediately followed by "-" (excludes HALT-AFTER); the
 # trailing \b already excludes HALT_OVERWATCH since "_" is a word character
 # contiguous with "HALT" (no boundary exists there).
-_HALT_ROOT_SUFFIX = r'/HALT(?!-)\b'
+_HALT_ROOT_SUFFIX = r"/HALT(?!-)\b"
 
 # The gap between the KANBAN_ROOT reference and the /HALT suffix that
 # immediately follows it. Only quoting/brace noise is tolerated here —
@@ -171,7 +171,7 @@ _HALT_ROOT_SUFFIX = r'/HALT(?!-)\b'
 # or another "/", both of which are barred, so a project-scoped
 # $KANBAN_ROOT/projects/<name>/HALT can never be misread as the fleet-wide
 # sentinel merely because the '.*' used to reach past it.
-_KANBAN_ROOT_HALT_GAP = r'[^A-Za-z0-9/]*'
+_KANBAN_ROOT_HALT_GAP = r"[^A-Za-z0-9/]*"
 
 # A declaration keyword may precede the variable name (`local x=...`,
 # `declare -g x=...`) without changing what the assignment does — the
@@ -181,13 +181,14 @@ _KANBAN_ROOT_HALT_GAP = r'[^A-Za-z0-9/]*'
 # separate assignment patterns so the orthogonality is structural: every
 # keyword shares the same "optional, then ordinary var=..." shape.
 _BASH_DECL_KEYWORDS = ("local", "declare", "typeset", "export", "readonly")
-_BASH_DECL_PREFIX_RE = (
-    r'(?:(?:' + "|".join(_BASH_DECL_KEYWORDS) + r')\s+(?:-\S+\s+)*)?'
-)
+_BASH_DECL_PREFIX_RE = r"(?:(?:" + "|".join(_BASH_DECL_KEYWORDS) + r")\s+(?:-\S+\s+)*)?"
 
 _BASH_ROOT_HALT_ASSIGN_RE = re.compile(
-    r'^\s*' + _BASH_DECL_PREFIX_RE + r'([A-Za-z_][A-Za-z0-9_]*)=.*\bKANBAN_ROOT\b'
-    + _KANBAN_ROOT_HALT_GAP + _HALT_ROOT_SUFFIX
+    r"^\s*"
+    + _BASH_DECL_PREFIX_RE
+    + r"([A-Za-z_][A-Za-z0-9_]*)=.*\bKANBAN_ROOT\b"
+    + _KANBAN_ROOT_HALT_GAP
+    + _HALT_ROOT_SUFFIX
 )
 
 # touch <bare-var>   — captures the variable name touched. Deliberately not
@@ -195,17 +196,13 @@ _BASH_ROOT_HALT_ASSIGN_RE = re.compile(
 _BASH_TOUCH_VAR_RE = re.compile(r'\btouch\s+"?\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"?')
 
 # touch <literal path containing KANBAN_ROOT and ending in /HALT>
-_BASH_TOUCH_LITERAL_RE = re.compile(
-    r'\btouch\s+.*\bKANBAN_ROOT\b' + _KANBAN_ROOT_HALT_GAP + _HALT_ROOT_SUFFIX
-)
+_BASH_TOUCH_LITERAL_RE = re.compile(r"\btouch\s+.*\bKANBAN_ROOT\b" + _KANBAN_ROOT_HALT_GAP + _HALT_ROOT_SUFFIX)
 
 # > <bare-var>  (redirect creating/truncating a file at that variable's path)
 _BASH_REDIRECT_VAR_RE = re.compile(r'>\s*"?\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"?')
 
 # > <literal path containing KANBAN_ROOT and ending in /HALT>
-_BASH_REDIRECT_LITERAL_RE = re.compile(
-    r'>\s*.*\bKANBAN_ROOT\b' + _KANBAN_ROOT_HALT_GAP + _HALT_ROOT_SUFFIX
-)
+_BASH_REDIRECT_LITERAL_RE = re.compile(r">\s*.*\bKANBAN_ROOT\b" + _KANBAN_ROOT_HALT_GAP + _HALT_ROOT_SUFFIX)
 
 
 def _is_test_path(rel_path: str) -> bool:
@@ -257,10 +254,8 @@ def scan_bash_text(text: str, *, path: Path) -> list[Violation]:
             continue
 
         is_root_write = False
-        write_var: Optional[str] = None
-        if _BASH_TOUCH_LITERAL_RE.search(raw_line) or _BASH_REDIRECT_LITERAL_RE.search(
-            raw_line
-        ):
+        write_var: str | None = None
+        if _BASH_TOUCH_LITERAL_RE.search(raw_line) or _BASH_REDIRECT_LITERAL_RE.search(raw_line):
             is_root_write = True
         else:
             for pat in (_BASH_TOUCH_VAR_RE, _BASH_REDIRECT_VAR_RE):
@@ -320,9 +315,7 @@ _PY_DEF_RE = re.compile(r"^(\s*)def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 # an unrelated, pre-existing constraint on the assignment's right-hand
 # side rather than a keyword-prefix blind spot. Widening this pattern is
 # out of scope here.
-_PY_ROOT_HALT_ASSIGN_RE = re.compile(
-    r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*.*\bkanban_root\b.*/\s*["\']HALT["\']\s*$'
-)
+_PY_ROOT_HALT_ASSIGN_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*.*\bkanban_root\b.*/\s*["\']HALT["\']\s*$')
 
 # <var>.touch( | <var>.write_text( | open(<var>, "w"...
 _PY_WRITE_CALL_RE = re.compile(
@@ -377,9 +370,7 @@ def scan_python_text(text: str, *, path: Path) -> list[Violation]:
             if scope_vars.get(varname):
                 # Self-documenting scope: either the enclosing function name
                 # says "global", or the target variable's own name does.
-                declared_global = bool(_GLOBAL_NAME_RE.search(current_scope)) or bool(
-                    _GLOBAL_NAME_RE.search(varname)
-                )
+                declared_global = bool(_GLOBAL_NAME_RE.search(current_scope)) or bool(_GLOBAL_NAME_RE.search(varname))
                 allowlisted = bool(_ALLOWLIST_MARKER_RE.search(prev_line))
                 if not declared_global and not allowlisted:
                     violations.append(
@@ -517,7 +508,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the HALT-scope writers lint and print each violation.
 
     Exit codes: 0 no violation; 1 one or more (printed); 2 usage error, or the

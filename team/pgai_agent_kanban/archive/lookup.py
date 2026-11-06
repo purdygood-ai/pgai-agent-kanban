@@ -72,7 +72,8 @@ import dataclasses
 import os
 import pathlib
 import re
-from typing import Iterable, Optional, Union
+from typing import Union
+from collections.abc import Iterable
 
 from pgai_agent_kanban.archive.layout import (
     CATEGORY_BUGS,
@@ -135,10 +136,10 @@ class ItemId:
 
     category: str
     canonical: str
-    number: Optional[int] = None
+    number: int | None = None
 
 
-def classify_item_id(item_id: str) -> Optional[ItemId]:
+def classify_item_id(item_id: str) -> ItemId | None:
     """Return the category and normalized form of *item_id*, or ``None``."""
     text = (item_id or "").strip()
     if not text:
@@ -157,7 +158,7 @@ def classify_item_id(item_id: str) -> Optional[ItemId]:
     return None
 
 
-def _find_numbered(directory: pathlib.Path, category: str, number: int) -> Optional[pathlib.Path]:
+def _find_numbered(directory: pathlib.Path, category: str, number: int) -> pathlib.Path | None:
     """The first file (by name) in *directory* numbered *number*, or None."""
     try:
         names = sorted(os.listdir(directory))
@@ -173,7 +174,7 @@ def _find_numbered(directory: pathlib.Path, category: str, number: int) -> Optio
     return None
 
 
-def find_item(layout: ProjectLayout, item_id: str) -> Optional[pathlib.Path]:
+def find_item(layout: ProjectLayout, item_id: str) -> pathlib.Path | None:
     """Return *item_id*'s path in *layout*, or ``None`` when it is not there.
 
     A bug or priority is a file whose number matches; a requirement is the
@@ -193,7 +194,7 @@ def find_item(layout: ProjectLayout, item_id: str) -> Optional[pathlib.Path]:
     return candidate if candidate.is_file() else None
 
 
-def find_archived(kanban_root: PathLike, project: str, item_id: str) -> Optional[pathlib.Path]:
+def find_archived(kanban_root: PathLike, project: str, item_id: str) -> pathlib.Path | None:
     """Return *item_id*'s path in *project*'s archive, or ``None``.
 
     Args:
@@ -302,7 +303,7 @@ def task_dirs_with_archived(tasks_dir: PathLike) -> list[pathlib.Path]:
     return sorted(folders, key=lambda entry: entry.name)
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run :func:`archived_task_ids` from the command line.
 
     ``archived_tasks --tasks-root DIR ID...``: prints each archived ID on

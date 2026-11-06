@@ -54,9 +54,7 @@ def _jobs(lines: list[str]) -> list[str]:
 
 
 @pytest.mark.parametrize("tier", ["small", "medium", "large"])
-def test_marked_block_with_the_old_overwatch_wake_is_rewritten_without_it(
-    tmp_path: pathlib.Path, tier: str
-) -> None:
+def test_marked_block_with_the_old_overwatch_wake_is_rewritten_without_it(tmp_path: pathlib.Path, tier: str) -> None:
     sandbox = UpgradeSandbox(tmp_path)
     root = sandbox.root
     sandbox.write_crontab(
@@ -75,12 +73,12 @@ def test_marked_block_with_the_old_overwatch_wake_is_rewritten_without_it(
     assert data is not None, "no crontab was installed\n" + diagnostic(result)
     text = data.decode("utf-8")
     jobs = _jobs(_managed_block(text, root))
-    assert not [line for line in jobs if "--agent=overwatch" in line], (
-        f"the managed block still schedules the daily OVERWATCH wake\n{text}"
-    )
-    assert [line for line in jobs if f"{root}/scripts/overwatch-sweep.sh" in line], (
-        f"the managed block lost the hourly OVERWATCH sweep\n{text}"
-    )
+    assert not [
+        line for line in jobs if "--agent=overwatch" in line
+    ], f"the managed block still schedules the daily OVERWATCH wake\n{text}"
+    assert [
+        line for line in jobs if f"{root}/scripts/overwatch-sweep.sh" in line
+    ], f"the managed block lost the hourly OVERWATCH sweep\n{text}"
     assert text.startswith(_FOREIGN), f"the operator's own lines must be kept\n{text}"
 
 
@@ -97,6 +95,6 @@ def test_unmarked_old_overwatch_wake_naming_the_root_is_dropped(tmp_path: pathli
     text = data.decode("utf-8")
     assert "--agent=overwatch" not in text, f"the old OVERWATCH wake survived the rewrite\n{text}"
     assert _jobs(_managed_block(text, root)), text
-    assert sum(1 for line in _jobs(text.splitlines()) if "overwatch-sweep.sh" in line) == 1, (
-        f"expected exactly one hourly OVERWATCH sweep line\n{text}"
-    )
+    assert (
+        sum(1 for line in _jobs(text.splitlines()) if "overwatch-sweep.sh" in line) == 1
+    ), f"expected exactly one hourly OVERWATCH sweep line\n{text}"

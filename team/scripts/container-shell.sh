@@ -10,6 +10,13 @@
 # cd's there, and execs a login bash — this script's job is only to supply
 # the mounts, env, and TTY the entrypoint depends on.
 #
+# The run passes --init (Docker and Podman both accept it), so the engine's
+# init is PID 1 and the entrypoint's shell runs as its child. PID 1 inherits
+# every orphaned process in the container, and only a PID 1 that reaps them
+# keeps them from staying zombies; with --init that holds whatever the
+# entrypoint ends in. Under podman the flag needs the engine's init binary
+# (catatonit) on the host.
+#
 # Usage:
 #   container-shell.sh [OPTIONS]
 #
@@ -45,10 +52,10 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 _SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # shellcheck source=lib/docker_engine.sh
 source "${_SCRIPT_DIR}/lib/docker_engine.sh"
@@ -100,7 +107,9 @@ Environment:
 The container engine (docker or podman) is resolved from kanban.cfg
 [docker] docker_exe — see team/scripts/lib/docker_engine.sh. Works
 identically under either engine; the run invocation below uses only flags
-both engines share.
+both engines share. It passes --init: the engine's init runs as PID 1 and
+reaps orphaned processes, so none stays a zombie whatever the entrypoint
+ends in.
 EOF
 )"
 
@@ -183,8 +192,9 @@ echo "${_SCRIPT_NAME}: engine=${_DOCKER_EXE} image=${IMAGE_TAG} kanban_root=${_K
 
 # Through the shared engine helper (lib/docker_use.sh), which records the
 # launch and its exit in the docker-use log; this script's exit status is
-# the container shell's own.
-pgai_docker "${_DOCKER_EXE}" run --rm -it \
+# the container shell's own. --init gives the container a reaping PID 1
+# (see the header).
+pgai_docker "${_DOCKER_EXE}" run --rm -it --init \
     "${CONTAINER_MOUNTS_ARGS[@]}" \
     "${IMAGE_TAG}"
 exit $?

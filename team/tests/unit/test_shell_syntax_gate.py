@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-import tempfile
 
 import pytest
 
@@ -183,9 +182,7 @@ def test_upgrade_sh_passes_syntax_gate(tmp_path: pathlib.Path) -> None:
         tmp_path,
         f"bash -n {upgrade_sh}",
     )
-    assert result.returncode == 0, (
-        f"bash -n failed on {upgrade_sh}:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"bash -n failed on {upgrade_sh}:\n{result.stderr}"
 
 
 def test_install_sh_passes_syntax_gate(tmp_path: pathlib.Path) -> None:
@@ -196,9 +193,7 @@ def test_install_sh_passes_syntax_gate(tmp_path: pathlib.Path) -> None:
         tmp_path,
         f"bash -n {install_sh}",
     )
-    assert result.returncode == 0, (
-        f"bash -n failed on {install_sh}:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"bash -n failed on {install_sh}:\n{result.stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +228,4 @@ def test_all_tracked_shell_files_parse(tmp_path: pathlib.Path) -> None:
         if result.returncode != 0:
             failures.append(f"  {sh_file}: bash -n FAILED\n    {result.stderr.strip()}")
 
-    assert not failures, (
-        f"bash -n gate failed on {len(failures)} shell file(s):\n"
-        + "\n".join(failures)
-    )
+    assert not failures, f"bash -n gate failed on {len(failures)} shell file(s):\n" + "\n".join(failures)

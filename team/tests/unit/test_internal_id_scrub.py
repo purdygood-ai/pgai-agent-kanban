@@ -63,7 +63,6 @@ _CM_LIB_DIR = pathlib.Path(__file__).parent.parent.parent / "scripts" / "lib" / 
 sys.path.insert(0, str(_CM_LIB_DIR))
 from internal_id_scrub import _strip_internal_ids, _strip_provenance_refs  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Sentence positions an identifier can occupy
 # ---------------------------------------------------------------------------
@@ -77,9 +76,7 @@ def test_identifier_alone_in_a_sentence():
 
 
 def test_identifier_mid_clause_after_a_conjunction():
-    result = _strip_internal_ids(
-        "Deferred because CODER-20260101-001-some-slug already covers the area."
-    )
+    result = _strip_internal_ids("Deferred because CODER-20260101-001-some-slug already covers the area.")
     assert result == "Deferred because another item already covers the area."
 
 
@@ -94,9 +91,7 @@ def test_identifier_inside_a_parenthetical_with_label_text():
 
 
 def test_identifier_at_the_end_of_a_sentence_before_the_period():
-    result = _strip_internal_ids(
-        "This bug was already reported as CODER-20260101-001-some-slug."
-    )
+    result = _strip_internal_ids("This bug was already reported as CODER-20260101-001-some-slug.")
     assert result == "This bug was already reported as another item."
 
 
@@ -114,9 +109,7 @@ def test_text_with_no_identifier_at_all_is_returned_unchanged():
 
 
 def test_defect_report_worked_example_reads_correctly_in_english():
-    result = _strip_internal_ids(
-        "Deferred because CODER-20260101-001-some-slug already covers the area."
-    )
+    result = _strip_internal_ids("Deferred because CODER-20260101-001-some-slug already covers the area.")
     assert result == "Deferred because another item already covers the area."
     assert "CODER-20260101-001" not in result
     assert "some-slug" not in result
@@ -153,9 +146,7 @@ def test_every_agent_prefixed_task_id_is_replaced_and_its_slug_removed(prefix):
 
 
 def test_multiple_identifiers_in_one_sentence_are_each_replaced():
-    result = _strip_internal_ids(
-        "See BUG-0001 and BUG-0002 for the two earlier attempts."
-    )
+    result = _strip_internal_ids("See BUG-0001 and BUG-0002 for the two earlier attempts.")
     assert result == "See another item and another item for the two earlier attempts."
 
 
@@ -195,18 +186,14 @@ def test_short_form_does_not_claim_a_longer_multi_segment_identifier():
 def test_requirements_document_path_is_replaced(citation):
     result = _strip_internal_ids(f"The v2.26.0 requirement ({citation}, Intent) exists because x.")
     assert "requirements/" not in result
-    assert result == (
-        "The v2.26.0 requirement (the release's requirements document, Intent) exists because x."
-    )
+    assert result == ("The v2.26.0 requirement (the release's requirements document, Intent) exists because x.")
 
 
 # ---------------------------------------------------------------------------
 # Commit ids and RC branch names
 # ---------------------------------------------------------------------------
 
-_PROVENANCE_SYMPTOM = (
-    "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
-)
+_PROVENANCE_SYMPTOM = "On ai_rc/v1.2.3 the unit suite (a1b2c3d4) fails, as TESTER-20260101-001 found."
 _PROVENANCE_SCRUBBED = "On the release candidate the unit suite fails, as another item found."
 
 
@@ -223,10 +210,11 @@ def test_commit_id_branch_name_and_task_id_are_all_removed(scrub):
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("The unit gated suite exits 1 on the RC (commit d3e118d7).",
-         "The unit gated suite exits 1 on the RC."),
-        ("The findings file (`lint/findings-unit.json`, run at RC commit d3e118d7) holds six.",
-         "The findings file (`lint/findings-unit.json`, run at RC) holds six."),
+        ("The unit gated suite exits 1 on the RC (commit d3e118d7).", "The unit gated suite exits 1 on the RC."),
+        (
+            "The findings file (`lint/findings-unit.json`, run at RC commit d3e118d7) holds six.",
+            "The findings file (`lint/findings-unit.json`, run at RC) holds six.",
+        ),
         ("Broken since `9f8e7d6c5b4a` landed.", "Broken since landed."),
         ("Bisected to abc1234..def5678 today.", "Bisected to today."),
     ],
@@ -239,13 +227,13 @@ def test_commit_id_is_deleted_and_its_parenthetical_tidied(text, expected):
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("The suite fails on `ai_rc/v2.52.0` (df59917b) in `tests/unit/x.py`.",
-         "The suite fails on the release candidate in `tests/unit/x.py`."),
+        (
+            "The suite fails on `ai_rc/v2.52.0` (df59917b) in `tests/unit/x.py`.",
+            "The suite fails on the release candidate in `tests/unit/x.py`.",
+        ),
         ("Stated wrongly on rc/v1.2.3.", "Stated wrongly on the release candidate."),
-        ("Seen on team_rc/v3.4.5-hotfix and ai_rc/v1.0.0.",
-         "Seen on the release candidate and the release candidate."),
-        ("Merged into the branch (ai_rc/v1.2.3, a1b2c3d4).",
-         "Merged into the branch (the release candidate)."),
+        ("Seen on team_rc/v3.4.5-hotfix and ai_rc/v1.0.0.", "Seen on the release candidate and the release candidate."),
+        ("Merged into the branch (ai_rc/v1.2.3, a1b2c3d4).", "Merged into the branch (the release candidate)."),
     ],
     ids=["backticked-with-commit", "unprefixed", "other-prefix-and-suffix", "shared-parenthetical"],
 )
@@ -282,9 +270,7 @@ def test_commit_word_takes_an_all_digit_id_but_a_bare_number_survives():
 
 def test_provenance_scrub_keeps_ledger_citations():
     text = "Fixes BUG-0011 and PRIORITY-0042 on ai_rc/v1.2.3."
-    assert _strip_provenance_refs(text) == (
-        "Fixes BUG-0011 and PRIORITY-0042 on the release candidate."
-    )
+    assert _strip_provenance_refs(text) == ("Fixes BUG-0011 and PRIORITY-0042 on the release candidate.")
 
 
 def test_provenance_scrub_returns_text_without_provenance_byte_identical():
@@ -293,7 +279,5 @@ def test_provenance_scrub_returns_text_without_provenance_byte_identical():
 
 
 def test_tidy_leaves_code_span_content_as_written():
-    text = "Running `pvg build . --scene 2` fails on ai_rc/v1.2.3 ."
-    assert _strip_internal_ids(text) == (
-        "Running `pvg build . --scene 2` fails on the release candidate."
-    )
+    text = "Running `my-app build . --target 2` fails on ai_rc/v1.2.3 ."
+    assert _strip_internal_ids(text) == ("Running `my-app build . --target 2` fails on the release candidate.")

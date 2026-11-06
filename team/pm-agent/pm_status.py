@@ -24,7 +24,6 @@ from lib.config import get_config
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pgai_agent_kanban.task_status import read_section, read_state  # noqa: E402
 
-
 STATE_EMOJI = {
     "BACKLOG": "⬜",
     "WAITING": "⏸️ ",
@@ -43,14 +42,14 @@ def get_status_fields(status_file):
     section reader.
     """
     text = status_file.read_text()
-    headings = [h.strip() for h in re.findall(r'^## (.+)$', text, re.M)]
+    headings = [h.strip() for h in re.findall(r"^## (.+)$", text, re.M)]
     return {heading: read_section(text, heading) or "" for heading in headings}
 
 
 def is_queue_entry(line):
     """Return True if line looks like a task queue entry (e.g. '- [ ] TASK-ID')."""
     # Matches: - [ ] TASK-ID  or  - [x] TASK-ID  or  * [ ] TASK-ID
-    return bool(re.match(r'^\s*[-*]\s*\[.?\]\s*\S+', line))
+    return bool(re.match(r"^\s*[-*]\s*\[.?\]\s*\S+", line))
 
 
 def scan_queue_files(tasks_dir):
@@ -91,7 +90,7 @@ def extract_task_id_from_queue_line(line):
     marker is [x] (case-insensitive), or None if the line is not a valid
     queue entry.
     """
-    m = re.match(r'^\s*[-*]\s*\[(.?)\]\s*(\S+)', line)
+    m = re.match(r"^\s*[-*]\s*\[(.?)\]\s*(\S+)", line)
     if not m:
         return None
     marker = m.group(1).strip().lower()
@@ -210,10 +209,7 @@ def print_queue_dashboard(tasks_dir, team_root):
                 except OSError:
                     print(f"  [{queue_name}] (unreadable)")
                     continue
-                task_lines = [
-                    l.strip() for l in text.splitlines()
-                    if is_queue_entry(l)
-                ]
+                task_lines = [l.strip() for l in text.splitlines() if is_queue_entry(l)]
                 count = len(task_lines)
                 print(f"  [{queue_name}] — {count} item(s)")
                 for tl in task_lines:
@@ -295,14 +291,16 @@ def main():
 
         status_file = task_dir / "status.md"
         if not status_file.is_file():
-            tasks.append({
-                "id": task_dir.name,
-                "state": "NO-STATUS",
-                "summary": "status.md missing",
-                "blockers": "",
-                "needs_human": "",
-                "artifacts": "",
-            })
+            tasks.append(
+                {
+                    "id": task_dir.name,
+                    "state": "NO-STATUS",
+                    "summary": "status.md missing",
+                    "blockers": "",
+                    "needs_human": "",
+                    "artifacts": "",
+                }
+            )
             continue
 
         fields = get_status_fields(status_file)
@@ -310,15 +308,17 @@ def main():
         if args.filter and state != args.filter.upper():
             continue
 
-        tasks.append({
-            "id": task_dir.name,
-            "state": state,
-            "summary": fields.get("Summary", ""),
-            "blockers": fields.get("Blockers", "none"),
-            "needs_human": fields.get("Needs Human", ""),
-            "artifacts": fields.get("Artifacts", "none"),
-            "next_step": fields.get("Next Recommended Step", ""),
-        })
+        tasks.append(
+            {
+                "id": task_dir.name,
+                "state": state,
+                "summary": fields.get("Summary", ""),
+                "blockers": fields.get("Blockers", "none"),
+                "needs_human": fields.get("Needs Human", ""),
+                "artifacts": fields.get("Artifacts", "none"),
+                "next_step": fields.get("Next Recommended Step", ""),
+            }
+        )
 
     if not tasks:
         print("No tasks found matching criteria.")

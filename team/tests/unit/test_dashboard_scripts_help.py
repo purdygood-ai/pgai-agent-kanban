@@ -94,6 +94,7 @@ def _discover_top_level_dashboard_scripts() -> list[pathlib.Path]:
 
 _DASHBOARD_SCRIPTS = _discover_top_level_dashboard_scripts()
 
+
 def _throwaway_root_env(root: pathlib.Path) -> dict[str, str]:
     """Subprocess environment confined to the throwaway kanban root *root*.
 
@@ -130,9 +131,9 @@ def test_discovery_finds_the_dashboard_entry_points() -> None:
     )
     for expected in ("create.sh", "logs.sh", "debug-logs.sh", "verify-window0-geometry.sh"):
         assert expected in names, f"discovery missed {expected} in {_DASHBOARD_DIR}"
-    assert all(p.parent == _DASHBOARD_DIR for p in _DASHBOARD_SCRIPTS), (
-        "discovery must cover only top-level dashboard scripts, not lib/ helpers"
-    )
+    assert all(
+        p.parent == _DASHBOARD_DIR for p in _DASHBOARD_SCRIPTS
+    ), "discovery must cover only top-level dashboard scripts, not lib/ helpers"
 
 
 @pytest.mark.parametrize("flag", _HELP_FLAGS)
@@ -150,9 +151,7 @@ def test_dashboard_script_prints_usage_and_exits_zero_on_help_flag(
     )
 
     try:
-        result = run_dashboard_script(
-            ["bash", str(script), flag], env=env, timeout=_PER_SCRIPT_TIMEOUT_S
-        )
+        result = run_dashboard_script(["bash", str(script), flag], env=env, timeout=_PER_SCRIPT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         pytest.fail(
             f"{script.name} {flag} did not exit within {_PER_SCRIPT_TIMEOUT_S}s -- "
@@ -162,12 +161,10 @@ def test_dashboard_script_prints_usage_and_exits_zero_on_help_flag(
 
     diagnostic = f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     assert result.returncode == 0, (
-        f"{script.name} {flag} exited {result.returncode}, expected 0. "
-        f"Fix: {remedy}.\n{diagnostic}"
+        f"{script.name} {flag} exited {result.returncode}, expected 0. " f"Fix: {remedy}.\n{diagnostic}"
     )
     assert result.stdout.strip(), (
-        f"{script.name} {flag} exited 0 but printed nothing on stdout. "
-        f"Fix: {remedy}.\n{diagnostic}"
+        f"{script.name} {flag} exited 0 but printed nothing on stdout. " f"Fix: {remedy}.\n{diagnostic}"
     )
     assert script.name in result.stdout, (
         f"{script.name} {flag} printed output that does not name the script, "
@@ -177,17 +174,13 @@ def test_dashboard_script_prints_usage_and_exits_zero_on_help_flag(
 
 
 @pytest.mark.parametrize("script", _DASHBOARD_SCRIPTS, ids=lambda p: p.name)
-def test_dashboard_script_help_stops_at_its_usage_header(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_dashboard_script_help_stops_at_its_usage_header(script: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """``<script> --help`` prints no ``shellcheck `` directive line -- the
     first comment below every self-rendered usage header -- so its help
     text ends at the header rather than spilling into body comments."""
     env = _throwaway_root_env(tmp_path / "kanban-root")
     try:
-        result = run_dashboard_script(
-            ["bash", str(script), "--help"], env=env, timeout=_PER_SCRIPT_TIMEOUT_S
-        )
+        result = run_dashboard_script(["bash", str(script), "--help"], env=env, timeout=_PER_SCRIPT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         pytest.fail(
             f"{script.name} --help did not exit within {_PER_SCRIPT_TIMEOUT_S}s; "
@@ -198,8 +191,8 @@ def test_dashboard_script_help_stops_at_its_usage_header(
     leaked = [line for line in result.stdout.splitlines() if line.startswith("shellcheck ")]
     assert not leaked, (
         f"{script.name} --help prints implementation comments from below its "
-        f"usage header: {leaked}. Fix: in the `-h|--help)` arm, print the "
-        f"help with header_help_print \"${{BASH_SOURCE[0]}}\" from "
+        f"usage header: {leaked}. Fix: answer help with "
+        f'header_help_exit_if_requested "${{BASH_SOURCE[0]}}" "$@" from '
         f"lib/header_help.sh, which stops at the header's last line."
         f"\n--- stdout ---\n{result.stdout}"
     )

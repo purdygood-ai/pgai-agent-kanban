@@ -8,8 +8,9 @@
 # team/pm-agent/lib/cron_parser.py), and prints the rendered pane content in
 # roster order -- each agent's first-seen position in the crontab, pm first.
 #
-# Designed to run under `watch -n 5 next-cron-firings.sh` in
-# the new bottom-row right pane created by dashboard/create.sh.
+# Designed to run under `cadence-loop.sh --interval N -- next-cron-firings.sh` in
+# the CRON pane (middle row, right side) of each drill window created by
+# dashboard/create.sh. `create.sh --no-tmux` also prints it once.
 #
 # Output format (default geometry -- the full roster packs into a compact
 # columnar band, at most two rows):
@@ -34,7 +35,7 @@
 # agree on entry order and identity between renders.  This is an ordering
 # change from time-remaining: an entry's position no longer reflects how
 # soon it fires, so watch the countdown value itself for urgency, not
-# position.  Each 5-second watch refresh recomputes each entry's own
+# position.  Each pane refresh recomputes each entry's own
 # remaining time from the system clock; only the values change on refresh,
 # never the order.
 #
@@ -77,13 +78,18 @@
 #   TERM=dumb                           Also disables colors
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory and library path
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TEAM_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CRON_PARSER_LIB="${TEAM_DIR}/pm-agent/lib/cron_parser.py"
 ROSTER_ENTRIES_PY="${TEAM_DIR}/pgai_agent_kanban/dashboard/roster_entries.py"
@@ -123,12 +129,6 @@ while [[ $# -gt 0 ]]; do
     --no-color)
       NO_COLOR_ARG=true
       shift
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       # Unknown arguments silently ignored for forward compatibility

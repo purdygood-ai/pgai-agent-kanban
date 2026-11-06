@@ -50,9 +50,7 @@ def _root(tmp_path: pathlib.Path, projects: tuple[str, ...] = ("alpha", "beta"))
     )
     for name in projects:
         (root / "projects" / name).mkdir(parents=True)
-        (root / "projects" / name / "project.cfg").write_text(
-            "[project]\nworkflow_type = release\n", encoding="utf-8"
-        )
+        (root / "projects" / name / "project.cfg").write_text("[project]\nworkflow_type = release\n", encoding="utf-8")
     return root
 
 
@@ -64,15 +62,19 @@ def _bug(root: pathlib.Path, project: str, bug_id: str, severity: str = "low", s
     )
 
 
-def _campaign(root: pathlib.Path, project: "str | None", body: str = "until=v2.33.0\n") -> pathlib.Path:
+def _campaign(root: pathlib.Path, project: str | None, body: str = "until=v2.33.0\n") -> pathlib.Path:
     path = (root / "projects" / project if project else root) / "DEFER-LOW-BUGS"
     path.write_text(body, encoding="utf-8")
     return path
 
 
 def _render(
-    tmp_path: pathlib.Path, script: pathlib.Path, root: pathlib.Path, *args: str,
-    rich: bool = False, **extra: str,
+    tmp_path: pathlib.Path,
+    script: pathlib.Path,
+    root: pathlib.Path,
+    *args: str,
+    rich: bool = False,
+    **extra: str,
 ) -> str:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -87,7 +89,10 @@ def _render(
         env_extra["NO_COLOR"] = "1"
     result = subprocess.run(
         ["bash", str(script), str(root), *args],
-        capture_output=True, text=True, timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
         env=build_scrubbed_env(
             home_dir=home, extra_path_dirs=[pathlib.Path(sys.executable).parent], extra_env=env_extra
         ),

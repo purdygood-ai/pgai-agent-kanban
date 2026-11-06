@@ -221,9 +221,7 @@ def test_version_stamp_resolves_release_tag_not_alias(tmp_path: pathlib.Path) ->
         tmp_path,
         f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{repo!s}' '{kanban_root!s}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION was not written"
@@ -235,9 +233,7 @@ def test_version_stamp_resolves_release_tag_not_alias(tmp_path: pathlib.Path) ->
         f"Got: {stamped!r}\n"
         f"If 'latest' was returned, --match 'v[0-9]*' is missing from git describe."
     )
-    assert "latest" not in stamped, (
-        f"VERSION must not contain 'latest'; got: {stamped!r}"
-    )
+    assert "latest" not in stamped, f"VERSION must not contain 'latest'; got: {stamped!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -283,15 +279,17 @@ def test_divergence_check_clean_when_version_matches_release_tag(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"export KANBAN_ROOT='{kanban_root!s}'",
-            f"export PGAI_DEV_TREE_PATH='{repo!s}'",
-            "export OVERWATCH_PROJECT='test-proj'",
-            # Stub out overwatch_log_action so the check doesn't need the full protocol.
-            "overwatch_log_action() { return 0; }",
-            f"source '{_CVD_SH!s}'",
-            "overwatch_check_version_divergence",
-        ]),
+        "\n".join(
+            [
+                f"export KANBAN_ROOT='{kanban_root!s}'",
+                f"export PGAI_DEV_TREE_PATH='{repo!s}'",
+                "export OVERWATCH_PROJECT='test-proj'",
+                # Stub out overwatch_log_action so the check doesn't need the full protocol.
+                "overwatch_log_action() { return 0; }",
+                f"source '{_CVD_SH!s}'",
+                "overwatch_check_version_divergence",
+            ]
+        ),
     )
 
     combined = result.stdout + result.stderr
@@ -338,14 +336,14 @@ def test_version_stamp_resolves_prefixed_tag_not_bare_ancestor(tmp_path: pathlib
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"source {_VERSION_STAMP_SH!s}",
-            f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
-        ]),
+        "\n".join(
+            [
+                f"source {_VERSION_STAMP_SH!s}",
+                f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
+            ]
+        ),
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION was not written"
@@ -358,9 +356,7 @@ def test_version_stamp_resolves_prefixed_tag_not_bare_ancestor(tmp_path: pathlib
         f"If '{bare_ancestor}' was returned, --match is not using the prefix.\n"
         f"If 'latest' was returned, --match filter is ineffective."
     )
-    assert "latest" not in stamped, (
-        f"VERSION must not contain 'latest'; got: {stamped!r}"
-    )
+    assert "latest" not in stamped, f"VERSION must not contain 'latest'; got: {stamped!r}"
     assert stamped != bare_ancestor, (
         f"VERSION must not be the bare ancestor tag {bare_ancestor!r}; "
         f"the prefix-aware pattern must match the prefixed tag."
@@ -419,14 +415,16 @@ def test_divergence_check_clean_when_version_matches_prefixed_tag(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"export KANBAN_ROOT='{kanban_root!s}'",
-            f"export PGAI_DEV_TREE_PATH='{repo!s}'",
-            "export OVERWATCH_PROJECT='test-proj'",
-            "overwatch_log_action() { return 0; }",
-            f"source '{_CVD_SH!s}'",
-            "overwatch_check_version_divergence",
-        ]),
+        "\n".join(
+            [
+                f"export KANBAN_ROOT='{kanban_root!s}'",
+                f"export PGAI_DEV_TREE_PATH='{repo!s}'",
+                "export OVERWATCH_PROJECT='test-proj'",
+                "overwatch_log_action() { return 0; }",
+                f"source '{_CVD_SH!s}'",
+                "overwatch_check_version_divergence",
+            ]
+        ),
     )
 
     combined = result.stdout + result.stderr
@@ -447,11 +445,14 @@ def test_divergence_check_clean_when_version_matches_prefixed_tag(
     not _VERSION_STAMP_SH.exists(),
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
-@pytest.mark.parametrize("prefix,expected_pattern", [
-    ("",     "v[0-9]*"),
-    ("ai_",  "ai_v[0-9]*"),
-    ("team-", "team-v[0-9]*"),
-])
+@pytest.mark.parametrize(
+    "prefix,expected_pattern",
+    [
+        ("", "v[0-9]*"),
+        ("ai_", "ai_v[0-9]*"),
+        ("team-", "team-v[0-9]*"),
+    ],
+)
 def test_git_describe_tag_pattern_constructs_correct_pattern(
     tmp_path: pathlib.Path,
     prefix: str,
@@ -464,17 +465,16 @@ def test_git_describe_tag_pattern_constructs_correct_pattern(
     """
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"source {_VERSION_STAMP_SH!s}",
-            f"git_describe_tag_pattern '{prefix}'",
-        ]),
+        "\n".join(
+            [
+                f"source {_VERSION_STAMP_SH!s}",
+                f"git_describe_tag_pattern '{prefix}'",
+            ]
+        ),
     )
-    assert result.returncode == 0, (
-        f"git_describe_tag_pattern exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"git_describe_tag_pattern exited non-zero: {result.stderr}"
     assert result.stdout.strip() == expected_pattern, (
-        f"git_describe_tag_pattern('{prefix}') must return '{expected_pattern}'; "
-        f"got: {result.stdout.strip()!r}"
+        f"git_describe_tag_pattern('{prefix}') must return '{expected_pattern}'; " f"got: {result.stdout.strip()!r}"
     )
 
 
@@ -487,12 +487,15 @@ def test_git_describe_tag_pattern_constructs_correct_pattern(
     not _VERSION_STAMP_SH.exists(),
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
-@pytest.mark.parametrize("prefix,tag,bare_ancestor,expected", [
-    # Bare-prefix shape: the empty-prefix regression scenario
-    ("", "v1.23.0", None, "v1.23.0"),
-    # Prefixed shape: the branch-prefix scenario
-    ("ai_", "ai_v1.23.0", "v1.0.0", "ai_v1.23.0"),
-])
+@pytest.mark.parametrize(
+    "prefix,tag,bare_ancestor,expected",
+    [
+        # Bare-prefix shape: the empty-prefix regression scenario
+        ("", "v1.23.0", None, "v1.23.0"),
+        # Prefixed shape: the branch-prefix scenario
+        ("ai_", "ai_v1.23.0", "v1.0.0", "ai_v1.23.0"),
+    ],
+)
 def test_version_stamp_prefix_shape_matrix(
     tmp_path: pathlib.Path,
     prefix: str,
@@ -518,22 +521,21 @@ def test_version_stamp_prefix_shape_matrix(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"source {_VERSION_STAMP_SH!s}",
-            f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
-        ]),
+        "\n".join(
+            [
+                f"source {_VERSION_STAMP_SH!s}",
+                f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
+            ]
+        ),
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero (prefix={prefix!r}): {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero (prefix={prefix!r}): {result.stderr}"
 
     version_file = kanban_root / "VERSION"
     assert version_file.exists(), "VERSION was not written"
     stamped = version_file.read_text(encoding="utf-8").strip()
 
     assert stamped == expected, (
-        f"stamp_version_files with prefix={prefix!r}: "
-        f"expected {expected!r}, got {stamped!r}"
+        f"stamp_version_files with prefix={prefix!r}: " f"expected {expected!r}, got {stamped!r}"
     )
     assert "latest" not in stamped, f"VERSION must not contain 'latest'; got: {stamped!r}"
 
@@ -547,12 +549,15 @@ def test_version_stamp_prefix_shape_matrix(
     not _CVD_SH.exists(),
     reason=f"check-version-divergence.sh not found at {_CVD_SH}",
 )
-@pytest.mark.parametrize("prefix,installed_version,tag,bare_ancestor", [
-    # Bare-prefix shape: the empty-prefix regression
-    ("", "v1.23.0", "v1.23.0", None),
-    # Prefixed shape: the branch-prefix scenario
-    ("ai_", "ai_v1.23.0", "ai_v1.23.0", "v1.0.0"),
-])
+@pytest.mark.parametrize(
+    "prefix,installed_version,tag,bare_ancestor",
+    [
+        # Bare-prefix shape: the empty-prefix regression
+        ("", "v1.23.0", "v1.23.0", None),
+        # Prefixed shape: the branch-prefix scenario
+        ("ai_", "ai_v1.23.0", "ai_v1.23.0", "v1.0.0"),
+    ],
+)
 def test_divergence_check_prefix_shape_matrix(
     tmp_path: pathlib.Path,
     prefix: str,
@@ -593,14 +598,16 @@ def test_divergence_check_prefix_shape_matrix(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"export KANBAN_ROOT='{kanban_root!s}'",
-            f"export PGAI_DEV_TREE_PATH='{repo!s}'",
-            "export OVERWATCH_PROJECT='test-proj'",
-            "overwatch_log_action() { return 0; }",
-            f"source '{_CVD_SH!s}'",
-            "overwatch_check_version_divergence",
-        ]),
+        "\n".join(
+            [
+                f"export KANBAN_ROOT='{kanban_root!s}'",
+                f"export PGAI_DEV_TREE_PATH='{repo!s}'",
+                "export OVERWATCH_PROJECT='test-proj'",
+                "overwatch_log_action() { return 0; }",
+                f"source '{_CVD_SH!s}'",
+                "overwatch_check_version_divergence",
+            ]
+        ),
     )
 
     combined = result.stdout + result.stderr
@@ -671,26 +678,24 @@ def _run_divergence_check_on_stamped_install(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"export KANBAN_ROOT='{kanban_root!s}'",
-            "export OVERWATCH_PROJECT='test-proj'",
-            "unset PGAI_DEV_TREE_PATH",
-            f"source '{_VERSION_STAMP_SH!s}'",
-            f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
-            'overwatch_log_action() { echo "ACTION: $3 $5"; return 0; }',
-            f"source '{_CVD_SH!s}'",
-            "overwatch_check_version_divergence",
-        ]),
+        "\n".join(
+            [
+                f"export KANBAN_ROOT='{kanban_root!s}'",
+                "export OVERWATCH_PROJECT='test-proj'",
+                "unset PGAI_DEV_TREE_PATH",
+                f"source '{_VERSION_STAMP_SH!s}'",
+                f"stamp_version_files '{repo!s}' '{kanban_root!s}' '' '{prefix}'",
+                'overwatch_log_action() { echo "ACTION: $3 $5"; return 0; }',
+                f"source '{_CVD_SH!s}'",
+                "overwatch_check_version_divergence",
+            ]
+        ),
     )
-    assert result.returncode == 0, (
-        f"stamp + divergence check exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp + divergence check exited non-zero: {result.stderr}"
 
     installed = (kanban_root / "VERSION").read_text(encoding="utf-8").strip()
     combined = result.stdout + result.stderr
-    actions = "\n".join(
-        line for line in result.stdout.splitlines() if line.startswith("ACTION:")
-    )
+    actions = "\n".join(line for line in result.stdout.splitlines() if line.startswith("ACTION:"))
     return installed, combined, actions
 
 
@@ -698,12 +703,15 @@ def _run_divergence_check_on_stamped_install(
     not (_CVD_SH.exists() and _VERSION_STAMP_SH.exists()),
     reason="check-version-divergence.sh or version_stamp.sh not found",
 )
-@pytest.mark.parametrize("prefix,committed_version,tag", [
-    # Prefixed lane: unprefixed committed VERSION, prefixed release tag.
-    ("ai_", "v1.23.0", "ai_v1.23.0"),
-    # Empty-prefix lane: committed VERSION and tag are the same string.
-    ("", "v1.23.0", "v1.23.0"),
-])
+@pytest.mark.parametrize(
+    "prefix,committed_version,tag",
+    [
+        # Prefixed lane: unprefixed committed VERSION, prefixed release tag.
+        ("ai_", "v1.23.0", "ai_v1.23.0"),
+        # Empty-prefix lane: committed VERSION and tag are the same string.
+        ("", "v1.23.0", "v1.23.0"),
+    ],
+)
 def test_divergence_check_clean_when_committed_version_matches_tag(
     tmp_path: pathlib.Path,
     prefix: str,
@@ -719,7 +727,9 @@ def test_divergence_check_clean_when_committed_version_matches_tag(
     """
     repo = _build_committed_version_repo(tmp_path, committed_version, tag)
     installed, combined, actions = _run_divergence_check_on_stamped_install(
-        tmp_path, repo, prefix,
+        tmp_path,
+        repo,
+        prefix,
     )
 
     assert installed == committed_version, (
@@ -755,7 +765,9 @@ def test_divergence_check_reports_real_difference_with_committed_version(
     tag = "ai_v1.23.0"
     repo = _build_committed_version_repo(tmp_path, committed_version, tag)
     installed, combined, actions = _run_divergence_check_on_stamped_install(
-        tmp_path, repo, "ai_",
+        tmp_path,
+        repo,
+        "ai_",
     )
 
     assert installed == committed_version, (
@@ -766,21 +778,16 @@ def test_divergence_check_reports_real_difference_with_committed_version(
         f"Divergence check must report divergence when VERSION={committed_version!r} "
         f"and the tag at HEAD is {tag!r}.\noutput:\n{combined}"
     )
-    report_lines = [
-        line for line in actions.splitlines()
-        if "report:version-divergence" in line
-    ]
+    report_lines = [line for line in actions.splitlines() if "report:version-divergence" in line]
     assert report_lines, (
         f"Divergence check must log a report:version-divergence entry.\n"
         f"action lines:\n{actions}\noutput:\n{combined}"
     )
     assert f"installed={committed_version}" in report_lines[0], (
-        f"Divergence report must name the raw installed VERSION "
-        f"{committed_version!r}; got: {report_lines[0]!r}"
+        f"Divergence report must name the raw installed VERSION " f"{committed_version!r}; got: {report_lines[0]!r}"
     )
     assert f"={tag}" in report_lines[0], (
-        f"Divergence report must name the raw describe value {tag!r}; "
-        f"got: {report_lines[0]!r}"
+        f"Divergence report must name the raw describe value {tag!r}; " f"got: {report_lines[0]!r}"
     )
 
 
@@ -793,12 +800,15 @@ def test_divergence_check_reports_real_difference_with_committed_version(
     not _VERSION_STAMP_SH.exists(),
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
-@pytest.mark.parametrize("prefix,tag,bare_ancestor", [
-    # Bare-prefix shape: the empty-prefix regression
-    ("", "v1.23.0", None),
-    # Prefixed shape: the branch-prefix scenario
-    ("ai_", "ai_v1.23.0", "v1.0.0"),
-])
+@pytest.mark.parametrize(
+    "prefix,tag,bare_ancestor",
+    [
+        # Bare-prefix shape: the empty-prefix regression
+        ("", "v1.23.0", None),
+        # Prefixed shape: the branch-prefix scenario
+        ("ai_", "ai_v1.23.0", "v1.0.0"),
+    ],
+)
 def test_describe_pattern_used_in_advisory_path(
     tmp_path: pathlib.Path,
     prefix: str,
@@ -819,15 +829,15 @@ def test_describe_pattern_used_in_advisory_path(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"source {_VERSION_STAMP_SH!s}",
-            f"_pat=\"$(git_describe_tag_pattern '{prefix}')\"",
-            f"git -C '{repo!s}' describe --tags --match \"$_pat\" 2>/dev/null || true",
-        ]),
+        "\n".join(
+            [
+                f"source {_VERSION_STAMP_SH!s}",
+                f"_pat=\"$(git_describe_tag_pattern '{prefix}')\"",
+                f"git -C '{repo!s}' describe --tags --match \"$_pat\" 2>/dev/null || true",
+            ]
+        ),
     )
-    assert result.returncode == 0, (
-        f"Advisory describe failed (prefix={prefix!r}): {result.stderr}"
-    )
+    assert result.returncode == 0, f"Advisory describe failed (prefix={prefix!r}): {result.stderr}"
     described = result.stdout.strip()
     # The described value starts with the tag (may have -N-gSHA suffix past the tag).
     assert described.startswith(tag), (
@@ -846,12 +856,15 @@ def test_describe_pattern_used_in_advisory_path(
     not _VERSION_STAMP_SH.exists(),
     reason=f"version_stamp.sh not found at {_VERSION_STAMP_SH}",
 )
-@pytest.mark.parametrize("prefix,tag,bare_ancestor", [
-    # Bare-prefix shape: the empty-prefix regression
-    ("", "v1.23.0", None),
-    # Prefixed shape: the branch-prefix scenario
-    ("ai_", "ai_v1.23.0", "v1.0.0"),
-])
+@pytest.mark.parametrize(
+    "prefix,tag,bare_ancestor",
+    [
+        # Bare-prefix shape: the empty-prefix regression
+        ("", "v1.23.0", None),
+        # Prefixed shape: the branch-prefix scenario
+        ("ai_", "ai_v1.23.0", "v1.0.0"),
+    ],
+)
 def test_finalize_release_describe_pattern_resolves_correct_tag(
     tmp_path: pathlib.Path,
     prefix: str,
@@ -872,16 +885,16 @@ def test_finalize_release_describe_pattern_resolves_correct_tag(
 
     result = run_bash(
         tmp_path,
-        "\n".join([
-            f"source {_VERSION_STAMP_SH!s}",
-            f"_pat=\"$(git_describe_tag_pattern '{prefix}')\"",
-            # Simulate the finalize-release.sh logic: describe with --abbrev=0
-            f"git -C '{repo!s}' describe --tags --match \"$_pat\" --abbrev=0 HEAD 2>/dev/null || true",
-        ]),
+        "\n".join(
+            [
+                f"source {_VERSION_STAMP_SH!s}",
+                f"_pat=\"$(git_describe_tag_pattern '{prefix}')\"",
+                # Simulate the finalize-release.sh logic: describe with --abbrev=0
+                f"git -C '{repo!s}' describe --tags --match \"$_pat\" --abbrev=0 HEAD 2>/dev/null || true",
+            ]
+        ),
     )
-    assert result.returncode == 0, (
-        f"Finalize-release describe failed (prefix={prefix!r}): {result.stderr}"
-    )
+    assert result.returncode == 0, f"Finalize-release describe failed (prefix={prefix!r}): {result.stderr}"
     resolved = result.stdout.strip()
     assert resolved == tag, (
         f"finalize-release describe with prefix={prefix!r} must resolve to {tag!r}; "
@@ -928,10 +941,7 @@ def _find_unfiltered_describe_calls() -> list[str]:
     scripts_dir = root / "team" / "scripts"
 
     if not scripts_dir.is_dir():
-        raise FileNotFoundError(
-            f"team/scripts/ not found at {scripts_dir}; "
-            "repo root resolution may be wrong."
-        )
+        raise FileNotFoundError(f"team/scripts/ not found at {scripts_dir}; " "repo root resolution may be wrong.")
 
     violations: list[str] = []
 
@@ -1023,8 +1033,8 @@ def test_filtered_describe_call_is_not_flagged(tmp_path: pathlib.Path) -> None:
     good_script = tmp_path / "good_version.sh"
     good_script.write_text(
         "#!/usr/bin/env bash\n"
-        'ver="$(git describe --tags --match \'v[0-9]*\' HEAD)"\n'
-        'ver2="$(git -C /repo describe --tags --match \'v[0-9]*\' 2>/dev/null || true)"\n',
+        "ver=\"$(git describe --tags --match 'v[0-9]*' HEAD)\"\n"
+        "ver2=\"$(git -C /repo describe --tags --match 'v[0-9]*' 2>/dev/null || true)\"\n",
         encoding="utf-8",
     )
 
@@ -1037,8 +1047,7 @@ def test_filtered_describe_call_is_not_flagged(tmp_path: pathlib.Path) -> None:
     ]
 
     assert not matching_lines, (
-        f"Filtered 'describe --tags --match ...' must not be flagged; "
-        f"got matches: {matching_lines!r}"
+        f"Filtered 'describe --tags --match ...' must not be flagged; " f"got matches: {matching_lines!r}"
     )
 
 
@@ -1065,6 +1074,4 @@ def test_comment_lines_are_excluded_from_scan(tmp_path: pathlib.Path) -> None:
         if not comment_pat.match(line) and pattern.search(line) and "--match" not in line
     ]
 
-    assert not matching_lines, (
-        f"Comment lines must not be flagged; got: {matching_lines!r}"
-    )
+    assert not matching_lines, f"Comment lines must not be flagged; got: {matching_lines!r}"

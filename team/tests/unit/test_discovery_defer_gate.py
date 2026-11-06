@@ -58,10 +58,7 @@ def _severity_of(bug_file: pathlib.Path) -> subprocess.CompletedProcess:
 
 
 def _decision(severity_raw: str, level: str) -> subprocess.CompletedProcess:
-    script = (
-        f"source {str(_DISCOVERY_DEFER)!r} && "
-        f"_disc_severity_defer_decision {severity_raw!r} {level!r}"
-    )
+    script = f"source {str(_DISCOVERY_DEFER)!r} && " f"_disc_severity_defer_decision {severity_raw!r} {level!r}"
     return _run_bash(script)
 
 
@@ -85,9 +82,7 @@ class TestBugSeverityExtraction:
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "medium"
 
-    def test_is_tolerant_of_extra_whitespace_around_the_value(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_is_tolerant_of_extra_whitespace_around_the_value(self, tmp_path: pathlib.Path) -> None:
         bug_file = _write_bug_file(
             tmp_path,
             "# BUG-0001: test\n\n**Severity:**    high   \n\n## Status\nopen\n",
@@ -97,16 +92,12 @@ class TestBugSeverityExtraction:
         assert result.stdout.strip() == "high"
 
     def test_missing_field_yields_empty_string(self, tmp_path: pathlib.Path) -> None:
-        bug_file = _write_bug_file(
-            tmp_path, "# BUG-0001: test\n\n## Status\nopen\n"
-        )
+        bug_file = _write_bug_file(tmp_path, "# BUG-0001: test\n\n## Status\nopen\n")
         result = _severity_of(bug_file)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == ""
 
-    def test_unreadable_file_yields_empty_string_rather_than_an_error(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unreadable_file_yields_empty_string_rather_than_an_error(self, tmp_path: pathlib.Path) -> None:
         missing = tmp_path / "does-not-exist.md"
         result = _severity_of(missing)
         assert result.returncode == 0, result.stderr
@@ -196,9 +187,7 @@ class TestSeverityDeferDecision:
             ("critical", "high", "kept"),
         ],
     )
-    def test_at_or_below_the_level_is_deferred(
-        self, severity: str, level: str, expected: str
-    ) -> None:
+    def test_at_or_below_the_level_is_deferred(self, severity: str, level: str, expected: str) -> None:
         result = _decision(severity, level)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == expected

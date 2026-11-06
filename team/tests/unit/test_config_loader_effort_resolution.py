@@ -125,16 +125,12 @@ def test_absent_everywhere_resolve_role_effort_returns_empty_value_and_source(
     cfg_file = _write_cfg(tmp_path, llm_effort=None)
     env = _base_env()
 
-    script = (
-        f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r} "
-        f"&& resolve_role_effort coder"
-    )
+    script = f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r} " f"&& resolve_role_effort coder"
     result = _run_bash(script, env)
 
     assert result.returncode == 0, f"resolve_role_effort failed: {result.stderr!r}"
     assert result.stdout.strip() == "|", (
-        f"Expected empty 'value|source' output when absent everywhere; "
-        f"got {result.stdout!r}"
+        f"Expected empty 'value|source' output when absent everywhere; " f"got {result.stdout!r}"
     )
 
 
@@ -166,12 +162,10 @@ def test_cfg_llm_effort_resolves_for_every_role_with_cfg_source(tmp_path: pathli
     assert result.returncode == 0, f"load_config failed: {result.stderr!r}"
     for role in _ROLES:
         assert f"{role}=[high]" in result.stdout, (
-            f"Expected PGAI_{role.upper()}_EFFORT=high from cfg; "
-            f"stdout: {result.stdout!r}"
+            f"Expected PGAI_{role.upper()}_EFFORT=high from cfg; " f"stdout: {result.stdout!r}"
         )
     assert "SOURCE=[[providers] llm_effort cfg]" in result.stdout, (
-        f"Expected the winning source to name '[providers] llm_effort cfg'; "
-        f"stdout: {result.stdout!r}"
+        f"Expected the winning source to name '[providers] llm_effort cfg'; " f"stdout: {result.stdout!r}"
     )
 
 
@@ -193,8 +187,8 @@ def test_env_override_wins_over_cfg_for_its_role_and_names_env_source(
 
     script = (
         f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r} "
-        f"&& echo \"writer=[${{PGAI_WRITER_EFFORT:-}}]\" "
-        f"&& echo \"coder=[${{PGAI_CODER_EFFORT:-}}]\" "
+        f'&& echo "writer=[${{PGAI_WRITER_EFFORT:-}}]" '
+        f'&& echo "coder=[${{PGAI_CODER_EFFORT:-}}]" '
         f"&& unset PGAI_CODER_EFFORT "
         f"&& echo 'CODER_SOURCE=['$(resolve_role_effort coder | cut -d'|' -f2)']' "
         f"&& echo 'WRITER_SOURCE=['$(resolve_role_effort writer | cut -d'|' -f2)']'"
@@ -203,20 +197,16 @@ def test_env_override_wins_over_cfg_for_its_role_and_names_env_source(
 
     assert result.returncode == 0, f"load_config failed: {result.stderr!r}"
     assert "writer=[low]" in result.stdout, (
-        f"Expected PGAI_WRITER_EFFORT to keep the env override 'low'; "
-        f"stdout: {result.stdout!r}"
+        f"Expected PGAI_WRITER_EFFORT to keep the env override 'low'; " f"stdout: {result.stdout!r}"
     )
     assert "coder=[high]" in result.stdout, (
-        f"Expected PGAI_CODER_EFFORT to fall back to cfg 'high'; "
-        f"stdout: {result.stdout!r}"
+        f"Expected PGAI_CODER_EFFORT to fall back to cfg 'high'; " f"stdout: {result.stdout!r}"
     )
     assert "CODER_SOURCE=[[providers] llm_effort cfg]" in result.stdout, (
-        f"Expected coder's winning source to name the cfg key; "
-        f"stdout: {result.stdout!r}"
+        f"Expected coder's winning source to name the cfg key; " f"stdout: {result.stdout!r}"
     )
     assert "WRITER_SOURCE=[PGAI_WRITER_EFFORT env]" in result.stdout, (
-        f"Expected writer's winning source to name the env var; "
-        f"stdout: {result.stdout!r}"
+        f"Expected writer's winning source to name the env var; " f"stdout: {result.stdout!r}"
     )
 
 
@@ -229,12 +219,14 @@ def test_env_override_wins_over_cfg_for_its_role_and_names_env_source(
     "cfg_llm_effort, env_overrides, expected_stderr_substrings",
     [
         pytest.param(
-            "extreme", {},
+            "extreme",
+            {},
             ["[providers] llm_effort", "extreme"],
             id="invalid_cfg_value_names_cfg_key",
         ),
         pytest.param(
-            None, {"PGAI_CODER_EFFORT": "bogus"},
+            None,
+            {"PGAI_CODER_EFFORT": "bogus"},
             ["PGAI_CODER_EFFORT", "bogus"],
             id="invalid_env_value_names_env_var",
         ),
@@ -261,9 +253,7 @@ def test_invalid_effort_value_fails_loud_naming_supplying_key(
         f"got returncode={result.returncode}, stderr={result.stderr!r}"
     )
     for substring in expected_stderr_substrings:
-        assert substring in result.stderr, (
-            f"Expected {substring!r} named in the error; stderr: {result.stderr!r}"
-        )
+        assert substring in result.stderr, f"Expected {substring!r} named in the error; stderr: {result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -278,22 +268,16 @@ def test_kanban_cfg_example_documents_commented_out_llm_effort() -> None:
     text = _KANBAN_CFG_EXAMPLE.read_text(encoding="utf-8")
 
     assert "# llm_effort" in text, (
-        "Expected a commented-out '# llm_effort' line in kanban.cfg_example "
-        "(default must be absent)."
+        "Expected a commented-out '# llm_effort' line in kanban.cfg_example " "(default must be absent)."
     )
     assert re.search(r"^[ \t]*llm_effort[ \t]*=", text, re.MULTILINE) is None, (
-        "llm_effort must not appear as an active (uncommented) key in "
-        "kanban.cfg_example — the default is absent."
+        "llm_effort must not appear as an active (uncommented) key in " "kanban.cfg_example — the default is absent."
     )
-    assert "Anthropic" in text and "high" in text, (
-        "Expected the Anthropic-defaults-to-high vendor note near llm_effort."
-    )
-    assert "OpenAI" in text and "medium" in text, (
-        "Expected the OpenAI-defaults-to-medium vendor note near llm_effort."
-    )
-    assert "vary by model" in text, (
-        "Expected the model-dependent-support caveat near llm_effort."
-    )
+    assert (
+        "Anthropic" in text and "high" in text
+    ), "Expected the Anthropic-defaults-to-high vendor note near llm_effort."
+    assert "OpenAI" in text and "medium" in text, "Expected the OpenAI-defaults-to-medium vendor note near llm_effort."
+    assert "vary by model" in text, "Expected the model-dependent-support caveat near llm_effort."
 
 
 # ---------------------------------------------------------------------------
@@ -316,17 +300,13 @@ def _write_provider_cfg(tmp_path: pathlib.Path, provider: str, llm_effort: str |
 )
 def test_each_provider_declares_its_own_effort_list(provider: str, expected: str) -> None:
     """pgai_provider_effort_values reads the list the provider lib declares."""
-    result = _run_bash(
-        f"source {str(_CONFIG_LOADER)!r} && pgai_provider_effort_values {provider}", _base_env()
-    )
+    result = _run_bash(f"source {str(_CONFIG_LOADER)!r} && pgai_provider_effort_values {provider}", _base_env())
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == expected
 
 
 def test_a_provider_without_a_lib_declares_no_effort_list() -> None:
-    result = _run_bash(
-        f"source {str(_CONFIG_LOADER)!r} && pgai_provider_effort_values no-such-provider", _base_env()
-    )
+    result = _run_bash(f"source {str(_CONFIG_LOADER)!r} && pgai_provider_effort_values no-such-provider", _base_env())
     assert result.returncode == 1
     assert result.stdout == ""
 
@@ -344,7 +324,11 @@ def test_a_provider_without_a_lib_declares_no_effort_list() -> None:
     ],
 )
 def test_effort_is_validated_against_the_active_providers_list(
-    tmp_path: pathlib.Path, provider: str, cfg_value: str | None, env_value: str | None, ok: bool,
+    tmp_path: pathlib.Path,
+    provider: str,
+    cfg_value: str | None,
+    env_value: str | None,
+    ok: bool,
 ) -> None:
     """load_config accepts exactly the levels the active provider declares and
     refuses any other dual-channel, naming the supplying key, the value and
@@ -354,7 +338,7 @@ def test_effort_is_validated_against_the_active_providers_list(
     if env_value is not None:
         env["PGAI_CODER_EFFORT"] = env_value
     result = _run_bash(
-        f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r} && echo \"CODER=$PGAI_CODER_EFFORT\"",
+        f'source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r} && echo "CODER=$PGAI_CODER_EFFORT"',
         env,
     )
     value = cfg_value or env_value
@@ -415,7 +399,10 @@ def _isolated_loader_with_provider_lib(tmp_path: pathlib.Path, provider: str, li
     ],
 )
 def test_provider_without_a_lib_passes_effort_through_unvalidated(
-    tmp_path: pathlib.Path, cfg_value: str | None, env_value: str | None, expected_source: str,
+    tmp_path: pathlib.Path,
+    cfg_value: str | None,
+    env_value: str | None,
+    expected_source: str,
 ) -> None:
     """An active provider with no provider_<name>.sh lib (the test-only
     harness lane) declares no effort list: load_config succeeds, exports the
@@ -432,8 +419,8 @@ def test_provider_without_a_lib_passes_effort_through_unvalidated(
     clear_export = "unset PGAI_CODER_EFFORT && " if cfg_value else ""
     result = _run_bash(
         f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r} "
-        f"&& echo \"CODER=$PGAI_CODER_EFFORT\" && {clear_export}"
-        f"echo \"RESOLVED=$(resolve_role_effort coder 2>/dev/null)\"",
+        f'&& echo "CODER=$PGAI_CODER_EFFORT" && {clear_export}'
+        f'echo "RESOLVED=$(resolve_role_effort coder 2>/dev/null)"',
         env,
     )
     assert result.returncode == 0, result.stderr
@@ -441,10 +428,7 @@ def test_provider_without_a_lib_passes_effort_through_unvalidated(
     assert f"CODER={value}" in result.stdout, result.stdout
     assert f"RESOLVED={value}|{expected_source}" in result.stdout, result.stdout
     supplying_key = "[providers] llm_effort" if cfg_value else "PGAI_CODER_EFFORT"
-    narration = [
-        line for line in result.stderr.splitlines()
-        if _NARRATION in line and supplying_key in line
-    ]
+    narration = [line for line in result.stderr.splitlines() if _NARRATION in line and supplying_key in line]
     assert narration, f"Expected a narration line for {supplying_key}; stderr: {result.stderr!r}"
     assert "'harness'" in narration[0] and f"'{value}'" in narration[0], narration[0]
 
@@ -453,15 +437,17 @@ def test_provider_lib_without_a_declaration_passes_effort_through(tmp_path: path
     """A provider lib that exists but has no PROVIDER_EFFORT_VALUES line is
     treated like a provider with no lib: the value loads unvalidated and is
     narrated, rather than every value being refused."""
-    loader = _isolated_loader_with_provider_lib(
-        tmp_path, "nolist", 'PROVIDER_NAME="nolist"\nPROVIDER_CLI="nolist"\n'
-    )
+    loader = _isolated_loader_with_provider_lib(tmp_path, "nolist", 'PROVIDER_NAME="nolist"\nPROVIDER_CLI="nolist"\n')
     cfg_file = _write_provider_cfg(tmp_path, "nolist", None)
     env = _base_env()
     env["PGAI_CODER_EFFORT"] = "high"
+    # The staged lib has no pp_run_ops.sh, so the [wake] budget defaults
+    # cannot be read; supplying both keys is what lets load_config run.
+    env["MAX_RUNTIME_SECONDS"] = "14400"
+    env["MAX_TASK_SECONDS"] = "5400"
     result = _run_bash(
-        f"source {str(loader)!r} && pgai_provider_effort_values nolist; echo \"LIST_RC=$?\"; "
-        f"load_config {str(cfg_file)!r} && echo \"CODER=$PGAI_CODER_EFFORT\"",
+        f'source {str(loader)!r} && pgai_provider_effort_values nolist; echo "LIST_RC=$?"; '
+        f'load_config {str(cfg_file)!r} && echo "CODER=$PGAI_CODER_EFFORT"',
         env,
     )
     assert "LIST_RC=1" in result.stdout, result.stdout

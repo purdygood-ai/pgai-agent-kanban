@@ -26,7 +26,10 @@
 #       pgai_agent_kanban.dashboard.column_render.multi.sources_from_env.
 #       Prints "(empty)" and exits 0 when no project is registered.
 #       Called by column_render_gather_data() (column_render_data.sh) when
-#       its <mode> argument is "multi".
+#       its <mode> argument is "multi". For COLUMN_TYPE "agents" it exports
+#       the five role columns' lists instead, each with its "__<role>"
+#       suffix (as column_render_gather_board_multi names them), which the
+#       AGENTS column merges.
 #
 #   column_render_gather_board_multi
 #       The same gather for EVERY board column at once, for the shared
@@ -218,9 +221,19 @@ _column_render_multi_column_lists() {
         export "_ALL_LAST_RELEASED${_sfx}=${_last_released}"
 }
 
+# The role columns the AGENTS column (COLUMN_TYPE "agents") merges.
+COLUMN_RENDER_AGENT_ROLE_TYPES=(pm coder writer tester cm)
+
 column_render_gather_data_multi() {
         _column_render_multi_rows_width
         _column_render_multi_projects
+        if [[ "${COLUMN_TYPE}" == "agents" ]]; then
+            local _role
+            for _role in "${COLUMN_RENDER_AGENT_ROLE_TYPES[@]}"; do
+                _column_render_multi_column_lists "$_role" "__${_role}"
+            done
+            return 0
+        fi
         _column_render_multi_column_lists "${COLUMN_TYPE}" ""
 }
 

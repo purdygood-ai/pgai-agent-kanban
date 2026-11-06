@@ -92,7 +92,7 @@ import dataclasses
 import pathlib
 import re
 import shlex
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from pgai_agent_kanban.archive.apply import (
     NO_TASK,
@@ -181,10 +181,10 @@ class ArchiveRun:
     exit_code: int
     project: str
     mode: str
-    plan: Optional[ArchivePlan] = None
-    result: Optional[RunResult] = None
-    legacy: Optional[RunResult] = None
-    queue_reconcile: Optional[QueueReconcilePlan] = None
+    plan: ArchivePlan | None = None
+    result: RunResult | None = None
+    legacy: RunResult | None = None
+    queue_reconcile: QueueReconcilePlan | None = None
 
     @property
     def ok(self) -> bool:
@@ -277,7 +277,7 @@ def _script(ctx: OpsContext) -> str:
     return shlex.quote(str(pathlib.Path(ctx.kanban_root).joinpath(*_SCRIPT_RELPATH)))
 
 
-def _parse_count(raw: Union[int, str, None]) -> Optional[int]:
+def _parse_count(raw: int | str | None) -> int | None:
     """``raw`` as a non-negative int, ``None`` when absent; raise ValueError when invalid."""
     if raw is None or raw == "":
         return None
@@ -302,11 +302,11 @@ def run_archive(
     project: str,
     *,
     dry_run: bool = False,
-    count: Union[int, str, None] = None,
-    restore_id: Optional[str] = None,
+    count: int | str | None = None,
+    restore_id: str | None = None,
     task: str = NO_TASK,
-    out: Optional[Line] = None,
-    err: Optional[Line] = None,
+    out: Line | None = None,
+    err: Line | None = None,
     accept_chain_lock: bool = False,
     reconcile_queues: bool = False,
 ) -> ArchiveRun:
@@ -425,8 +425,7 @@ def run_archive(
         _refuse(
             warn,
             "archive.project_missing",
-            f"archive: project '{resolved}' has no directory at {layout.root}; nothing was "
-            "planned or moved.",
+            f"archive: project '{resolved}' has no directory at {layout.root}; nothing was " "planned or moved.",
             f"ls -1 {shlex.quote(str(layout.root.parent))}",
         )
         return ArchiveRun(EXIT_REFUSED, resolved, mode)
@@ -480,9 +479,7 @@ def run_archive(
     if result.status != RESULT_OK or planned.count == 0:
         return ArchiveRun(_result_exit_code(result), resolved, mode, plan=planned, result=result)
 
-    legacy = migrate_legacy(
-        resolved, kanban_root=root, task=task, log=narrate, accept_chain_lock=accept_chain_lock
-    )
+    legacy = migrate_legacy(resolved, kanban_root=root, task=task, log=narrate, accept_chain_lock=accept_chain_lock)
     for line in _render_result(legacy):
         say(line)
     return ArchiveRun(_result_exit_code(legacy), resolved, mode, plan=planned, result=result, legacy=legacy)
@@ -501,7 +498,7 @@ def _result_exit_code(result: RunResult) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run :func:`run_archive` from the command line.
 
     ``run_archive --kanban-root ROOT --project NAME [--dry-run] [--count N]
@@ -543,10 +540,7 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--restore",
         default=None,
-        help=(
-            "restore this one archived item (a bug, priority, requirements file or task ID) "
-            "instead of archiving"
-        ),
+        help=("restore this one archived item (a bug, priority, requirements file or task ID) " "instead of archiving"),
     )
     parser.add_argument(
         "--reconcile-queues",

@@ -86,10 +86,12 @@ def test_auto_shipped_release_notes_name_the_stop_under_known_issues_on_both_pat
     lane = build_lane(tmp_path, fixture, "always", writer_notes=writer_notes)
     generated_root = tmp_path / "generated"
     generated = generated_root / "release-notes" / f"{VERSION}.md"
-    after = "\n".join([
-        generate_notes_bash(write_notes_generator(tmp_path), generated_root),
-        f"cm_ship_posture_stamp_notes '{generated}'",
-    ])
+    after = "\n".join(
+        [
+            generate_notes_bash(write_notes_generator(tmp_path), generated_root),
+            f"cm_ship_posture_stamp_notes '{generated}'",
+        ]
+    )
 
     result = run_ship_policy(tmp_path, lane, after)
 
@@ -101,9 +103,9 @@ def test_auto_shipped_release_notes_name_the_stop_under_known_issues_on_both_pat
         notes = path.read_text(encoding="utf-8")
         assert section(notes, "Status") == status, notes
         known = section(notes, "Known Issues")
-        assert known.splitlines().count(expected) == 1, (
-            f"{path.name} must carry {expected!r} once, as its own line, under ## Known Issues:\n{notes}"
-        )
+        assert (
+            known.splitlines().count(expected) == 1
+        ), f"{path.name} must carry {expected!r} once, as its own line, under ## Known Issues:\n{notes}"
         assert known.splitlines()[0] == expected, known
         if status == "NON-FUNCTIONAL":
             assert "This release is shipped non-functional." in known, known
@@ -111,9 +113,9 @@ def test_auto_shipped_release_notes_name_the_stop_under_known_issues_on_both_pat
             assert known == expected, f"the empty Known Issues body is replaced by the line:\n{known}"
     if writer_notes:
         committed = run_bash(tmp_path, f"git -C '{lane.repo}' show HEAD:release-notes/{VERSION}.md")
-        assert committed.stdout == lane.notes_file.read_text(encoding="utf-8"), (
-            "Step 4e must commit the notes with the auto-ship line in them"
-        )
+        assert committed.stdout == lane.notes_file.read_text(
+            encoding="utf-8"
+        ), "Step 4e must commit the notes with the auto-ship line in them"
 
 
 # Fixtures that ship without a covered stop, and the postures that must
@@ -132,23 +134,25 @@ def test_release_notes_without_an_auto_ship_stop_are_byte_identical(tmp_path, fi
     generated = generated_root / "release-notes" / f"{VERSION}.md"
     reference_generated = tmp_path / "reference-generated.md"
     stamp_output = tmp_path / "stamp-output.txt"
-    after = "\n".join([
-        f"cm_stamp_release_notes_status '{reference_writer}' \"$_RELEASE_NOTES_STATUS\" "
-        "\"$_KNOWN_ISSUE_NOTES_BLOCK\" \"$_BUGS_SKIPPED_NOTES_BLOCK\" >/dev/null",
-        generate_notes_bash(write_notes_generator(tmp_path), generated_root),
-        f"cp '{generated}' '{reference_generated}'",
-        f"cm_ship_posture_stamp_notes '{generated}' > '{stamp_output}' 2>&1",
-    ])
+    after = "\n".join(
+        [
+            f"cm_stamp_release_notes_status '{reference_writer}' \"$_RELEASE_NOTES_STATUS\" "
+            '"$_KNOWN_ISSUE_NOTES_BLOCK" "$_BUGS_SKIPPED_NOTES_BLOCK" >/dev/null',
+            generate_notes_bash(write_notes_generator(tmp_path), generated_root),
+            f"cp '{generated}' '{reference_generated}'",
+            f"cm_ship_posture_stamp_notes '{generated}' > '{stamp_output}' 2>&1",
+        ]
+    )
 
     result = run_ship_policy(tmp_path, lane, after)
 
     assert result.returncode == 0, _diag(result)
-    assert lane.notes_file.read_bytes() == reference_writer.read_bytes(), (
-        "Step 4e must write exactly the status stamp when no stop was shipped through"
-    )
-    assert generated.read_bytes() == reference_generated.read_bytes(), (
-        "Step 11a must leave the generator's output untouched when no stop was shipped through"
-    )
+    assert (
+        lane.notes_file.read_bytes() == reference_writer.read_bytes()
+    ), "Step 4e must write exactly the status stamp when no stop was shipped through"
+    assert (
+        generated.read_bytes() == reference_generated.read_bytes()
+    ), "Step 11a must leave the generator's output untouched when no stop was shipped through"
     assert stamp_output.read_text(encoding="utf-8") == ""
     assert "Auto-shipped" not in result.stdout + result.stderr
     assert "Auto-shipped" not in lane.notes_file.read_text(encoding="utf-8")
@@ -156,14 +160,16 @@ def test_release_notes_without_an_auto_ship_stop_are_byte_identical(tmp_path, fi
 
 def test_a_notes_file_that_cannot_be_updated_is_a_warning_not_an_exit(tmp_path):
     missing = tmp_path / "release-notes" / f"{VERSION}.md"
-    script = "\n".join([
-        "set -euo pipefail",
-        "source scripts/lib/pp_run_ops.sh",
-        "source scripts/lib/cm/release_ship_posture.sh",
-        f"_CM_AUTO_SHIP_EVENTS=($'2026-01-01T00:00:00Z\\t2\\t{KEY_T2}\\t')",
-        f"cm_ship_posture_stamp_notes '{missing}'",
-        "echo continued",
-    ])
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            "source scripts/lib/pp_run_ops.sh",
+            "source scripts/lib/cm/release_ship_posture.sh",
+            f"_CM_AUTO_SHIP_EVENTS=($'2026-01-01T00:00:00Z\\t2\\t{KEY_T2}\\t')",
+            f"cm_ship_posture_stamp_notes '{missing}'",
+            "echo continued",
+        ]
+    )
 
     result = run_bash(tmp_path, script)
 
@@ -184,13 +190,15 @@ def test_the_warning_remedy_is_a_command_that_adds_the_line_when_pasted(tmp_path
     """
     team_dir = pathlib.Path(__file__).resolve().parents[2]
     notes = tmp_path / "release-notes" / f"{VERSION}.md"
-    script = "\n".join([
-        "set -euo pipefail",
-        "source scripts/lib/pp_run_ops.sh",
-        "source scripts/lib/cm/release_ship_posture.sh",
-        f"_CM_AUTO_SHIP_EVENTS=($'2026-01-01T00:00:00Z\\t2\\t{KEY_T2}\\t')",
-        f"cm_ship_posture_stamp_notes '{notes}'",
-    ])
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            "source scripts/lib/pp_run_ops.sh",
+            "source scripts/lib/cm/release_ship_posture.sh",
+            f"_CM_AUTO_SHIP_EVENTS=($'2026-01-01T00:00:00Z\\t2\\t{KEY_T2}\\t')",
+            f"cm_ship_posture_stamp_notes '{notes}'",
+        ]
+    )
     warned = run_bash(tmp_path, script, extra_env={"KANBAN_ROOT": str(team_dir)})
     assert warned.returncode == 0, _diag(warned)
     marker = "Add them by hand and commit the file: "

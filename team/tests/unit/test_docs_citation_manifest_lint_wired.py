@@ -94,9 +94,7 @@ _EXPECTED_CITED = f"docs/{_REMOVED_MANIFEST_ENTRY}"
 # Nothing under team/ that install.sh/upgrade.sh's docs-manifest-driven
 # deposit reads needs .git (lives at the repo root, so this is never a
 # cp -r of the worktree), bytecode caches, or a tests/ subtree.
-_SOURCE_COPY_IGNORE = shutil.ignore_patterns(
-    ".git", "__pycache__", "*.pyc", ".pytest_cache", "tests"
-)
+_SOURCE_COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".pytest_cache", "tests")
 
 
 def _import_check_docs_citations_module():
@@ -116,17 +114,14 @@ _check = _import_check_docs_citations_module()
 # ---------------------------------------------------------------------------
 
 
-def test_run_unit_tests_calls_the_docs_citation_check_through_the_quality_wrapper() -> (
-    None
-):
+def test_run_unit_tests_calls_the_docs_citation_check_through_the_quality_wrapper() -> None:
     """run-unit-tests.sh names check_docs_citations.py through the shared
     quality-class wrapper, so an authoring agent meets the check without
     choosing to, and a finding
     warns and records rather than aborting the runner."""
     text = (_TEAM_DIR / "scripts" / "run-unit-tests.sh").read_text(encoding="utf-8")
     assert f'gated_runner_run_quality_lint "{_LINT_NAME}"' in text, (
-        "run-unit-tests.sh must invoke check_docs_citations.py through "
-        "gated_runner_run_quality_lint."
+        "run-unit-tests.sh must invoke check_docs_citations.py through " "gated_runner_run_quality_lint."
     )
     assert "check_docs_citations.py" in text
     # Registered exactly once -- a duplicate registration under a name
@@ -165,9 +160,8 @@ def test_check_docs_citations_is_silent_against_the_shipped_tree() -> None:
 
     assert setup_error is None, f"Unexpected setup error: {setup_error}"
     assert report is not None
-    assert exit_code == 0, (
-        "Expected the shipped tree to be clean; found: "
-        + "\n".join(f"{f.source}:{f.line} cites {f.cited!r}" for f in report.findings)
+    assert exit_code == 0, "Expected the shipped tree to be clean; found: " + "\n".join(
+        f"{f.source}:{f.line} cites {f.cited!r}" for f in report.findings
     )
     assert report.findings == []
     assert report.citations_checked > 0, (
@@ -201,9 +195,7 @@ def _citation_line_number(text: str, cited: str) -> int:
     *cited*. Asserts exactly one match so a future edit adding a second
     citation to the same document fails this fixture loudly instead of
     silently changing what "exactly one finding" means below."""
-    matches = [
-        i + 1 for i, line in enumerate(text.splitlines()) if cited in line
-    ]
+    matches = [i + 1 for i, line in enumerate(text.splitlines()) if cited in line]
     assert len(matches) == 1, (
         f"Expected exactly one line citing {cited!r}; found {len(matches)}: "
         f"{matches}. This red-case fixture assumes a single citing line."
@@ -257,13 +249,11 @@ def test_removing_one_manifest_entry_produces_exactly_one_named_finding(
     that reports everything)."""
     original_manifest_bytes = _MANIFEST.read_bytes()
 
-    copy_repo_root, copy_team_dir, copy_manifest, expected_line = (
-        _build_throwaway_copy_with_manifest_entry_removed(tmp_path)
+    copy_repo_root, copy_team_dir, copy_manifest, expected_line = _build_throwaway_copy_with_manifest_entry_removed(
+        tmp_path
     )
 
-    exit_code, report, setup_error = _check.run_check(
-        copy_repo_root, copy_team_dir, copy_manifest
-    )
+    exit_code, report, setup_error = _check.run_check(copy_repo_root, copy_team_dir, copy_manifest)
 
     assert setup_error is None, f"Unexpected setup error: {setup_error}"
     assert report is not None
@@ -271,9 +261,8 @@ def test_removing_one_manifest_entry_produces_exactly_one_named_finding(
         "Expected a non-zero exit once the manifest entry is removed; got "
         f"{exit_code} with findings: {report.findings}"
     )
-    assert len(report.findings) == 1, (
-        f"Expected exactly one finding; got {len(report.findings)}: "
-        + "\n".join(f"{f.source}:{f.line} cites {f.cited!r}" for f in report.findings)
+    assert len(report.findings) == 1, f"Expected exactly one finding; got {len(report.findings)}: " + "\n".join(
+        f"{f.source}:{f.line} cites {f.cited!r}" for f in report.findings
     )
     finding = report.findings[0]
     assert finding.cited == _EXPECTED_CITED, finding.cited
@@ -309,8 +298,8 @@ def test_removed_manifest_entry_is_wired_through_the_quality_lint_wrapper(
     team/scripts/lib/gated_runner_lint.sh's CONVERT contract."""
     original_manifest_bytes = _MANIFEST.read_bytes()
 
-    copy_repo_root, copy_team_dir, copy_manifest, _expected_line = (
-        _build_throwaway_copy_with_manifest_entry_removed(tmp_path)
+    copy_repo_root, copy_team_dir, copy_manifest, _expected_line = _build_throwaway_copy_with_manifest_entry_removed(
+        tmp_path
     )
     findings_file = tmp_path / "findings-unit.json"
 
@@ -336,9 +325,7 @@ gated_runner_write_findings_file "{findings_file}" "run-unit-tests.sh"
 
     doc_written = json.loads(findings_file.read_text(encoding="utf-8"))
     findings = [f for f in doc_written["findings"] if f.get("lint") == _LINT_NAME]
-    assert len(findings) == 1, (
-        f"expected exactly one {_LINT_NAME} finding, got: {doc_written['findings']}"
-    )
+    assert len(findings) == 1, f"expected exactly one {_LINT_NAME} finding, got: {doc_written['findings']}"
     assert findings[0]["severity"] == "quality"
     assert _EXPECTED_CITED in findings[0]["detail"]
     assert "team/README.md" in findings[0]["detail"]

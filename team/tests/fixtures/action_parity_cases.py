@@ -75,7 +75,7 @@ import datetime
 import pathlib
 import shutil
 import subprocess
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.overwatch import inbox as overwatch_inbox
@@ -166,7 +166,7 @@ class EffectParityCase:
     rest_route: str
     rest_body: dict
     expect_changed: tuple[str, ...]
-    seed: Optional[SeedFn] = None
+    seed: SeedFn | None = None
 
     @property
     def kind(self) -> str:
@@ -203,9 +203,9 @@ class RefusalParityCase:
     cli_args: CliArgsFn
     rest_route: str
     rest_body: dict
-    error_key: Optional[str]
+    error_key: str | None
     channel: str = "response"
-    seed: Optional[SeedFn] = None
+    seed: SeedFn | None = None
     note: str = ""
 
     @property
@@ -213,7 +213,7 @@ class RefusalParityCase:
         return "refusal"
 
 
-ActionParityCase = Union[EffectParityCase, RefusalParityCase]
+ActionParityCase = EffectParityCase | RefusalParityCase
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +249,7 @@ def seed_kanban_cfg_active_codex(root: pathlib.Path, project_dir: pathlib.Path) 
         "kanban.cfg_example no longer carries exactly one 'active = claude' line; "
         "update seed_kanban_cfg_active_codex to match the template."
     )
-    (root / "kanban.cfg").write_text(
-        text.replace("\nactive = claude\n", "\nactive = codex\n"), encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text(text.replace("\nactive = claude\n", "\nactive = codex\n"), encoding="utf-8")
 
 
 def seed_unregistered_project_dir(root: pathlib.Path, project_dir: pathlib.Path) -> None:
@@ -328,7 +326,7 @@ def seed_inbox_entry(root: pathlib.Path, project_dir: pathlib.Path) -> None:
         question="Cancel the RC or keep it open for the late fix?",
         meanwhile="Left the RC open; the rest of the queue kept running.",
         how_to_answer='Answer "cancel" or "keep".',
-        now=datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc),
+        now=datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.UTC),
     )
 
 
@@ -354,20 +352,25 @@ _GOLDEN_PROJECT_REL = f"projects/{_P}"
 ACTION_PARITY_CASES: tuple = (
     # --- HALT family --------------------------------------------------------
     EffectParityCase(
-        verb="halt", script="halt.sh",
+        verb="halt",
+        script="halt.sh",
         cli_args=_args("--project", _P),
-        rest_route="/operations/halt", rest_body={"project": _P},
+        rest_route="/operations/halt",
+        rest_body={"project": _P},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/HALT",),
     ),
     EffectParityCase(
-        verb="unhalt", script="unhalt.sh",
+        verb="unhalt",
+        script="unhalt.sh",
         cli_args=_args("--project", _P),
-        rest_route="/operations/unhalt", rest_body={"project": _P},
+        rest_route="/operations/unhalt",
+        rest_body={"project": _P},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/HALT",),
         seed=seed_project_halt,
     ),
     RefusalParityCase(
-        verb="halt", script="halt.sh",
+        verb="halt",
+        script="halt.sh",
         cli_args=_args("--project", GHOST_PROJECT),
         rest_route="/operations/halt",
         rest_body={"project": GHOST_PROJECT},
@@ -375,7 +378,8 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     RefusalParityCase(
-        verb="unhalt", script="unhalt.sh",
+        verb="unhalt",
+        script="unhalt.sh",
         cli_args=_args("--project", GHOST_PROJECT),
         rest_route="/operations/unhalt",
         rest_body={"project": GHOST_PROJECT},
@@ -383,29 +387,35 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     EffectParityCase(
-        verb="halt-global", script="halt-global.sh",
+        verb="halt-global",
+        script="halt-global.sh",
         cli_args=_args(),
-        rest_route="/operations/halt-global", rest_body={},
+        rest_route="/operations/halt-global",
+        rest_body={},
         expect_changed=("HALT",),
     ),
     EffectParityCase(
-        verb="unhalt-global", script="unhalt-global.sh",
+        verb="unhalt-global",
+        script="unhalt-global.sh",
         cli_args=_args(),
-        rest_route="/operations/unhalt-global", rest_body={},
+        rest_route="/operations/unhalt-global",
+        rest_body={},
         expect_changed=("HALT",),
         seed=seed_root_halt,
     ),
     # The requirements document's named case: REST halt-after with an until
     # version arms byte-identical sentinel content to the CLI's --until.
     EffectParityCase(
-        verb="halt-after", script="halt-after.sh",
+        verb="halt-after",
+        script="halt-after.sh",
         cli_args=_args("--project", _P, "--key", "rc", "--until", PARITY_UNTIL_VERSION),
         rest_route="/operations/halt-after",
         rest_body={"project": _P, "key": "rc", "until": PARITY_UNTIL_VERSION},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/HALT-AFTER",),
     ),
     RefusalParityCase(
-        verb="halt-after", script="halt-after.sh",
+        verb="halt-after",
+        script="halt-after.sh",
         cli_args=_args("--project", _P, "--key", "rc", "--until", MALFORMED_VERSION),
         rest_route="/operations/halt-after",
         rest_body={"project": _P, "key": "rc", "until": MALFORMED_VERSION},
@@ -417,14 +427,16 @@ ACTION_PARITY_CASES: tuple = (
     # same two values and no key -- the route omits --key from the argv and
     # lets the script apply its own default.
     EffectParityCase(
-        verb="halt-after", script="halt-after.sh",
+        verb="halt-after",
+        script="halt-after.sh",
         cli_args=_args("--project", _P, "--until", PARITY_UNTIL_VERSION),
         rest_route="/operations/halt-after",
         rest_body={"project": _P, "until": PARITY_UNTIL_VERSION},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/HALT-AFTER",),
     ),
     RefusalParityCase(
-        verb="halt-after", script="halt-after.sh",
+        verb="halt-after",
+        script="halt-after.sh",
         cli_args=_args("--project", _P, "--until", MALFORMED_VERSION),
         rest_route="/operations/halt-after",
         rest_body={"project": _P, "until": MALFORMED_VERSION},
@@ -436,14 +448,16 @@ ACTION_PARITY_CASES: tuple = (
     ),
     # --- Deferral posture ---------------------------------------------------
     EffectParityCase(
-        verb="defer", script="defer.sh",
+        verb="defer",
+        script="defer.sh",
         cli_args=_args("--project", _P, "--until", PARITY_UNTIL_VERSION),
         rest_route="/operations/defer",
         rest_body={"project": _P, "until": PARITY_UNTIL_VERSION},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/DEFER-LOW-BUGS",),
     ),
     RefusalParityCase(
-        verb="defer", script="defer.sh",
+        verb="defer",
+        script="defer.sh",
         cli_args=_args("--project", _P, "--until", MALFORMED_VERSION),
         rest_route="/operations/defer",
         rest_body={"project": _P, "until": MALFORMED_VERSION},
@@ -451,13 +465,16 @@ ACTION_PARITY_CASES: tuple = (
         note="defer.sh's write-time --until check; the route forwards the value verbatim",
     ),
     EffectParityCase(
-        verb="undefer", script="undefer.sh",
+        verb="undefer",
+        script="undefer.sh",
         cli_args=_args("--project", _P),
-        rest_route="/operations/undefer", rest_body={"project": _P},
+        rest_route="/operations/undefer",
+        rest_body={"project": _P},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/DEFER-LOW-BUGS",),
     ),
     RefusalParityCase(
-        verb="undefer", script="undefer.sh",
+        verb="undefer",
+        script="undefer.sh",
         cli_args=_args("--project", GHOST_PROJECT),
         rest_route="/operations/undefer",
         rest_body={"project": GHOST_PROJECT},
@@ -466,9 +483,11 @@ ACTION_PARITY_CASES: tuple = (
     ),
     # --- Long-running / detached lanes: refusal only ------------------------
     RefusalParityCase(
-        verb="deep-verify", script="deep-verify.sh",
+        verb="deep-verify",
+        script="deep-verify.sh",
         cli_args=_args("--project", GHOST_PROJECT),
-        rest_route="/operations/deep-verify", rest_body={"project": GHOST_PROJECT},
+        rest_route="/operations/deep-verify",
+        rest_body={"project": GHOST_PROJECT},
         error_key="project_resolve.not_found",
         channel="detached-log",
         note=(
@@ -478,38 +497,47 @@ ACTION_PARITY_CASES: tuple = (
         ),
     ),
     RefusalParityCase(
-        verb="cold-build-now", script="cold-build-now.sh",
+        verb="cold-build-now",
+        script="cold-build-now.sh",
         cli_args=_args("--project", GHOST_PROJECT),
-        rest_route="/operations/cold-build-now", rest_body={"project": GHOST_PROJECT},
+        rest_route="/operations/cold-build-now",
+        rest_body={"project": GHOST_PROJECT},
         error_key="project_resolve.not_found",
         channel="detached-log",
         note="a named alias for deep-verify.sh --project; same detached dispatch, same log channel",
     ),
     RefusalParityCase(
-        verb="wake-now", script="wake-now.sh",
+        verb="wake-now",
+        script="wake-now.sh",
         cli_args=_args("--agent", "no-such-agent"),
-        rest_route="/operations/wake-now", rest_body={"agent": "no-such-agent"},
+        rest_route="/operations/wake-now",
+        rest_body={"agent": "no-such-agent"},
         error_key="wake_now.unknown_agent",
         note="firing a real agent wake is not a fixture-sized effect; the agent-name refusal is",
     ),
     # --- Locks --------------------------------------------------------------
     EffectParityCase(
-        verb="release-locks", script="release-locks.sh",
+        verb="release-locks",
+        script="release-locks.sh",
         cli_args=_args("--release", STALE_LOCK_NAME),
-        rest_route="/operations/release-locks", rest_body={"release": STALE_LOCK_NAME},
+        rest_route="/operations/release-locks",
+        rest_body={"release": STALE_LOCK_NAME},
         expect_changed=(f"locks/{STALE_LOCK_NAME}.lock",),
         seed=seed_stale_lock,
     ),
     RefusalParityCase(
-        verb="release-locks", script="release-locks.sh",
+        verb="release-locks",
+        script="release-locks.sh",
         cli_args=_args("--release", "no-such-lock"),
-        rest_route="/operations/release-locks", rest_body={"release": "no-such-lock"},
+        rest_route="/operations/release-locks",
+        rest_body={"release": "no-such-lock"},
         error_key="release_locks.not_found",
         seed=seed_empty_locks_dir,
     ),
     # --- Release mechanics (need a git checkout for any effect): refusal ----
     RefusalParityCase(
-        verb="unwind-rc", script="unwind-rc.sh",
+        verb="unwind-rc",
+        script="unwind-rc.sh",
         cli_args=_args("--project", _P, "--key", "banana", "--confirm"),
         rest_route="/operations/unwind-rc",
         # The route's confirm gate must be satisfied byte-for-byte or the
@@ -521,7 +549,8 @@ ACTION_PARITY_CASES: tuple = (
         note="unwind-rc.sh refuses a malformed version with plain stderr text (no dual-channel block)",
     ),
     RefusalParityCase(
-        verb="ship-rc", script="ship-rc.sh",
+        verb="ship-rc",
+        script="ship-rc.sh",
         cli_args=_args("--project", _P, "--key", "banana"),
         rest_route="/operations/ship-rc",
         # The route's confirm gate must be satisfied byte-for-byte or the
@@ -531,7 +560,8 @@ ACTION_PARITY_CASES: tuple = (
         note="ship-rc.sh refuses a malformed version with plain stderr text (no dual-channel block)",
     ),
     RefusalParityCase(
-        verb="cancel-rc", script="cm/cancel-rc.sh",
+        verb="cancel-rc",
+        script="cm/cancel-rc.sh",
         cli_args=_args("--project", _P, "--key", "banana", "--yes"),
         rest_route="/operations/cancel-rc",
         rest_body={"project": _P, "key": "banana", "yes": True},
@@ -544,32 +574,40 @@ ACTION_PARITY_CASES: tuple = (
     ),
     # --- Task and intake items ---------------------------------------------
     EffectParityCase(
-        verb="reset", script="reset.sh",
+        verb="reset",
+        script="reset.sh",
         cli_args=_args("--project", _P, "--key", _TASKS["BLOCKED"]),
-        rest_route="/operations/reset", rest_body={"project": _P, "key": _TASKS["BLOCKED"]},
+        rest_route="/operations/reset",
+        rest_body={"project": _P, "key": _TASKS["BLOCKED"]},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/tasks/{_TASKS['BLOCKED']}/status.md",),
     ),
     EffectParityCase(
-        verb="close", script="close.sh",
+        verb="close",
+        script="close.sh",
         cli_args=_args("--project", _P, "--key", _TASKS["WORKING"]),
-        rest_route="/operations/close", rest_body={"project": _P, "key": _TASKS["WORKING"]},
+        rest_route="/operations/close",
+        rest_body={"project": _P, "key": _TASKS["WORKING"]},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/tasks/{_TASKS['WORKING']}/status.md",),
     ),
     EffectParityCase(
-        verb="wontdo", script="wontdo.sh",
+        verb="wontdo",
+        script="wontdo.sh",
         cli_args=_args("--project", _P, "--key", _TASKS["BACKLOG"]),
-        rest_route="/operations/wontdo", rest_body={"project": _P, "key": _TASKS["BACKLOG"]},
+        rest_route="/operations/wontdo",
+        rest_body={"project": _P, "key": _TASKS["BACKLOG"]},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/tasks/{_TASKS['BACKLOG']}/status.md",),
     ),
     EffectParityCase(
-        verb="delete", script="delete.sh",
+        verb="delete",
+        script="delete.sh",
         cli_args=_args("--project", _P, "--key", _TASKS["WONT-DO"], "--force"),
         rest_route="/operations/delete",
         rest_body={"project": _P, "key": _TASKS["WONT-DO"], "force": True},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/tasks/{_TASKS['WONT-DO']}/status.md",),
     ),
     EffectParityCase(
-        verb="intake", script="intake.sh",
+        verb="intake",
+        script="intake.sh",
         cli_args=lambda root: ["--project", _P, str(intake_source_path(root))],
         rest_route="/operations/intake",
         rest_body={"project": _P, "filename": INTAKE_FILENAME, "content": INTAKE_CONTENT},
@@ -577,7 +615,8 @@ ACTION_PARITY_CASES: tuple = (
         seed=seed_intake_source,
     ),
     RefusalParityCase(
-        verb="reset", script="reset.sh",
+        verb="reset",
+        script="reset.sh",
         cli_args=_args("--project", GHOST_PROJECT, "--key", _TASKS["BLOCKED"]),
         rest_route="/operations/reset",
         rest_body={"project": GHOST_PROJECT, "key": _TASKS["BLOCKED"]},
@@ -585,7 +624,8 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     RefusalParityCase(
-        verb="close", script="close.sh",
+        verb="close",
+        script="close.sh",
         cli_args=_args("--project", GHOST_PROJECT, "--key", _TASKS["WORKING"]),
         rest_route="/operations/close",
         rest_body={"project": GHOST_PROJECT, "key": _TASKS["WORKING"]},
@@ -593,7 +633,8 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     RefusalParityCase(
-        verb="wontdo", script="wontdo.sh",
+        verb="wontdo",
+        script="wontdo.sh",
         cli_args=_args("--project", GHOST_PROJECT, "--key", _TASKS["BACKLOG"]),
         rest_route="/operations/wontdo",
         rest_body={"project": GHOST_PROJECT, "key": _TASKS["BACKLOG"]},
@@ -601,7 +642,8 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     RefusalParityCase(
-        verb="delete", script="delete.sh",
+        verb="delete",
+        script="delete.sh",
         cli_args=_args("--project", GHOST_PROJECT, "--key", _TASKS["WONT-DO"], "--force"),
         rest_route="/operations/delete",
         rest_body={"project": GHOST_PROJECT, "key": _TASKS["WONT-DO"], "force": True},
@@ -609,7 +651,8 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     RefusalParityCase(
-        verb="intake", script="intake.sh",
+        verb="intake",
+        script="intake.sh",
         cli_args=lambda root: ["--project", GHOST_PROJECT, str(intake_source_path(root))],
         rest_route="/operations/intake",
         rest_body={"project": GHOST_PROJECT, "filename": INTAKE_FILENAME, "content": INTAKE_CONTENT},
@@ -619,14 +662,17 @@ ACTION_PARITY_CASES: tuple = (
     ),
     # --- Configuration ------------------------------------------------------
     EffectParityCase(
-        verb="set-version-ceiling", script="set-version-ceiling.sh",
+        verb="set-version-ceiling",
+        script="set-version-ceiling.sh",
         cli_args=_args("--project", _P, "--minor", "5"),
-        rest_route="/operations/set-version-ceiling", rest_body={"project": _P, "minor": 5},
+        rest_route="/operations/set-version-ceiling",
+        rest_body={"project": _P, "minor": 5},
         expect_changed=(f"{_GOLDEN_PROJECT_REL}/project.cfg",),
         seed=seed_project_cfg,
     ),
     RefusalParityCase(
-        verb="set-version-ceiling", script="set-version-ceiling.sh",
+        verb="set-version-ceiling",
+        script="set-version-ceiling.sh",
         cli_args=_args("--project", GHOST_PROJECT, "--minor", "5"),
         rest_route="/operations/set-version-ceiling",
         rest_body={"project": GHOST_PROJECT, "minor": 5},
@@ -634,28 +680,35 @@ ACTION_PARITY_CASES: tuple = (
         note="project resolution is the script's first refusal; the route lifts it to top-level keys",
     ),
     EffectParityCase(
-        verb="switch-provider", script="switch-provider.sh",
+        verb="switch-provider",
+        script="switch-provider.sh",
         cli_args=_args("--provider", "claude"),
-        rest_route="/operations/switch-provider", rest_body={"provider": "claude"},
+        rest_route="/operations/switch-provider",
+        rest_body={"provider": "claude"},
         expect_changed=("kanban.cfg",),
         seed=seed_kanban_cfg_active_codex,
     ),
     # --- Project registry ---------------------------------------------------
     EffectParityCase(
-        verb="create-project", script="create-project.sh",
+        verb="create-project",
+        script="create-project.sh",
         cli_args=_args("--project", CREATED_PROJECT),
-        rest_route="/operations/create-project", rest_body={"project": CREATED_PROJECT},
+        rest_route="/operations/create-project",
+        rest_body={"project": CREATED_PROJECT},
         expect_changed=("projects.cfg", f"projects/{CREATED_PROJECT}/project.cfg"),
     ),
     EffectParityCase(
-        verb="add-project", script="add-project.sh",
+        verb="add-project",
+        script="add-project.sh",
         cli_args=_args("--project", ADOPTED_PROJECT),
-        rest_route="/operations/add-project", rest_body={"project": ADOPTED_PROJECT},
+        rest_route="/operations/add-project",
+        rest_body={"project": ADOPTED_PROJECT},
         expect_changed=("projects.cfg",),
         seed=seed_unregistered_project_dir,
     ),
     RefusalParityCase(
-        verb="create-project", script="create-project.sh",
+        verb="create-project",
+        script="create-project.sh",
         # -1 is malformed on both surfaces (the body field is an int).
         cli_args=_args("--project", CREATED_PROJECT, "--max-minor", "-1"),
         rest_route="/operations/create-project",
@@ -664,31 +717,38 @@ ACTION_PARITY_CASES: tuple = (
         note="create_project refuses a ceiling that is not a non-negative integer with a plain ERROR: line",
     ),
     RefusalParityCase(
-        verb="add-project", script="add-project.sh",
+        verb="add-project",
+        script="add-project.sh",
         cli_args=_args("--project", ADOPTED_PROJECT),
-        rest_route="/operations/add-project", rest_body={"project": ADOPTED_PROJECT},
+        rest_route="/operations/add-project",
+        rest_body={"project": ADOPTED_PROJECT},
         error_key=None,
         note="add_project refuses a project with no directory (exit 2) with plain ERROR: lines",
     ),
     EffectParityCase(
-        verb="remove-project", script="remove-project.sh",
+        verb="remove-project",
+        script="remove-project.sh",
         cli_args=_args("--project", ADOPTED_PROJECT),
-        rest_route="/operations/remove-project", rest_body={"project": ADOPTED_PROJECT},
+        rest_route="/operations/remove-project",
+        rest_body={"project": ADOPTED_PROJECT},
         # The default mode unregisters only: projects.cfg changes, the
         # project's README.md stays (it is absent from the effect).
         expect_changed=("projects.cfg",),
         seed=seed_registered_project_dir,
     ),
     RefusalParityCase(
-        verb="remove-project", script="remove-project.sh",
+        verb="remove-project",
+        script="remove-project.sh",
         cli_args=_args("--project", ADOPTED_PROJECT),
-        rest_route="/operations/remove-project", rest_body={"project": ADOPTED_PROJECT},
+        rest_route="/operations/remove-project",
+        rest_body={"project": ADOPTED_PROJECT},
         error_key="remove_project.active_rc",
         seed=seed_registered_project_with_active_rc,
         note="the Active-RC guard refuses the unregister-only mode",
     ),
     RefusalParityCase(
-        verb="remove-project", script="remove-project.sh",
+        verb="remove-project",
+        script="remove-project.sh",
         cli_args=_args("--project", ADOPTED_PROJECT, "--force"),
         rest_route="/operations/remove-project",
         rest_body={
@@ -701,7 +761,8 @@ ACTION_PARITY_CASES: tuple = (
         note="the Active-RC guard holds with --force / a confirmed force: true",
     ),
     EffectParityCase(
-        verb="remove-project", script="remove-project.sh",
+        verb="remove-project",
+        script="remove-project.sh",
         cli_args=_args("--project", ADOPTED_PROJECT, "--force"),
         rest_route="/operations/remove-project",
         # force is the destructive escalation and must be confirmed byte-for-byte.
@@ -717,9 +778,11 @@ ACTION_PARITY_CASES: tuple = (
     # --count 1 keeps the newest task (WONT-DO) live; of the older five only
     # the DONE task is finished, so exactly it moves, with its ledger row.
     EffectParityCase(
-        verb="archive", script="archive.sh",
+        verb="archive",
+        script="archive.sh",
         cli_args=_args("--project", _P, "--count", "1"),
-        rest_route="/operations/archive", rest_body={"project": _P, "count": 1},
+        rest_route="/operations/archive",
+        rest_body={"project": _P, "count": 1},
         expect_changed=(
             f"{_GOLDEN_PROJECT_REL}/tasks/{_TASKS['DONE']}/status.md",
             f"archive/{_P}/tasks/{_TASKS['DONE']}/status.md",
@@ -728,7 +791,8 @@ ACTION_PARITY_CASES: tuple = (
     ),
     # --- Operator inbox -----------------------------------------------------
     EffectParityCase(
-        verb="inbox", script="inbox.sh",
+        verb="inbox",
+        script="inbox.sh",
         cli_args=_args("--project", _P, "answer", "--id", INBOX_ENTRY_ID, "--answer", "keep"),
         rest_route="/operations/inbox-answer",
         rest_body={"project": _P, "id": INBOX_ENTRY_ID, "answer": "keep"},
@@ -736,7 +800,8 @@ ACTION_PARITY_CASES: tuple = (
         seed=seed_inbox_entry,
     ),
     RefusalParityCase(
-        verb="inbox", script="inbox.sh",
+        verb="inbox",
+        script="inbox.sh",
         cli_args=_args("--project", GHOST_PROJECT, "answer", "--id", INBOX_ENTRY_ID, "--answer", "keep"),
         rest_route="/operations/inbox-answer",
         rest_body={"project": GHOST_PROJECT, "id": INBOX_ENTRY_ID, "answer": "keep"},
@@ -749,7 +814,8 @@ ACTION_PARITY_CASES: tuple = (
         ),
     ),
     RefusalParityCase(
-        verb="archive", script="archive.sh",
+        verb="archive",
+        script="archive.sh",
         cli_args=_args("--project", GHOST_PROJECT, "--dry-run"),
         rest_route="/operations/archive",
         rest_body={"project": GHOST_PROJECT, "dry_run": True},

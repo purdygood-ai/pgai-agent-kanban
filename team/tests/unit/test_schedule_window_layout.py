@@ -46,7 +46,8 @@ import termios
 import threading
 import time
 import uuid
-from typing import Callable, Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -55,7 +56,12 @@ from tests.fixtures.binary_guard import (
     teardown_private_tmux,
     try_resolve_binary,
 )
-from tests.fixtures.process_progress import require_procfs, run_until_exit
+from tests.fixtures.process_progress import (
+    processes_carrying_env,
+    reap_processes_carrying_env,
+    require_procfs,
+    run_until_exit,
+)
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
@@ -74,8 +80,7 @@ _ROSTER_AGENTS = ("PM", "CM", "TESTER", "CODER", "WRITER", "CLEANUP", "OVERWATCH
 # A roster no operator's crontab plausibly holds (no pipeline agents at
 # all): a band showing exactly these rows can only have read the stub.
 _STUB_ONLY_CRONTAB = (
-    "0 3 * * 4 $KANBAN_ROOT/scripts/wake-batch.sh --agent=overwatch\n"
-    "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
+    "0 3 * * 4 $KANBAN_ROOT/scripts/wake-batch.sh --agent=overwatch\n" "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
 )
 _STUB_ONLY_AGENTS = ("OVERWATCH", "CLEANUP")
 # Header row + one row per agent + one row of headroom (lib/schedule_layout.sh).
@@ -94,6 +99,10 @@ printf 'test crontab stub: only -l is supported, got: %s\\n' "$*" >&2
 exit 1
 """
 _SETTLE_WAIT_S = 30
+# Set to the private socket name in create.sh's environment, so it reaches
+# the tmux server, every pane, and the status-bottom loop create.sh starts
+# outside tmux; teardown reaps every live process carrying it.
+_SOCKET_MARKER_ENV = "TEST_TMUX_PRIVATE_SOCKET"
 
 
 class _Dashboard(NamedTuple):
@@ -118,14 +127,15 @@ class _Dashboard(NamedTuple):
         return self.query("capture-pane", "-p", "-t", f"{self.session}:schedule.0")
 
     def window_size(self) -> tuple[int, int]:
-        out = self.query("display-message", "-p", "-t", f"{self.session}:schedule",
-                         "#{window_width} #{window_height}")
+        out = self.query("display-message", "-p", "-t", f"{self.session}:schedule", "#{window_width} #{window_height}")
         width, height = out.split()
         return int(width), int(height)
 
     def zoomed(self) -> bool:
-        return self.query("display-message", "-p", "-t", f"{self.session}:schedule",
-                          "#{window_zoomed_flag}").strip() == "1"
+        return (
+            self.query("display-message", "-p", "-t", f"{self.session}:schedule", "#{window_zoomed_flag}").strip()
+            == "1"
+        )
 
 
 def _visible_rows(text: str) -> list[str]:
@@ -164,8 +174,12 @@ def _wait_for_list_layout(dash: _Dashboard, min_event_rows: int = 1) -> tuple[li
         heights = dash.pane_heights()
         text = dash.list_text()
         rows = _visible_rows(text)
-        if (heights[0] == _LIST_ROWS and heights[1] >= min_event_rows
-                and rows[:1] == ["AGENT"] and all(agent in rows for agent in _ROSTER_AGENTS)):
+        if (
+            heights[0] == _LIST_ROWS
+            and heights[1] >= min_event_rows
+            and rows[:1] == ["AGENT"]
+            and all(agent in rows for agent in _ROSTER_AGENTS)
+        ):
             return heights, text
         time.sleep(0.5)
     pytest.fail(
@@ -236,20 +250,32 @@ def _descendant_cmdlines(pid: int) -> list[str]:
     return found
 
 
-@pytest.fixture
-def dashboard(
-    request: pytest.FixtureRequest, tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path
+def _stop_private_tmux(tmux: str, socket: str, env: dict | None) -> None:
+    """Stop the private server, then reap every process still carrying its
+    socket marker: a pane child that ignored the hangup, or the
+    status-bottom loop create.sh backgrounds outside tmux, which only
+    notices the session is gone on its next wake and would otherwise
+    outlive the test's tmp_path."""
+    try:
+        run_until_exit([tmux, "-L", socket, "kill-server"], env=env, cmdline_marker=socket)
+    finally:
+        reap_processes_carrying_env(_SOCKET_MARKER_ENV, socket)
+
+
+@contextlib.contextmanager
+def _dashboard_session(
+    tmp_path: pathlib.Path, tests_temp_dir: pathlib.Path, crontab_text: str = _ROSTER_CRONTAB
 ) -> Iterator[_Dashboard]:
     """A real create.sh dashboard on a private tmux server, its private stub
-    crontab holding _ROSTER_CRONTAB, or the crontab text an indirect
-    parametrization passes."""
-    crontab_text = getattr(request, "param", _ROSTER_CRONTAB)
+    crontab holding *crontab_text*. create.sh runs with the socket marker
+    in its environment, and leaving the block stops the server and reaps
+    every process carrying the marker (_stop_private_tmux)."""
     guard = try_resolve_binary("tmux")
     socket = f"pgai-test-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     session = f"sched-layout-{uuid.uuid4().hex[:8]}"
     # A short private TMUX_TMPDIR: tmp_path can be long enough to push the
     # server socket's path past the kernel's unix-socket length limit.
-    tmux_tmpdir = tempfile.mkdtemp(prefix="tmx", dir=str(pgai_tests_temp_dir))
+    tmux_tmpdir = tempfile.mkdtemp(prefix="tmx", dir=str(tests_temp_dir))
     env: dict = {}
     try:
         if not guard.resolved:
@@ -259,9 +285,7 @@ def dashboard(
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         wrapper = bin_dir / "tmux"
-        wrapper.write_text(
-            f"#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket)} \"$@\"\n"
-        )
+        wrapper.write_text(f'#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket)} "$@"\n')
         wrapper.chmod(0o755)
         crontab_file = tmp_path / "crontab"
         crontab_file.write_text(crontab_text, encoding="utf-8")
@@ -283,12 +307,17 @@ def dashboard(
             TMUX_TMPDIR=tmux_tmpdir,
             PGAI_CRONTAB_CMD=str(stub_crontab),
         )
+        env[_SOCKET_MARKER_ENV] = socket
         listed = subprocess.run([str(stub_crontab), "-l"], text=True, capture_output=True, env=env, timeout=10)
         assert listed.stdout == crontab_text, (listed.returncode, listed.stdout, listed.stderr)
 
         created = subprocess.run(
             ["bash", str(_CREATE_SH), "--kanban-root", str(root), "--session", session],
-            env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=240,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=240,
         )
         # create.sh ends by attaching, which has no terminal here; everything
         # before it -- every window, the readiness handshake, the hooks -- ran.
@@ -300,11 +329,21 @@ def dashboard(
             guard,
             socket,
             env=env or None,
-            kill=lambda path: run_until_exit(
-                [path, "-L", socket, "kill-server"], env=env or None, cmdline_marker=socket
-            ),
+            kill=lambda path: _stop_private_tmux(path, socket, env or None),
         )
         shutil.rmtree(tmux_tmpdir, ignore_errors=True)
+
+
+@pytest.fixture
+def dashboard(
+    request: pytest.FixtureRequest, tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path
+) -> Iterator[_Dashboard]:
+    """A real create.sh dashboard (_dashboard_session), its private stub
+    crontab holding _ROSTER_CRONTAB, or the crontab text an indirect
+    parametrization passes; no process its create.sh run started outlives
+    the fixture's teardown."""
+    with _dashboard_session(tmp_path, pgai_tests_temp_dir, getattr(request, "param", _ROSTER_CRONTAB)) as dash:
+        yield dash
 
 
 def test_schedule_window_is_two_bands_without_next_cron_firings(dashboard: _Dashboard) -> None:
@@ -375,8 +414,11 @@ def test_squeezing_the_list_by_hand_is_undone(dashboard: _Dashboard) -> None:
     the list's height."""
     dashboard.query("resize-pane", "-t", f"{dashboard.session}:schedule.0", "-y", "3")
 
-    _wait_until(lambda: dashboard.pane_heights()[0] == _LIST_ROWS, "the list band to return to its full height",
-                lambda: str(dashboard.pane_heights()))
+    _wait_until(
+        lambda: dashboard.pane_heights()[0] == _LIST_ROWS,
+        "the list band to return to its full height",
+        lambda: str(dashboard.pane_heights()),
+    )
 
 
 def test_attached_client_keeps_every_roster_row_on_first_view_and_live_resize(dashboard: _Dashboard) -> None:
@@ -387,15 +429,21 @@ def test_attached_client_keeps_every_roster_row_on_first_view_and_live_resize(da
 
     with _attached_client(dashboard, 176, 35) as (client_pid, fd):
         dashboard.query("select-window", "-t", f"{dashboard.session}:schedule")
-        _wait_until(lambda: dashboard.window_size()[0] == 176, "the window to take the client's 176-column width",
-                    lambda: str(dashboard.window_size()))
+        _wait_until(
+            lambda: dashboard.window_size()[0] == 176,
+            "the window to take the client's 176-column width",
+            lambda: str(dashboard.window_size()),
+        )
         heights, text = _wait_for_list_layout(dashboard)
         assert dashboard.window_size()[1] <= 35, (dashboard.window_size(), heights)
 
         _set_winsize(fd, 176, 24)
         os.kill(client_pid, signal.SIGWINCH)
-        _wait_until(lambda: dashboard.window_size()[1] <= 24, "the window to shrink to the 24-row terminal",
-                    lambda: str(dashboard.window_size()))
+        _wait_until(
+            lambda: dashboard.window_size()[1] <= 24,
+            "the window to shrink to the 24-row terminal",
+            lambda: str(dashboard.window_size()),
+        )
         heights, text = _wait_for_list_layout(dashboard, min_event_rows=5)
 
     assert _visible_rows(text)[0] == "AGENT"
@@ -414,3 +462,28 @@ def test_zooming_a_schedule_pane_is_not_undone(dashboard: _Dashboard) -> None:
     dashboard.query("resize-pane", "-Z", "-t", f"{dashboard.session}:schedule.1")
     assert not dashboard.zoomed()
     assert dashboard.pane_heights()[0] == _LIST_ROWS
+
+
+def test_teardown_leaves_no_process_create_started_alive(
+    tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path
+) -> None:
+    """create.sh starts processes inside the private tmux server (its panes)
+    and outside it (the status-bottom loop it backgrounds). While the
+    dashboard runs, the marker scan sees both kinds; once the fixture's
+    teardown completes, no process carrying the marker is alive."""
+    with _dashboard_session(tmp_path, pgai_tests_temp_dir) as dash:
+        running = processes_carrying_env(_SOCKET_MARKER_ENV, dash.socket)
+        context = "\n".join(f"{pid} {cmdline}" for pid, cmdline in running)
+        assert any(
+            "status-bottom-loop.sh" in cmdline for _pid, cmdline in running
+        ), f"expected the scan to see the status-bottom loop create.sh backgrounds outside tmux:\n{context}"
+        assert any(
+            f"-L {dash.socket}" in cmdline for _pid, cmdline in running
+        ), f"expected the scan to see the private tmux server:\n{context}"
+
+    survivors = processes_carrying_env(_SOCKET_MARKER_ENV, dash.socket)
+    assert (
+        survivors == []
+    ), "processes started under the private tmux socket are still alive after teardown:\n" + "\n".join(
+        f"{pid} {cmdline}" for pid, cmdline in survivors
+    )

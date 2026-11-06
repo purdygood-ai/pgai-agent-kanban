@@ -75,7 +75,11 @@ def _install_stub(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def _env(tmp_path: pathlib.Path, root: pathlib.Path) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "TMUX", "TMUX_PANE", "PGAI_DASHBOARD_SESSION_NAME")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "TMUX", "TMUX_PANE", "PGAI_DASHBOARD_SESSION_NAME")
+    }
     env.update(
         PATH=f"{tmp_path / 'bin'}:{env.get('PATH', '/usr/bin:/bin')}",
         KANBAN_ROOT=str(root),
@@ -119,7 +123,10 @@ def _two_dashboards(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path,
 def _kill(tmp_path: pathlib.Path, root: pathlib.Path, session: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(_KILL_SH), "--kanban-root", str(root), "--session", session],
-        capture_output=True, text=True, env=_env(tmp_path, root), timeout=60,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root),
+        timeout=60,
     )
 
 
@@ -182,16 +189,25 @@ def test_session_options_are_session_scoped_and_overrides_are_added_once(tmp_pat
         + "dashboard_apply_window_status_style dash-a\n"
         + "dashboard_apply_session_options dash-a 5\n"
     )
-    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                            env=_env(tmp_path, root), timeout=60)
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=_env(tmp_path, root), timeout=60
+    )
     assert result.returncode == 0, result.stderr
 
     calls = [call for call in _calls(bin_dir) if call.startswith("set-option")]
     assert calls, "the option functions must set options"
     global_sets = [call for call in calls if re.search(r"(^|\s)-g[a-z]*(\s|$)", call)]
     assert global_sets == [], f"no option may be set server-wide with -g: {global_sets}"
-    for option in ("status 3", "status-style", "status-interval", "status-format[0]", "status-format[1]",
-                   "status-format[2]", "default-terminal", "@pgai_dashboard 1"):
+    for option in (
+        "status 3",
+        "status-style",
+        "status-interval",
+        "status-format[0]",
+        "status-format[1]",
+        "status-format[2]",
+        "default-terminal",
+        "@pgai_dashboard 1",
+    ):
         assert any(call.startswith(f"set-option -t dash-a {option}") for call in calls), (option, calls)
     overrides = [call for call in calls if "terminal-overrides" in call]
     assert overrides == [
@@ -201,13 +217,12 @@ def test_session_options_are_session_scoped_and_overrides_are_added_once(tmp_pat
 
 
 def test_create_sh_sets_no_global_option_and_binds_prefix_p_conditionally() -> None:
-    lines = [line for line in _CREATE_SH.read_text(encoding="utf-8").splitlines()
-             if not line.lstrip().startswith("#")]
+    lines = [line for line in _CREATE_SH.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")]
     text = "\n".join(lines)
     assert not re.search(r"tmux set-option[^\n]*\s-g[a-z]*\s", text), "create.sh must not set a global option"
     binding = re.search(r"tmux bind-key -T prefix p (.*)", text)
     assert binding, "create.sh binds prefix+p"
     assert binding.group(1).startswith("if-shell -F '#{@pgai_dashboard}'"), binding.group(0)
-    assert "previous-window" in text[binding.start(): binding.start() + 400], (
-        "outside a dashboard session prefix+p must stay previous-window"
-    )
+    assert (
+        "previous-window" in text[binding.start() : binding.start() + 400]
+    ), "outside a dashboard session prefix+p must stay previous-window"

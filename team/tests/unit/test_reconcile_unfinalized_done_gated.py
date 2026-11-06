@@ -200,12 +200,10 @@ class Board:
 
     def create_worktree_with_unmerged_work(self) -> str:
         """Create the task's worktree and commit work on its feature branch; return the worktree path."""
-        result = self.run(
-            f"""\
+        result = self.run(f"""\
             wt="$(create_task_worktree "{self.task_id}" "{_RC_BRANCH}" "{self.feature}" "{self.dev_tree}")"
             printf 'WORKTREE=%s\\n' "$wt"
-            """
-        )
+            """)
         match = re.search(r"^WORKTREE=(.+)$", result.stdout, re.M)
         assert match, result.stdout
         worktree = pathlib.Path(match.group(1).strip())
@@ -238,7 +236,7 @@ class Board:
 
 def _registered_worktrees(dev_tree: pathlib.Path) -> list[str]:
     out = _git(dev_tree, "worktree", "list", "--porcelain")
-    return [line[len("worktree "):] for line in out.splitlines() if line.startswith("worktree ")]
+    return [line[len("worktree ") :] for line in out.splitlines() if line.startswith("worktree ")]
 
 
 def test_unfinalized_done_with_unmerged_branch_is_blocked_not_marked_done(tmp_path: pathlib.Path) -> None:
@@ -287,12 +285,10 @@ def test_terminal_worktree_sweep_keeps_the_worktree_of_a_refused_done(tmp_path: 
     board = Board(tmp_path, "CODER-20260101-064-unfinalized-done-terminal-sweep")
     worktree = board.create_worktree_with_unmerged_work()
 
-    board.run(
-        f"""\
+    board.run(f"""\
         task_liveness_record "{board.task_id}" claude {_DEAD_PID} dispatch
         reconcile_terminal_worktrees
-        """
-    )
+        """)
 
     assert worktree in _registered_worktrees(board.dev_tree), "a refused done-claim's worktree must not be torn down"
     assert board.state() == "BLOCKED"
@@ -303,8 +299,7 @@ def test_terminal_worktree_sweep_keeps_the_worktree_of_a_refused_done(tmp_path: 
 def test_finalize_record_helpers_write_detect_and_clear(tmp_path: pathlib.Path) -> None:
     board = Board(tmp_path, "CODER-20260101-065-finalize-record-helpers")
 
-    result = board.run(
-        f"""\
+    result = board.run(f"""\
         task_finalize_record_present "{board.task_dir}" && echo "BEFORE=present" || echo "BEFORE=absent"
         task_finalize_record_write "{board.task_dir}" DONE
         task_finalize_record_present "{board.task_dir}" && echo "AFTER_WRITE=present" || echo "AFTER_WRITE=absent"
@@ -312,8 +307,7 @@ def test_finalize_record_helpers_write_detect_and_clear(tmp_path: pathlib.Path) 
         task_finalize_record_present "{board.task_dir}" && echo "AFTER_CLEAR=present" || echo "AFTER_CLEAR=absent"
         task_finalize_record_clear "{board.task_dir}" && echo "CLEAR_AGAIN=ok"
         task_finalize_record_path "" || echo "BLANK=refused"
-        """
-    )
+        """)
 
     assert "BEFORE=absent" in result.stdout
     assert "AFTER_WRITE=present" in result.stdout

@@ -366,12 +366,12 @@ def test_missing_queue_entry_refuses_and_leaves_both_surfaces_untouched(tmp_path
     """)
     result = _run(script)
     assert result.returncode != 0, "transition must refuse when the queue entry is missing"
-    assert "error:   wake.transition.marker-write-failed" in result.stderr, (
-        f"refusal must carry the house-shape error key naming the marker surface\nstderr={result.stderr}"
-    )
-    assert "message: " in result.stderr and "remedy:  " in result.stderr, (
-        f"refusal must carry the house-shape message/remedy fields\nstderr={result.stderr}"
-    )
+    assert (
+        "error:   wake.transition.marker-write-failed" in result.stderr
+    ), f"refusal must carry the house-shape error key naming the marker surface\nstderr={result.stderr}"
+    assert (
+        "message: " in result.stderr and "remedy:  " in result.stderr
+    ), f"refusal must carry the house-shape message/remedy fields\nstderr={result.stderr}"
 
     after_status = _read(status_file)
     after_queue = _read(backlog_file)
@@ -401,9 +401,9 @@ def test_missing_status_file_refuses_before_touching_the_queue(tmp_path: pathlib
     """)
     result = _run(script)
     assert result.returncode != 0, "transition must refuse when status.md does not exist"
-    assert "error:   wake.transition.status-missing" in result.stderr, (
-        f"refusal must carry the house-shape error key naming the status surface\nstderr={result.stderr}"
-    )
+    assert (
+        "error:   wake.transition.status-missing" in result.stderr
+    ), f"refusal must carry the house-shape error key naming the status surface\nstderr={result.stderr}"
 
     assert _read(backlog_file) == before_queue, "queue file must be untouched when status.md is missing"
     assert not status_file.exists(), "a missing status.md must not be created by a refused transition"
@@ -429,9 +429,9 @@ def test_invalid_target_state_refuses_before_touching_either_surface(tmp_path: p
     """)
     result = _run(script)
     assert result.returncode != 0, "transition must refuse an unrecognized state name"
-    assert "error:   wake.transition.invalid-state" in result.stderr, (
-        f"refusal must carry the house-shape error key\nstderr={result.stderr}"
-    )
+    assert (
+        "error:   wake.transition.invalid-state" in result.stderr
+    ), f"refusal must carry the house-shape error key\nstderr={result.stderr}"
 
     assert _read(status_file) == before_status, "status.md must be untouched on an invalid-state refusal"
     assert _read(backlog_file) == before_queue, "queue file must be untouched on an invalid-state refusal"
@@ -497,7 +497,9 @@ def test_reconcile_stale_active_resets_orphan_through_transition_path(tmp_path: 
     # dependencies beyond what this header already provides.
     script = header + f'task_liveness_record "{task_id}" claude 99999999 dispatch\n' + "reconcile_stale_active"
     result = _run(script)
-    assert result.returncode == 0, f"reconcile_stale_active should not error\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert (
+        result.returncode == 0
+    ), f"reconcile_stale_active should not error\nstdout={result.stdout}\nstderr={result.stderr}"
 
     status_text = _read(status_file)
     queue_text = _read(backlog_file)

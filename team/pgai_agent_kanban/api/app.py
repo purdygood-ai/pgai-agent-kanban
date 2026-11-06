@@ -22,6 +22,8 @@ wired with:
   - GET /traces          — training-trace index (newest-first, optional project/agent/limit filters).
   - GET /traces/{id}     — fetch one trace by opaque server-minted id.
   - GET /dashboard/{pane} — render a named dashboard pane.
+  - GET /skills          — skills in the staging directory and their state in
+                           each provider home (skills_install, in process).
   - POST /operations/halt          — halt.sh (per-project HALT signal).
   - POST /operations/unhalt        — unhalt.sh (remove per-project HALT).
   - POST /operations/halt-after    — halt-after.sh (soft-drain HALT-AFTER signal).
@@ -83,7 +85,6 @@ story holds at the CORS layer exactly as it holds at the bind layer.
 
 import importlib.resources
 import ipaddress
-import os
 import pathlib
 import shlex
 
@@ -100,6 +101,7 @@ from .routers.board import router as board_router
 from .routers.logs import router as logs_router
 from .routers.operations import router as operations_router
 from .routers.projects import router as projects_router
+from .routers.skills import router as skills_router
 from .routers.traces import router as traces_router
 
 _VERSION_FALLBACK = "unknown"
@@ -201,7 +203,7 @@ def _host_header_port(host_header: str) -> str | None:
     value = host_header.strip()
     if value.startswith("["):
         end = value.find("]")
-        tail = value[end + 1:] if end != -1 else ""
+        tail = value[end + 1 :] if end != -1 else ""
         return tail[1:] if tail.startswith(":") and tail[1:].isdigit() else None
     if value.count(":") == 1:
         port = value.rsplit(":", 1)[1]
@@ -257,10 +259,7 @@ def _curl_remedy(method: str, url: str) -> str:
     """
     if method in _NON_MUTATING_METHODS:
         return f"curl -sS {shlex.quote(url)}"
-    return (
-        f"curl -sS -X {method} {shlex.quote(url)} "
-        f"-H 'Content-Type: {_JSON_MEDIA_TYPE}' -d '{{}}'"
-    )
+    return f"curl -sS -X {method} {shlex.quote(url)} " f"-H 'Content-Type: {_JSON_MEDIA_TYPE}' -d '{{}}'"
 
 
 class LoopbackHostMiddleware:
@@ -445,8 +444,7 @@ def create_app(cfg: ApiConfig | None = None) -> FastAPI:
         "/health",
         summary="Service liveness check",
         response_description=(
-            "JSON object with service name, kanban root path, installed version, "
-            "running version, and warnings list."
+            "JSON object with service name, kanban root path, installed version, " "running version, and warnings list."
         ),
     )
     def health(
@@ -497,6 +495,9 @@ def create_app(cfg: ApiConfig | None = None) -> FastAPI:
 
     # Register the training-trace endpoints (GET /traces, GET /traces/{id}).
     app.include_router(traces_router)
+
+    # Register the skills listing endpoint (GET /skills).
+    app.include_router(skills_router)
 
     # Register mutation endpoints (halt family, reset, close, wontdo, delete,
     # intake, unwind-rc) under /operations/*.

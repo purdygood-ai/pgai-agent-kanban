@@ -67,8 +67,13 @@ def test_seeded_finding_is_printed_recorded_and_exits_zero(tmp_path: pathlib.Pat
     findings_file = tmp_path / "out" / "findings.json"
 
     result = _run_audit(
-        "--repo-root", str(repo), "--output-file", str(results),
-        "--findings-file", str(findings_file), "--verbose",
+        "--repo-root",
+        str(repo),
+        "--output-file",
+        str(results),
+        "--findings-file",
+        str(findings_file),
+        "--verbose",
         cwd=tmp_path,
     )
 
@@ -92,8 +97,12 @@ def test_clearing_the_seeded_finding_removes_it(tmp_path: pathlib.Path) -> None:
     findings_file = tmp_path / "findings.json"
 
     result = _run_audit(
-        "--repo-root", str(repo), "--output-file", str(tmp_path / "results.md"),
-        "--findings-file", str(findings_file),
+        "--repo-root",
+        str(repo),
+        "--output-file",
+        str(tmp_path / "results.md"),
+        "--findings-file",
+        str(findings_file),
         cwd=tmp_path,
     )
 
@@ -108,8 +117,12 @@ def test_every_non_pass_directive_is_one_finding(tmp_path: pathlib.Path) -> None
     findings_file = tmp_path / "findings.json"
 
     result = _run_audit(
-        "--repo-root", str(repo), "--output-file", str(tmp_path / "results.md"),
-        "--findings-file", str(findings_file),
+        "--repo-root",
+        str(repo),
+        "--output-file",
+        str(tmp_path / "results.md"),
+        "--findings-file",
+        str(findings_file),
         cwd=tmp_path,
     )
 

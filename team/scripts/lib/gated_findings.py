@@ -57,8 +57,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 __all__ = ["build_finding", "findings_document", "instance_finding", "record_finding"]
 
@@ -95,7 +94,7 @@ def instance_finding(lint: str, cause: str, remedy: str, extras: dict) -> dict:
     return finding
 
 
-def _parse_extras(pairs: list) -> Optional[dict]:
+def _parse_extras(pairs: list) -> dict | None:
     """``KEY=VALUE`` arguments as a dict, or None when one is malformed."""
     extras = {}
     for pair in pairs:
@@ -106,9 +105,9 @@ def _parse_extras(pairs: list) -> Optional[dict]:
     return extras
 
 
-def findings_document(runner: str, findings: list, now: Optional[datetime] = None) -> dict:
+def findings_document(runner: str, findings: list, now: datetime | None = None) -> dict:
     """The findings file's document for *runner* holding *findings*."""
-    stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    stamp = (now or datetime.now(UTC)).isoformat(timespec="seconds")
     return {"schema_version": 1, "generated_at": stamp, "runner": runner, "findings": findings}
 
 
@@ -121,7 +120,7 @@ _USAGE = (
 _ARITY = {"build": 2, "record": 2, "array": 1, "count": 1, "split": 1, "write": 2}
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] in ("-h", "--help"):

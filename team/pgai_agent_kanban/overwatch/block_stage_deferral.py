@@ -43,7 +43,8 @@ import pathlib
 import re
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
+from collections.abc import Callable
 
 # Run by file path (``python3 .../block_stage_deferral.py``) or loaded from a
 # file outside its package, this module has no parent package and the
@@ -93,7 +94,7 @@ class StageDeferral:
     reason: str
     events_before: int
     events_after: int
-    ledger_entry_id: Optional[str] = None
+    ledger_entry_id: str | None = None
 
     @property
     def decision_event_appended(self) -> bool:
@@ -123,12 +124,12 @@ class StageDeferral:
         return f"resolution stage {self.status}: {self.reason}; {event}; {verdict}"
 
 
-def release_state_path(kanban_root: "Path | str", project: str) -> Path:
+def release_state_path(kanban_root: Path | str, project: str) -> Path:
     """The project's release-state.md, where the stage appends its Decision events."""
     return Path(kanban_root) / "projects" / project / "release-state.md"
 
 
-def count_decision_events(path: "Path | str") -> int:
+def count_decision_events(path: Path | str) -> int:
     """``## OVERWATCH Decision`` events in *path* (0 when it is absent or unreadable)."""
     try:
         text = Path(path).read_text(encoding="utf-8")
@@ -137,7 +138,7 @@ def count_decision_events(path: "Path | str") -> int:
     return len(_DECISION_EVENT_RE.findall(text))
 
 
-def ship_policy_halt_state(kanban_root: "Path | str", project: str) -> tuple[bool, str]:
+def ship_policy_halt_state(kanban_root: Path | str, project: str) -> tuple[bool, str]:
     """``(ready, why)``: whether the project's HALT is a ship-policy HALT
     the stage can resolve. Reads only."""
     halt = Path(kanban_root) / "projects" / project / "HALT"
@@ -146,12 +147,13 @@ def ship_policy_halt_state(kanban_root: "Path | str", project: str) -> tuple[boo
         return True, f"ship-policy HALT present at {halt}"
     if kind == "absent":
         return False, f"no HALT at {halt}, so the resolution stage has nothing to resolve"
-    return False, f"the HALT at {halt} is not a ship-policy HALT (no CM header), so the resolution stage leaves it alone"
+    return (
+        False,
+        f"the HALT at {halt} is not a ship-policy HALT (no CM header), so the resolution stage leaves it alone",
+    )
 
 
-def defer_to_stage(
-    kanban_root: "Path | str", project: str, *, runner: Optional[StageRunner] = None
-) -> StageDeferral:
+def defer_to_stage(kanban_root: Path | str, project: str, *, runner: StageRunner | None = None) -> StageDeferral:
     """Run the resolution stage for *project* once and report its decision.
 
     *runner* defaults to the stage's ``run_resolution_stage``. A runner that

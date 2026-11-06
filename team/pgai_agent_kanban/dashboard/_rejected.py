@@ -41,22 +41,18 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
-from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Public type alias for the sidecar dict returned by read_reason_sidecar.
 # Keys are always present; values are None when the key was absent in the file.
 # ---------------------------------------------------------------------------
 
-SIDECAR_KEYS = frozenset(
-    {"original_type", "original_dir", "rejected_at", "reason", "retry_count"}
-)
+SIDECAR_KEYS = frozenset({"original_type", "original_dir", "rejected_at", "reason", "retry_count"})
 
 
 def read_reason_sidecar(
-    sidecar_path: "str | pathlib.Path",
-) -> dict[str, Optional[str]]:
+    sidecar_path: str | pathlib.Path,
+) -> dict[str, str | None]:
     """Parse a .reason sidecar file and return a dict with all known keys.
 
     Args:
@@ -85,7 +81,7 @@ def read_reason_sidecar(
         - OSError (e.g. file not found) is silently caught; the function returns
           an all-None dict so callers do not need a try/except at every call site.
     """
-    result: dict[str, Optional[str]] = {key: None for key in SIDECAR_KEYS}
+    result: dict[str, str | None] = {key: None for key in SIDECAR_KEYS}
 
     path = pathlib.Path(sidecar_path)
     try:
@@ -114,7 +110,7 @@ def read_reason_sidecar(
 SIDECAR_SUFFIX = ".reason"
 
 
-def count_quarantined(rejected_dir: "str | pathlib.Path") -> int:
+def count_quarantined(rejected_dir: str | pathlib.Path) -> int:
     """Return how many files are quarantined in a project's ``rejected/`` directory.
 
     Counts the regular files directly inside *rejected_dir* (not symlinks,
@@ -135,13 +131,11 @@ def count_quarantined(rejected_dir: "str | pathlib.Path") -> int:
     except OSError:
         return 0
     return sum(
-        1
-        for entry in entries
-        if entry.is_file() and not entry.is_symlink() and not entry.name.endswith(SIDECAR_SUFFIX)
+        1 for entry in entries if entry.is_file() and not entry.is_symlink() and not entry.name.endswith(SIDECAR_SUFFIX)
     )
 
 
-def sidecar_path_for(quarantined_file: "str | pathlib.Path") -> pathlib.Path:
+def sidecar_path_for(quarantined_file: str | pathlib.Path) -> pathlib.Path:
     """Return the expected .reason sidecar path for a quarantined file.
 
     Convenience helper: given ``/path/to/rejected/malformed-intake-foo.md``, returns
@@ -189,7 +183,7 @@ class QuarantinedFile:
 
     path: pathlib.Path
     origin: str
-    restore_dir: Optional[pathlib.Path]
+    restore_dir: pathlib.Path | None
 
     @property
     def name(self) -> str:
@@ -209,15 +203,18 @@ def _quarantined_entries(directory: pathlib.Path) -> list[pathlib.Path]:
         return []
     return sorted(
         (
-            entry for entry in entries
-            if entry.is_file() and not entry.is_symlink()
-            and not entry.name.startswith(".") and not entry.name.endswith(SIDECAR_SUFFIX)
+            entry
+            for entry in entries
+            if entry.is_file()
+            and not entry.is_symlink()
+            and not entry.name.startswith(".")
+            and not entry.name.endswith(SIDECAR_SUFFIX)
         ),
         key=lambda entry: entry.name,
     )
 
 
-def _resolved(path: "str | pathlib.Path") -> Optional[pathlib.Path]:
+def _resolved(path: str | pathlib.Path) -> pathlib.Path | None:
     """*path* resolved to an absolute real path, or ``None`` when it cannot be."""
     try:
         return pathlib.Path(path).resolve()
@@ -226,8 +223,8 @@ def _resolved(path: "str | pathlib.Path") -> Optional[pathlib.Path]:
 
 
 def quarantine_origin(
-    project_root: "str | pathlib.Path", name: str, sidecar: "dict[str, Optional[str]]"
-) -> tuple[str, Optional[pathlib.Path]]:
+    project_root: str | pathlib.Path, name: str, sidecar: dict[str, str | None]
+) -> tuple[str, pathlib.Path | None]:
     """Return ``(origin, restore_dir)`` for a file in the project's ``rejected/``.
 
     The sidecar decides first. Its ``original_dir`` is honoured when it names
@@ -260,9 +257,7 @@ def quarantine_origin(
     return UNKNOWN_ORIGIN, None
 
 
-def quarantined_files(
-    project_root: "str | pathlib.Path", rejected_dir: "str | pathlib.Path"
-) -> list[QuarantinedFile]:
+def quarantined_files(project_root: str | pathlib.Path, rejected_dir: str | pathlib.Path) -> list[QuarantinedFile]:
     """Return every file discovery quarantined for one project.
 
     Discovery moves a file it keeps rejecting into the project's
@@ -296,8 +291,8 @@ def quarantined_files(
 
 
 def find_quarantined(
-    project_root: "str | pathlib.Path", rejected_dir: "str | pathlib.Path", name: str
-) -> Optional[QuarantinedFile]:
+    project_root: str | pathlib.Path, rejected_dir: str | pathlib.Path, name: str
+) -> QuarantinedFile | None:
     """Return the quarantined file called *name*, or ``None``.
 
     Searches in :func:`quarantined_files` order, so the project's

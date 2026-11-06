@@ -54,20 +54,24 @@ def _ctx(root: pathlib.Path) -> OpsContext:
 
 def _bug(root: pathlib.Path, stem: str, status: str) -> pathlib.Path:
     path = root / "projects" / _PROJECT / "bugs" / f"{stem}.md"
-    path.write_text(f"# {stem}\n\n**Severity:** low\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n", encoding="utf-8")
+    path.write_text(
+        f"# {stem}\n\n**Severity:** low\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n", encoding="utf-8"
+    )
     return path
 
 
 def _requirement(root: pathlib.Path, extra: str = "") -> pathlib.Path:
     path = root / "projects" / _PROJECT / "requirements" / "v9.9.0-convergence.md"
-    path.write_text(f"# v9.9.0-convergence\n\n## Status\nrunning\n\n## Deliverables\n1. Things.\n{extra}", encoding="utf-8")
+    path.write_text(
+        f"# v9.9.0-convergence\n\n## Status\nrunning\n\n## Deliverables\n1. Things.\n{extra}", encoding="utf-8"
+    )
     return path
 
 
 def _status(path: pathlib.Path) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     index = lines.index("## Status")
-    return next(line.strip() for line in lines[index + 1:] if line.strip())
+    return next(line.strip() for line in lines[index + 1 :] if line.strip())
 
 
 def _snapshot(root: pathlib.Path) -> dict:

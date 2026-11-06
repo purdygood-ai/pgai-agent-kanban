@@ -100,8 +100,7 @@ def test_all_pairs_skipped_yields_could_not_attempt_naming_unavailable_resource(
             "under docker: `docker pull ghcr.io/example/base:latest` did not "
             "succeed (dial tcp: lookup ghcr.io: no such host); treating this as "
             "an environmental network gap rather than a Dockerfile defect",
-            "Cold-build lane: all (engine, flavor) pairs skipped (see narration "
-            "above) — exit 0",
+            "Cold-build lane: all (engine, flavor) pairs skipped (see narration " "above) — exit 0",
         ]
     )
     result = classify_cold_build_result(0, output)
@@ -194,8 +193,7 @@ def test_mixed_run_with_some_built_and_some_skipped_is_built() -> None:
     output = "\n".join(
         [
             "[cold-build] [docker] [claude-code] Image built successfully: tag:test",
-            "[cold-build] SKIP — codex base-image reachability probe failed "
-            "under podman: engine not found",
+            "[cold-build] SKIP — codex base-image reachability probe failed " "under podman: engine not found",
             "Cold-build lane PASSED",
         ]
     )
@@ -210,8 +208,7 @@ def test_built_and_could_not_attempt_records_are_distinguishable_by_verdict_alon
     re-parse either detail string to tell them apart."""
     built = classify_cold_build_result(
         0,
-        "[cold-build] [docker] [claude-code] Image built successfully: tag\n"
-        "Cold-build lane PASSED\n",
+        "[cold-build] [docker] [claude-code] Image built successfully: tag\n" "Cold-build lane PASSED\n",
     )
     could_not_attempt = classify_cold_build_result(
         0,
@@ -298,8 +295,7 @@ def test_engine_unavailable_run_exiting_zero_without_the_all_skipped_marker_is_c
 def test_a_built_pair_keeps_a_skipping_run_with_a_failing_non_build_test_built() -> None:
     output = ENGINE_UNAVAILABLE_NON_BUILD_FAILURE_OUTPUT.replace(
         "tests/cold/test_docker_cold_build.py",
-        "[cold-build] [podman] [debian] Image built successfully: tag:test\n"
-        "tests/cold/test_docker_cold_build.py",
+        "[cold-build] [podman] [debian] Image built successfully: tag:test\n" "tests/cold/test_docker_cold_build.py",
         1,
     )
 
@@ -314,10 +310,13 @@ def test_shows_build_evidence_needs_a_built_pair_or_no_narrated_skip() -> None:
     assert shows_build_evidence("Cold-build lane PASSED\n") is True
     assert shows_build_evidence(NON_BUILD_TEST_FAILURE_OUTPUT) is True
     assert shows_build_evidence(ENGINE_UNAVAILABLE_OTHER_TESTS_PASSED_OUTPUT) is False
-    assert shows_build_evidence(
-        "[cold-build] [docker] [debian] Image built successfully: tag\n"
-        "[cold-build] SKIP — podman binary not found or podman unreachable\n"
-    ) is True
+    assert (
+        shows_build_evidence(
+            "[cold-build] [docker] [debian] Image built successfully: tag\n"
+            "[cold-build] SKIP — podman binary not found or podman unreachable\n"
+        )
+        is True
+    )
 
 
 def test_extract_failing_tests_reads_summary_node_ids_and_build_modules() -> None:

@@ -33,9 +33,13 @@
 #   4. Log each step via overwatch_log_action.
 #
 # A branch that cannot be proven released, or whose proven delete fails,
-# files one bug report in the project's bugs/ and is recorded under
-# overwatch/orphan-rc-reported/; later sweeps log it as already reported and
-# make no further attempt while the branch tip is unchanged.
+# files one bug report through intake (overwatch_deposit_bug) and is
+# recorded under overwatch/orphan-rc-reported/; later sweeps log it as
+# already reported and make no further attempt while the branch tip is
+# unchanged. A report for a branch whose earlier report is still live is
+# refused by intake as the same defect, and no second bug is filed. A
+# report that files nothing (bugs/ missing, intake refused or failed)
+# records nothing, so the next sweep reports the branch again.
 #
 # Notes:
 #   - The ACTIVE RC branch (the one currently being worked) is NOT deleted.
@@ -71,8 +75,15 @@
 #
 # --dry-run: scans and logs findings but does NOT delete branches or push to origin.
 
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CORB_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CORB_SELF_DIR=""
+_CORB_LIB_DIR="${_CORB_SELF_DIR%/*}"
+
 # overwatch_registered_projects and overwatch_branch_prefix: the shared
-# projects.cfg and branch_prefix readers.
+# projects.cfg and branch_prefix readers; overwatch_deposit_bug: filing
+# through intake.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
@@ -83,35 +94,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _corb_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-orphan-rc-branches: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        # Resolve from projects.cfg — never silently fall back to first project.
-        # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
-        # path is only safe for single-project installs.
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-orphan-rc-branches: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-orphan-rc-branches: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-orphan-rc-branches || return 1
 
     # Resolve dev tree path: project.cfg takes precedence over env (falls back to PROJECT.cfg for legacy installs)
     local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
@@ -122,14 +105,9 @@ _corb_resolve_env() {
         cfg_file="${_proj_root}/PROJECT.cfg"
     fi
     _CORB_DEV_TREE=""
-    if [[ -n "${cfg_file}" ]]; then
-        _CORB_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-    fi
-    if [[ -z "${_CORB_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        _CORB_DEV_TREE="${PGAI_DEV_TREE_PATH}"
-    fi
+    # The documented dev_tree_path chain (overwatch_dev_tree, overwatch_config.sh):
+    # project.cfg, then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    _CORB_DEV_TREE="$(overwatch_dev_tree "${OVERWATCH_PROJECT}")" || _CORB_DEV_TREE=""
     if [[ -z "${_CORB_DEV_TREE}" ]]; then
         echo "check-orphan-rc-branches: cannot resolve dev tree path (set PGAI_DEV_TREE_PATH or ensure project.cfg has dev_tree_path)" >&2
         return 1
@@ -231,29 +209,13 @@ _corb_already_reported() {
 }
 
 # ---------------------------------------------------------------------------
-# _corb_next_bug_number <bugs_dir>
-# The next BUG-NNNN number after the highest in <bugs_dir>, zero-padded.
-# ---------------------------------------------------------------------------
-_corb_next_bug_number() {
-    local bugs_dir="$1" highest=0 num f
-    while IFS= read -r f; do
-        num="$(basename "${f}" | grep -oE '^BUG-[0-9]+' | grep -oE '[0-9]+' | head -n1)"
-        if [[ -n "${num}" ]] && (( 10#${num} > highest )); then
-            highest=$(( 10#${num} ))
-        fi
-    done < <(find "${bugs_dir}" -maxdepth 1 -name 'BUG-[0-9]*' -type f 2>/dev/null)
-    printf '%04d' $(( highest + 1 ))
-}
-
-# ---------------------------------------------------------------------------
-# _corb_bug_text <seq> <branch> <tag> <reason>
-# Print the bug report _corb_report_unresolved files.
+# _corb_bug_text <branch> <tag> <reason>
+# Print the body (everything after the title line) of the bug report
+# _corb_report_unresolved files.
 # ---------------------------------------------------------------------------
 _corb_bug_text() {
-    local seq="$1" branch="$2" tag="$3" reason="$4"
+    local branch="$1" tag="$2" reason="$3"
     printf '%s\n' \
-        "# BUG-${seq}: Orphan RC branch ${branch} not deleted" \
-        "" \
         "**Severity:** low" \
         "" \
         "## Status" \
@@ -276,38 +238,66 @@ _corb_bug_text() {
 }
 
 # ---------------------------------------------------------------------------
+# _corb_bug_slug <branch>
+# Echo the slug <branch>'s report is filed under: the branch name in
+# lower-case kebab, ending in a word, so reports for two versions
+# (ai_rc/v1.0.0, ai_rc/v1.0.1) never read to intake as the same defect
+# filed again with a trailing counter.
+# ---------------------------------------------------------------------------
+_corb_bug_slug() {
+    local slug="orphan-rc-branch-${1//[^A-Za-z0-9]/-}-not-deleted"
+    slug="${slug,,}"
+    while [[ "${slug}" == *--* ]]; do
+        slug="${slug//--/-}"
+    done
+    printf '%s\n' "${slug}"
+}
+
+# ---------------------------------------------------------------------------
 # _corb_report_unresolved <project_root> <dev_tree> <branch> <tag> <reason>
-# File one bug report for an orphan RC branch OVERWATCH will not delete, and
-# record the branch tip so later sweeps do not retry it. A bug file is never
-# overwritten: a taken number moves on to the next one.
+# File one bug report for an orphan RC branch OVERWATCH will not delete,
+# through intake (overwatch_deposit_bug), and record the branch tip so later
+# sweeps do not retry it. Intake claims the bug's number; a report the
+# branch already has a live bug for is refused as the same defect, and the
+# marker then names that bug. A report that files nothing writes no marker:
+# the next sweep retries it, so the branch is never silenced without a bug.
 # ---------------------------------------------------------------------------
 _corb_report_unresolved() {
     local project_root="$1" dev_tree="$2" branch="$3" tag="$4" reason="$5"
     local bugs_dir="${project_root}/bugs"
-    local marker tip bug_file="" seq attempt
+    local marker tip bug_file="" outcome="no bug filed (bugs/ missing)" deposit_rc=0 reported=0
     marker="$(_corb_report_marker "${project_root}" "${branch}")"
     tip="$(git -C "${dev_tree}" rev-parse --verify --quiet "refs/heads/${branch}" 2>/dev/null)" || tip=""
     if [[ -d "${bugs_dir}" ]]; then
-        local slug="orphan-rc-branch-${branch//[^A-Za-z0-9]/-}"
-        slug="${slug,,}"
-        for attempt in 1 2 3 4 5; do
-            seq="$(_corb_next_bug_number "${bugs_dir}")"
-            bug_file="${bugs_dir}/BUG-${seq}-${slug}.md"
-            if ( set -o noclobber; _corb_bug_text "${seq}" "${branch}" "${tag}" "${reason}" > "${bug_file}" ) 2>/dev/null; then
-                break
-            fi
-            bug_file=""
-        done
+        bug_file="$(_corb_bug_text "${branch}" "${tag}" "${reason}" \
+            | overwatch_deposit_bug check-orphan-rc-branches "${project_root##*/}" \
+                "$(_corb_bug_slug "${branch}")" "Orphan RC branch ${branch} not deleted")" || deposit_rc=$?
+        case "${deposit_rc}" in
+            0) reported=1; outcome="bug filed: ${bug_file}" ;;
+            2) reported=1; outcome="already filed: ${bug_file}" ;;
+            *) bug_file=""; outcome="no bug filed (intake refused or failed)" ;;
+        esac
+    fi
+    if (( reported == 0 )); then
+        echo "check-orphan-rc-branches: ${branch} left in place (${reason}); ${outcome}; not recorded as reported, so the next sweep reports it again" >&2
+        overwatch_log_action \
+            "check-orphan-rc-branches" \
+            "${branch}" \
+            "orphan-rc-branch-report-failed" \
+            "none" \
+            "Orphan RC branch ${branch} not deleted: ${reason}; ${outcome}; the next sweep reports it again" \
+        2>/dev/null || true
+        return 0
     fi
     mkdir -p "$(dirname "${marker}")" 2>/dev/null || true
-    printf '%s\n%s\n' "${tip}" "${bug_file:-no bug filed (bugs/ missing or unwritable)}" > "${marker}" 2>/dev/null || true
-    echo "check-orphan-rc-branches: ${branch} left in place (${reason}); reported once${bug_file:+ in ${bug_file}}" >&2
+    printf '%s\n%s\n' "${tip}" "${bug_file:-${outcome}}" > "${marker}" 2>/dev/null || true
+    echo "check-orphan-rc-branches: ${branch} left in place (${reason}); reported once (${outcome})" >&2
     overwatch_log_action \
         "check-orphan-rc-branches" \
         "${branch}" \
         "orphan-rc-branch-reported" \
         "none" \
-        "Orphan RC branch ${branch} not deleted: ${reason}; ${bug_file:+bug filed: ${bug_file}; }no further attempts while its tip is unchanged" \
+        "Orphan RC branch ${branch} not deleted: ${reason}; ${outcome}; no further attempts while its tip is unchanged" \
     2>/dev/null || true
 }
 
@@ -432,7 +422,8 @@ overwatch_check_orphan_rc_branches() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CORB_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-orphan-rc-branches: cannot resolve lib dir" >&2
             return 1
         }
@@ -461,7 +452,7 @@ overwatch_check_orphan_rc_branches() {
     local push_decision="unresolved" remote=""
     if (( dry_run == 0 )); then
         local _corb_lib
-        _corb_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)"
+        _corb_lib="${_CORB_LIB_DIR}"
         if ! declare -F pp_git_remote_name >/dev/null 2>&1 && [[ -f "${_corb_lib}/project_paths.sh" ]]; then
             # shellcheck source=../project_paths.sh
             source "${_corb_lib}/project_paths.sh"

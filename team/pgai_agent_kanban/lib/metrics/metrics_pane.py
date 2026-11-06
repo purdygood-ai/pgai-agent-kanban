@@ -57,8 +57,9 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from datetime import datetime, UTC
+from typing import Any
+from collections.abc import Iterator
 
 from ...dashboard.status_line import BugStatusSplit, bug_status_split
 from ...metrics.reliability_view import reliability_section_lines
@@ -128,7 +129,7 @@ def fmt_wall_time(minutes: int | float | None) -> str:
     return f"{minutes}m"
 
 
-def fmt_elapsed_since(opened_at: str | None, now: Optional[datetime] = None) -> str:
+def fmt_elapsed_since(opened_at: str | None, now: datetime | None = None) -> str:
     """Format the whole minutes from *opened_at* to *now* as ``fmt_wall_time``
     does.
 
@@ -143,8 +144,8 @@ def fmt_elapsed_since(opened_at: str | None, now: Optional[datetime] = None) -> 
         dt_str = opened_at.replace("Z", "+00:00")
         opened = datetime.fromisoformat(dt_str)
         if opened.tzinfo is None:
-            opened = opened.replace(tzinfo=timezone.utc)
-        current = now if now is not None else datetime.now(tz=timezone.utc)
+            opened = opened.replace(tzinfo=UTC)
+        current = now if now is not None else datetime.now(tz=UTC)
         delta_sec = (current - opened).total_seconds()
         if delta_sec < 0:
             return "0m"
@@ -166,9 +167,7 @@ def fmt_blocked(minutes: int | float | None) -> str:
     return format_int(minutes)
 
 
-def project_bug_split(
-    bugs_dir: str | None, kanban_root: str | None, project: str
-) -> tuple[BugStatusSplit, bool]:
+def project_bug_split(bugs_dir: str | None, kanban_root: str | None, project: str) -> tuple[BugStatusSplit, bool]:
     """Return *project*'s open / deferred / needs-operator split and whether
     its deferral posture resolved.
 
@@ -234,7 +233,7 @@ def metrics_pane_lines(
     cyan: str = "",
     green: str = "",
     yellow: str = "",
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> Iterator[str]:
     """Yield the Metrics pane's lines, without trailing newlines.
 
@@ -260,7 +259,7 @@ def metrics_pane_lines(
     ``int()`` cannot read) raises.
     """
     del use_color, green, yellow  # see Args: the escapes carry the colour
-    current = now if now is not None else datetime.now(tz=timezone.utc)
+    current = now if now is not None else datetime.now(tz=UTC)
 
     def section_header(title: str) -> str:
         return f"{cyan}{bold}=== {title} ==={reset}"

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Optional
 
 # Run by file path (``python3 .../describe.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -45,7 +44,7 @@ from pgai_agent_kanban.halt_after.token import describe_token, parse_token  # no
 __all__ = ["main"]
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] in ("-h", "--help"):

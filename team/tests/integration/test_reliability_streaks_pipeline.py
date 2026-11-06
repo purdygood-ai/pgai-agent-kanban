@@ -105,10 +105,14 @@ _ESCALATED_TASK = "CODER-20260305-002-example-escalated-task"
 _HUMAN_HALT_CLEARED_AT = "2026-03-01T02:30:00+00:00"
 _SEEDED_RCS = (
     (
-        "v2.0.0", "2026-03-01T00:00:00+00:00", "2026-03-01T12:00:00+00:00",
+        "v2.0.0",
+        "2026-03-01T00:00:00+00:00",
+        "2026-03-01T12:00:00+00:00",
         (
             (
-                "halt:project", "2026-03-01T02:00:00+00:00", _HUMAN_HALT_CLEARED_AT,
+                "halt:project",
+                "2026-03-01T02:00:00+00:00",
+                _HUMAN_HALT_CLEARED_AT,
                 {"block_class": "any", "cause": "chain", "reason_code": "release_trigger"},
                 {"block_class": "human", "cause": "chain", "reason_code": "unhalt"},
             ),
@@ -116,10 +120,14 @@ _SEEDED_RCS = (
         30,
     ),
     (
-        "v2.1.0", "2026-03-02T00:00:00+00:00", "2026-03-02T12:00:00+00:00",
+        "v2.1.0",
+        "2026-03-02T00:00:00+00:00",
+        "2026-03-02T12:00:00+00:00",
         (
             (
-                "halt:project", "2026-03-02T03:00:00+00:00", "2026-03-02T03:40:00+00:00",
+                "halt:project",
+                "2026-03-02T03:00:00+00:00",
+                "2026-03-02T03:40:00+00:00",
                 {"cause": "operator"},
                 {"block_class": "any", "cause": "operator", "reason_code": "unhalt"},
             ),
@@ -127,10 +135,14 @@ _SEEDED_RCS = (
         40,
     ),
     (
-        "v2.2.0", "2026-03-03T00:00:00+00:00", "2026-03-03T12:00:00+00:00",
+        "v2.2.0",
+        "2026-03-03T00:00:00+00:00",
+        "2026-03-03T12:00:00+00:00",
         (
             (
-                "halt:project", "2026-03-03T05:00:00+00:00", "2026-03-03T05:25:00+00:00",
+                "halt:project",
+                "2026-03-03T05:00:00+00:00",
+                "2026-03-03T05:25:00+00:00",
                 {"cause": "operator"},
                 {"block_class": "any", "cause": "operator", "reason_code": "unhalt"},
             ),
@@ -261,8 +273,15 @@ def _seed_history(project: Project) -> None:
         )
         ma.aggregate_rc(_PROJECT, version, kanban_root=project.root)
     _run_module(
-        project.root, "pgai_agent_kanban.metrics.reliability", "refresh",
-        "--project", _PROJECT, "--kanban-root", str(project.root), "--now", _HISTORY_REFRESHED_AT,
+        project.root,
+        "pgai_agent_kanban.metrics.reliability",
+        "refresh",
+        "--project",
+        _PROJECT,
+        "--kanban-root",
+        str(project.root),
+        "--now",
+        _HISTORY_REFRESHED_AT,
     )
 
 
@@ -291,9 +310,19 @@ def _add_task(project: Project, task_id: str, *, state: str, marker: str) -> pat
 def _triage_apply(project: Project, task_id: str, now: str) -> list[str]:
     """``block_triage apply`` for one task; the printed TSV result."""
     result = _run_module(
-        project.root, "pgai_agent_kanban.overwatch.block_triage", "apply",
-        "--kanban-root", str(project.root), "--project", _PROJECT, "--task-id", task_id,
-        "--queue-file", str(project.queue), "--now", now,
+        project.root,
+        "pgai_agent_kanban.overwatch.block_triage",
+        "apply",
+        "--kanban-root",
+        str(project.root),
+        "--project",
+        _PROJECT,
+        "--task-id",
+        task_id,
+        "--queue-file",
+        str(project.queue),
+        "--now",
+        now,
     )
     return result.stdout.strip().split("\t")
 
@@ -356,8 +385,14 @@ def test_triage_requeue_resets_clean_while_hands_off_keeps_its_count(project: Pr
     text = status.read_text(encoding="utf-8").replace("## Needs Human\nno", "## Needs Human\nyes")
     status.write_text(text, encoding="utf-8")
     _run_module(
-        project.root, "pgai_agent_kanban.overwatch.block_record", "write",
-        str(status), "zero_progress", "CODER", "--now", _REQUEUE_BLOCKED_AT,
+        project.root,
+        "pgai_agent_kanban.overwatch.block_record",
+        "write",
+        str(status),
+        "zero_progress",
+        "CODER",
+        "--now",
+        _REQUEUE_BLOCKED_AT,
     )
     (opened,) = project.blocks_of(f"task:{_REQUEUED_TASK}")
     assert opened["end"] is None and opened["reason_code"] == "zero_progress"
@@ -380,7 +415,9 @@ def test_triage_requeue_resets_clean_while_hands_off_keeps_its_count(project: Pr
     assert clean["last_block"]["task"] == _REQUEUED_TASK, doc
     assert clean["last_block"]["reason_code"] == "zero_progress", doc
     assert clean["last_block"]["resolution"] == {
-        "time": _REQUEUE_TRIAGED_AT, "class": "any", "reason_code": "requeue",
+        "time": _REQUEUE_TRIAGED_AT,
+        "class": "any",
+        "reason_code": "requeue",
     }, doc
     assert hands_off["status"] == "resolved", doc
     assert hands_off["rcs"] == _RCS_SINCE_HUMAN_BLOCK, doc
@@ -396,7 +433,7 @@ def test_triage_requeue_resets_clean_while_hands_off_keeps_its_count(project: Pr
 
 
 def _utc_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def test_escalation_released_by_reset_resets_both_streaks(project: Project) -> None:
@@ -409,11 +446,25 @@ def test_escalation_released_by_reset_resets_both_streaks(project: Project) -> N
     source = f"task:{_ESCALATED_TASK}"
 
     _add_task(project, _ESCALATED_TASK, state="WORKING", marker="A")
-    _run(project.root, [
-        "bash", str(_TASK_STATUS_SH), "--project", _PROJECT, "--key", _ESCALATED_TASK,
-        "--state", "BLOCKED", "--needs-human", "yes", "--reason-code", "agent_unclassified",
-        "--blockers", "the brief names a file that does not exist",
-    ])
+    _run(
+        project.root,
+        [
+            "bash",
+            str(_TASK_STATUS_SH),
+            "--project",
+            _PROJECT,
+            "--key",
+            _ESCALATED_TASK,
+            "--state",
+            "BLOCKED",
+            "--needs-human",
+            "yes",
+            "--reason-code",
+            "agent_unclassified",
+            "--blockers",
+            "the brief names a file that does not exist",
+        ],
+    )
     # The wake's reconciliation renders the BLOCKED state as the [B] marker.
     project.queue.write_text(
         project.queue.read_text(encoding="utf-8").replace(f"- [A] {_ESCALATED_TASK}", f"- [B] {_ESCALATED_TASK}"),
@@ -422,8 +473,14 @@ def test_escalation_released_by_reset_resets_both_streaks(project: Project) -> N
     (opened,) = project.blocks_of(source)
     assert opened["end"] is None and opened["reason_code"] == "agent_unclassified"
     # The row's retry ladder (three requeues) is already spent, so triage escalates.
-    _run_module(project.root, "pgai_agent_kanban.overwatch.block_record", "update",
-                str(project.status(_ESCALATED_TASK)), "--attempts", "3")
+    _run_module(
+        project.root,
+        "pgai_agent_kanban.overwatch.block_record",
+        "update",
+        str(project.status(_ESCALATED_TASK)),
+        "--attempts",
+        "3",
+    )
 
     outcome, reason_code, action, mutation, *_detail = _triage_apply(project, _ESCALATED_TASK, _utc_now())
     assert (outcome, reason_code, action, mutation) == ("escalate", "agent_unclassified", "escalate", "none")

@@ -62,7 +62,6 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -159,11 +158,7 @@ _QUEUES = {
         "- [x] PRIORITY-0002-delta\n"
         "[x] PRIORITY-0001-alpha (a line without its list dash)\n"
     ),
-    "bug_backlog.md": (
-        "# Bug Backlog\n\n## Queue\n"
-        "- [x] BUG-0001-beta\n"
-        "- [ ] BUG-0002-gamma\n"
-    ),
+    "bug_backlog.md": ("# Bug Backlog\n\n## Queue\n" "- [x] BUG-0001-beta\n" "- [ ] BUG-0002-gamma\n"),
 }
 
 _REQUIREMENTS_NAME = f"{_VERSION}-bugfix-bundle-20260101.md"
@@ -335,7 +330,10 @@ def _git(repo: pathlib.Path, *args: str) -> str:
     env = {**os.environ, **_GIT_ENV}
     done = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True, env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
     )
     return done.stdout
 
@@ -419,9 +417,7 @@ def _seed_root(base: pathlib.Path, repo: pathlib.Path, spec: dict) -> pathlib.Pa
     for task_id, release, status in (*_TASKS, *spec.get("extra_tasks", ())):
         task_dir = proj / "tasks" / task_id
         task_dir.mkdir()
-        (task_dir / "README.md").write_text(
-            f"# Task: {task_id}\n\n## Release Version\n{release}\n", encoding="utf-8"
-        )
+        (task_dir / "README.md").write_text(f"# Task: {task_id}\n\n## Release Version\n{release}\n", encoding="utf-8")
         if status is not None:
             (task_dir / "status.md").write_text(status, encoding="utf-8")
     for name, text in _QUEUES.items():
@@ -503,7 +499,9 @@ def snapshot(root: pathlib.Path, repo: pathlib.Path) -> dict:
     refs = _git(repo, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/tags")
     head = subprocess.run(
         ["git", "-C", str(repo), "symbolic-ref", "--short", "HEAD"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
     tracked = ""
     if (proj / ".git").is_dir():
@@ -551,8 +549,11 @@ def _run_cli(script: pathlib.Path, base, root, repo, spec) -> subprocess.Complet
         ["bash", str(script), *spec.get("args", _default_args())],
         input=stdin if stdin is not None else None,
         stdin=None if stdin is not None else subprocess.DEVNULL,
-        capture_output=True, text=True, env=_cli_env(base, root, repo, spec),
-        cwd=str(cwd), timeout=_TIMEOUT_SECONDS,
+        capture_output=True,
+        text=True,
+        env=_cli_env(base, root, repo, spec),
+        cwd=str(cwd),
+        timeout=_TIMEOUT_SECONDS,
     )
 
 
@@ -633,12 +634,8 @@ def test_route_and_cli_reach_cm_unwind_unwind_rc(tmp_path: pathlib.Path) -> None
     body = result.response.json()
     assert result.response.status_code == 500, body
     assert body["exit_code"] == result.cli.completed.returncode == 1
-    assert normalise(body["stdout"], rest_root, rest_repo) == normalise(
-        result.cli.completed.stdout, cli_root, cli_repo
-    )
-    assert normalise(body["stderr"], rest_root, rest_repo) == normalise(
-        result.cli.completed.stderr, cli_root, cli_repo
-    )
+    assert normalise(body["stdout"], rest_root, rest_repo) == normalise(result.cli.completed.stdout, cli_root, cli_repo)
+    assert normalise(body["stderr"], rest_root, rest_repo) == normalise(result.cli.completed.stderr, cli_root, cli_repo)
     assert body["error"] == "unwind_rc.refused"
 
 
@@ -777,8 +774,12 @@ class _UnwindGateCase:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(_SCRIPT), "--project", _PROJECT, "--key", _VERSION, *extra],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env,
-            cwd=str(cwd), timeout=_TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(cwd),
+            timeout=_TIMEOUT_SECONDS,
         )
 
     def network_calls(self) -> list[str]:
@@ -800,9 +801,7 @@ def _both(run: subprocess.CompletedProcess) -> str:
 
 _REPO_BY_BOTH_NAMES = {"REPO_ROOT": "{REPO}", "PGAI_DEV_TREE_PATH": "{REPO}"}
 _REPO_BY_ENV = {"PGAI_DEV_TREE_PATH": "{REPO}"}
-_LOCAL_ONLY_POLICY = (
-    "[unwind-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only."
-)
+_LOCAL_ONLY_POLICY = "[unwind-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only."
 
 # (shape, missing-piece token, environment naming the repository)
 _UNRESOLVED_SHAPES = [
@@ -843,9 +842,9 @@ class TestUnwindPushGate:
         assert run.returncode == 0, f"{shape}: unexpected exit\n{_both(run)}"
         assert case.network_calls() == [], f"{shape}: unwind-rc made a git network call\n{_both(run)}"
         skips = _gate_skip_lines(_both(run))
-        assert len(skips) == 1 and token in skips[0], (
-            f"{shape}: expected one {_PUSH_GATE_SKIP} line naming {token!r}\n{_both(run)}"
-        )
+        assert (
+            len(skips) == 1 and token in skips[0]
+        ), f"{shape}: expected one {_PUSH_GATE_SKIP} line naming {token!r}\n{_both(run)}"
         assert skips[0].startswith(f"[unwind-rc] {_PUSH_GATE_SKIP}: project '{_PROJECT}': {token}: "), skips[0]
         assert skips[0].endswith("; nothing pushed and no remote contacted"), skips[0]
         assert _LOCAL_ONLY_POLICY not in run.stdout
@@ -869,9 +868,7 @@ class TestUnwindPushGate:
         assert "ERROR: could not load project config for" in run.stderr
         assert case.rc_branch_exists() and case.active_rc() == _VERSION
 
-    def test_a_project_absent_from_projects_cfg_refuses_without_a_network_call(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_a_project_absent_from_projects_cfg_refuses_without_a_network_call(self, tmp_path: pathlib.Path) -> None:
         case = _UnwindGateCase(tmp_path, "registered-elsewhere", _REPO_BY_ENV)
         run = case.run("--confirm")
 

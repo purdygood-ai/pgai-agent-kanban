@@ -6,9 +6,10 @@
 # SOURCE THIS FILE; do not execute it directly:
 #   source "$(dirname "${BASH_SOURCE[0]}")/overwatch_lib.sh"
 #
-# This file is side-effect-free on source: no commands run at the top level,
-# no files are created, no variables are set outside the function definitions
-# and the two read-only constant declarations below.
+# This file is side-effect-free on source: no commands run at the top level
+# beyond resolving this file's own directory, no files are created, and no
+# variables are set outside the function definitions, that directory, and
+# the two read-only constant declarations below.
 #
 # Requirements:
 #   - KANBAN_ROOT must be set in the environment before calling any function
@@ -58,6 +59,11 @@
 # sourcing this library. If you prefer a static constant, ensure KANBAN_ROOT
 # is exported before sourcing this file.
 # ---------------------------------------------------------------------------
+
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_OVERWATCH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _OVERWATCH_LIB_DIR=""
 
 # ---------------------------------------------------------------------------
 # overwatch_halt_flag_path
@@ -156,7 +162,8 @@ overwatch_acquire_firing_lock() {
     # for project_paths.sh.
     if ! declare -f pgai_lock_acquire > /dev/null 2>&1; then
         local _oafl_lib_dir
-        _oafl_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || {
+        _oafl_lib_dir="${_OVERWATCH_LIB_DIR}"
+        [[ -n "${_oafl_lib_dir}" ]] || {
             echo "overwatch_lib.sh: overwatch_acquire_firing_lock: cannot resolve lib dir to source lock_provenance.sh" >&2
             return 2
         }
@@ -243,7 +250,7 @@ overwatch_run_with_firing_lock() {
         local message="${entry} for project ${project_name} skipped: another OVERWATCH firing holds the project's firing lock ${lock_file}; nothing was done, and the next tick tries again."
         if ! declare -F pgai_emit_error_contract >/dev/null 2>&1; then
             local _owrl_lib_dir
-            _owrl_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _owrl_lib_dir=""
+            _owrl_lib_dir="${_OVERWATCH_LIB_DIR}"
             # shellcheck source=error_contract.sh
             [[ -n "$_owrl_lib_dir" && -f "${_owrl_lib_dir}/error_contract.sh" ]] \
                 && source "${_owrl_lib_dir}/error_contract.sh"

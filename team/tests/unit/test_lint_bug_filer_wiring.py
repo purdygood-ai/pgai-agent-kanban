@@ -238,9 +238,7 @@ def test_a_deliberately_broken_filer_does_not_change_the_runners_exit_code(
     # unconditionally, simulating an internal filer failure.
     broken_filer = fixture_root / "team" / "pgai_agent_kanban" / "lint" / "bug_filer.py"
     broken_filer.write_text(
-        "import sys\n"
-        "sys.stderr.write('deliberately broken filer for wiring test\\n')\n"
-        "sys.exit(7)\n",
+        "import sys\n" "sys.stderr.write('deliberately broken filer for wiring test\\n')\n" "sys.exit(7)\n",
         encoding="utf-8",
     )
 

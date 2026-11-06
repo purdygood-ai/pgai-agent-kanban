@@ -286,8 +286,8 @@ ENGINE_FILES: tuple[str, ...] = (
     "wake/claude.sh",
     "wake/codex.sh",
     # cm/release.sh's lib stages (the five original stages plus the
-    # closing-summary formatter, Fixed-In stage and archive stage
-    # release_finalize.sh calls, the ship-posture stage release_ship_policy.sh calls into, the
+    # closing-summary formatter, Fixed-In stage, archive stage and hook
+    # runner release_finalize.sh sources, the ship-posture stage release_ship_policy.sh calls into, the
     # VERSION-file stage release_notes.sh calls, the --decide-only
     # stage, and the squash-conflict / push-lag / tag-on-remote stage
     # release_squash.sh and release_finalize.sh call).
@@ -301,6 +301,7 @@ ENGINE_FILES: tuple[str, ...] = (
     "lib/cm/release_origin_summary.sh",
     "lib/cm/release_fixed_in.sh",
     "lib/cm/release_archive.sh",
+    "lib/cm/release_hook_runner.sh",
     "lib/cm/release_decide_only.sh",
     "lib/cm/release_resolve.sh",
     # lib/discovery.sh's lib stages.
@@ -333,8 +334,10 @@ ENGINE_FILES: tuple[str, ...] = (
     "lib/dashboard/column_render_frame.sh",
     "lib/dashboard/column_render_cells.sh",
     "lib/dashboard/column_render_defer.sh",
-    # wake/claude.sh + wake/codex.sh's shared driver stages and per-provider
-    # implementations of the five-function provider interface.
+    # wake/claude.sh + wake/codex.sh's shared entry body, shared driver
+    # stages and per-provider implementations of the five-function provider
+    # interface.
+    "lib/wake_entry.sh",
     "lib/wake_driver.sh",
     "lib/wake_driver_prep.sh",
     "lib/wake_driver_worktree.sh",
@@ -359,18 +362,18 @@ DEFAULT_SIZE_ALLOW_FILES: frozenset[str] = frozenset()
 # ---------------------------------------------------------------------------
 # CHECK 2: duplication defaults
 # ---------------------------------------------------------------------------
-_DEFAULT_ALLOW_FILES: frozenset[str] = frozenset({
-    "provider_claude.sh",
-    "provider_codex.sh",
-    "harness.sh",
-})
+_DEFAULT_ALLOW_FILES: frozenset[str] = frozenset(
+    {
+        "provider_claude.sh",
+        "provider_codex.sh",
+        "harness.sh",
+    }
+)
 
 _FUNC_DEF_RE: re.Pattern[str] = re.compile(r"^([a-z][a-z0-9_]*)\(\)")
 _SOURCE_PREFIX_RE: re.Pattern[str] = re.compile(r'^\s*(?:source|\.)\s+"')
-_VAR_ASSIGN_PREFIX_RE: re.Pattern[str] = re.compile(
-    r'^\s*([A-Za-z_][A-Za-z0-9_]*)="'
-)
-_BARE_VAR_RE: re.Pattern[str] = re.compile(r'^\$([A-Za-z_][A-Za-z0-9_]*)$')
+_VAR_ASSIGN_PREFIX_RE: re.Pattern[str] = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)="')
+_BARE_VAR_RE: re.Pattern[str] = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +466,7 @@ def _strip_to_literal_suffix(expr: str) -> str | None:
     idx = max(expr.rfind("}"), expr.rfind(")"))
     if idx == -1:
         return None
-    suffix = expr[idx + 1:].lstrip("/")
+    suffix = expr[idx + 1 :].lstrip("/")
     if not suffix or not suffix.endswith(".sh"):
         return None
     return suffix
@@ -670,9 +673,7 @@ def find_duplicate_functions(
                     colliding.add(b)
 
         if colliding:
-            violations[name] = sorted(
-                str(p.relative_to(scripts_dir)) for p in colliding
-            )
+            violations[name] = sorted(str(p.relative_to(scripts_dir)) for p in colliding)
 
     return violations
 
@@ -733,9 +734,7 @@ def find_duplicate_python_defs(
             if digest is not None:
                 groups[(node.name, digest)].add(rel)
 
-    return sorted(
-        (name, sorted(files)) for (name, _digest), files in groups.items() if len(files) > 1
-    )
+    return sorted((name, sorted(files)) for (name, _digest), files in groups.items() if len(files) > 1)
 
 
 # ---------------------------------------------------------------------------
@@ -758,10 +757,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--scripts-dir",
         metavar="PATH",
-        help=(
-            "Directory to scan (default: team/scripts/ resolved from this "
-            "script's own location)."
-        ),
+        help=("Directory to scan (default: team/scripts/ resolved from this " "script's own location)."),
     )
     parser.add_argument(
         "--python-dir",
@@ -795,10 +791,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="ENTRY",
         action="append",
         dest="size_allow_files",
-        help=(
-            "Manifest entry (relative path or basename) exempt from the "
-            "size ceiling. May be repeated."
-        ),
+        help=("Manifest entry (relative path or basename) exempt from the " "size ceiling. May be repeated."),
     )
     parser.add_argument(
         "--findings-file",
@@ -857,8 +850,7 @@ def _findings(
         findings.append(
             quality_finding(
                 _LINT_NAME,
-                f"{name}() is defined in {len(paths)} files that share a bash process: "
-                f"{', '.join(paths)}",
+                f"{name}() is defined in {len(paths)} files that share a bash process: " f"{', '.join(paths)}",
                 f"keep one {name}() definition and remove or rename it in "
                 f"{', '.join(paths[1:])}, then re-check: {relint}",
                 file=paths[0],
@@ -904,8 +896,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not scripts_dir.is_dir():
         print(
-            f"ERROR: scripts directory not found: {scripts_dir}\n"
-            "Use --scripts-dir to specify an alternative path.",
+            f"ERROR: scripts directory not found: {scripts_dir}\n" "Use --scripts-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
@@ -924,13 +915,9 @@ def main(argv: list[str] | None = None) -> int:
         if not python_dir.is_dir():
             python_dir = None
 
-    dupe_allow: frozenset[str] = (
-        frozenset(args.allow_files) if args.allow_files is not None else _DEFAULT_ALLOW_FILES
-    )
+    dupe_allow: frozenset[str] = frozenset(args.allow_files) if args.allow_files is not None else _DEFAULT_ALLOW_FILES
     size_allow: frozenset[str] = (
-        frozenset(args.size_allow_files)
-        if args.size_allow_files is not None
-        else DEFAULT_SIZE_ALLOW_FILES
+        frozenset(args.size_allow_files) if args.size_allow_files is not None else DEFAULT_SIZE_ALLOW_FILES
     )
 
     if args.verbose:
@@ -944,9 +931,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        dupe_violations = find_duplicate_functions(
-            scripts_dir, allow_files=dupe_allow, verbose=args.verbose
-        )
+        dupe_violations = find_duplicate_functions(scripts_dir, allow_files=dupe_allow, verbose=args.verbose)
     except FileNotFoundError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
@@ -954,8 +939,12 @@ def main(argv: list[str] | None = None) -> int:
     python_dupes = find_duplicate_python_defs(python_dir, verbose=args.verbose) if python_dir else []
 
     findings = _findings(
-        size_violations, dupe_violations, scripts_dir=scripts_dir, max_lines=args.max_lines,
-        python_dupes=python_dupes, python_dir=python_dir,
+        size_violations,
+        dupe_violations,
+        scripts_dir=scripts_dir,
+        max_lines=args.max_lines,
+        python_dupes=python_dupes,
+        python_dir=python_dir,
     )
     write_findings_file(args.findings_file, findings, lint="lint_engine_size_dupe")
 
@@ -963,9 +952,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"lint_engine_size_dupe: ok -- {len(ENGINE_FILES)} engine file(s) "
             f"within the {args.max_lines}-line ceiling, no cross-file "
-            "function-name collisions"
-            + (", no copied Python defs" if python_dir else "")
-            + " found.",
+            "function-name collisions" + (", no copied Python defs" if python_dir else "") + " found.",
             flush=True,
         )
         return 0

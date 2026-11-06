@@ -94,14 +94,14 @@ def _own_install_root() -> pathlib.Path:
     return pathlib.Path(os.path.abspath(__file__)).parents[2]
 
 
-def _paths_pair(cfg: pathlib.Path) -> "tuple[str, str]":
+def _paths_pair(cfg: pathlib.Path) -> tuple[str, str]:
     """``(tmp_root, tmp_subdir)`` from *cfg*'s ``[paths]``; ``""`` for each one absent or unreadable."""
     tmp_root = (ini.read_line_value(cfg, _PATHS_SECTION, "tmp_root") or "").strip()
     tmp_subdir = (ini.read_line_value(cfg, _PATHS_SECTION, "tmp_subdir") or "").strip()
     return tmp_root, tmp_subdir
 
 
-def _configured_pair(kanban_root: "PathLike | None") -> "tuple[str, str]":
+def _configured_pair(kanban_root: PathLike | None) -> tuple[str, str]:
     """The ``[paths]`` pair tier 2 reads, from the kanban.cfg the caller's choice locates.
 
     An explicit kanban root that is empty or blank names no kanban.cfg, so
@@ -130,7 +130,7 @@ def _names_filesystem_root(value: str) -> bool:
     return not value or os.path.realpath(value) == os.sep
 
 
-def resolve_temp_root(kanban_root: "PathLike | None" = None, *, honour_override: bool = True) -> str:
+def resolve_temp_root(kanban_root: PathLike | None = None, *, honour_override: bool = True) -> str:
     """Return the framework temp root, resolved by the precedence in the module docstring.
 
     Args:

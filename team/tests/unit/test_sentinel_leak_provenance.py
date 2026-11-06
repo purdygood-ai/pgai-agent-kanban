@@ -17,6 +17,9 @@ between a real snapshot and a real check, and assert:
 * a sentinel written straight onto the root with no record is still
   reported ADDED, naming the path;
 * a writer call made from inside a test is still reported, naming the test;
+* a project HALT whose body names a chain writer (halt_provenance's
+  CHAIN_WRITERS) is narrated as a chain write and not counted, while an
+  unmarked HALT and the kanban root's own HALT are still reported;
 * each writer leaves a record naming entry point, pid and time, and a
   repeated identical arm leaves none;
 * a provenance failure narrates and never stops the sentinel write.
@@ -39,6 +42,7 @@ import pytest
 from pgai_agent_kanban.lib import sentinel_provenance
 from pgai_agent_kanban.ops import write as ops_write
 from pgai_agent_kanban.ops.context import OpsContext
+from pgai_agent_kanban.overwatch import halt_provenance
 from tests.unit.shell_harness import run_bash
 
 _LIB = "scripts/lib/sentinel_leak_check.sh"
@@ -306,8 +310,7 @@ def test_a_drain_capture_rewrite_during_the_run_is_attributed_not_reported_as_a_
         tmp_path,
         _operator_python(
             sandbox_root,
-            "from pgai_agent_kanban.halt_after.drain import check_drain; "
-            f"print(check_drain('rc', '{project_dir}'))",
+            "from pgai_agent_kanban.halt_after.drain import check_drain; " f"print(check_drain('rc', '{project_dir}'))",
         ),
     )
     assert drained.returncode == 0, drained.stdout + drained.stderr
@@ -342,8 +345,7 @@ def test_a_promotion_during_the_run_attributes_both_the_halt_and_the_removed_hal
         tmp_path,
         _operator_python(
             sandbox_root,
-            "from pgai_agent_kanban.halt_after.promote import promote; "
-            f"promote('{project_dir}', 'rc:v9.9.9')",
+            "from pgai_agent_kanban.halt_after.promote import promote; " f"promote('{project_dir}', 'rc:v9.9.9')",
         ),
     )
     assert promoted.returncode == 0, promoted.stdout + promoted.stderr
@@ -375,14 +377,16 @@ def test_a_sentinel_removed_with_no_record_is_still_reported_removed(
     deleted.write_text("", encoding="utf-8")
     snap = _snapshot(tmp_path, sandbox_root)
 
-    assert run_bash(
-        tmp_path,
-        _operator_python(
-            sandbox_root,
-            "from pgai_agent_kanban.halt_after.promote import promote; "
-            f"promote('{project_dir}', 'rc:v9.9.9')",
-        ),
-    ).returncode == 0
+    assert (
+        run_bash(
+            tmp_path,
+            _operator_python(
+                sandbox_root,
+                "from pgai_agent_kanban.halt_after.promote import promote; " f"promote('{project_dir}', 'rc:v9.9.9')",
+            ),
+        ).returncode
+        == 0
+    )
     deleted.unlink()
 
     result = _check(tmp_path, sandbox_root, snap)
@@ -402,14 +406,16 @@ def test_a_removal_record_does_not_excuse_a_sentinel_written_back_without_one(
     halt_after.write_text("rc:v9.9.9\n", encoding="utf-8")
     snap = _snapshot(tmp_path, sandbox_root)
 
-    assert run_bash(
-        tmp_path,
-        _operator_python(
-            sandbox_root,
-            "from pgai_agent_kanban.halt_after.promote import promote; "
-            f"promote('{project_dir}', 'rc:v9.9.9')",
-        ),
-    ).returncode == 0
+    assert (
+        run_bash(
+            tmp_path,
+            _operator_python(
+                sandbox_root,
+                "from pgai_agent_kanban.halt_after.promote import promote; " f"promote('{project_dir}', 'rc:v9.9.9')",
+            ),
+        ).returncode
+        == 0
+    )
     halt_after.write_text("coder\n", encoding="utf-8")
 
     result = _check(tmp_path, sandbox_root, snap)
@@ -487,6 +493,140 @@ def test_a_provenance_failure_never_changes_what_drain_and_promote_do(
     assert "drain_capture: WARNING:" in err
     assert err.count("promote: WARNING:") == 2
     assert "provenance record could not be appended" in err
+
+
+# ---------------------------------------------------------------------------
+# Chain HALT writers record nothing in the write log; they put a provenance
+# block in the HALT body, which the check reads through halt_provenance.
+# ---------------------------------------------------------------------------
+
+
+def _chain_halt_body(writer: str, reason: str) -> str:
+    """A HALT body as a chain writer leaves it: a header line, then the
+    provenance block."""
+    return (
+        "# HALT created by the chain at 2026-01-01T00:00:00Z\n"
+        f"# halt-writer: {writer}\n"
+        f"# halt-reason: {reason}\n"
+    )
+
+
+@pytest.mark.parametrize("writer", sorted(halt_provenance.CHAIN_WRITERS))
+def test_a_halt_added_by_a_chain_writer_is_narrated_as_a_chain_write_not_counted(
+    tmp_path: pathlib.Path, sandbox_root: pathlib.Path, writer: str
+) -> None:
+    """A sibling lane's chain HALT landing mid-run, with no write-log record,
+    is narrated naming the path, the writer and its reason; it is not a
+    finding, and the check passes when it is the only difference."""
+    halt = sandbox_root / "projects" / _PROJECT / "HALT"
+    reason = f"{writer}.stopped-for-a-reason"
+    snap = _snapshot(tmp_path, sandbox_root)
+    halt.write_text(_chain_halt_body(writer, reason), encoding="utf-8")
+
+    result = _check(tmp_path, sandbox_root, snap)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ADDED:" not in result.stderr
+    assert (
+        f"[pgai-sentinel] ATTRIBUTED: {halt} -- added during the run by chain writer {writer} "
+        f"(halt-reason: {reason}), a chain write" in result.stdout
+    )
+    assert "unchanged by the suite (1 change(s) above attributed" in result.stdout
+    assert not sentinel_provenance.log_path(sandbox_root).exists()
+
+
+def test_a_halt_changed_to_a_chain_writer_body_is_narrated_not_counted(
+    tmp_path: pathlib.Path, sandbox_root: pathlib.Path
+) -> None:
+    halt = sandbox_root / "projects" / _PROJECT / "HALT"
+    halt.write_text("", encoding="utf-8")
+    snap = _snapshot(tmp_path, sandbox_root)
+    halt.write_text(
+        _chain_halt_body("cm-release", "cm-release.trigger-4.pre-squash-hook-failed") + "# halt-trigger: 4\n",
+        encoding="utf-8",
+    )
+
+    result = _check(tmp_path, sandbox_root, snap)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "CHANGED:" not in result.stderr
+    assert (
+        f"[pgai-sentinel] ATTRIBUTED: {halt} -- changed during the run by chain writer cm-release "
+        "(halt-reason: cm-release.trigger-4.pre-squash-hook-failed)" in result.stdout
+    )
+    found = run_bash(
+        tmp_path,
+        f"source {_LIB} && pgai_sentinel_leak_check '{sandbox_root}' '{snap}' >/dev/null && "
+        'echo "COUNT=${#PGAI_SENTINEL_LEAKS_FOUND[@]}"',
+    )
+    assert "COUNT=0" in found.stdout, found.stdout + found.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("paused by hand for maintenance\n", id="no-provenance-block"),
+        pytest.param("# halt-writer: someone-else\n# halt-reason: not the chain\n", id="non-chain-writer"),
+    ],
+)
+def test_a_halt_added_without_a_chain_writer_or_record_is_still_reported_added(
+    tmp_path: pathlib.Path, sandbox_root: pathlib.Path, body: str
+) -> None:
+    """The leak shape is unchanged: a HALT with neither a chain writer in its
+    body nor a write-log record is a finding, even beside a chain write."""
+    leaked = sandbox_root / "projects" / "beta" / "HALT"
+    chain = sandbox_root / "projects" / _PROJECT / "HALT"
+    snap = _snapshot(tmp_path, sandbox_root)
+    leaked.write_text(body, encoding="utf-8")
+    chain.write_text(_chain_halt_body("cm-release", "cm-release.trigger-5.squash-conflict"), encoding="utf-8")
+
+    result = run_bash(
+        tmp_path,
+        f"source {_LIB} && pgai_sentinel_leak_check '{sandbox_root}' '{snap}'; echo \"RC=$?\"; "
+        'for e in "${PGAI_SENTINEL_LEAKS_FOUND[@]}"; do printf \'FOUND=%s\\n\' "$e"; done',
+    )
+    assert "RC=1" in result.stdout, result.stdout + result.stderr
+    assert f"[pgai-sentinel] ADDED:   {leaked} -- a sentinel the suite left behind" in result.stderr
+    assert "1 sentinel difference(s)" in result.stderr
+    assert f"FOUND=added\t{leaked}\t" in result.stdout
+    assert f"ATTRIBUTED: {chain} -- added during the run by chain writer cm-release" in result.stdout
+
+
+def test_the_kanban_roots_own_halt_is_reported_whatever_its_body_names(
+    tmp_path: pathlib.Path, sandbox_root: pathlib.Path
+) -> None:
+    """The fleet-scoped HALT has only operator writers, so a chain writer
+    named in its body explains nothing: it is still a finding."""
+    halt = sandbox_root / "HALT"
+    snap = _snapshot(tmp_path, sandbox_root)
+    halt.write_text(_chain_halt_body("cm-release", "cm-release.trigger-5.squash-conflict"), encoding="utf-8")
+
+    result = _check(tmp_path, sandbox_root, snap)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"[pgai-sentinel] ADDED:   {halt} -- a sentinel the suite left behind" in result.stderr
+    assert "ATTRIBUTED" not in result.stdout
+
+
+def test_a_record_naming_a_test_outranks_a_chain_writer_body(
+    tmp_path: pathlib.Path, sandbox_root: pathlib.Path
+) -> None:
+    """Record evidence of a test write wins over what the body says: the
+    HALT is reported naming the test that wrote it."""
+    halt = sandbox_root / "projects" / _PROJECT / "HALT"
+    snap = _snapshot(tmp_path, sandbox_root)
+    halt.write_text(_chain_halt_body("cm-release", "cm-release.trigger-5.squash-conflict"), encoding="utf-8")
+    log = sentinel_provenance.log_path(sandbox_root)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        f"time=2026-01-01T00:00:00+00:00\tepoch={int(snap.stat().st_mtime)}\top=halt\tpath={halt}\t"
+        "sha256=-\tentry=fixture\tpid=1\tppid=0\tparent=-\tuser=op\ttest=tests/unit/test_x.py::test_y\n",
+        encoding="utf-8",
+    )
+
+    result = _check(tmp_path, sandbox_root, snap)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"[pgai-sentinel] ADDED:   {halt}" in result.stderr
+    assert "Written by halt under test tests/unit/test_x.py::test_y" in result.stderr
+    assert "ATTRIBUTED" not in result.stdout
 
 
 @pytest.mark.parametrize(

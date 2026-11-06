@@ -308,17 +308,13 @@ def test_four_consecutive_transient_failures_reach_ceiling_and_escalate(
             handle_working_after_exit "{task_id}" "{status_file}" "{agent_log}" 1
         """)
         result = _run(script)
-        assert result.returncode == 0, (
-            f"invocation {i} failed\nstdout={result.stdout}\nstderr={result.stderr}"
-        )
-        assert result.stdout.strip().splitlines()[-1] == "BLOCKED", (
-            f"invocation {i}: expected final_state BLOCKED on stdout, got: {result.stdout!r}"
-        )
+        assert result.returncode == 0, f"invocation {i} failed\nstdout={result.stdout}\nstderr={result.stderr}"
+        assert (
+            result.stdout.strip().splitlines()[-1] == "BLOCKED"
+        ), f"invocation {i}: expected final_state BLOCKED on stdout, got: {result.stdout!r}"
 
         status_text = _read(status_file)
-        assert _field(status_text, "State") == "BLOCKED", (
-            f"invocation {i}: State should be BLOCKED\n{status_text}"
-        )
+        assert _field(status_text, "State") == "BLOCKED", f"invocation {i}: State should be BLOCKED\n{status_text}"
         assert "[B]" in backlog_file.read_text(encoding="utf-8"), (
             f"invocation {i}: queue marker should read [B] alongside ## State=BLOCKED\n"
             f"{backlog_file.read_text(encoding='utf-8')}"
@@ -329,9 +325,12 @@ def test_four_consecutive_transient_failures_reach_ceiling_and_escalate(
         observed_needs_human.append(_field(status_text, "Needs Human").lower())
 
     # Monotonic, never resetting: 1, 2, 3, 4.
-    assert observed_counts == [1, 2, 3, 4], (
-        f"retry_count must increase monotonically across invocations, got {observed_counts}"
-    )
+    assert observed_counts == [
+        1,
+        2,
+        3,
+        4,
+    ], f"retry_count must increase monotonically across invocations, got {observed_counts}"
     # Needs Human=no while strictly below the ceiling; yes exactly at the ceiling.
     assert observed_needs_human == ["no", "no", "no", "yes"], (
         f"Needs Human must stay 'no' below the ceiling and flip to 'yes' exactly "
@@ -375,9 +374,9 @@ def test_backlog_promotion_preserves_transient_retry_record(tmp_path: pathlib.Pa
     pre_promotion_text = _read(status_file)
     pre_count = _record_field(pre_promotion_text, "retry_count")
     assert pre_count == "1", f"expected retry_count=1 before promotion\n{pre_promotion_text}"
-    assert _field(pre_promotion_text, "Blocked Reason") != "none", (
-        "Blocked Reason should carry a human-readable narrative before promotion"
-    )
+    assert (
+        _field(pre_promotion_text, "Blocked Reason") != "none"
+    ), "Blocked Reason should carry a human-readable narrative before promotion"
 
     # Reset the queue file to a clean [B] entry, as promote_blocked_to_backlog
     # expects — independent of whatever marker the classification step above
@@ -394,28 +393,28 @@ def test_backlog_promotion_preserves_transient_retry_record(tmp_path: pathlib.Pa
     assert result.returncode == 0, f"promotion failed\nstdout={result.stdout}\nstderr={result.stderr}"
 
     post_promotion_text = _read(status_file)
-    assert _field(post_promotion_text, "State") == "BACKLOG", (
-        f"State should be BACKLOG after promotion\n{post_promotion_text}"
-    )
+    assert (
+        _field(post_promotion_text, "State") == "BACKLOG"
+    ), f"State should be BACKLOG after promotion\n{post_promotion_text}"
     # Blocked Reason IS reset — that is expected, existing behavior.
-    assert _field(post_promotion_text, "Blocked Reason") == "none", (
-        f"Blocked Reason should be reset to none on promotion\n{post_promotion_text}"
-    )
+    assert (
+        _field(post_promotion_text, "Blocked Reason") == "none"
+    ), f"Blocked Reason should be reset to none on promotion\n{post_promotion_text}"
     # But the durable retry record must survive, byte-for-byte on the count.
     post_count = _record_field(post_promotion_text, "retry_count")
     assert post_count == "1", (
         f"Durable ## Transient Retry record must survive BACKLOG promotion; "
         f"expected retry_count=1, got {post_count!r}\n{post_promotion_text}"
     )
-    assert _record_field(post_promotion_text, "reason_code") == "transient_api_error", (
-        f"reason_code should survive promotion unchanged\n{post_promotion_text}"
-    )
+    assert (
+        _record_field(post_promotion_text, "reason_code") == "transient_api_error"
+    ), f"reason_code should survive promotion unchanged\n{post_promotion_text}"
 
     # Confirm the queue marker flip happened too (sanity: real function ran).
     backlog_text = backlog_file.read_text(encoding="utf-8")
-    assert "[ ]" in backlog_text and "[B]" not in backlog_text, (
-        f"Queue marker should flip from [B] to [ ]\n{backlog_text}"
-    )
+    assert (
+        "[ ]" in backlog_text and "[B]" not in backlog_text
+    ), f"Queue marker should flip from [B] to [ ]\n{backlog_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -465,12 +464,12 @@ def test_exactly_at_cap_is_blocked_and_needs_human_no_limbo(tmp_path: pathlib.Pa
 
     status_text = _read(status_file)
     assert _field(status_text, "State") == "BLOCKED", f"State should be BLOCKED\n{status_text}"
-    assert _record_field(status_text, "retry_count") == "3", (
-        f"retry_count should reach exactly the cap (3)\n{status_text}"
-    )
-    assert _field(status_text, "Needs Human").lower() == "yes", (
-        f"Exactly-at-cap must be Needs Human=yes — no limbo state\n{status_text}"
-    )
+    assert (
+        _record_field(status_text, "retry_count") == "3"
+    ), f"retry_count should reach exactly the cap (3)\n{status_text}"
+    assert (
+        _field(status_text, "Needs Human").lower() == "yes"
+    ), f"Exactly-at-cap must be Needs Human=yes — no limbo state\n{status_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -535,9 +534,9 @@ def test_transient_signature_detected_when_tail_window_exceeds_pipe_buffer(
     """)
     result = _run(script)
     assert result.returncode == 0, f"invocation failed\nstderr={result.stderr}"
-    assert result.stdout.strip().splitlines()[-1] == "BLOCKED", (
-        f"expected final_state BLOCKED on stdout, got: {result.stdout!r}"
-    )
+    assert (
+        result.stdout.strip().splitlines()[-1] == "BLOCKED"
+    ), f"expected final_state BLOCKED on stdout, got: {result.stdout!r}"
 
     status_text = _read(status_file)
     assert _field(status_text, "State") == "BLOCKED", f"State should be BLOCKED\n{status_text}"
@@ -546,12 +545,12 @@ def test_transient_signature_detected_when_tail_window_exceeds_pipe_buffer(
         f"increment retry_count to 1 — a dropped detection leaves the durable "
         f"record at 'none' instead\n{status_text}"
     )
-    assert _record_field(status_text, "reason_code") == "transient_api_error", (
-        f"reason_code should be recorded once the signature is detected\n{status_text}"
-    )
-    assert _field(status_text, "Needs Human").lower() == "no", (
-        f"first transient failure (retry 1/4) must stay Needs Human=no\n{status_text}"
-    )
+    assert (
+        _record_field(status_text, "reason_code") == "transient_api_error"
+    ), f"reason_code should be recorded once the signature is detected\n{status_text}"
+    assert (
+        _field(status_text, "Needs Human").lower() == "no"
+    ), f"first transient failure (retry 1/4) must stay Needs Human=no\n{status_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -600,9 +599,9 @@ def test_multibyte_80th_signature_character_is_stored_as_valid_utf8_under_c_loca
     signature = "API Error: 529 " + "x" * 64 + "—tail"
     status_text = _transient_under_c_locale(tmp_path, "CODER-20260101-014-fixture-e", signature)
 
-    assert _record_field(status_text, "last_error") == signature[:80], (
-        f"last_error must be the first 80 characters, em dash whole\n{status_text}"
-    )
+    assert (
+        _record_field(status_text, "last_error") == signature[:80]
+    ), f"last_error must be the first 80 characters, em dash whole\n{status_text}"
     assert f"TRANSIENT API ERROR — {signature[:80]} — safe to retry" in _field(
         status_text, "Blocked Reason"
     ), f"## Blocked Reason must carry the whole 80-character signature\n{status_text}"
@@ -614,9 +613,9 @@ def test_ascii_signature_longer_than_80_characters_is_stored_truncated_to_80(
     signature = "API Error: 503 " + "y" * 120
     status_text = _transient_under_c_locale(tmp_path, "CODER-20260101-015-fixture-e", signature)
 
-    assert _record_field(status_text, "last_error") == signature[:80], (
-        f"an ASCII signature is still capped at exactly 80 characters\n{status_text}"
-    )
+    assert (
+        _record_field(status_text, "last_error") == signature[:80]
+    ), f"an ASCII signature is still capped at exactly 80 characters\n{status_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -637,9 +636,9 @@ def _real_extract_re() -> str:
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0 and result.stdout.strip(), (
-        f"provider_signature_pattern transient --extract failed: {result.stderr}"
-    )
+    assert (
+        result.returncode == 0 and result.stdout.strip()
+    ), f"provider_signature_pattern transient --extract failed: {result.stderr}"
     return result.stdout.strip()
 
 
@@ -679,9 +678,9 @@ def _extract_like_cron(line: str) -> str:
     ],
 )
 def test_extracted_signature_keeps_text_past_the_letter_n(line: str) -> None:
-    assert _extract_like_cron(line) == line, (
-        "the stored signature must be the whole matched line, not cut at the first 'n'"
-    )
+    assert (
+        _extract_like_cron(line) == line
+    ), "the stored signature must be the whole matched line, not cut at the first 'n'"
 
 
 @pytest.mark.skipif(not _SYSTEM_GREP.exists(), reason="/usr/bin/grep is the grep cron runs; absent on this host")

@@ -101,8 +101,8 @@ import shlex
 import subprocess
 import sys
 import time
-from typing import Generator
-from unittest.mock import MagicMock, patch
+from collections.abc import Generator
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -127,7 +127,6 @@ from pgai_agent_kanban.ops import projects as _ops_projects  # noqa: E402
 from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command  # noqa: E402
 from tests.fixtures.binary_guard import require_binary  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Fixture builders
 # ---------------------------------------------------------------------------
@@ -136,9 +135,7 @@ from tests.fixtures.binary_guard import require_binary  # noqa: E402
 def _register_project(root: pathlib.Path, name: str) -> pathlib.Path:
     """Register *name* in a sandbox root's projects.cfg and create its directory."""
     root.mkdir(parents=True, exist_ok=True)
-    (root / "projects.cfg").write_text(
-        f"[project:{name}]\npriority=1\n\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{name}]\npriority=1\n\n", encoding="utf-8")
     project_dir = root / "projects" / name
     project_dir.mkdir(parents=True, exist_ok=True)
     return project_dir
@@ -149,9 +146,7 @@ def _write_lock(root: pathlib.Path, name: str, pid: int) -> pathlib.Path:
     locks = root / "locks"
     locks.mkdir(parents=True, exist_ok=True)
     lock = locks / f"{name}.lock"
-    lock.write_text(
-        f"holder=test-holder\npid={pid}\nop=wake\ntask=none\n", encoding="utf-8"
-    )
+    lock.write_text(f"holder=test-holder\npid={pid}\nop=wake\ntask=none\n", encoding="utf-8")
     return lock
 
 
@@ -216,13 +211,23 @@ def ops_client(sandbox_root: pathlib.Path) -> Generator[TestClient, None, None]:
 
 
 # Routes that call their pgai_agent_kanban.ops function in process.
-_OPS_ROUTES = frozenset({
-    "/operations/halt", "/operations/unhalt", "/operations/halt-after",
-    "/operations/defer", "/operations/undefer",
-    "/operations/set-version-ceiling", "/operations/switch-provider",
-    "/operations/create-project", "/operations/add-project", "/operations/remove-project",
-    "/operations/release-locks", "/operations/cancel-rc", "/operations/unwind-rc",
-})
+_OPS_ROUTES = frozenset(
+    {
+        "/operations/halt",
+        "/operations/unhalt",
+        "/operations/halt-after",
+        "/operations/defer",
+        "/operations/undefer",
+        "/operations/set-version-ceiling",
+        "/operations/switch-provider",
+        "/operations/create-project",
+        "/operations/add-project",
+        "/operations/remove-project",
+        "/operations/release-locks",
+        "/operations/cancel-rc",
+        "/operations/unwind-rc",
+    }
+)
 
 
 _REFUSAL_KEYS = {"error", "message", "remedy"}
@@ -233,9 +238,9 @@ def _assert_dual_channel(body: dict) -> None:
     missing = _REFUSAL_KEYS - set(body)
     assert not missing, f"refusal body is missing {sorted(missing)}: {body!r}"
     for key in _REFUSAL_KEYS:
-        assert isinstance(body[key], str) and body[key].strip(), (
-            f"refusal body key {key!r} must be a non-empty string: {body!r}"
-        )
+        assert (
+            isinstance(body[key], str) and body[key].strip()
+        ), f"refusal body key {key!r} must be a non-empty string: {body!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -301,13 +306,10 @@ class TestColdBuildNow:
                     break
             time.sleep(0.2)
         assert "Verdict: built" in text, (
-            f"backgrounded cold-build-now run never wrote a built verdict to "
-            f"{ledger}; ledger: {text!r}"
+            f"backgrounded cold-build-now run never wrote a built verdict to " f"{ledger}; ledger: {text!r}"
         )
 
-    def test_missing_project_is_refused_dual_channel_and_spawns_nothing(
-        self, client: TestClient
-    ) -> None:
+    def test_missing_project_is_refused_dual_channel_and_spawns_nothing(self, client: TestClient) -> None:
         with patch("subprocess.Popen") as mock_popen, patch("subprocess.run") as mock_run:
             resp = client.post("/operations/cold-build-now", json={})
             mock_popen.assert_not_called()
@@ -324,9 +326,7 @@ class TestColdBuildNow:
 
     def test_dry_run_short_circuits_without_a_subprocess(self, client: TestClient) -> None:
         with patch("subprocess.Popen") as mock_popen:
-            resp = client.post(
-                "/operations/cold-build-now", json={"project": "proj", "dry_run": True}
-            )
+            resp = client.post("/operations/cold-build-now", json={"project": "proj", "dry_run": True})
             mock_popen.assert_not_called()
         assert resp.status_code == 200
         assert "dry-run: would execute cold-build-now.sh --project proj" in resp.json()["stdout"]
@@ -390,9 +390,7 @@ class TestCancelRc:
         self, ops_client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         calls = self._replace_cancel_rc(monkeypatch)
-        resp = ops_client.post(
-            "/operations/cancel-rc", json={"project": "proj", "key": "v1.2.0", "force": True}
-        )
+        resp = ops_client.post("/operations/cancel-rc", json={"project": "proj", "key": "v1.2.0", "force": True})
         assert resp.status_code == 422, resp.text
         assert resp.json()["error"] == "cancel_rc.confirmation_required"
         assert calls == [], "force is not a confirmation; nothing may run without yes"
@@ -412,23 +410,19 @@ class TestCancelRc:
             f"it emitted a house-shape block instead:\n{cli.stderr}"
         )
 
-        resp = client.post(
-            "/operations/cancel-rc", json={"project": "proj", "key": "v1.2.0", "yes": True}
-        )
+        resp = client.post("/operations/cancel-rc", json={"project": "proj", "key": "v1.2.0", "yes": True})
         assert resp.status_code == 500, resp.json()
         body = resp.json()
         _assert_dual_channel(body)
         assert body["exit_code"] == cli.returncode
         assert body["stderr"] == cli.stderr, (
-            "HTTP stderr must be byte-identical to the CLI's own stderr for "
-            "the same arguments."
+            "HTTP stderr must be byte-identical to the CLI's own stderr for " "the same arguments."
         )
         assert body["error"] == "cancel_rc.refused"
         assert body["message"] == cli.stderr.strip()
         assert "cancel-rc.sh --project proj --key v1.2.0" in body["remedy"]
         assert "--yes" not in body["remedy"], (
-            "the fallback remedy must point at the prompting CLI form, never "
-            "a pre-confirmed one"
+            "the fallback remedy must point at the prompting CLI form, never " "a pre-confirmed one"
         )
 
     def test_missing_yes_is_refused_before_anything_runs(
@@ -455,10 +449,7 @@ class TestCancelRc:
             )
             mock_run.assert_not_called()
         assert resp.status_code == 200
-        assert (
-            "dry-run: would execute cancel-rc.sh --project proj --key v1.2.0"
-            in resp.json()["stdout"]
-        )
+        assert "dry-run: would execute cancel-rc.sh --project proj --key v1.2.0" in resp.json()["stdout"]
 
     def test_dry_run_preview_names_force(self, client: TestClient) -> None:
         with patch("subprocess.run") as mock_run:
@@ -504,12 +495,8 @@ class TestReleaseLocks:
         assert body["exit_code"] == 0
         assert "released stale lock repo-wake-proj" in body["stdout"], body
         # Same wording as the CLI, modulo the sandbox path each run named.
-        assert body["stdout"].replace(str(sandbox_root), "ROOT") == cli.stdout.replace(
-            str(cli_root), "ROOT"
-        )
-        assert http_lock.read_text(encoding="utf-8") == "", (
-            "release must swap the lock file for a fresh, empty one"
-        )
+        assert body["stdout"].replace(str(sandbox_root), "ROOT") == cli.stdout.replace(str(cli_root), "ROOT")
+        assert http_lock.read_text(encoding="utf-8") == "", "release must swap the lock file for a fresh, empty one"
 
     def test_not_found_refusal_lifts_the_scripts_dual_channel_block(
         self, ops_client: TestClient, sandbox_root: pathlib.Path
@@ -570,23 +557,17 @@ class TestReleaseLocks:
             while not ready.exists() and time.time() < deadline:
                 time.sleep(0.05)
             assert ready.exists(), "the holder never acquired the lock"
-            forced = ops_client.post(
-                "/operations/release-locks", json={"release": "repo-wake-proj", "force": True}
-            )
+            forced = ops_client.post("/operations/release-locks", json={"release": "repo-wake-proj", "force": True})
             assert forced.status_code == 200, forced.json()
             assert f"sent SIGTERM to live holder pid {holder.pid}" in forced.json()["stdout"]
             holder.wait(timeout=5)
-            assert not lock.exists(), (
-                "the holder's own release removes the file; the verb must never swap it"
-            )
+            assert not lock.exists(), "the holder's own release removes the file; the verb must never swap it"
         finally:
             if holder.poll() is None:
                 holder.kill()
                 holder.wait(timeout=5)
 
-    def test_missing_release_is_refused_dual_channel_and_spawns_nothing(
-        self, client: TestClient
-    ) -> None:
+    def test_missing_release_is_refused_dual_channel_and_spawns_nothing(self, client: TestClient) -> None:
         with patch("subprocess.run") as mock_run:
             resp = client.post("/operations/release-locks", json={})
             mock_run.assert_not_called()
@@ -600,15 +581,11 @@ class TestReleaseLocks:
         self, ops_client: TestClient, sandbox_root: pathlib.Path
     ) -> None:
         _write_lock(sandbox_root, "repo-wake-proj", _dead_pid())
-        resp = ops_client.post(
-            "/operations/release-locks", json={"release": "repo-wake-proj", "project": "x"}
-        )
+        resp = ops_client.post("/operations/release-locks", json={"release": "repo-wake-proj", "project": "x"})
         assert resp.status_code == 200, resp.json()
         assert resp.json()["warnings"] == ["unknown field: project"]
 
-    def test_listing_get_still_refuses_release_naming_the_post_twin(
-        self, client: TestClient
-    ) -> None:
+    def test_listing_get_still_refuses_release_naming_the_post_twin(self, client: TestClient) -> None:
         resp = client.get("/release-locks", params={"release": "repo-wake-proj"})
         assert resp.status_code == 422
         assert "POST /operations/release-locks" in resp.json()["detail"]
@@ -642,8 +619,7 @@ class TestHaltAfterMinimalParameters:
         rest_sentinel = sandbox_root / "projects" / "proj" / "HALT-AFTER"
         assert rest_sentinel.is_file(), "the route answered 200 but armed no HALT-AFTER"
         assert rest_sentinel.read_bytes() == cli_sentinel.read_bytes(), (
-            f"HALT-AFTER content differs: CLI={cli_sentinel.read_bytes()!r} "
-            f"REST={rest_sentinel.read_bytes()!r}"
+            f"HALT-AFTER content differs: CLI={cli_sentinel.read_bytes()!r} " f"REST={rest_sentinel.read_bytes()!r}"
         )
         assert rest_sentinel.read_bytes() == b"rc:v99.0.0\n"
 
@@ -654,9 +630,7 @@ class TestHaltAfterMinimalParameters:
 
         _register_project(sandbox_root, "proj")
         armed: list[str] = []
-        with patch.object(
-            ops_write, "halt_after", side_effect=lambda ctx, project, token: armed.append(token)
-        ):
+        with patch.object(ops_write, "halt_after", side_effect=lambda ctx, project, token: armed.append(token)):
             ops_client.post("/operations/halt-after", json={"project": "proj", "until": "v99.0.0"})
             ops_client.post("/operations/halt-after", json={"project": "proj", "until": "99.0.0"})
             ops_client.post("/operations/halt-after", json={"project": "proj", "key": "coder"})
@@ -677,9 +651,7 @@ class TestHaltAfterMinimalParameters:
         cli_triple = parse_error_contract(cli.stderr)
         assert cli_triple is not None, cli.stderr
 
-        resp = client.post(
-            "/operations/halt-after", json={"project": "proj", "until": "not-a-version"}
-        )
+        resp = client.post("/operations/halt-after", json={"project": "proj", "until": "not-a-version"})
         assert resp.status_code == 422, resp.json()
         body = resp.json()
         _assert_dual_channel(body)
@@ -688,16 +660,10 @@ class TestHaltAfterMinimalParameters:
         assert body["message"] == cli_triple["message"]
         assert body["remedy"] == cli_triple["remedy"]
         assert body["stderr"] == cli.stderr, "HTTP stderr must match the CLI byte-for-byte"
-        assert "--key" not in body["remedy"], (
-            "the fallback remedy must not name a --key the caller never sent"
-        )
-        assert not (sandbox_root / "projects" / "proj" / "HALT-AFTER").exists(), (
-            "a refused arm must write no sentinel"
-        )
+        assert "--key" not in body["remedy"], "the fallback remedy must not name a --key the caller never sent"
+        assert not (sandbox_root / "projects" / "proj" / "HALT-AFTER").exists(), "a refused arm must write no sentinel"
 
-    def test_missing_project_is_refused_dual_channel_and_spawns_nothing(
-        self, client: TestClient
-    ) -> None:
+    def test_missing_project_is_refused_dual_channel_and_spawns_nothing(self, client: TestClient) -> None:
         with patch("subprocess.run") as mock_run:
             resp = client.post("/operations/halt-after", json={"until": "v99.0.0"})
             mock_run.assert_not_called()
@@ -734,9 +700,7 @@ def _route_dependency_names(app, path: str) -> list[str]:
 
 class TestAuthorizationMatchesExistingActionRoutes:
     @pytest.mark.parametrize("path", _NEW_ROUTES)
-    def test_dependency_set_equals_the_existing_action_routes(
-        self, client: TestClient, path: str
-    ) -> None:
+    def test_dependency_set_equals_the_existing_action_routes(self, client: TestClient, path: str) -> None:
         reference = _route_dependency_names(client.app, "/operations/halt")
         assert _route_dependency_names(client.app, path) == reference, (
             f"{path} must carry exactly the dependency set the existing action "
@@ -744,9 +708,7 @@ class TestAuthorizationMatchesExistingActionRoutes:
         )
 
     @pytest.mark.parametrize("path", _NEW_ROUTES)
-    def test_unauthenticated_call_is_treated_like_the_existing_routes(
-        self, client: TestClient, path: str
-    ) -> None:
+    def test_unauthenticated_call_is_treated_like_the_existing_routes(self, client: TestClient, path: str) -> None:
         with patch("subprocess.run"), patch("subprocess.Popen"):
             reference = client.post("/operations/halt", json={})
             resp = client.post(path, json={})
@@ -771,9 +733,7 @@ class TestCensusRowsCarryTheRealTwins:
             ("release-locks", "/operations/release-locks", "ReleaseLocksBody"),
         ],
     )
-    def test_row_names_its_post_twin_and_schema(
-        self, verb_name: str, route: str, body_model: str
-    ) -> None:
+    def test_row_names_its_post_twin_and_schema(self, verb_name: str, route: str, body_model: str) -> None:
         from pgai_agent_kanban.lib.operator_verb_manifest import load_manifest
 
         verb = load_manifest()[verb_name]
@@ -826,7 +786,11 @@ _MISSING_FIELD_REFUSALS = [
     ("/operations/add-project", {}, "add_project.project_required"),
     ("/operations/remove-project", {}, "remove_project.project_required"),
     ("/operations/remove-project", {"project": "proj", "force": True}, "remove_project.confirm_required"),
-    ("/operations/remove-project", {"project": "proj", "force": True, "confirm": "no"}, "remove_project.confirm_mismatch"),
+    (
+        "/operations/remove-project",
+        {"project": "proj", "force": True, "confirm": "no"},
+        "remove_project.confirm_mismatch",
+    ),
     ("/operations/ship-rc", {"project": "proj", "key": "v1.2.3"}, "ship_rc.confirm_required"),
     ("/operations/ship-rc", {"project": "proj", "key": "v1.2.3", "confirm": "no"}, "ship_rc.confirm_mismatch"),
     ("/operations/deep-verify", {}, "deep_verify.project_required"),
@@ -857,14 +821,12 @@ class TestEveryActionRouteRefusesDualChannel:
         assert payload["error"] == error_key, payload
         assert payload["remedy"].startswith("curl "), payload["remedy"]
         assert route in payload["remedy"], payload["remedy"]
-        assert "<" not in payload["remedy"], (
-            f"remedy must be runnable as printed, with no placeholder: {payload['remedy']}"
-        )
+        assert (
+            "<" not in payload["remedy"]
+        ), f"remedy must be runnable as printed, with no placeholder: {payload['remedy']}"
         assert payload["warnings"] == []
 
-    def test_unknown_field_warning_survives_a_missing_field_refusal(
-        self, client: TestClient
-    ) -> None:
+    def test_unknown_field_warning_survives_a_missing_field_refusal(self, client: TestClient) -> None:
         with patch("subprocess.run") as mock_run:
             resp = client.post("/operations/halt", json={"projekt": "proj"})
             mock_run.assert_not_called()
@@ -895,7 +857,9 @@ class TestEveryActionRouteRefusesDualChannel:
             client = ops_client
         _register_project(sandbox_root, "proj")
         cli_args = [f"--{k}" if v is True else f"--{k}={v}" for k, v in body.items()]
-        cli_args = [a for pair in ((f"--{k}", v) for k, v in body.items()) for a in ((pair[0],) if pair[1] is True else pair)]
+        cli_args = [
+            a for pair in ((f"--{k}", v) for k, v in body.items()) for a in ((pair[0],) if pair[1] is True else pair)
+        ]
         cli = _run_cli(_SCRIPTS_DIR / script, cli_args, sandbox_root)
         assert cli.returncode != 0, cli.stdout + cli.stderr
         cli_triple = parse_error_contract(cli.stderr)
@@ -906,9 +870,7 @@ class TestEveryActionRouteRefusesDualChannel:
         assert resp.status_code == 404, resp.json()
         payload = resp.json()
         _assert_dual_channel(payload)
-        assert set(payload) == {
-            "exit_code", "stdout", "stderr", "error", "message", "remedy", "warnings"
-        }, payload
+        assert set(payload) == {"exit_code", "stdout", "stderr", "error", "message", "remedy", "warnings"}, payload
         assert payload["exit_code"] == cli.returncode
         assert payload["stderr"] == cli.stderr, "HTTP stderr must match the CLI byte-for-byte"
         assert payload["error"] == cli_triple["error"]
@@ -953,9 +915,9 @@ class TestEveryActionRouteRefusesDualChannel:
         # The fallback names the installed script under the root this API
         # serves, shell-quoted, so the command runs as printed.
         _, _, command = payload["remedy"].partition("re-run the CLI form: ")
-        assert command == installed_script_command(sandbox_root, "add-project.sh", "--project", "nobody"), (
-            payload["remedy"]
-        )
+        assert command == installed_script_command(sandbox_root, "add-project.sh", "--project", "nobody"), payload[
+            "remedy"
+        ]
         assert shlex.split(command) == [str(sandbox_root / "scripts" / "add-project.sh"), "--project", "nobody"]
         assert "<" not in payload["remedy"]
 
@@ -973,9 +935,7 @@ class TestEveryActionRouteRefusesDualChannel:
         plain = sorted(
             name
             for name, verb in load_manifest().items()
-            if verb.status == "active"
-            and verb.verb_class == "action"
-            and verb.schema_ref != "DualChannelShellEnvelope"
+            if verb.status == "active" and verb.verb_class == "action" and verb.schema_ref != "DualChannelShellEnvelope"
         )
         assert plain == [], f"action rows not declaring DualChannelShellEnvelope: {plain}"
 
@@ -990,9 +950,7 @@ def _diagnostic(body: dict) -> str:
 
 
 def _write_active_rc(project_dir: pathlib.Path, version: str) -> None:
-    (project_dir / "release-state.md").write_text(
-        f"# Release State\n\n## Active RC\n{version}\n", encoding="utf-8"
-    )
+    (project_dir / "release-state.md").write_text(f"# Release State\n\n## Active RC\n{version}\n", encoding="utf-8")
 
 
 class TestRemoveProjectSafetyLadder:
@@ -1008,9 +966,9 @@ class TestRemoveProjectSafetyLadder:
         assert resp.status_code == 200, body
         assert body["exit_code"] == 0, _diagnostic(body)
         assert "[project:proj]" not in (sandbox_root / "projects.cfg").read_text(encoding="utf-8")
-        assert (project_dir / "README.md").is_file(), (
-            "the default call must be the safe mode: unregister only, directory untouched"
-        )
+        assert (
+            project_dir / "README.md"
+        ).is_file(), "the default call must be the safe mode: unregister only, directory untouched"
         assert "directory will be left in place" in body["stdout"], _diagnostic(body)
 
     def test_default_call_passes_no_force(self, ops_client: TestClient) -> None:
@@ -1064,9 +1022,9 @@ class TestRemoveProjectSafetyLadder:
         assert "remove-project.sh --project proj" in body["remedy"]
         assert "<" not in body["remedy"]
         assert cli.stdout == "" and body["stdout"] == ""
-        assert (sandbox_root / "projects.cfg").read_text(encoding="utf-8") == registry, (
-            "a refused call must leave the registration in place"
-        )
+        assert (sandbox_root / "projects.cfg").read_text(
+            encoding="utf-8"
+        ) == registry, "a refused call must leave the registration in place"
         assert (project_dir / "README.md").is_file(), "a refused call must leave the directory"
 
     def test_invalid_active_rc_field_is_refused_in_both_modes(
@@ -1087,13 +1045,9 @@ class TestRemoveProjectSafetyLadder:
         assert project_dir.is_dir()
         assert "[project:proj]" in (sandbox_root / "projects.cfg").read_text(encoding="utf-8")
 
-    def test_force_without_confirm_is_refused_before_any_subprocess(
-        self, client: TestClient
-    ) -> None:
+    def test_force_without_confirm_is_refused_before_any_subprocess(self, client: TestClient) -> None:
         with patch("subprocess.run") as mock_run:
-            resp = client.post(
-                "/operations/remove-project", json={"project": "proj", "force": True}
-            )
+            resp = client.post("/operations/remove-project", json={"project": "proj", "force": True})
             mock_run.assert_not_called()
         assert resp.status_code == 422, resp.text
         body = resp.json()
@@ -1117,9 +1071,7 @@ class TestRemoveProjectSafetyLadder:
         ],
         ids=["trailing-space", "leading-space", "case-folded", "other-project", "no-project", "yes"],
     )
-    def test_force_with_wrong_confirm_is_refused_before_any_subprocess(
-        self, client: TestClient, wrong: str
-    ) -> None:
+    def test_force_with_wrong_confirm_is_refused_before_any_subprocess(self, client: TestClient, wrong: str) -> None:
         with patch("subprocess.run") as mock_run:
             resp = client.post(
                 "/operations/remove-project",
@@ -1134,9 +1086,7 @@ class TestRemoveProjectSafetyLadder:
         assert f"got '{wrong}'" in body["message"]
         assert '"confirm": "remove-project proj"' in body["remedy"], body["remedy"]
 
-    def test_force_with_exact_confirm_passes_force_and_no_confirm(
-        self, ops_client: TestClient
-    ) -> None:
+    def test_force_with_exact_confirm_passes_force_and_no_confirm(self, ops_client: TestClient) -> None:
         with patch.object(_ops_projects, "remove_project") as remove:
             resp = ops_client.post(
                 "/operations/remove-project",
@@ -1144,9 +1094,9 @@ class TestRemoveProjectSafetyLadder:
             )
         assert resp.status_code == 200, resp.json()
         remove.assert_called_once()
-        assert remove.call_args.kwargs == {"force": True}, (
-            "confirm is an API-layer gate; remove_project takes no such argument"
-        )
+        assert remove.call_args.kwargs == {
+            "force": True
+        }, "confirm is an API-layer gate; remove_project takes no such argument"
 
     def test_force_with_exact_confirm_runs_the_destructive_mode(
         self, ops_client: TestClient, sandbox_root: pathlib.Path
@@ -1200,14 +1150,9 @@ def _unwind_sandbox(root: pathlib.Path, name: str, active_rc: str) -> pathlib.Pa
     project_dir = _register_project(root, name)
     dev_tree = root / f"{name}-dev-tree"
     dev_tree.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [git, "init", "-q"], cwd=str(dev_tree), capture_output=True, text=True, check=True, timeout=30
-    )
+    subprocess.run([git, "init", "-q"], cwd=str(dev_tree), capture_output=True, text=True, check=True, timeout=30)
     (project_dir / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {name}\n"
-        f"dev_tree_path = {dev_tree}\n"
-        "workflow_type = release\n",
+        "[project]\n" f"project_name = {name}\n" f"dev_tree_path = {dev_tree}\n" "workflow_type = release\n",
         encoding="utf-8",
     )
     (project_dir / "HALT").write_text("", encoding="utf-8")
@@ -1241,9 +1186,7 @@ class TestUnwindRcSafetyLadder:
         monkeypatch.setattr(cm_unwind, "unwind_rc", _fake)
         return calls
 
-    def test_cli_prompt_aborts_on_closed_stdin_and_confirm_flag_answers_it(
-        self, sandbox_root: pathlib.Path
-    ) -> None:
+    def test_cli_prompt_aborts_on_closed_stdin_and_confirm_flag_answers_it(self, sandbox_root: pathlib.Path) -> None:
         _unwind_sandbox(sandbox_root, "proj", "v9.9.9")
         args = ["--project", "proj", "--key", "v9.9.9"]
 
@@ -1256,16 +1199,18 @@ class TestUnwindRcSafetyLadder:
 
         confirmed = _run_cli(_UNWIND_RC_SH, [*args, "--confirm"], sandbox_root)
         assert _UNWIND_PASSED_THE_PROMPT in confirmed.stdout, (
-            "--confirm must carry the run past the prompt over a closed stdin\n"
-            + confirmed.stdout + confirmed.stderr
+            "--confirm must carry the run past the prompt over a closed stdin\n" + confirmed.stdout + confirmed.stderr
         )
         assert "--confirm (confirmation prompt answered non-interactively)" in confirmed.stdout
         assert "ERROR: Active RC mismatch." not in confirmed.stderr
 
     @pytest.mark.parametrize("confirm", [True, "unwind-rc proj v1.2.0"], ids=["true", "typed-phrase"])
     def test_confirm_reaches_unwind_rc_confirmed_without_force(
-        self, ops_client: TestClient, sandbox_root: pathlib.Path,
-        monkeypatch: pytest.MonkeyPatch, confirm,
+        self,
+        ops_client: TestClient,
+        sandbox_root: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
+        confirm,
     ) -> None:
         calls = self._replace_unwind_rc(monkeypatch)
         with patch("subprocess.run") as mock_run:
@@ -1281,7 +1226,10 @@ class TestUnwindRcSafetyLadder:
         assert kwargs["confirm"] is True and kwargs["force"] is False, kwargs
         assert resp.status_code == 200, resp.json()
         assert resp.json() == {
-            "exit_code": 0, "stdout": "Unwind complete.\n", "stderr": "", "warnings": [],
+            "exit_code": 0,
+            "stdout": "Unwind complete.\n",
+            "stderr": "",
+            "warnings": [],
         }
 
     def test_force_reaches_unwind_rc_as_its_own_argument(
@@ -1364,17 +1312,14 @@ class TestUnwindRcSafetyLadder:
             "dry-run: would execute unwind-rc.sh --project proj --key v1.2.0 --confirm"
         ), payload
         assert "--dry-run" not in payload["stdout"], (
-            "the route's dry_run is the API-layer short-circuit; it is not the "
-            "CLI's --dry-run plan"
+            "the route's dry_run is the API-layer short-circuit; it is not the " "CLI's --dry-run plan"
         )
 
     def test_confirmed_call_still_hits_the_scripts_active_rc_mismatch_check(
         self, ops_client: TestClient, sandbox_root: pathlib.Path
     ) -> None:
         _unwind_sandbox(sandbox_root, "proj", "v9.9.9")
-        cli = _run_cli(
-            _UNWIND_RC_SH, ["--project", "proj", "--key", "v1.0.0", "--confirm"], sandbox_root
-        )
+        cli = _run_cli(_UNWIND_RC_SH, ["--project", "proj", "--key", "v1.0.0", "--confirm"], sandbox_root)
         assert cli.returncode == 1, cli.stdout + cli.stderr
         assert "ERROR: Active RC mismatch." in cli.stderr, cli.stderr
 
@@ -1423,9 +1368,7 @@ class TestUnwindRcSafetyLadder:
         )
 
         body = resp.json()
-        assert "WARNING: Active RC mismatch (--force bypassing check)." in body["stderr"], (
-            _diagnostic(body)
-        )
+        assert "WARNING: Active RC mismatch (--force bypassing check)." in body["stderr"], _diagnostic(body)
         assert "ERROR: Active RC mismatch." not in body["stderr"]
         assert _UNWIND_PASSED_THE_PROMPT in body["stdout"], _diagnostic(body)
 

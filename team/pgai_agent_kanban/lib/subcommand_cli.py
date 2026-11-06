@@ -22,14 +22,14 @@ Public API:
 from __future__ import annotations
 
 import argparse
-from typing import Callable, Optional
+from collections.abc import Callable
 
 __all__ = ["subcommand_main"]
 
 
 def subcommand_main(
     build_parser: Callable[[], argparse.ArgumentParser],
-) -> Callable[[Optional[list]], int]:
+) -> Callable[[list | None], int]:
     """Return a ``main(argv=None) -> int`` that parses *argv* with a parser
     from *build_parser* and returns what the chosen verb's ``func`` returns.
 
@@ -37,7 +37,7 @@ def subcommand_main(
     a fresh parser.
     """
 
-    def main(argv: Optional[list] = None) -> int:
+    def main(argv: list | None = None) -> int:
         """Command-line entry point; see the module docstring."""
         args = build_parser().parse_args(argv)
         return args.func(args)

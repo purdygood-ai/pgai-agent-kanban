@@ -51,7 +51,6 @@ import datetime
 import json
 import pathlib
 import sys
-from typing import Optional
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path: put the package root this file sits in first,
@@ -77,7 +76,7 @@ __all__ = [
 RECORDED_AT_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
-def as_int(raw: Optional[str]) -> Optional[int]:
+def as_int(raw: str | None) -> int | None:
     """Return *raw* as an int when, stripped, it is all digits; otherwise None.
 
     An empty or None *raw*, a sign, a decimal point or any other character
@@ -95,7 +94,7 @@ def dispatch_record(
     offset_start: str,
     offset_end: str = "",
     exit_code: str = "",
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> dict:
     """Build one ledger record from the wake's string arguments.
 
@@ -104,7 +103,7 @@ def dispatch_record(
     when empty or not all digits (see ``as_int``). ``recorded_at`` is *now*
     (default the current UTC time) in ``RECORDED_AT_FORMAT``.
     """
-    stamp = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
+    stamp = now if now is not None else datetime.datetime.now(datetime.UTC)
     return {
         "recorded_at": stamp.strftime(RECORDED_AT_FORMAT),
         "event": event,
@@ -127,7 +126,7 @@ def append_dispatch_record(ledger: str, record: dict) -> None:
         fh.write(json.dumps(record, sort_keys=True) + "\n")
 
 
-def latest_dispatch_span(ledger: str) -> Optional[tuple]:
+def latest_dispatch_span(ledger: str) -> tuple | None:
     """Return ``(batch_log, offset_start, offset_end)`` of *ledger*'s latest record.
 
     The latest record is the last line that parses as a JSON object with a

@@ -101,6 +101,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="lint-changelog-freshness")
 
+
 # ---------------------------------------------------------------------------
 # Locate lint_changelog_freshness.py and the real CHANGELOG artifact.
 # This file lives at team/tests/unit/test_lint_changelog_freshness.py.
@@ -136,9 +137,7 @@ def _import_lint_module():
     Raises:
         ImportError: if the lint script cannot be loaded.
     """
-    spec = importlib.util.spec_from_file_location(
-        "lint_changelog_freshness", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_changelog_freshness", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -186,9 +185,7 @@ def _scratch_bugs_dir(tmp_path: pathlib.Path) -> pathlib.Path:
     return _scratch_kanban_root(tmp_path) / "projects" / _PROJECT_NAME / "bugs"
 
 
-def _render_scratch_changelog(
-    bugs_dir: pathlib.Path, path: pathlib.Path
-) -> pathlib.Path:
+def _render_scratch_changelog(bugs_dir: pathlib.Path, path: pathlib.Path) -> pathlib.Path:
     """Write the CHANGELOG.md a release render of *bugs_dir* produces to *path*.
 
     Renders the dev tree's release notes and PUBLISHED manifest with
@@ -273,9 +270,7 @@ class TestChangelogFreshnessPositive:
         """Gate subprocess exits 0 for a CHANGELOG.md rendered from its own ledger."""
         _skip_if_published_missing()
         root = _scratch_kanban_root(tmp_path)
-        changelog = _render_scratch_changelog(
-            root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md"
-        )
+        changelog = _render_scratch_changelog(root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md")
 
         result = self._run_gate(root, changelog, rc_mode=True)
 
@@ -294,9 +289,7 @@ class TestChangelogFreshnessPositive:
         """
         _skip_if_published_missing()
         root = _scratch_kanban_root(tmp_path)
-        changelog = _render_scratch_changelog(
-            root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md"
-        )
+        changelog = _render_scratch_changelog(root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md")
 
         result = self._run_gate(root, changelog, rc_mode=True)
 
@@ -353,9 +346,7 @@ class TestChangelogFreshnessPositive:
         """A fresh artifact writes an empty findings array, so "ran clean" is visible."""
         _skip_if_published_missing()
         root = _scratch_kanban_root(tmp_path)
-        changelog = _render_scratch_changelog(
-            root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md"
-        )
+        changelog = _render_scratch_changelog(root / "projects" / _PROJECT_NAME / "bugs", tmp_path / "CHANGELOG.md")
         findings_file = tmp_path / "findings.json"
 
         result = self._run_gate(root, changelog, rc_mode=True, findings_file=findings_file)
@@ -378,9 +369,7 @@ class TestChangelogFreshnessBehavioralNegative:
     not a gate.
     """
 
-    def test_byte_modified_artifact_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_byte_modified_artifact_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """check_freshness() returns False when the artifact has been byte-modified.
 
         The test copies CHANGELOG.md to a scratch file under tmp_path,
@@ -458,9 +447,7 @@ class TestChangelogFreshnessBehavioralNegative:
             "error message so operators know how to fix the staleness."
         )
 
-    def test_missing_artifact_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_missing_artifact_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """check_freshness() returns False when the artifact file does not exist.
 
         An absent artifact is treated as stale — it has not been generated
@@ -567,17 +554,10 @@ class TestChangelogFreshnessRemedyBlock:
 
         err = capsys.readouterr().err
 
-        assert "Cause(s):" in err, (
-            f"Remedy block missing the 'Cause(s):' section.\nstderr: {err!r}"
-        )
-        assert str(scratch) in err, (
-            "Remedy block does not name the actual stale changelog_path.\n"
-            f"stderr: {err!r}"
-        )
+        assert "Cause(s):" in err, f"Remedy block missing the 'Cause(s):' section.\nstderr: {err!r}"
+        assert str(scratch) in err, "Remedy block does not name the actual stale changelog_path.\n" f"stderr: {err!r}"
 
-        assert "To fix:" in err, (
-            f"Remedy block missing the 'To fix:' numbered fix block.\nstderr: {err!r}"
-        )
+        assert "To fix:" in err, f"Remedy block missing the 'To fix:' numbered fix block.\nstderr: {err!r}"
         commands = _NUMBERED_COMMAND_RE.findall(err)
         assert len(commands) >= 2, (
             "Remedy block's numbered fix block has fewer than 2 commands "
@@ -593,15 +573,11 @@ class TestChangelogFreshnessRemedyBlock:
             f"Last command: {last_command_text!r}\nstderr: {err!r}"
         )
         assert str(scratch) in last_command_text, (
-            "Re-lint command does not carry the actual scratch changelog_path.\n"
-            f"Last command: {last_command_text!r}"
+            "Re-lint command does not carry the actual scratch changelog_path.\n" f"Last command: {last_command_text!r}"
         )
 
-        assert (
-            "the writer owns CHANGELOG.md; hand-edits re-trip this gate" in err
-        ), (
-            "Remedy block missing the one-line enforced rule.\n"
-            f"stderr: {err!r}"
+        assert "the writer owns CHANGELOG.md; hand-edits re-trip this gate" in err, (
+            "Remedy block missing the one-line enforced rule.\n" f"stderr: {err!r}"
         )
 
         placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(err)
@@ -637,10 +613,7 @@ class TestChangelogFreshnessRemedyBlock:
 
         err = capsys.readouterr().err
         commands = _NUMBERED_COMMAND_RE.findall(err)
-        assert len(commands) >= 2, (
-            f"Expected at least 2 numbered commands in the remedy block.\n"
-            f"stderr: {err!r}"
-        )
+        assert len(commands) >= 2, f"Expected at least 2 numbered commands in the remedy block.\n" f"stderr: {err!r}"
 
         # Run every printed command in order, verbatim, through a shell (the
         # regenerate command uses '>' redirection and a leading env-var
@@ -675,9 +648,7 @@ class TestChangelogFreshnessRemedyBlock:
 class TestRemedyRegenerateCommand:
     """The printed regenerate command is the writer's release render, verbatim."""
 
-    def test_regenerate_command_is_the_release_render_with_no_placeholder(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_regenerate_command_is_the_release_render_with_no_placeholder(self, tmp_path: pathlib.Path) -> None:
         changelog = tmp_path / "CHANGELOG.md"
         bugs_dir = tmp_path / "bugs"
 
@@ -733,13 +704,9 @@ class TestChangelogFreshnessCliArgparse:
         """
         with pytest.raises(SystemExit) as exc_info:
             _lint.main(["--unknown-argument-xyz"])
-        assert (
-            exc_info.value.code == 2
-        ), f"Expected SystemExit(2) for unknown argument, got {exc_info.value.code}."
+        assert exc_info.value.code == 2, f"Expected SystemExit(2) for unknown argument, got {exc_info.value.code}."
 
-    def test_help_exits_0_without_running_check(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_help_exits_0_without_running_check(self, capsys: pytest.CaptureFixture[str]) -> None:
         """main(['--help']) exits 0 without running the freshness check.
 
         Verifies that --help shows the usage message and exits without
@@ -750,14 +717,11 @@ class TestChangelogFreshnessCliArgparse:
         """
         with pytest.raises(SystemExit) as exc_info:
             _lint.main(["--help"])
-        assert (
-            exc_info.value.code == 0
-        ), f"Expected SystemExit(0) for --help, got {exc_info.value.code}."
+        assert exc_info.value.code == 0, f"Expected SystemExit(0) for --help, got {exc_info.value.code}."
         captured = capsys.readouterr()
         # The help message should mention the script name or usage
         assert "changelog" in captured.out.lower() or "usage" in captured.out.lower(), (
-            f"--help output does not mention 'changelog' or 'usage'.\n"
-            f"stdout: {captured.out!r}"
+            f"--help output does not mention 'changelog' or 'usage'.\n" f"stdout: {captured.out!r}"
         )
 
 
@@ -803,9 +767,7 @@ class TestChangelogContentGates:
         """
         release_note_files = list(_RELEASE_NOTES_DIR.glob("v*.md"))
         expected_count = len(release_note_files)
-        assert (
-            expected_count > 0
-        ), f"No release-notes/v*.md files found under {_RELEASE_NOTES_DIR}"
+        assert expected_count > 0, f"No release-notes/v*.md files found under {_RELEASE_NOTES_DIR}"
 
         content = _CHANGELOG_ARTIFACT.read_text(encoding="utf-8")
         headings = re.findall(r"^## (v\d+\.\d+\.\d+)", content, re.MULTILINE)
@@ -820,17 +782,18 @@ class TestChangelogContentGates:
 
             _refs = _sp.run(
                 [
-                    "git", "-C", str(_DEV_TREE_ROOT),
+                    "git",
+                    "-C",
+                    str(_DEV_TREE_ROOT),
                     "for-each-ref",
-                    "--points-at", "HEAD",
+                    "--points-at",
+                    "HEAD",
                     "--format=%(refname:short)",
                 ],
                 capture_output=True,
                 text=True,
             ).stdout.splitlines()
-            _is_rc_branch = any(
-                re.match(r"^(rc/|ai_rc/)", r.strip()) for r in _refs
-            )
+            _is_rc_branch = any(re.match(r"^(rc/|ai_rc/)", r.strip()) for r in _refs)
             if _is_rc_branch:
                 # Identify versions present in release-notes but absent from CHANGELOG.
                 _heading_versions = set(headings)
@@ -889,7 +852,10 @@ class TestChangelogContentGates:
         published = _changelog_writer.load_published_manifest(_DEV_TREE_ROOT)
 
         content = _changelog_writer.regenerate(
-            _DEV_TREE_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            _DEV_TREE_ROOT,
+            versions,
+            published,
+            _FIXTURE_BUGS_DIR,
             published_changelog=None,  # the fixture ledger is rendered without
             # the live artifact: its published IDs belong to the live ledger
         )
@@ -899,12 +865,8 @@ class TestChangelogContentGates:
         # Extract the v1.0.0 entry (from its "## v1.0.0" heading line to the
         # next "## v" heading or end of file). Anchored to a line start: a
         # release-notes bullet may quote "## v1.0.0" mid-line.
-        entry_match = re.search(
-            r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE
-        )
-        assert (
-            entry_match is not None
-        ), f"v1.0.0 entry not found in fixture-regenerated CHANGELOG:\n{content}"
+        entry_match = re.search(r"^## v1\.0\.0(?:\s|$).*?(?=\n## v|\Z)", content, re.DOTALL | re.MULTILINE)
+        assert entry_match is not None, f"v1.0.0 entry not found in fixture-regenerated CHANGELOG:\n{content}"
         entry_text = entry_match.group(0)
 
         assert "KI-1.0.0.1" in entry_text, (
@@ -913,8 +875,7 @@ class TestChangelogContentGates:
             f"under v1.0.0.\nRegenerated entry:\n{entry_text}"
         )
         assert "size missing" in entry_text, (
-            "The tmux 'size missing' symptom is not present in the "
-            f"fixture-regenerated v1.0.0 entry:\n{entry_text}"
+            "The tmux 'size missing' symptom is not present in the " f"fixture-regenerated v1.0.0 entry:\n{entry_text}"
         )
 
 
@@ -992,9 +953,7 @@ fixture and must never appear in the real bug ledger.
 test-fixture
 """
 
-    def _make_temp_bugs_dir(
-        self, source_bugs_dir: pathlib.Path, tmp_path: pathlib.Path
-    ) -> pathlib.Path:
+    def _make_temp_bugs_dir(self, source_bugs_dir: pathlib.Path, tmp_path: pathlib.Path) -> pathlib.Path:
         """Copy source_bugs_dir to a temp location, preserving file contents and mtimes.
 
         The copy must include every record in source_bugs_dir so that
@@ -1022,9 +981,7 @@ test-fixture
                     shutil.copy2(str(bug_file), str(dest))
         return temp_bugs
 
-    def _regenerate_fixture_baseline_changelog(
-        self, tmp_path: pathlib.Path, suffix: str = "baseline"
-    ) -> pathlib.Path:
+    def _regenerate_fixture_baseline_changelog(self, tmp_path: pathlib.Path, suffix: str = "baseline") -> pathlib.Path:
         """Regenerate a scratch CHANGELOG.md from the fixture ledger alone.
 
         This is the "checked-in" side of the RC-tolerance comparison for the
@@ -1053,7 +1010,10 @@ test-fixture
         published = _changelog_writer.load_published_manifest(_DEV_TREE_ROOT)
 
         content = _changelog_writer.regenerate(
-            _DEV_TREE_ROOT, versions, published, _FIXTURE_BUGS_DIR,
+            _DEV_TREE_ROOT,
+            versions,
+            published,
+            _FIXTURE_BUGS_DIR,
             published_changelog=None,  # the fixture ledger is rendered without
             # the live artifact: its published IDs belong to the live ledger
         )
@@ -1122,9 +1082,7 @@ test-fixture
         prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
         os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
         try:
-            with unittest.mock.patch.object(
-                _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
-            ):
+            with unittest.mock.patch.object(_lint, "_current_git_branch", return_value="ai_rc/v1.23.10"):
                 result = _lint.check_freshness(
                     changelog_path=baseline_changelog,
                     bugs_dir=temp_bugs_dir,
@@ -1324,9 +1282,7 @@ test-fixture
         prev_mode = os.environ.get("PGAI_LINT_CHANGELOG_MODE", "")
         os.environ["PGAI_LINT_CHANGELOG_MODE"] = "rc"
         try:
-            with unittest.mock.patch.object(
-                _lint, "_current_git_branch", return_value="ai_rc/v1.23.10"
-            ):
+            with unittest.mock.patch.object(_lint, "_current_git_branch", return_value="ai_rc/v1.23.10"):
                 result = _lint.check_freshness(
                     changelog_path=changelog,
                     bugs_dir=bugs_dir,
@@ -1488,12 +1444,7 @@ class TestWriterMigrationDriftTolerance:
         )
         # The fresh regeneration omits Feature B — a genuine content edit.
         regenerated_without_feature_b = (
-            "## v1.0.0 — 2026-01-01\n"
-            "\n"
-            "### Implemented\n"
-            "- Feature A\n"
-            "\n"
-            "### Known Issues\n"
+            "## v1.0.0 — 2026-01-01\n" "\n" "### Implemented\n" "- Feature A\n" "\n" "### Known Issues\n"
         )
         is_tolerable, clause = _lint._diff_is_rc_tolerable(
             checked_in_with_genuine_removal,
@@ -1507,9 +1458,7 @@ class TestWriterMigrationDriftTolerance:
             f"Clause returned: {clause!r}"
         )
 
-    def test_fail_fast_on_ai_main_overrides_rc_env_var(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fail_fast_on_ai_main_overrides_rc_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_is_rc_mode() returns False on ai_main even when the env var is set to 'rc'.
 
         When PGAI_LINT_CHANGELOG_MODE=rc is set but the current git branch is
@@ -1525,9 +1474,7 @@ class TestWriterMigrationDriftTolerance:
         """
         monkeypatch.setenv("PGAI_LINT_CHANGELOG_MODE", "rc")
         # Patch _current_git_branch at the module level to return 'ai_main'.
-        monkeypatch.setattr(
-            _lint, "_current_git_branch", lambda _root: "ai_main"
-        )
+        monkeypatch.setattr(_lint, "_current_git_branch", lambda _root: "ai_main")
         result = _lint._is_rc_mode()
         assert result is False, (
             "_is_rc_mode() returned True when the branch is 'ai_main' even "
@@ -1536,9 +1483,7 @@ class TestWriterMigrationDriftTolerance:
             "Branch-aware suppression: 'ai_main' does not match rc/* or ai_rc/*."
         )
 
-    def test_rc_mode_active_on_rc_branch_with_env_var(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_rc_mode_active_on_rc_branch_with_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_is_rc_mode() returns True on an ai_rc/* branch when env var is 'rc'.
 
         Complements the fail-fast-on-ai_main test: when both conditions are met
@@ -1546,9 +1491,7 @@ class TestWriterMigrationDriftTolerance:
         This ensures the branch-aware check does not over-suppress RC mode.
         """
         monkeypatch.setenv("PGAI_LINT_CHANGELOG_MODE", "rc")
-        monkeypatch.setattr(
-            _lint, "_current_git_branch", lambda _root: "ai_rc/v1.23.10"
-        )
+        monkeypatch.setattr(_lint, "_current_git_branch", lambda _root: "ai_rc/v1.23.10")
         result = _lint._is_rc_mode()
         assert result is True, (
             "_is_rc_mode() returned False for branch 'ai_rc/v1.23.10' with "
@@ -1557,9 +1500,7 @@ class TestWriterMigrationDriftTolerance:
             "the env var is 'rc' AND the branch matches the rc/* or ai_rc/* prefix."
         )
 
-    def test_rc_mode_inactive_without_env_var_on_rc_branch(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_rc_mode_inactive_without_env_var_on_rc_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_is_rc_mode() returns False when env var is absent, even on an rc/* branch.
 
         If the operator runs the lint without setting
@@ -1568,9 +1509,7 @@ class TestWriterMigrationDriftTolerance:
         invocations.
         """
         monkeypatch.delenv("PGAI_LINT_CHANGELOG_MODE", raising=False)
-        monkeypatch.setattr(
-            _lint, "_current_git_branch", lambda _root: "ai_rc/v1.23.10"
-        )
+        monkeypatch.setattr(_lint, "_current_git_branch", lambda _root: "ai_rc/v1.23.10")
         result = _lint._is_rc_mode()
         assert result is False, (
             "_is_rc_mode() returned True for branch 'ai_rc/v1.23.10' WITHOUT "
@@ -1629,9 +1568,7 @@ class TestResolveBranchPrefixRefusedValue:
     def test_refused_prefix_reads_as_an_unreadable_project_cfg(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, value: str
     ) -> None:
-        monkeypatch.setenv(
-            "PGAI_AGENT_KANBAN_ROOT_PATH", str(self._kanban_root(tmp_path / "none", None))
-        )
+        monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(self._kanban_root(tmp_path / "none", None)))
         unreadable = _lint._resolve_branch_prefix()
 
         monkeypatch.setenv(
@@ -1643,9 +1580,7 @@ class TestResolveBranchPrefixRefusedValue:
         assert refused == unreadable == _lint._DEFAULT_BRANCH_PREFIX
         assert value not in refused
 
-    def test_inline_comment_is_stripped(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_inline_comment_is_stripped(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(
             "PGAI_AGENT_KANBAN_ROOT_PATH",
             str(self._kanban_root(tmp_path, "[project]\nbranch_prefix = zz_  # note\n")),
@@ -1681,8 +1616,7 @@ class TestCurrentGitBranchDetachedHead:
     from sys.modules, so patching 'subprocess.run' intercepts the _sp.run call.
     """
 
-    def _make_run_side_effect(self, symbolic_ref_output, symbolic_ref_rc,
-                              points_at_output, points_at_rc):
+    def _make_run_side_effect(self, symbolic_ref_output, symbolic_ref_rc, points_at_output, points_at_rc):
         """Return a side_effect callable for subprocess.run mock.
 
         The side_effect dispatches on the command list to return the appropriate
@@ -1844,12 +1778,8 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
 
     def test_placeholder_replaced_by_first_new_entry_is_tolerated(self) -> None:
         """A ``None`` under Known Issues replaced by a new-ID KI line is admitted."""
-        regenerated = self._with_known_issues(
-            "KI-1.0.0.1 — symptom text; affects v1.0.0 · open"
-        )
-        is_tolerable, clause = _lint._diff_is_rc_tolerable(
-            self._CHECKED_IN_EMPTY_SECTION, regenerated
-        )
+        regenerated = self._with_known_issues("KI-1.0.0.1 — symptom text; affects v1.0.0 · open")
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(self._CHECKED_IN_EMPTY_SECTION, regenerated)
         assert is_tolerable is True, (
             "_diff_is_rc_tolerable() rejected the one-line replacement of an "
             "empty Known Issues placeholder by a KI entry whose ID the checked-in "
@@ -1869,9 +1799,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
             "KI-1.0.0.1 — first symptom; affects v1.0.0 · open",
             "KI-1.0.0.2 — second symptom; affects v1.0.0 · open",
         )
-        is_tolerable, clause = _lint._diff_is_rc_tolerable(
-            self._CHECKED_IN_EMPTY_SECTION, regenerated
-        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(self._CHECKED_IN_EMPTY_SECTION, regenerated)
         assert is_tolerable is True, (
             "_diff_is_rc_tolerable() rejected a placeholder replaced by two new "
             "KI entries; the first entry replaces the placeholder and the second "
@@ -1898,12 +1826,8 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
 
     def test_placeholder_removed_without_a_replacement_is_rejected(self) -> None:
         """A ``None`` that simply disappears is missing content."""
-        regenerated = self._CHECKED_IN_EMPTY_SECTION.replace(
-            "### Known Issues\nNone\n", "### Known Issues\n"
-        )
-        is_tolerable, clause = _lint._diff_is_rc_tolerable(
-            self._CHECKED_IN_EMPTY_SECTION, regenerated
-        )
+        regenerated = self._CHECKED_IN_EMPTY_SECTION.replace("### Known Issues\nNone\n", "### Known Issues\n")
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(self._CHECKED_IN_EMPTY_SECTION, regenerated)
         assert is_tolerable is False, (
             "_diff_is_rc_tolerable() admitted the removal of a Known Issues "
             "placeholder that nothing replaced.  Only a KI entry standing directly "
@@ -1913,9 +1837,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
     def test_placeholder_replaced_by_prose_is_rejected(self) -> None:
         """Only a KI entry may stand where the placeholder was."""
         regenerated = self._with_known_issues("Nothing to see here")
-        is_tolerable, clause = _lint._diff_is_rc_tolerable(
-            self._CHECKED_IN_EMPTY_SECTION, regenerated
-        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(self._CHECKED_IN_EMPTY_SECTION, regenerated)
         assert is_tolerable is False, (
             "_diff_is_rc_tolerable() admitted a Known Issues placeholder replaced "
             "by a line that is not a KI entry.  That is a hand edit, not a "
@@ -1928,9 +1850,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
             "### Fixed\nNone\n",
             "### Fixed\nKI-1.0.0.1 — symptom text; affects v1.0.0 · open\n",
         )
-        is_tolerable, clause = _lint._diff_is_rc_tolerable(
-            self._CHECKED_IN_EMPTY_SECTION, regenerated
-        )
+        is_tolerable, clause = _lint._diff_is_rc_tolerable(self._CHECKED_IN_EMPTY_SECTION, regenerated)
         assert is_tolerable is False, (
             "_diff_is_rc_tolerable() admitted a ``None`` removed from a Fixed "
             "section.  Fixed lines come from release notes, not the bug ledger, "
@@ -1942,8 +1862,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
     # Known Issues section renders as, and the one-line change a single bug
     # filed against it afterwards produces.
     _FIRST_ENTRY_HEAD = (
-        "# Changelog\n\n---\n\n## v9.9.9 — 2026-01-01\n\n"
-        "### Fixed\n- something\n\n### Known Issues\n"
+        "# Changelog\n\n---\n\n## v9.9.9 — 2026-01-01\n\n" "### Fixed\n- something\n\n### Known Issues\n"
     )
     _FIRST_ENTRY_TAIL = "\n*Details: [release-notes/v9.9.9.md](release-notes/v9.9.9.md)*\n"
     _FIRST_ENTRY_KI = "KI-9.9.9.1 — `x.md`: first bug; affects v9.9.9 · open\n"
@@ -1967,12 +1886,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
     def test_placeholder_replaced_by_entry_then_prose_is_rejected(self) -> None:
         """Every line filling the emptied section must be a KI entry, not just the first."""
         checked_in, _ = self._first_entry_pair()
-        regenerated = (
-            self._FIRST_ENTRY_HEAD
-            + self._FIRST_ENTRY_KI
-            + "Hand-written note\n"
-            + self._FIRST_ENTRY_TAIL
-        )
+        regenerated = self._FIRST_ENTRY_HEAD + self._FIRST_ENTRY_KI + "Hand-written note\n" + self._FIRST_ENTRY_TAIL
         is_tolerable, clause = _lint._diff_is_rc_tolerable(checked_in, regenerated)
         assert is_tolerable is False, (
             "_diff_is_rc_tolerable() admitted a Known Issues placeholder replaced "
@@ -1982,9 +1896,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
 
     def test_placeholder_removed_with_a_second_line_is_rejected(self) -> None:
         """A removal beside the placeholder is not covered by the replacement."""
-        checked_in = (
-            self._FIRST_ENTRY_HEAD + "None\n```\n" + self._FIRST_ENTRY_TAIL
-        )
+        checked_in = self._FIRST_ENTRY_HEAD + "None\n```\n" + self._FIRST_ENTRY_TAIL
         _, regenerated = self._first_entry_pair()
         is_tolerable, clause = _lint._diff_is_rc_tolerable(checked_in, regenerated)
         assert is_tolerable is False, (
@@ -2012,8 +1924,7 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
         changelog_path = tmp_path / "CHANGELOG.md"
         changelog_path.write_text(checked_in, encoding="utf-8")
 
-        def _fake_regenerate(temp_root, bugs_dir, extra_release_notes_dir=None,
-                             published_changelog=None):
+        def _fake_regenerate(temp_root, bugs_dir, extra_release_notes_dir=None, published_changelog=None):
             out = tmp_path / "regenerated.md"
             out.write_text(regenerated, encoding="utf-8")
             return out
@@ -2068,6 +1979,5 @@ class TestEmptyKnownIssuesPlaceholderReplacement:
             f"stderr: {captured.err!r}"
         )
         assert "placeholder" in captured.out, (
-            "RC mode passed but its ok line does not name the placeholder "
-            f"replacement.\nstdout: {captured.out!r}"
+            "RC mode passed but its ok line does not name the placeholder " f"replacement.\nstdout: {captured.out!r}"
         )

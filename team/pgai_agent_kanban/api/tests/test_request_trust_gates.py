@@ -77,15 +77,13 @@ def client(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> TestClien
 
 def _assert_dual_channel(body: dict, expected_error: str) -> None:
     """Assert *body* is the four-key refusal shape under *expected_error*."""
-    assert set(body) == _REFUSAL_KEYS, (
-        f"refusal body must carry exactly {sorted(_REFUSAL_KEYS)}; got {sorted(body)}"
-    )
+    assert set(body) == _REFUSAL_KEYS, f"refusal body must carry exactly {sorted(_REFUSAL_KEYS)}; got {sorted(body)}"
     assert body["error"] == expected_error, f"machine key: {body['error']!r}"
     assert body["message"].strip(), "message must be non-empty"
     assert body["remedy"].startswith("curl "), f"remedy must be a runnable curl line: {body['remedy']!r}"
-    assert "<" not in body["remedy"] and ">" not in body["remedy"], (
-        f"remedy must carry no placeholder: {body['remedy']!r}"
-    )
+    assert (
+        "<" not in body["remedy"] and ">" not in body["remedy"]
+    ), f"remedy must carry no placeholder: {body['remedy']!r}"
     assert body["warnings"] == [], f"no route ran, so warnings must be empty: {body['warnings']!r}"
 
 
@@ -190,8 +188,7 @@ def test_form_post_refused_415_before_any_subprocess(client: TestClient) -> None
     _assert_dual_channel(body, "api.content_type_not_json")
     assert "application/x-www-form-urlencoded" in body["message"]
     assert body["remedy"] == (
-        "curl -sS -X POST http://127.0.0.1/operations/wake-now "
-        "-H 'Content-Type: application/json' -d '{}'"
+        "curl -sS -X POST http://127.0.0.1/operations/wake-now " "-H 'Content-Type: application/json' -d '{}'"
     )
     run.assert_not_called()
 
@@ -208,25 +205,19 @@ def test_post_without_content_type_refused_415(client: TestClient) -> None:
 
 def test_text_plain_post_refused_415(client: TestClient) -> None:
     """text/plain -- the other browser simple-request type -- is refused too."""
-    response = client.post(
-        _MUTATING_ROUTE, content=b'{"agent": "coder"}', headers={"Content-Type": "text/plain"}
-    )
+    response = client.post(_MUTATING_ROUTE, content=b'{"agent": "coder"}', headers={"Content-Type": "text/plain"})
     assert response.status_code == 415, response.text
 
 
 def test_get_route_ignores_content_type(client: TestClient) -> None:
     """The content-type gate never touches a read route."""
-    response = client.get(
-        "/health", headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
+    response = client.get("/health", headers={"Content-Type": "application/x-www-form-urlencoded"})
     assert response.status_code == 200, response.text
 
 
 def test_host_gate_runs_before_content_type_gate(client: TestClient) -> None:
     """A foreign-Host form POST is refused as a Host failure, the outer gate."""
-    response = client.post(
-        _MUTATING_ROUTE, data={"agent": "coder"}, headers={"Host": _FOREIGN_HOST}
-    )
+    response = client.post(_MUTATING_ROUTE, data={"agent": "coder"}, headers={"Host": _FOREIGN_HOST})
     assert response.status_code == 400, response.text
     assert response.json()["error"] == "api.host_not_loopback"
 
@@ -236,9 +227,7 @@ def test_host_gate_runs_before_content_type_gate(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "content_type", ["application/json", "application/json; charset=utf-8", "Application/JSON"]
-)
+@pytest.mark.parametrize("content_type", ["application/json", "application/json; charset=utf-8", "Application/JSON"])
 def test_json_post_reaches_route(client: TestClient, content_type: str) -> None:
     """A JSON POST passes both gates: the route's own 422 proves it was routed.
 
@@ -248,9 +237,7 @@ def test_json_post_reaches_route(client: TestClient, content_type: str) -> None:
     the route, with nothing spawned.
     """
     with patch("pgai_agent_kanban.api.adapter.subprocess.run") as run:
-        response = client.post(
-            "/operations/halt", content=b"{}", headers={"Content-Type": content_type}
-        )
+        response = client.post("/operations/halt", content=b"{}", headers={"Content-Type": content_type})
     assert response.status_code == 422, response.text
     body = response.json()
     assert body["error"] == "halt.project_required", body

@@ -2,7 +2,8 @@
 # queue-pane.sh
 # Pretty-prints the content and recent task statuses for a single agent queue.
 #
-# Designed to run under `watch -n 5 -- queue-pane.sh <queue_name> --project <name>`.
+# Run it by hand for a one-shot render, or keep it refreshing in a pane under
+# `cadence-loop.sh --interval N -- queue-pane.sh <queue_name> --project <name>`.
 #
 # Output includes:
 #   - Queue name header with counts (done / working / waiting / blocked / pending)
@@ -40,10 +41,15 @@
 #   TERM=dumb                           — also disables ANSI colors
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
@@ -89,12 +95,6 @@ _i=0
 while [[ $_i -lt ${#_args[@]} ]]; do
   arg="${_args[$_i]}"
   case "$arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
     --kanban-root)
       _next=$(( _i + 1 ))
       KANBAN_ROOT="${_args[$_next]:-$KANBAN_ROOT}"
@@ -152,7 +152,7 @@ if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
     export PGAI_DASHBOARD_COLOR_BLOCKED="${PGAI_DASHBOARD_COLOR_BLOCKED:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard color_blocked red)}"
     export PGAI_DASHBOARD_COLOR_WAITING="${PGAI_DASHBOARD_COLOR_WAITING:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard color_waiting yellow)}"
     export PGAI_DASHBOARD_COLOR_LABEL="${PGAI_DASHBOARD_COLOR_LABEL:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard color_label cyan)}"
-    DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "${KANBAN_ROOT}/kanban.cfg")"
     export DASHBOARD_ROWS_PER_COLUMN
 fi
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"

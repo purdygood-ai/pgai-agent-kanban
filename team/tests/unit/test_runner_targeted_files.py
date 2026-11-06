@@ -149,18 +149,12 @@ def _write_logging_stub(path: pathlib.Path, name: str, *, exit_code: int = 0) ->
             f"sys.exit({exit_code})\n"
         )
     else:
-        body = (
-            "#!/usr/bin/env bash\n"
-            f"printf '%s\\n' {name!r} >> \"$GATE_LOG\"\n"
-            f"exit {exit_code}\n"
-        )
+        body = "#!/usr/bin/env bash\n" f"printf '%s\\n' {name!r} >> \"$GATE_LOG\"\n" f"exit {exit_code}\n"
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
 
 
-def _build_fixture(
-    tmp_path: pathlib.Path, runner_name: str, *, breakage_fails: bool = False
-) -> pathlib.Path:
+def _build_fixture(tmp_path: pathlib.Path, runner_name: str, *, breakage_fails: bool = False) -> pathlib.Path:
     """Build the throwaway tree; return its team/ directory.
 
     Each runner's test root holds test_named.py (passes) and test_other.py
@@ -183,9 +177,7 @@ def _build_fixture(
     for rel in [config["test_dir"], *config["extra_dirs"]]:
         (team / rel).mkdir(parents=True, exist_ok=True)
     test_dir = team / config["test_dir"]
-    (test_dir / "test_named.py").write_text(
-        "def test_named_passes():\n    assert True\n", encoding="utf-8"
-    )
+    (test_dir / "test_named.py").write_text("def test_named_passes():\n    assert True\n", encoding="utf-8")
     (test_dir / "test_other.py").write_text(
         "def test_other_must_not_be_collected():\n"
         "    assert False, 'collected a file the targeted run did not name'\n",
@@ -273,19 +265,16 @@ def test_targeted_run_collects_only_the_named_file(runner_name: str, tmp_path: p
         "collected too\n" + _describe(result)
     )
     assert "1 passed" in result.stdout, _describe(result)
-    assert "test_other" not in result.stdout, (
-        "pytest output names test_other.py, which the targeted run did not "
-        "name\n" + _describe(result)
-    )
-    assert result.stdout.splitlines()[0] == _HEADER, (
-        f"the first line of a targeted run must be the header {_HEADER!r}\n" + _describe(result)
-    )
+    assert (
+        "test_other" not in result.stdout
+    ), "pytest output names test_other.py, which the targeted run did not " "name\n" + _describe(result)
+    assert (
+        result.stdout.splitlines()[0] == _HEADER
+    ), f"the first line of a targeted run must be the header {_HEADER!r}\n" + _describe(result)
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_writes_its_exit_code_to_the_targeted_exit_file(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_writes_its_exit_code_to_the_targeted_exit_file(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
     exit_file = _exit_file(sandbox, runner_name)
@@ -297,15 +286,13 @@ def test_targeted_run_writes_its_exit_code_to_the_targeted_exit_file(
     failing_rel = f"{_RUNNER_CONFIG[runner_name]['test_dir']}/test_other.py"
     failing = sandbox.run(team, runner_name, "--files", failing_rel)
     assert failing.returncode == 1, _describe(failing)
-    assert exit_file.read_text(encoding="utf-8") == "1\n", (
-        "the targeted exit file must record the failing run's exit code"
-    )
+    assert (
+        exit_file.read_text(encoding="utf-8") == "1\n"
+    ), "the targeted exit file must record the failing run's exit code"
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_leaves_existing_certification_files_untouched(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_leaves_existing_certification_files_untouched(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
     seeded = {}
@@ -325,9 +312,7 @@ def test_targeted_run_leaves_existing_certification_files_untouched(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_creates_no_certification_files_when_absent(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_creates_no_certification_files_when_absent(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
 
@@ -357,11 +342,7 @@ def _green_ledger_file(sandbox: _Sandbox) -> pathlib.Path:
 
 
 def _snapshot_files(root: pathlib.Path) -> dict[pathlib.Path, tuple[bytes, int]]:
-    return {
-        path: (path.read_bytes(), path.stat().st_mtime_ns)
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+    return {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
@@ -376,7 +357,7 @@ def test_help_leaves_findings_file_claim_and_ledger_byte_identical(
     seeds = {
         findings: '{"seed":1}\n',
         pathlib.Path(f"{findings}.runid"): "seeded-run-token\n",
-        _green_ledger_file(sandbox): '{"commit": "seed", "suite": "%s", "exit": 0}\n' % suite,
+        _green_ledger_file(sandbox): f'{{"commit": "seed", "suite": "{suite}", "exit": 0}}\n',
     }
     for path, content in seeds.items():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -389,9 +370,9 @@ def test_help_leaves_findings_file_claim_and_ledger_byte_identical(
 
     assert result.returncode == 0, _describe(result)
     assert "Usage:" in result.stdout, _describe(result)
-    assert "findings file written" not in result.stdout + result.stderr, (
-        "a help invocation must not write the findings file\n" + _describe(result)
-    )
+    assert (
+        "findings file written" not in result.stdout + result.stderr
+    ), "a help invocation must not write the findings file\n" + _describe(result)
     assert sandbox.gates_run() == [], "a help invocation must not run any gate or lint"
     after = _snapshot_files(sandbox.temp_dir)
     for path, (content, mtime_ns) in before.items():
@@ -445,9 +426,7 @@ def test_certification_run_still_runs_quality_lints(runner_name: str, tmp_path: 
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_targeted_run_still_stops_on_breakage_class_failure(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_targeted_run_still_stops_on_breakage_class_failure(runner_name: str, tmp_path: pathlib.Path) -> None:
     team = _build_fixture(tmp_path, runner_name, breakage_fails=True)
     sandbox = _Sandbox(tmp_path)
 
@@ -482,10 +461,7 @@ def test_targeted_refusals_speak_the_dual_channel_contract(
 ) -> None:
     team = _build_fixture(tmp_path, runner_name)
     sandbox = _Sandbox(tmp_path)
-    args = [
-        a.format(test_dir=_RUNNER_CONFIG[runner_name]["test_dir"], named=_named(runner_name))
-        for a in argv
-    ]
+    args = [a.format(test_dir=_RUNNER_CONFIG[runner_name]["test_dir"], named=_named(runner_name)) for a in argv]
 
     result = sandbox.run(team, runner_name, *args)
 
@@ -496,9 +472,9 @@ def test_targeted_refusals_speak_the_dual_channel_contract(
     message = [ln for ln in lines if ln.startswith("message: ")]
     remedy = [ln for ln in lines if ln.startswith("remedy:  ")]
     assert message and message[0].strip() != "message:", _describe(result)
-    assert remedy and f"{runner_name}\" --files " in remedy[0], (
-        "the remedy must be the corrected runner command\n" + _describe(result)
-    )
+    assert (
+        remedy and f'{runner_name}" --files ' in remedy[0]
+    ), "the remedy must be the corrected runner command\n" + _describe(result)
     assert "<" not in remedy[0], "a remedy must carry no angle-bracket placeholder"
     assert sandbox.gates_run() == [], "a refused targeted run must refuse before any gate runs"
     for path in _certification_files(sandbox, runner_name):
@@ -536,9 +512,7 @@ def test_help_documents_files_flag(runner_name: str, tmp_path: pathlib.Path) -> 
 
 def _resolve(team: pathlib.Path, path: str, *roots: str) -> tuple[int, str]:
     script = (
-        'source "$1"; shift; '
-        'out="$(gated_runner_targeted_resolve_path "$@")"; rc=$?; '
-        'printf "%s %s" "$rc" "$out"'
+        'source "$1"; shift; ' 'out="$(gated_runner_targeted_resolve_path "$@")"; rc=$?; ' 'printf "%s %s" "$rc" "$out"'
     )
     result = subprocess.run(
         ["bash", "-c", script, "resolve", str(_SCRIPTS_DIR / "lib" / "gated_runner_lint.sh"), str(team), path, *roots],

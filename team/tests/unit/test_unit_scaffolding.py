@@ -22,7 +22,6 @@ import pathlib
 
 from tests.unit.shell_harness import run_bash
 
-
 # ---------------------------------------------------------------------------
 # Fixture smoke tests
 # ---------------------------------------------------------------------------
@@ -33,16 +32,10 @@ def test_minimal_kanban_root_contains_release_state_file(
 ) -> None:
     """minimal_kanban_root fixture creates a release-state.md with idle state."""
     release_state = minimal_kanban_root / "release-state.md"
-    assert release_state.exists(), (
-        "minimal_kanban_root must create release-state.md in the root"
-    )
+    assert release_state.exists(), "minimal_kanban_root must create release-state.md in the root"
     content = release_state.read_text(encoding="utf-8")
-    assert "Active RC" in content, (
-        "release-state.md must contain an 'Active RC' field"
-    )
-    assert "none" in content, (
-        "Fresh synthetic kanban root must have Active RC: none"
-    )
+    assert "Active RC" in content, "release-state.md must contain an 'Active RC' field"
+    assert "none" in content, "Fresh synthetic kanban root must have Active RC: none"
 
 
 def test_installed_root_has_no_team_shim_directory(
@@ -66,13 +59,9 @@ def test_installed_root_contains_workflow_definitions(
 ) -> None:
     """installed_root fixture provides workflow plugin directories under workflows/."""
     workflows_dir = installed_root / "workflows"
-    assert workflows_dir.is_dir(), (
-        "installed_root must contain a workflows/ directory"
-    )
+    assert workflows_dir.is_dir(), "installed_root must contain a workflows/ directory"
     release_pipeline = workflows_dir / "release" / "pipeline.yaml"
-    assert release_pipeline.exists(), (
-        "installed_root/workflows/release/pipeline.yaml must exist (copied from dev tree)"
-    )
+    assert release_pipeline.exists(), "installed_root/workflows/release/pipeline.yaml must exist (copied from dev tree)"
 
 
 def test_two_project_root_isolates_projects_from_each_other(
@@ -98,9 +87,7 @@ def test_two_project_root_isolates_projects_from_each_other(
 
     # project-b's state must be unchanged.
     b_content = project_b_state.read_text(encoding="utf-8")
-    assert "rc/v9.9.9" not in b_content, (
-        "Mutating project-a's release state must not affect project-b's state"
-    )
+    assert "rc/v9.9.9" not in b_content, "Mutating project-a's release state must not affect project-b's state"
 
 
 # ---------------------------------------------------------------------------
@@ -113,12 +100,8 @@ def test_shell_harness_captures_stdout_and_exit_zero(
 ) -> None:
     """run_bash captures stdout and reports exit code 0 for a successful script."""
     result = run_bash(tmp_path, "echo 'hello from bash'")
-    assert result.returncode == 0, (
-        f"Simple echo script must exit 0; got {result.returncode}\nstderr: {result.stderr}"
-    )
-    assert "hello from bash" in result.stdout, (
-        f"stdout must contain the echoed string; got: {result.stdout!r}"
-    )
+    assert result.returncode == 0, f"Simple echo script must exit 0; got {result.returncode}\nstderr: {result.stderr}"
+    assert "hello from bash" in result.stdout, f"stdout must contain the echoed string; got: {result.stdout!r}"
 
 
 def test_shell_harness_captures_nonzero_exit_code(
@@ -126,9 +109,7 @@ def test_shell_harness_captures_nonzero_exit_code(
 ) -> None:
     """run_bash captures the exit code from a failing script."""
     result = run_bash(tmp_path, "exit 42")
-    assert result.returncode == 42, (
-        f"exit 42 must produce returncode 42; got {result.returncode}"
-    )
+    assert result.returncode == 42, f"exit 42 must produce returncode 42; got {result.returncode}"
 
 
 def test_shell_harness_captures_stderr(
@@ -137,13 +118,9 @@ def test_shell_harness_captures_stderr(
     """run_bash captures output written to stderr separately from stdout."""
     result = run_bash(tmp_path, "echo 'to-stderr' >&2")
     assert result.returncode == 0
-    assert "to-stderr" in result.stderr, (
-        f"stderr must contain the message; got: {result.stderr!r}"
-    )
+    assert "to-stderr" in result.stderr, f"stderr must contain the message; got: {result.stderr!r}"
     # stdout should be empty (the message went to stderr only)
-    assert result.stdout.strip() == "", (
-        f"stdout must be empty when output goes to stderr; got: {result.stdout!r}"
-    )
+    assert result.stdout.strip() == "", f"stdout must be empty when output goes to stderr; got: {result.stdout!r}"
 
 
 def test_shell_harness_passes_extra_env_to_subprocess(
@@ -157,8 +134,7 @@ def test_shell_harness_passes_extra_env_to_subprocess(
     )
     assert result.returncode == 0
     assert "scaffolding-check" in result.stdout, (
-        f"extra_env variable must be visible inside the subprocess; "
-        f"got stdout: {result.stdout!r}"
+        f"extra_env variable must be visible inside the subprocess; " f"got stdout: {result.stdout!r}"
     )
 
 
@@ -175,6 +151,5 @@ def test_shell_harness_writes_no_filesystem_artifacts_after_run(
     run_bash(tmp_path, "echo 'no artifacts'")
     contents_after = set(tmp_path.iterdir())
     assert contents_after == contents_before, (
-        f"run_bash must not create files in tmp_path; "
-        f"new entries: {contents_after - contents_before}"
+        f"run_bash must not create files in tmp_path; " f"new entries: {contents_after - contents_before}"
     )

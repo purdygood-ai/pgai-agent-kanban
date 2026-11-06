@@ -57,7 +57,7 @@ import dataclasses
 import os
 import pathlib
 import re
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from pgai_agent_kanban.dashboard.column_render import board_gather
 from pgai_agent_kanban.dashboard.column_render.cells import NEEDS_OPERATOR_PALETTE_KEY, Palette
@@ -158,9 +158,9 @@ def read_deferral_glyphs(path: pathlib.Path = STATUS_GLYPHS_FILE) -> tuple:
 
 
 def resolve_pane_settings(
-    kanban_root: "pathlib.Path | str",
+    kanban_root: pathlib.Path | str,
     subcommand: str,
-    environ: Optional[Mapping[str, str]] = None,
+    environ: Mapping[str, str] | None = None,
 ) -> PaneSettings:
     """Resolve a board column's render settings as the script's board path does.
 
@@ -189,11 +189,11 @@ def resolve_pane_settings(
 
 
 def render_board_pane(
-    kanban_root: "pathlib.Path | str",
+    kanban_root: pathlib.Path | str,
     *,
     subcommand: str,
     column_type: str,
-    environ: Optional[Mapping[str, str]] = None,
+    environ: Mapping[str, str] | None = None,
 ) -> list:
     """Return the lines of the mixed-project *column_type* column for *kanban_root*.
 

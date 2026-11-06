@@ -92,7 +92,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 # The router scan lives in lint_api_route_impl.py beside this file; it is
 # imported, never copied.
@@ -194,7 +194,7 @@ class DocIndex(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def route_pattern(path: str) -> "re.Pattern[str]":
+def route_pattern(path: str) -> re.Pattern[str]:
     """Full-match pattern for *path* with every ``{param}`` as a one-segment wildcard.
 
     A ``{param:path}`` parameter matches one or more segments.
@@ -202,14 +202,14 @@ def route_pattern(path: str) -> "re.Pattern[str]":
     out: list[str] = []
     pos = 0
     for match in _PARAM_RE.finditer(path):
-        out.append(re.escape(path[pos:match.start()]))
+        out.append(re.escape(path[pos : match.start()]))
         out.append(".+" if match.group(2) else "[^/]+")
         pos = match.end()
     out.append(re.escape(path[pos:]))
     return re.compile("".join(out))
 
 
-def _matches(route: Route, method: Optional[str], doc_path: str) -> bool:
+def _matches(route: Route, method: str | None, doc_path: str) -> bool:
     if method is not None and method != route.method:
         return False
     return bool(route_pattern(route.path).fullmatch(doc_path.rstrip("/") or "/"))
@@ -239,19 +239,22 @@ def scan_app_routes(team_dir: Path, root: Path) -> tuple[list[Route], list[Findi
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         except (OSError, SyntaxError) as exc:
-            findings.append(Finding(
-                "parse-error", "", rel, 0,
-                f"{rel} could not be parsed ({exc}); its routes were not checked",
-                f"python3 -m py_compile {rel}",
-            ))
+            findings.append(
+                Finding(
+                    "parse-error",
+                    "",
+                    rel,
+                    0,
+                    f"{rel} could not be parsed ({exc}); its routes were not checked",
+                    f"python3 -m py_compile {rel}",
+                )
+            )
             continue
         prefix = _route_scan._router_prefix(tree)
         declared: list[tuple[str, str, int]] = []
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                declared.extend(
-                    (method, sub, node.lineno) for method, sub in _route_scan._route_decorations(node)
-                )
+                declared.extend((method, sub, node.lineno) for method, sub in _route_scan._route_decorations(node))
         declared.extend(_route_scan.route_registration_calls(tree))
         for method, sub, line in declared:
             key = (method, prefix + sub)
@@ -280,7 +283,7 @@ def _strip_generated(lines: list[str]) -> list[str]:
     return out
 
 
-def _doc_route(span: "re.Match[str]", line: int) -> DocRoute:
+def _doc_route(span: re.Match[str], line: int) -> DocRoute:
     path = span.group(2).split("?", 1)[0]
     return DocRoute(span.group(1), path, line)
 
@@ -288,7 +291,7 @@ def _doc_route(span: "re.Match[str]", line: int) -> DocRoute:
 def parse_doc(lines: list[str]) -> DocIndex:
     """Index the routes, curl URLs and "starts a process" list of an operator API document."""
     lines = _strip_generated(lines)
-    endpoint_start: Optional[int] = None
+    endpoint_start: int | None = None
     for index, line in enumerate(lines):
         if _ENDPOINT_SECTION_RE.match(line):
             endpoint_start = index
@@ -401,61 +404,84 @@ def run_checks(root: Path, doc_path: Path, manifest_path: Path, ovm) -> tuple[li
     try:
         lines = doc_path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        findings.append(Finding(
-            "doc-unreadable", "", doc_rel, 0,
-            f"{doc_rel} could not be read ({exc}); no route was checked against it",
-            f"{RUN_COMMAND} --doc {DEFAULT_DOC}",
-        ))
+        findings.append(
+            Finding(
+                "doc-unreadable",
+                "",
+                doc_rel,
+                0,
+                f"{doc_rel} could not be read ({exc}); no route was checked against it",
+                f"{RUN_COMMAND} --doc {DEFAULT_DOC}",
+            )
+        )
         return findings, {"routes": len(routes), "documented": 0, "curl": 0, "listed": 0}
     index = parse_doc(lines)
 
     for route in routes:
         if not any(_matches(route, d.method, d.path) for d in index.documented):
-            findings.append(Finding(
-                "route_table_row_missing", route.label, doc_rel, index.endpoint_line,
-                f"{route.label} ({route.file}:{route.line}) has no row in a hand-written table of "
-                f"{doc_rel}'s Endpoint table section and no heading of its own there; add a row naming "
-                f"`{route.label}`, its CLI twin and its parameters",
-                _edit_remedy(doc_rel, index.endpoint_line),
-            ))
+            findings.append(
+                Finding(
+                    "route_table_row_missing",
+                    route.label,
+                    doc_rel,
+                    index.endpoint_line,
+                    f"{route.label} ({route.file}:{route.line}) has no row in a hand-written table of "
+                    f"{doc_rel}'s Endpoint table section and no heading of its own there; add a row naming "
+                    f"`{route.label}`, its CLI twin and its parameters",
+                    _edit_remedy(doc_rel, index.endpoint_line),
+                )
+            )
         if not any(_matches(route, None, path) for path, _line in index.curl_paths):
-            findings.append(Finding(
-                "route_curl_missing", route.label, doc_rel, index.curl_line,
-                f"{route.label} ({route.file}:{route.line}) has no curl example in {doc_rel} whose URL "
-                f"matches {route.path} (path parameters as wildcards); add one runnable curl line",
-                _edit_remedy(doc_rel, index.curl_line),
-            ))
+            findings.append(
+                Finding(
+                    "route_curl_missing",
+                    route.label,
+                    doc_rel,
+                    index.curl_line,
+                    f"{route.label} ({route.file}:{route.line}) has no curl example in {doc_rel} whose URL "
+                    f"matches {route.path} (path parameters as wildcards); add one runnable curl line",
+                    _edit_remedy(doc_rel, index.curl_line),
+                )
+            )
 
     verbs: dict = {}
     manifest_rel = _route_scan._rel(manifest_path, root)
     try:
         verbs = ovm.load_manifest(manifest_path)
     except (FileNotFoundError, ovm.ManifestFormatError) as exc:
-        findings.append(Finding(
-            "manifest-unreadable", "", manifest_rel, 0,
-            f"{manifest_rel} could not be read ({exc}); the starts-a-process list was not checked",
-            "python3 team/scripts/lint_operator_verb_manifest.py",
-        ))
+        findings.append(
+            Finding(
+                "manifest-unreadable",
+                "",
+                manifest_rel,
+                0,
+                f"{manifest_rel} could not be read ({exc}); the starts-a-process list was not checked",
+                "python3 team/scripts/lint_operator_verb_manifest.py",
+            )
+        )
     if verbs:
         shell, _in_process = process_routes(routes, verbs, ovm)
         list_line = index.process_list[0].line if index.process_list else index.endpoint_line
-        listed: list[tuple[DocRoute, Optional[tuple[str, str]]]] = []
+        listed: list[tuple[DocRoute, tuple[str, str] | None]] = []
         for doc_route in index.process_list:
-            match = next(
-                ((r.method, r.path) for r in routes if _matches(r, doc_route.method, doc_route.path)), None
-            )
+            match = next(((r.method, r.path) for r in routes if _matches(r, doc_route.method, doc_route.path)), None)
             listed.append((doc_route, match))
         listed_keys = {match for _d, match in listed if match is not None}
         for method, path in sorted(shell, key=lambda k: (k[1], k[0])):
             if (method, path) not in listed_keys:
                 label = f"{method} {path}"
-                findings.append(Finding(
-                    "process_route_unlisted", label, doc_rel, list_line,
-                    f"{label} starts a process (impl shell in {manifest_rel}, or the dashboard pane "
-                    f"route) but {doc_rel}'s starts-a-process list in the Endpoint table introduction "
-                    "does not name it",
-                    _edit_remedy(doc_rel, list_line),
-                ))
+                findings.append(
+                    Finding(
+                        "process_route_unlisted",
+                        label,
+                        doc_rel,
+                        list_line,
+                        f"{label} starts a process (impl shell in {manifest_rel}, or the dashboard pane "
+                        f"route) but {doc_rel}'s starts-a-process list in the Endpoint table introduction "
+                        "does not name it",
+                        _edit_remedy(doc_rel, list_line),
+                    )
+                )
         for doc_route, match in listed:
             label = f"{doc_route.method} {doc_route.path}"
             if match is None:
@@ -464,12 +490,17 @@ def run_checks(root: Path, doc_path: Path, manifest_path: Path, ovm) -> tuple[li
                 why = f"its census row in {manifest_rel} is not impl shell, so it runs in process"
             else:
                 continue
-            findings.append(Finding(
-                "process_route_not_shell", label, doc_rel, doc_route.line,
-                f"{doc_rel}:{doc_route.line} lists {label} as starting a process, but {why}; "
-                "remove it from the list",
-                _edit_remedy(doc_rel, doc_route.line),
-            ))
+            findings.append(
+                Finding(
+                    "process_route_not_shell",
+                    label,
+                    doc_rel,
+                    doc_route.line,
+                    f"{doc_rel}:{doc_route.line} lists {label} as starting a process, but {why}; "
+                    "remove it from the list",
+                    _edit_remedy(doc_rel, doc_route.line),
+                )
+            )
 
     totals = {
         "routes": len(routes),
@@ -497,16 +528,30 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog="Exit codes:\n  0  Always (findings are narrated, never fatal).\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--doc", metavar="PATH", default=DEFAULT_DOC,
-                        help=f"Operator API reference, relative to --root or absolute (default: {DEFAULT_DOC}).")
-    parser.add_argument("--manifest", metavar="PATH", default=DEFAULT_MANIFEST,
-                        help=f"Operator verb census, relative to --root or absolute (default: {DEFAULT_MANIFEST}).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write findings as a JSON array to PATH (always written).")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print every route the API declares, documented or not.")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--doc",
+        metavar="PATH",
+        default=DEFAULT_DOC,
+        help=f"Operator API reference, relative to --root or absolute (default: {DEFAULT_DOC}).",
+    )
+    parser.add_argument(
+        "--manifest",
+        metavar="PATH",
+        default=DEFAULT_MANIFEST,
+        help=f"Operator verb census, relative to --root or absolute (default: {DEFAULT_MANIFEST}).",
+    )
+    parser.add_argument(
+        "--findings-file", metavar="PATH", default=None, help="Write findings as a JSON array to PATH (always written)."
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Print every route the API declares, documented or not."
+    )
     return parser
 
 
@@ -515,7 +560,7 @@ def _resolve(root: Path, value: str) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _write_findings(path_str: Optional[str], findings: list[Finding]) -> None:
+def _write_findings(path_str: str | None, findings: list[Finding]) -> None:
     if not path_str:
         return
     path = Path(path_str)
@@ -529,7 +574,7 @@ def _write_findings(path_str: Optional[str], findings: list[Finding]) -> None:
         print(f"lint_{LINT_NAME}: could not write findings file {path}: {exc}", file=sys.stderr)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the lint, printing each finding and writing ``--findings-file``. Always returns 0."""
     args = _build_parser().parse_args(argv)
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent.parent

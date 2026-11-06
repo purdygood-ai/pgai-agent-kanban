@@ -1,8 +1,9 @@
 """
 test_wake_budget_stop_keeps_feature_branch.py
 =============================================
-A task the wake's batch or project clock stops keeps the commits on its
-feature branch when it is dispatched again.
+A task the wake's batch or project clock stops, or one the per-task timeout
+stops after it committed work, keeps the commits on its feature branch when
+it is dispatched again.
 
 The mechanism under test:
 
@@ -11,6 +12,10 @@ The mechanism under test:
     dispatch (wd_record_branch_resume): the Block Record's ``resume`` field
     when the task carries a record, otherwise the wake-owned
     ``## Resume Mode`` section -- never a new Block Record.
+
+  team/scripts/lib/wake_task_budget.sh -- requeue_after_timeout_with_commits
+    returns a task killed at max_task_seconds whose feature branch holds
+    commits to BACKLOG, with its Block Record's resume set to branch.
 
   team/scripts/lib/wake_driver_worktree.sh -- wd_setup_task_worktree, the
     wake prep stage that calls create_task_worktree, reads the Block
@@ -100,8 +105,9 @@ def _dispatched(sb: Sandbox) -> None:
     _git(sb.repo, "worktree", "add", "-q", str(sb.worktree), _FEATURE_BRANCH)
 
 
-def _budget_stop_then_prep(sb: Sandbox, *, budget_stop: bool = True, armed: int = _BUDGET_ARMED,
-                           between: str = "") -> subprocess.CompletedProcess:
+def _budget_stop_then_prep(
+    sb: Sandbox, *, budget_stop: bool = True, armed: int = _BUDGET_ARMED, between: str = ""
+) -> subprocess.CompletedProcess:
     """Run the budget stop (and the finalize teardown after it), then *between*
     (bash), then the next dispatch's worktree stage. TEAM_ROOT under tmp_path
     makes the stage skip dev-tree parking."""
@@ -113,7 +119,8 @@ def _budget_stop_then_prep(sb: Sandbox, *, budget_stop: bool = True, armed: int 
         fi
         teardown_task_worktree "$task_id" '{sb.repo}' >/dev/null 2>&1 || true
         """) if budget_stop else ""
-    script = textwrap.dedent(f"""\
+    script = (
+        textwrap.dedent(f"""\
         set -uo pipefail
         cd '{_TEAM_DIR}'
         export LOG_FILE='{sb.root}/wake.log'
@@ -140,11 +147,15 @@ def _budget_stop_then_prep(sb: Sandbox, *, budget_stop: bool = True, armed: int 
         _update_readme_feature_branch() {{ :; }}
         wf_load_plugin() {{ return 0; }}
         wf_git_mode() {{ echo branch; }}
-        """) + stop + between + textwrap.dedent("""\
+        """)
+        + stop
+        + between
+        + textwrap.dedent("""\
         set -e
         wd_setup_task_worktree
         printf 'FINAL=[%s]\\nPATH_OUT=[%s]\\n' "$LAST_TASK_FINAL_STATE" "$_task_worktree_path"
         """)
+    )
     # The trace records only the calls made by the code under test.
     sb.trace.write_text("", encoding="utf-8")
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=180, env=_env(sb))
@@ -208,13 +219,65 @@ def test_a_block_written_after_the_budget_stop_decides_the_next_resume_mode(tmp_
     _dispatched(sb)
     # After the stop, a later dispatch blocks and its record says resume: fresh:
     # the record, not the earlier ## Resume Mode section, decides.
-    between = "block_record_write \"$task_status\" zero_progress CODER worktree=gone >/dev/null\n"
+    between = 'block_record_write "$task_status" zero_progress CODER worktree=gone >/dev/null\n'
 
     result = _budget_stop_then_prep(sb, between=between)
 
     assert result.returncode == 0 and "FINAL=[]" in result.stdout, _explain(result)
     assert ["-C", str(sb.repo), "branch", "-D", _FEATURE_BRANCH] in _git_calls(sb)
     _assert_branch_recreated_from_rc(sb)
+
+
+# ---------------------------------------------------------------------------
+# A per-task timeout after committed work keeps the branch
+# ---------------------------------------------------------------------------
+
+
+def _timeout_stop() -> str:
+    """Bash for a kill at the full max_task_seconds, resolved the way the
+    finalize stage resolves it, followed by the finalize teardown."""
+    return textwrap.dedent(f"""\
+        ev="$(block_record_evidence --repo "$_canonical_dev_tree_path" --branch '{_FEATURE_BRANCH}' --source '{_RC_BRANCH}')"
+        if requeue_after_timeout_with_commits "$task_id" "$task_status" "$LOG_FILE" {_MAX_TASK} CODER "$ev"; then
+          echo "STOP=requeued"
+        else
+          echo "STOP=per_task_timeout"
+        fi
+        teardown_task_worktree "$task_id" "$_canonical_dev_tree_path" >/dev/null 2>&1 || true
+        """)
+
+
+def test_timeout_after_commits_then_redispatch_attaches_the_feature_branch_at_its_tip(tmp_path: pathlib.Path) -> None:
+    commits = 3
+    sb = _make_sandbox(tmp_path, feature_commits=commits)
+    _dispatched(sb)
+    tip_before = _git(sb.repo, "rev-parse", _FEATURE_BRANCH)
+
+    result = _budget_stop_then_prep(sb, budget_stop=False, between=_timeout_stop())
+
+    assert result.returncode == 0 and "STOP=requeued" in result.stdout, _explain(result)
+    assert "FINAL=[]" in result.stdout and f"PATH_OUT=[{sb.worktree}]" in result.stdout, _explain(result)
+    assert _git(sb.worktree, "rev-parse", "HEAD") == tip_before, "worktree HEAD is not the branch's old tip"
+    assert _git(sb.repo, "rev-list", "--count", f"{_RC_BRANCH}..{_FEATURE_BRANCH}") == str(commits), "commits were lost"
+    _assert_no_branch_delete_or_create(sb)
+    text = sb.status.read_text(encoding="utf-8")
+    assert _section(text, "State") == "BACKLOG" and _section(text, "Needs Human") == "no", text
+    record = load_block_record(sb.status)
+    assert record is not None and (record.reason_code, record.resume) == ("per_task_timeout", "branch"), text
+    assert f"- [ ] {_TASK_ID}" in _queue(sb).read_text(encoding="utf-8")
+
+
+def test_timeout_without_commits_leaves_the_task_to_be_blocked(tmp_path: pathlib.Path) -> None:
+    sb = _make_sandbox(tmp_path, feature_commits=0)
+    _git(sb.repo, "branch", _FEATURE_BRANCH, _RC_BRANCH)
+    _dispatched(sb)
+
+    result = _budget_stop_then_prep(sb, budget_stop=False, between=_timeout_stop())
+
+    assert "STOP=per_task_timeout" in result.stdout, _explain(result)
+    text = sb.status.read_text(encoding="utf-8")
+    assert _section(text, "State") == "WORKING", "the per-task timeout is the caller's to block"
+    assert load_block_record(sb.status) is None, text
 
 
 # ---------------------------------------------------------------------------

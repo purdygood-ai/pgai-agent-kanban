@@ -126,7 +126,6 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Dev-tree root resolution -- each tree finds itself.
@@ -143,6 +142,11 @@ if _team_str not in sys.path:
 
 from pgai_agent_kanban.lib import operator_verb_manifest as ovm  # noqa: E402
 from pgai_agent_kanban.lib.error_contract import emit_error_contract  # noqa: E402
+from pgai_agent_kanban.lib.doc_markers import (  # noqa: E402
+    MarkerNotFoundError,
+    extract_between_markers as _extract_between_markers,
+    replace_between_markers as _replace_between_markers,
+)
 
 _DEFAULT_DOC = _DEV_TREE_ROOT / "docs" / "operator-commands.md"
 _DEFAULT_API_DOC = _DEV_TREE_ROOT / "docs" / "operator-api.md"
@@ -166,9 +170,7 @@ _ICD_REGENERATE_COMMAND = "bash team/scripts/generate-icd.sh"
 # it answers --help; without it each one refuses instead of printing usage.
 _ROOT_ENV_VAR = "PGAI_AGENT_KANBAN_ROOT_PATH"
 # env_bootstrap.sh's refusal, as it reaches a capture's reason (first stderr line).
-_SHELL_ENV_REFUSAL_RE = re.compile(
-    r"PGAI_AGENT_KANBAN_ROOT_PATH\s+not\s+set|shell-env\s+missing", re.IGNORECASE
-)
+_SHELL_ENV_REFUSAL_RE = re.compile(r"PGAI_AGENT_KANBAN_ROOT_PATH\s+not\s+set|shell-env\s+missing", re.IGNORECASE)
 
 
 def _begin_marker(verb_name: str) -> str:
@@ -189,9 +191,7 @@ def section_end_marker(section: str) -> str:
     return f"<!-- {_MARKER_NAMESPACE}:END section={section} -->"
 
 
-_VERB_BEGIN_RE = re.compile(
-    re.escape(f"<!-- {_MARKER_NAMESPACE}:BEGIN verb=") + r"([^\s>]+)\s*-->"
-)
+_VERB_BEGIN_RE = re.compile(re.escape(f"<!-- {_MARKER_NAMESPACE}:BEGIN verb=") + r"([^\s>]+)\s*-->")
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +209,8 @@ class HelpCapture:
     """
 
     ok: bool
-    text: Optional[str]
-    reason: Optional[str]
+    text: str | None
+    reason: str | None
 
 
 def _help_command(verb: ovm.Verb, team_dir: pathlib.Path) -> list[str]:
@@ -220,9 +220,7 @@ def _help_command(verb: ovm.Verb, team_dir: pathlib.Path) -> list[str]:
     return ["bash", str(script_path), "--help"]
 
 
-def capture_help(
-    verb: ovm.Verb, team_dir: pathlib.Path, timeout: float = _DEFAULT_TIMEOUT
-) -> HelpCapture:
+def capture_help(verb: ovm.Verb, team_dir: pathlib.Path, timeout: float = _DEFAULT_TIMEOUT) -> HelpCapture:
     """Invoke *verb*'s own script with --help and return its output.
 
     Never raises: every failure mode (missing script, non-zero exit,
@@ -251,9 +249,7 @@ def capture_help(
     if result.returncode != 0:
         stderr_excerpt = result.stderr.strip().splitlines()[:1]
         detail = stderr_excerpt[0] if stderr_excerpt else "(no stderr)"
-        return HelpCapture(
-            False, None, f"--help exited {result.returncode}: {detail}"
-        )
+        return HelpCapture(False, None, f"--help exited {result.returncode}: {detail}")
 
     # Prefer stdout -- the convention every verb but one follows. One verb
     # (set-version-ceiling.sh) writes its usage text to stderr instead of
@@ -289,7 +285,7 @@ class ShellEnvUnavailableError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
-def _mutates_label(mutates: Optional[bool]) -> str:
+def _mutates_label(mutates: bool | None) -> str:
     if mutates is True:
         return "yes"
     if mutates is False:
@@ -349,17 +345,14 @@ def render_verb_block(verb: ovm.Verb, capture: HelpCapture) -> str:
     return "\n".join(lines)
 
 
-def render_verb_reference_section(
-    active_verbs: list[ovm.Verb], captures: dict[str, HelpCapture]
-) -> str:
+def render_verb_reference_section(active_verbs: list[ovm.Verb], captures: dict[str, HelpCapture]) -> str:
     """Render the whole verb-reference section (section markers inclusive).
 
     One block per active verb in census order, blank-line separated.
     """
     blocks = [render_verb_block(v, captures[v.name]) for v in active_verbs]
     return "\n".join(
-        [section_begin_marker(VERB_REFERENCE_SECTION), "\n\n".join(blocks),
-         section_end_marker(VERB_REFERENCE_SECTION)]
+        [section_begin_marker(VERB_REFERENCE_SECTION), "\n\n".join(blocks), section_end_marker(VERB_REFERENCE_SECTION)]
     )
 
 
@@ -380,7 +373,7 @@ class RouteParameters:
     ok: bool
     names: tuple[str, ...] = ()
     required: frozenset[str] = field(default_factory=frozenset)
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 def load_icd(icd_path: pathlib.Path) -> dict:
@@ -398,7 +391,7 @@ def load_icd(icd_path: pathlib.Path) -> dict:
     return document
 
 
-def _schema_ref_name(schema: dict) -> Optional[str]:
+def _schema_ref_name(schema: dict) -> str | None:
     ref = schema.get("$ref", "")
     return ref.rsplit("/", 1)[-1] if ref else None
 
@@ -425,19 +418,12 @@ def resolve_route_parameters(icd: dict, method: str, route: str) -> RouteParamet
         if parameter.get("required"):
             required.add(name)
 
-    body_schema = (
-        operation.get("requestBody", {})
-        .get("content", {})
-        .get("application/json", {})
-        .get("schema", {})
-    )
+    body_schema = operation.get("requestBody", {}).get("content", {}).get("application/json", {}).get("schema", {})
     model_name = _schema_ref_name(body_schema)
     if model_name is not None:
         model = icd.get("components", {}).get("schemas", {}).get(model_name)
         if model is None:
-            return RouteParameters(
-                False, reason=f"body model {model_name} is not in the ICD's components"
-            )
+            return RouteParameters(False, reason=f"body model {model_name} is not in the ICD's components")
         properties = model.get("properties", {})
         model_required = set(model.get("required", []))
         # Required fields first, then optional, each in the ICD's own
@@ -531,34 +517,6 @@ def render_api_reference_section(active_verbs: list[ovm.Verb], icd: dict) -> str
 # ---------------------------------------------------------------------------
 
 
-class MarkerNotFoundError(ValueError):
-    """A required BEGIN/END marker pair is missing from the target doc."""
-
-
-def _replace_between_markers(
-    content: str, begin_marker: str, end_marker: str, new_inner: str
-) -> str:
-    begin_idx = content.find(begin_marker)
-    if begin_idx == -1:
-        raise MarkerNotFoundError(f"marker not found: {begin_marker!r}")
-    end_idx = content.find(end_marker, begin_idx)
-    if end_idx == -1:
-        raise MarkerNotFoundError(f"marker not found: {end_marker!r}")
-    end_idx += len(end_marker)
-    return content[:begin_idx] + new_inner + content[end_idx:]
-
-
-def _extract_between_markers(content: str, begin_marker: str, end_marker: str) -> str:
-    begin_idx = content.find(begin_marker)
-    if begin_idx == -1:
-        raise MarkerNotFoundError(f"marker not found: {begin_marker!r}")
-    end_idx = content.find(end_marker, begin_idx)
-    if end_idx == -1:
-        raise MarkerNotFoundError(f"marker not found: {end_marker!r}")
-    end_idx += len(end_marker)
-    return content[begin_idx:end_idx]
-
-
 def _replace_section(doc_path: pathlib.Path, content: str, section: str, rendered: str) -> str:
     begin = section_begin_marker(section)
     end = section_end_marker(section)
@@ -595,6 +553,7 @@ class RenderResult:
     rendered), the manifest verbs that are active, and each verb's ``--help``
     capture keyed by verb name.
     """
+
     verb_doc: DocRender
     api_doc: DocRender
     active_verbs: list[ovm.Verb]
@@ -632,13 +591,17 @@ def render_docs(
 
     verb_current = doc_path.read_text(encoding="utf-8")
     verb_rendered = _replace_section(
-        doc_path, verb_current, VERB_REFERENCE_SECTION,
+        doc_path,
+        verb_current,
+        VERB_REFERENCE_SECTION,
         render_verb_reference_section(active_verbs, captures),
     )
 
     api_current = api_doc_path.read_text(encoding="utf-8")
     api_rendered = _replace_section(
-        api_doc_path, api_current, API_REFERENCE_SECTION,
+        api_doc_path,
+        api_current,
+        API_REFERENCE_SECTION,
         render_api_reference_section(active_verbs, icd),
     )
 
@@ -675,8 +638,7 @@ def _verb_reference_disagreements(doc: DocRender, active_verbs: list[ovm.Verb]) 
             current_block = _extract_between_markers(current_section, begin, end)
         except MarkerNotFoundError:
             disagreements.append(
-                f"verb={verb.name!r} has no block in {doc.path} (census row "
-                "present, section not regenerated)"
+                f"verb={verb.name!r} has no block in {doc.path} (census row " "present, section not regenerated)"
             )
             continue
         if current_block != rendered_block:
@@ -686,13 +648,9 @@ def _verb_reference_disagreements(doc: DocRender, active_verbs: list[ovm.Verb]) 
             )
     for stale in _VERB_BEGIN_RE.findall(current_section):
         if stale not in active_names:
-            disagreements.append(
-                f"verb={stale!r} has a block in {doc.path} but no active census row"
-            )
+            disagreements.append(f"verb={stale!r} has a block in {doc.path} but no active census row")
     if not disagreements:
-        disagreements.append(
-            f"section={doc.section!r} in {doc.path} differs outside the per-verb blocks"
-        )
+        disagreements.append(f"section={doc.section!r} in {doc.path} differs outside the per-verb blocks")
     return disagreements
 
 
@@ -707,17 +665,9 @@ def _api_reference_disagreements(doc: DocRender) -> list[str]:
         return []
     current_rows = {line for line in current_section.splitlines() if line.startswith("| `")}
     rendered_rows = {line for line in rendered_section.splitlines() if line.startswith("| `")}
-    changed = sorted(
-        line.split("|")[1].strip().strip("`")
-        for line in current_rows.symmetric_difference(rendered_rows)
-    )
-    detail = (
-        f" (rows differing: {', '.join(dict.fromkeys(changed))})" if changed else ""
-    )
-    return [
-        f"section={doc.section!r} in {doc.path} disagrees with the census and "
-        f"the ICD{detail}"
-    ]
+    changed = sorted(line.split("|")[1].strip().strip("`") for line in current_rows.symmetric_difference(rendered_rows))
+    detail = f" (rows differing: {', '.join(dict.fromkeys(changed))})" if changed else ""
+    return [f"section={doc.section!r} in {doc.path} disagrees with the census and " f"the ICD{detail}"]
 
 
 # ---------------------------------------------------------------------------
@@ -744,12 +694,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--doc", metavar="PATH", help="docs/operator-commands.md path.")
     parser.add_argument("--api-doc", metavar="PATH", help="docs/operator-api.md path.")
     parser.add_argument(
-        "--icd", metavar="PATH",
+        "--icd",
+        metavar="PATH",
         help="Checked-in ICD artifact (docs/api/icd.json) route parameters are resolved from.",
     )
-    parser.add_argument(
-        "--team-dir", metavar="PATH", help="Root of the team/ directory."
-    )
+    parser.add_argument("--team-dir", metavar="PATH", help="Root of the team/ directory.")
     parser.add_argument(
         "--timeout",
         type=float,
@@ -761,11 +710,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _failed_captures(captures: dict[str, HelpCapture]) -> list[tuple[str, str]]:
-    return [
-        (name, capture.reason)
-        for name, capture in captures.items()
-        if not capture.ok
-    ]
+    return [(name, capture.reason) for name, capture in captures.items() if not capture.ok]
 
 
 def _write_if_changed(doc: DocRender, verb_names: list[str]) -> None:
@@ -782,7 +727,7 @@ def _write_if_changed(doc: DocRender, verb_names: list[str]) -> None:
         )
 
 
-def _missing_root_cause(root_value: str, team_dir: pathlib.Path) -> Optional[str]:
+def _missing_root_cause(root_value: str, team_dir: pathlib.Path) -> str | None:
     """Describe why *root_value* is not a usable kanban root, or None if it is.
 
     The value is resolved the way each verb's --help sees it: verbs run with
@@ -883,9 +828,7 @@ def main(argv: list[str] | None = None) -> int:
     # render ever compares against or writes that refusal.
     missing_cause = _missing_root_cause(root_value, team_dir) if has_shell_verb else None
     if missing_cause is not None:
-        return _refuse_shell_env(
-            team_dir, argv, missing_cause, error_key="operator-verb-docs.root-path-missing"
-        )
+        return _refuse_shell_env(team_dir, argv, missing_cause, error_key="operator-verb-docs.root-path-missing")
 
     try:
         result = render_docs(verbs, team_dir, doc_path, api_doc_path, icd, args.timeout)
@@ -902,10 +845,7 @@ def main(argv: list[str] | None = None) -> int:
         _write_if_changed(result.verb_doc, verb_names)
         _write_if_changed(result.api_doc, verb_names)
         if failed:
-            print(
-                f"generate_operator_verb_docs: {len(failed)} verb(s) could not "
-                "be invoked for --help:"
-            )
+            print(f"generate_operator_verb_docs: {len(failed)} verb(s) could not " "be invoked for --help:")
             for name, reason in failed:
                 print(f"  - {name}: {reason}")
         else:

@@ -30,14 +30,13 @@ try:
     )
 except ImportError:
     import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
-    from lib import workflow_loader  # type: ignore[no-redef]
     from lib.workflow_loader import (  # type: ignore[no-redef]
         load_workflow,
         list_workflows,
         WorkflowError,
         WorkflowDefinition,
-        VALID_ROLES,
     )
 
 
@@ -180,9 +179,7 @@ def test_load_workflow_populates_versioning(tmp_path: pathlib.Path) -> None:
 
 def test_load_workflow_outputs_alias_accepted(tmp_path: pathlib.Path) -> None:
     """load_workflow accepts 'output' as an alias for 'outputs' in YAML."""
-    yaml_with_output_alias = _MINIMAL_YAML.format(name="test").replace(
-        "outputs:", "output:"
-    )
+    yaml_with_output_alias = _MINIMAL_YAML.format(name="test").replace("outputs:", "output:")
     _write_workflow(tmp_path, "test", yaml_with_output_alias)
     result = load_workflow("test", kanban_root=tmp_path)
     assert result.outputs is not None
@@ -236,9 +233,7 @@ def test_load_workflow_project_local_override_wins_over_team_definition(
 ) -> None:
     """Project-local workflows/$name.yaml is preferred over team/workflows/$name.yaml."""
     team_yaml = _MINIMAL_YAML.format(name="custom") + "\n# from team\n"
-    project_yaml = _MINIMAL_YAML.format(name="custom").replace(
-        "A test workflow.", "Project override description."
-    )
+    project_yaml = _MINIMAL_YAML.format(name="custom").replace("A test workflow.", "Project override description.")
     _write_workflow(tmp_path, "custom", team_yaml)
     _write_project_workflow(tmp_path, "custom", project_yaml)
     result = load_workflow("custom", kanban_root=tmp_path)
@@ -274,9 +269,7 @@ def test_load_workflow_raises_when_name_does_not_match_filename(
 
 def test_load_workflow_raises_for_unknown_agent_role(tmp_path: pathlib.Path) -> None:
     """load_workflow raises WorkflowError when an agent has an unknown role."""
-    yaml_with_bad_role = _MINIMAL_YAML.format(name="test").replace(
-        "author: WRITER", "author: UNKNOWN_ROLE"
-    )
+    yaml_with_bad_role = _MINIMAL_YAML.format(name="test").replace("author: WRITER", "author: UNKNOWN_ROLE")
     _write_workflow(tmp_path, "test", yaml_with_bad_role)
     with pytest.raises(WorkflowError, match="Unknown role"):
         load_workflow("test", kanban_root=tmp_path)
@@ -448,9 +441,7 @@ def test_plugin_with_pipeline_loads_via_plugin_directory_path(
     any type string, with no per-type special-casing.  The same code path that
     serves 'document' serves every plugin carrying a pipeline.yaml.
     """
-    _write_plugin_pipeline(
-        tmp_path, "my-plugin", _MINIMAL_YAML.format(name="my-plugin")
-    )
+    _write_plugin_pipeline(tmp_path, "my-plugin", _MINIMAL_YAML.format(name="my-plugin"))
     result = load_workflow("my-plugin", kanban_root=tmp_path)
     assert isinstance(result, WorkflowDefinition)
     assert result.name == "my-plugin"
@@ -465,12 +456,8 @@ def test_plugin_with_pipeline_resolves_same_path_as_document(
     the pipeline.  Both types succeed through the identical code path; neither
     requires PM edits beyond the generic load_workflow() call.
     """
-    _write_plugin_pipeline(
-        tmp_path, "my-plugin", _MINIMAL_YAML.format(name="my-plugin")
-    )
-    _write_plugin_pipeline(
-        tmp_path, "document", _MINIMAL_YAML.format(name="document")
-    )
+    _write_plugin_pipeline(tmp_path, "my-plugin", _MINIMAL_YAML.format(name="my-plugin"))
+    _write_plugin_pipeline(tmp_path, "document", _MINIMAL_YAML.format(name="document"))
     plugin_result = load_workflow("my-plugin", kanban_root=tmp_path)
     doc_result = load_workflow("document", kanban_root=tmp_path)
     # Both resolved via the plugin-directory path — same WorkflowDefinition type.

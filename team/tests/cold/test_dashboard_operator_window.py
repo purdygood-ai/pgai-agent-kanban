@@ -9,17 +9,18 @@ This module contains two groups of tests:
 Group 1 — Static analysis (no Docker required):
     Parse create.sh for tmux commands to assert the operator window is created
     at the correct position in the window sequence, is laid out by the same
-    board builder as the visibility window (board + cmdline + legend, ten
-    panes), runs the visibility window's pane commands, and that kill.sh
-    sends the session-kill that removes it.
+    board builder as the visibility window (board + cmdline + workbench +
+    legend) with the column set [dashboard] operator_board_agents names,
+    is dispatched the four merged column commands or the visibility
+    window's eight, and that kill.sh sends the session-kill that removes it.
 
 Group 2 — Docker-gated live session tests:
     Build the flavor image, start a real tmux session inside the container,
     query the session with tmux list-windows / list-panes, assert operator at
-    index 2 (1-based), visibility at index 3 (1-based), ten panes (8 board
-    columns + cmdline + legend), the cmdline pane is an
-    interactive bash shell where show.sh --help resolves.  Then run kill.sh
-    and assert the session is gone.
+    index 2 (1-based), visibility at index 3 (1-based), the default (merged)
+    operator window's seven panes (4 board columns + cmdline + workbench +
+    legend), the cmdline pane is an interactive bash shell where show.sh
+    --help resolves.  Then run kill.sh and assert the session is gone.
 
 Group 3 — Window-0 section-header fixture comparison (Docker-gated):
     Run create.sh --no-tmux inside the container and extract separator + section-
@@ -74,11 +75,12 @@ from tests.fixtures.docker_cli_pins import cli_pins_build_args
 # repo root:  team/../
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent          # team/
-_REPO_ROOT = _TEAM_DIR.parent                        # repo root
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_REPO_ROOT = _TEAM_DIR.parent  # repo root
 
 _CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
 _BOARD_WINDOW_SH = _TEAM_DIR / "scripts" / "dashboard" / "lib" / "board_window.sh"
+_OPERATOR_SHELL_SH = _TEAM_DIR / "scripts" / "dashboard" / "lib" / "operator_shell.sh"
 _KILL_SH = _TEAM_DIR / "scripts" / "dashboard" / "kill.sh"
 _SHOW_SH = _TEAM_DIR / "scripts" / "show.sh"
 
@@ -87,36 +89,49 @@ if str(_TEAM_DIR) not in sys.path:
 
 from pgai_agent_kanban.dashboard.window_census import load_census  # noqa: E402
 
+# The operator window's census variant create.sh builds when kanban.cfg has
+# no [dashboard] operator_board_agents line -- what the live-session groups
+# below see.
+_DEFAULT_BOARD_AGENTS = "merged"
 
-def _operator_pane_index(script_name: str) -> int:
+
+def _operator_window(variant: str = _DEFAULT_BOARD_AGENTS):
+    """The census's operator window record for one board column set."""
+    (operator_window,) = [w for w in load_census() if w.name == "operator" and w.variant == variant]
+    return operator_window
+
+
+def _operator_pane_index(script_name: str, variant: str = _DEFAULT_BOARD_AGENTS) -> int:
     """Resolve a pane's index within the operator window from the census,
     matched by its populating script name -- so this test tracks a future
     column-ladder change instead of carrying a second hardcoded number.
     """
-    windows = load_census()
-    (operator_window,) = [w for w in windows if w.name == "operator"]
-    (pane,) = [p for p in operator_window.panes if p.script == script_name]
+    (pane,) = [p for p in _operator_window(variant).panes if p.script == script_name]
     return pane.pane_seq
 
 
-# The operator window's cmdline (shell) and legend pane indices, resolved
-# from the census rather than hardcoded -- see _operator_pane_index.
+# The default operator window's cmdline (shell), workbench and legend pane
+# indices, resolved from the census rather than hardcoded -- see
+# _operator_pane_index.
 _OP_SHELL_PANE = _operator_pane_index("(interactive bash, kanban shell-env sourced)")
+_OP_WORKBENCH_PANE = _operator_pane_index("none (interactive shell)")
 _OP_LEGEND_PANE = _operator_pane_index("legend-render.sh")
 
 
 def _window_tmux_index(window_name: str) -> int:
     """Resolve a window's 0-based tmux creation-order index from the census
     by NAME, so a live-session assertion tracks a future window insertion
-    instead of carrying a second hardcoded number.
+    instead of carrying a second hardcoded number. A window with two
+    variants has one index for both.
     """
     windows = load_census()
-    (window,) = [w for w in windows if w.name == window_name]
-    return window.tmux_index
+    (tmux_index,) = {w.tmux_index for w in windows if w.name == window_name}
+    return tmux_index
 
 
 def _operator_window_tmux_index() -> int:
     return _window_tmux_index("operator")
+
 
 _FIXTURE_DIR = _THIS_FILE.parent.parent / "fixtures" / "golden"
 _WINDOW0_FIXTURE = _FIXTURE_DIR / "window0_section_headers.txt"
@@ -138,11 +153,13 @@ _SMOKE_DOCKERFILE = _REPO_ROOT / "docker" / "debian" / "Dockerfile"
 
 
 @pytest.fixture(scope="module")
-def operator_test_image() -> str:
+def operator_test_image(operator_container_tier: None) -> str:
     """
     Build docker/debian/Dockerfile and return the image tag.
 
-    Skips (with narration) when Docker is unavailable.
+    Skips (with narration) without the operator's container-tier
+    authorization (operator_container_tier, tests/cold/conftest.py) -- checked
+    before any docker command -- or when Docker is unavailable.
     Builds once per test session; tears down in finally.
 
     We use the debian flavor because it is the canonical smoke flavor and the
@@ -186,9 +203,7 @@ def operator_test_image() -> str:
             f"\n[dashboard-operator-coverage] BUILD STDERR:\n{build_result.stderr}",
             flush=True,
         )
-        pytest.fail(
-            f"docker build [debian] exited {build_result.returncode}; see output above"
-        )
+        pytest.fail(f"docker build [debian] exited {build_result.returncode}; see output above")
 
     print(
         f"[dashboard-operator-coverage] Image built: {_SMOKE_IMAGE_TAG}",
@@ -436,16 +451,14 @@ def _extract_pane_capture(output: str) -> str:
 def test_create_sh_exists() -> None:
     """team/scripts/dashboard/create.sh must exist in the shipped tree."""
     assert _CREATE_SH.exists(), (
-        f"team/scripts/dashboard/create.sh not found at {_CREATE_SH}; "
-        "this file must be committed to the repository"
+        f"team/scripts/dashboard/create.sh not found at {_CREATE_SH}; " "this file must be committed to the repository"
     )
 
 
 def test_kill_sh_exists() -> None:
     """team/scripts/dashboard/kill.sh must exist in the shipped tree."""
     assert _KILL_SH.exists(), (
-        f"team/scripts/dashboard/kill.sh not found at {_KILL_SH}; "
-        "this file must be committed to the repository"
+        f"team/scripts/dashboard/kill.sh not found at {_KILL_SH}; " "this file must be committed to the repository"
     )
 
 
@@ -460,7 +473,7 @@ def test_window0_fixture_exists() -> None:
 def test_operator_new_window_appears_in_create_sh() -> None:
     """create.sh contains a 'new-window' call that names the window 'operator'."""
     content = _CREATE_SH.read_text(encoding="utf-8")
-    assert 'new-window' in content and '"operator"' in content, (
+    assert "new-window" in content and '"operator"' in content, (
         "create.sh does not contain a new-window call for 'operator'; "
         "the operator window was not added to the dashboard"
     )
@@ -481,12 +494,10 @@ def test_operator_window_appears_before_visibility_window() -> None:
     visibility_match = re.search(r'tmux new-window\b[^\n]*-n\s+"visibility"', content)
 
     assert operator_match is not None, (
-        "create.sh does not contain: tmux new-window ... -n \"operator\"; "
-        "the operator window is missing"
+        'create.sh does not contain: tmux new-window ... -n "operator"; ' "the operator window is missing"
     )
     assert visibility_match is not None, (
-        "create.sh does not contain: tmux new-window ... -n \"visibility\"; "
-        "the visibility window is missing"
+        'create.sh does not contain: tmux new-window ... -n "visibility"; ' "the visibility window is missing"
     )
     assert operator_match.start() < visibility_match.start(), (
         "create.sh defines the 'visibility' new-window BEFORE the 'operator' "
@@ -505,7 +516,7 @@ def test_operator_window_is_first_new_window_after_session_creation() -> None:
     """
     content = _CREATE_SH.read_text(encoding="utf-8")
 
-    session_match = re.search(r'tmux new-session\b', content)
+    session_match = re.search(r"tmux new-session\b", content)
     operator_match = re.search(r'tmux new-window\b[^\n]*-n\s+"operator"', content)
     visibility_match = re.search(r'tmux new-window\b[^\n]*-n\s+"visibility"', content)
 
@@ -514,7 +525,7 @@ def test_operator_window_is_first_new_window_after_session_creation() -> None:
     assert visibility_match is not None, "create.sh has no new-window for visibility"
 
     # Find ALL new-window calls in the script.
-    all_new_windows = list(re.finditer(r'tmux new-window\b', content))
+    all_new_windows = list(re.finditer(r"tmux new-window\b", content))
     assert all_new_windows, "create.sh has no new-window calls at all"
 
     # The first new-window call must be the operator window.
@@ -534,10 +545,18 @@ def _operator_section(content: str) -> str:
     visibility_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "visibility"')
     assert operator_start != -1, "operator new-window not found in create.sh"
     assert visibility_start != -1, "visibility new-window not found in create.sh"
-    assert operator_start < visibility_start, (
-        "operator window section comes after visibility in create.sh"
-    )
+    assert operator_start < visibility_start, "operator window section comes after visibility in create.sh"
     return content[operator_start:visibility_start]
+
+
+def _operator_shell_init_body() -> str:
+    """The body of dashboard_init_operator_shell in lib/operator_shell.sh --
+    the operator shell start-up sequence create.sh calls for the cmdline
+    pane -- from its definition line to the closing brace."""
+    lib_text = _OPERATOR_SHELL_SH.read_text(encoding="utf-8")
+    match = re.search(r"^dashboard_init_operator_shell\(\)\s*\{\n(.*?)^\}", lib_text, re.MULTILINE | re.DOTALL)
+    assert match is not None, f"dashboard_init_operator_shell() not defined in {_OPERATOR_SHELL_SH}"
+    return match.group(1)
 
 
 def _visibility_section(content: str) -> str:
@@ -545,7 +564,7 @@ def _visibility_section(content: str) -> str:
     next window's."""
     visibility_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "visibility"')
     assert visibility_start != -1, "visibility new-window not found in create.sh"
-    next_window = re.compile(r'tmux new-window\b').search(content, visibility_start + 1)
+    next_window = re.compile(r"tmux new-window\b").search(content, visibility_start + 1)
     end = next_window.start() if next_window else len(content)
     return content[visibility_start:end]
 
@@ -555,74 +574,90 @@ def test_operator_and_visibility_windows_share_one_board_builder() -> None:
     Both board windows are laid out by the same builder,
     dashboard_build_board_window (team/scripts/dashboard/lib/board_window.sh),
     so their columns cannot drift: the operator window asks it for a shell
-    row (the dashboard_constants.sh percentage and minimum), the visibility
-    window for none. Neither section carries split-window calls of its own.
+    row (the dashboard_constants.sh percentage and minimum), the workbench
+    and the column set create.sh resolved from [dashboard]
+    operator_board_agents; the visibility window for none of them, so it
+    gets the builder's default eight columns. Neither section carries
+    split-window calls of its own.
     """
     content = _CREATE_SH.read_text(encoding="utf-8")
-    assert re.search(r'^source\s+"\$\{SCRIPT_DIR\}/lib/board_window\.sh"', content, re.MULTILINE), (
-        "create.sh does not source lib/board_window.sh"
-    )
+    assert re.search(
+        r'^source\s+"\$\{SCRIPT_DIR\}/lib/board_window\.sh"', content, re.MULTILINE
+    ), "create.sh does not source lib/board_window.sh"
 
     operator_section = _operator_section(content)
     visibility_section = _visibility_section(content)
 
     operator_build = re.search(
         r'dashboard_build_board_window\s+"\$\{SESSION_NAME\}"\s+"operator"\s*\\?\s*'
-        r'"\$\{PGAI_OPERATOR_SHELL_PCT\}"\s+"\$\{PGAI_OPERATOR_SHELL_MIN_ROWS\}"',
+        r'"\$\{PGAI_OPERATOR_SHELL_PCT\}"\s+"\$\{PGAI_OPERATOR_SHELL_MIN_ROWS\}"\s*\\?\s*'
+        r'"\$\{OPERATOR_WORKBENCH_PCT\}"\s+"\$\{OPERATOR_WORKBENCH_MIN_COLS\}"\s*\\?\s*'
+        r'"\$\{OPERATOR_BOARD_AGENTS\}"\s*$',
         operator_section,
+        re.MULTILINE,
     )
     assert operator_build is not None, (
         "the operator section must build its window with "
-        "dashboard_build_board_window \"${SESSION_NAME}\" \"operator\" "
-        "\"${PGAI_OPERATOR_SHELL_PCT}\" \"${PGAI_OPERATOR_SHELL_MIN_ROWS}\""
+        'dashboard_build_board_window "${SESSION_NAME}" "operator" '
+        '"${PGAI_OPERATOR_SHELL_PCT}" "${PGAI_OPERATOR_SHELL_MIN_ROWS}" '
+        '"${OPERATOR_WORKBENCH_PCT}" "${OPERATOR_WORKBENCH_MIN_COLS}" '
+        '"${OPERATOR_BOARD_AGENTS}"'
     )
     visibility_build = re.search(
-        r'dashboard_build_board_window\s+"\$\{SESSION_NAME\}"\s+"visibility"\s+0\b',
+        r'^dashboard_build_board_window\s+"\$\{SESSION_NAME\}"\s+"visibility"\s+0\s*$',
         visibility_section,
+        re.MULTILINE,
     )
     assert visibility_build is not None, (
         "the visibility section must build its window with "
-        "dashboard_build_board_window \"${SESSION_NAME}\" \"visibility\" 0"
+        'dashboard_build_board_window "${SESSION_NAME}" "visibility" 0'
     )
 
     for name, section in (("operator", operator_section), ("visibility", visibility_section)):
-        stray = re.findall(r'^\s*tmux (?:split-window|resize-pane)\b.*$', section, re.MULTILINE)
+        stray = re.findall(r"^\s*tmux (?:split-window|resize-pane)\b.*$", section, re.MULTILINE)
         assert not stray, (
-            f"the {name} section lays out panes itself instead of leaving it "
-            f"to the shared builder: {stray}"
+            f"the {name} section lays out panes itself instead of leaving it " f"to the shared builder: {stray}"
         )
 
 
-def test_board_builder_split_ladder_is_legend_then_shell_then_columns() -> None:
+def test_board_builder_split_ladder_is_legend_then_workbench_then_shell_then_columns() -> None:
     """
     The shared builder's split ladder, in order: the 1-row legend off the
-    bottom of the full window, the shell row (operator only) between the
-    content and the legend, the 40/60 left/right board split, then the six
-    splits fanning the board out into its eight columns.
+    bottom of the full window, the workbench column (operator only) off the
+    right of everything above the legend, the shell row (operator only)
+    under the board, the 40/60 left/right board split, then the six splits
+    fanning the board out into its eight columns.
     """
     lib_text = _BOARD_WINDOW_SH.read_text(encoding="utf-8")
-    splits = re.findall(r'^\s*tmux split-window\b(.*)$', lib_text, re.MULTILINE)
-    assert len(splits) == 9, f"expected 9 split-window calls in the builder; found {splits}"
+    splits = re.findall(r"^\s*tmux split-window\b(.*)$", lib_text, re.MULTILINE)
+    assert len(splits) == 10, f"expected 10 split-window calls in the builder; found {splits}"
 
     assert "-v" in splits[0] and '-l "$legend_h"' in splits[0], splits[0]
-    assert "-v" in splits[1] and '-l "$shell_h"' in splits[1], splits[1]
+    assert "-h" in splits[1] and "workbench_pct" in splits[1], splits[1]
+    assert "-v" in splits[2] and '-l "$shell_h"' in splits[2], splits[2]
     expected_column_pcts = ["60%", "67%", "50%", "80%", "75%", "67%", "50%"]
-    for split, pct in zip(splits[2:], expected_column_pcts):
+    for split, pct in zip(splits[3:], expected_column_pcts):
         assert "-h" in split and f"-l {pct}" in split, (split, pct)
 
 
 def test_operator_column_panes_send_visibility_column_commands() -> None:
     """
     Both board windows dispatch their pane commands through the same
-    create.sh function, dashboard_dispatch_board_panes, which sends the
-    eight visibility column commands to panes 0-7 and the legend command to
-    the legend pane the builder recorded.
+    create.sh function, dashboard_dispatch_board_panes, which takes the
+    column set the window was built with: the operator window passes the
+    one create.sh resolved from [dashboard] operator_board_agents, the
+    visibility window none (the default, split). For merged it sends the
+    four merged column commands, for split the eight visibility column
+    commands, then the legend command to the legend pane the builder
+    recorded, for both.
 
-      pane 0 → VIS_BUGS_CMD           pane 4 → VIS_CODER_CMD
-      pane 1 → VIS_PRIORITY_CMD       pane 5 → VIS_WRITER_CMD
-      pane 2 → VIS_REQUIREMENTS_CMD   pane 6 → VIS_TESTER_CMD
-      pane 3 → VIS_PM_CMD             pane 7 → VIS_CM_CMD
-      legend → VIS_LEGEND_CMD
+      merged: pane 0 → OP_BUGS_CMD          pane 2 → OP_REQUIREMENTS_CMD
+              pane 1 → OP_PRIORITY_CMD      pane 3 → OP_AGENTS_CMD
+      split:  pane 0 → VIS_BUGS_CMD         pane 4 → VIS_CODER_CMD
+              pane 1 → VIS_PRIORITY_CMD     pane 5 → VIS_WRITER_CMD
+              pane 2 → VIS_REQUIREMENTS_CMD pane 6 → VIS_TESTER_CMD
+              pane 3 → VIS_PM_CMD           pane 7 → VIS_CM_CMD
+      both:   legend → VIS_LEGEND_CMD
 
     A pane's first command is dispatched through dashboard_send_armed_keys
     (team/scripts/dashboard/lib/pane_readiness.sh's signal-safety trap
@@ -630,23 +665,37 @@ def test_operator_column_panes_send_visibility_column_commands() -> None:
     """
     content = _CREATE_SH.read_text(encoding="utf-8")
 
-    for name, section in (
-        ("operator", _operator_section(content)),
-        ("visibility", _visibility_section(content)),
-    ):
-        assert re.search(
-            r'^dashboard_dispatch_board_panes\s+"' + name + r'"\s*$', section, re.MULTILINE
-        ), f"the {name} section does not call dashboard_dispatch_board_panes \"{name}\""
+    assert re.search(
+        r'^dashboard_dispatch_board_panes\s+"operator"\s+"\$\{OPERATOR_BOARD_AGENTS\}"\s*$',
+        _operator_section(content),
+        re.MULTILINE,
+    ), 'the operator section does not call dashboard_dispatch_board_panes "operator" "${OPERATOR_BOARD_AGENTS}"'
+    assert re.search(
+        r'^dashboard_dispatch_board_panes\s+"visibility"\s*$',
+        _visibility_section(content),
+        re.MULTILINE,
+    ), 'the visibility section does not call dashboard_dispatch_board_panes "visibility"'
 
-    body_match = re.search(
-        r'^dashboard_dispatch_board_panes\(\)\s*\{\n(.*?)^\}', content, re.MULTILINE | re.DOTALL
-    )
+    body_match = re.search(r"^dashboard_dispatch_board_panes\(\)\s*\{\n(.*?)^\}", content, re.MULTILINE | re.DOTALL)
     assert body_match is not None, "dashboard_dispatch_board_panes is not defined in create.sh"
-    sends = re.findall(
-        r'dashboard_send_armed_keys\s+"\$\{board_win\}\.([^"]+)"\s+"([^"]+)"',
-        body_match.group(1),
+    body = body_match.group(1)
+    branch = re.search(
+        r'if \[\[ "\$column_set" == "merged" \]\]; then\n(.*?)^\s*else\n(.*?)^\s*fi\n(.*)',
+        body,
+        re.MULTILINE | re.DOTALL,
     )
-    expected = [
+    assert branch is not None, (
+        "dashboard_dispatch_board_panes must branch on " 'if [[ "$column_set" == "merged" ]]; then ... else ... fi'
+    )
+    send_re = r'dashboard_send_armed_keys\s+"\$\{board_win\}\.([^"]+)"\s+"([^"]+)"'
+    merged, split, after = (re.findall(send_re, part) for part in branch.groups())
+    assert merged == [
+        ("0", "${OP_BUGS_CMD}"),
+        ("1", "${OP_PRIORITY_CMD}"),
+        ("2", "${OP_REQUIREMENTS_CMD}"),
+        ("3", "${OP_AGENTS_CMD}"),
+    ], f"the merged column set must send the four merged column commands in pane order; found {merged}"
+    assert split == [
         ("0", "${VIS_BUGS_CMD}"),
         ("1", "${VIS_PRIORITY_CMD}"),
         ("2", "${VIS_REQUIREMENTS_CMD}"),
@@ -655,12 +704,17 @@ def test_operator_column_panes_send_visibility_column_commands() -> None:
         ("5", "${VIS_WRITER_CMD}"),
         ("6", "${VIS_TESTER_CMD}"),
         ("7", "${VIS_CM_CMD}"),
-        ("${DASHBOARD_BOARD_LEGEND_PANE}", "${VIS_LEGEND_CMD}"),
-    ]
-    assert sends == expected, (
-        "dashboard_dispatch_board_panes must send exactly the eight visibility "
-        f"column commands and the legend command, in pane order; found {sends}"
-    )
+    ], f"the split column set must send the eight visibility column commands in pane order; found {split}"
+    assert after == [
+        ("${DASHBOARD_BOARD_LEGEND_PANE}", "${VIS_LEGEND_CMD}")
+    ], f"both column sets must then send the legend command; found {after}"
+
+    agents_cmd = re.search(r'^OP_AGENTS_CMD="([^"]*)"\s*$', content, re.MULTILINE)
+    assert agents_cmd is not None, "OP_AGENTS_CMD is not defined in create.sh"
+    assert agents_cmd.group(1).startswith(
+        "${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- "
+    ), agents_cmd.group(1)
+    assert "--label AGENTS --column-type agents" in agents_cmd.group(1), agents_cmd.group(1)
 
 
 def test_operator_window_has_no_suggested_commands_pane() -> None:
@@ -676,28 +730,29 @@ def test_operator_shell_pane_sends_interactive_bash() -> None:
     create.sh sends an interactive bash shell to the operator window's
     shell row, which sits between the board and the legend.
 
-    The census layout assigns:
-      panes 0-7 = the eight board column panes (visibility inputs + agent queues)
-      pane 8    = cmdline (interactive bash shell)
-      pane 9    = legend bar
+    The census layout assigns, merged (the default) / split:
+      panes 0-3 / 0-7 = the board column panes
+      pane  4   / 8   = cmdline (interactive bash shell)
+      pane  5   / 9   = workbench (interactive bash shell; absent when disabled)
+      pane  6   / 10  = legend bar
 
     create.sh tracks the cmdline pane's index in the `OP_SHELL_PANE` shell
     variable (taken from the builder's DASHBOARD_BOARD_SHELL_PANE) rather
-    than a literal, so this test targets the same variable reference
-    instead of hardcoding a pane number. The send-keys command for that
-    pane must include 'bash' so it starts an interactive shell, not a
-    read-only watch loop.
+    than a literal, and hands that pane target to
+    dashboard_init_operator_shell (lib/operator_shell.sh), so this test
+    targets the same variable reference instead of hardcoding a pane
+    number.
 
-    The pane's FIRST command (the actual interactive-shell launch) is
+    The function's FIRST command (the actual interactive-shell launch) is
     dispatched through dashboard_send_armed_keys, not a bare
     `tmux send-keys` call (see lib/pane_readiness.sh -- every pane's first
-    command is wrapped with the signal-safety trap preamble). Two FOLLOW-UP
-    `tmux send-keys` calls to the same pane target (the guarded ~/.bashrc
-    source, and the shell-env re-source) come later in file order and do
-    use a bare `tmux send-keys`; searching for the FIRST occurrence (this
-    function's `dashboard_send_armed_keys` shape) is what keeps this
-    assertion pinned to the real shell-launch line rather than one of
-    those follow-ups.
+    command is wrapped with the signal-safety trap preamble), and must
+    include 'bash' so it starts an interactive shell, not a read-only
+    refresh loop. The FOLLOW-UP `tmux send-keys` calls to the same pane (the
+    re-arm, the guarded ~/.bashrc source, the shell-env re-source) come
+    later and use a bare `tmux send-keys`; matching the
+    `dashboard_send_armed_keys` shape keeps this assertion pinned to the
+    real shell-launch line.
     """
     operator_section = _operator_section(_CREATE_SH.read_text(encoding="utf-8"))
 
@@ -705,33 +760,49 @@ def test_operator_shell_pane_sends_interactive_bash() -> None:
         r'^OP_SHELL_PANE="\$\{DASHBOARD_BOARD_SHELL_PANE\}"\s*$', operator_section, re.MULTILINE
     ), "OP_SHELL_PANE must take the shell pane index the shared builder recorded"
 
-    send_keys_shell_pane = re.search(
-        r'dashboard_send_armed_keys\b[^\n]*operator\.\$\{OP_SHELL_PANE\}[^\n]*',
+    assert re.search(
+        r'^dashboard_init_operator_shell\s+"operator\.\$\{OP_SHELL_PANE\}"\s+"operator"\s*$',
         operator_section,
+        re.MULTILINE,
+    ), (
+        "create.sh does not contain "
+        '\'dashboard_init_operator_shell "operator.${OP_SHELL_PANE}" "operator"\' '
+        "in the operator section; the cmdline pane must be started by the "
+        "shared operator shell function, addressed through the tracked "
+        "OP_SHELL_PANE variable, not a hardcoded index"
+    )
+
+    send_keys_shell_pane = re.search(
+        r"dashboard_send_armed_keys\b[^\n]*",
+        _operator_shell_init_body(),
     )
     assert send_keys_shell_pane is not None, (
-        "create.sh does not contain "
-        "'dashboard_send_armed_keys \"operator.${OP_SHELL_PANE}\" ...' "
-        "in the operator section; the cmdline pane must be addressed through "
-        "the tracked OP_SHELL_PANE variable, not a hardcoded index"
+        "dashboard_init_operator_shell does not dispatch the pane's first " "command through dashboard_send_armed_keys"
     )
     send_keys_cmd = send_keys_shell_pane.group(0)
-    assert 'bash' in send_keys_cmd, (
+    assert "bash" in send_keys_cmd, (
         f"The send-keys to the operator cmdline pane does not include 'bash'; "
         f"the shell row must be an interactive bash shell. "
         f"Found: {send_keys_cmd!r}"
     )
 
-    # The census agrees: the shell sits at pane_seq 8 (directly after the
-    # eight board columns) and the legend at 9, the window's last pane.
-    assert _OP_SHELL_PANE == 8, (
-        f"Census-resolved cmdline pane index changed to {_OP_SHELL_PANE}; "
-        "update this assertion if the operator layout intentionally moved it"
-    )
-    assert _OP_LEGEND_PANE == 9, (
-        f"Census-resolved legend pane index changed to {_OP_LEGEND_PANE}; "
-        "the legend must stay the operator window's last pane"
-    )
+    # The census agrees: the shell sits directly after the board columns
+    # (pane_seq 4 merged, 8 split), then the workbench, then the legend as
+    # the window's last pane.
+    for variant, (shell, workbench, legend) in (("merged", (4, 5, 6)), ("split", (8, 9, 10))):
+        found = (
+            _operator_pane_index("(interactive bash, kanban shell-env sourced)", variant),
+            _operator_pane_index("none (interactive shell)", variant),
+            _operator_pane_index("legend-render.sh", variant),
+        )
+        assert found == (shell, workbench, legend), (
+            f"Census-resolved {variant} cmdline / workbench / legend pane indices "
+            f"changed to {found}; update this assertion if the operator layout "
+            "intentionally moved them"
+        )
+        assert (
+            legend == _operator_window(variant).pane_count - 1
+        ), "the legend must stay the operator window's last pane"
 
 
 def test_operator_shell_pane_bashrc_source_is_guarded() -> None:
@@ -742,28 +813,28 @@ def test_operator_shell_pane_bashrc_source_is_guarded() -> None:
     The guard means hosts without a ~/.bashrc start
     silently and cleanly — an unguarded `source "$HOME/.bashrc"` would print
     a "No such file or directory" error on those hosts.
+
+    The source lives once, in dashboard_init_operator_shell
+    (lib/operator_shell.sh), which every operator shell pane is started by;
+    create.sh itself carries no `source "$HOME/.bashrc"` line.
     """
-    content = _CREATE_SH.read_text(encoding="utf-8")
-
-    operator_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "operator"')
-    visibility_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "visibility"')
-    assert operator_start != -1, "operator new-window not found in create.sh"
-    assert visibility_start != -1, "visibility new-window not found in create.sh"
-
-    operator_section = content[operator_start:visibility_start]
-
     guard = '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"'
-    assert guard in operator_section, (
-        f"create.sh's operator section does not contain the guarded bashrc "
-        f"source {guard!r}; the operator shell pane must source ~/.bashrc "
-        f"guarded against a missing file"
+    assert _operator_shell_init_body().count(guard) == 1, (
+        f"dashboard_init_operator_shell does not contain the guarded bashrc "
+        f"source {guard!r} exactly once; the operator shell pane must source "
+        f"~/.bashrc guarded against a missing file"
+    )
+    assert 'source "$HOME/.bashrc"' not in _CREATE_SH.read_text(encoding="utf-8"), (
+        "create.sh carries its own ~/.bashrc source; the operator shell "
+        "start-up sequence belongs to dashboard_init_operator_shell alone"
     )
 
 
 def test_operator_shell_pane_reorders_shell_env_after_bashrc() -> None:
     """
-    create.sh re-sources shell-env AFTER the guarded ~/.bashrc source, with
-    an inline comment documenting why.
+    The operator shell start-up sequence (dashboard_init_operator_shell in
+    lib/operator_shell.sh) re-sources shell-env AFTER the guarded ~/.bashrc
+    source, with a comment documenting why.
 
     The ordering decision: the operator's ~/.bashrc is
     arbitrary and may redefine or clobber a PGAI_* / kanban-env value, so
@@ -772,33 +843,27 @@ def test_operator_shell_pane_reorders_shell_env_after_bashrc() -> None:
     guarded bashrc source appears before the follow-up shell-env source, and
     an inline comment documents the ordering choice.
     """
-    content = _CREATE_SH.read_text(encoding="utf-8")
-
-    operator_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "operator"')
-    visibility_start = content.find('tmux new-window -t "${SESSION_NAME}" -n "visibility"')
-    operator_section = content[operator_start:visibility_start]
+    operator_section = _operator_shell_init_body()
+    lib_text = _OPERATOR_SHELL_SH.read_text(encoding="utf-8")
 
     guard = '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"'
     guard_pos = operator_section.find(guard)
-    assert guard_pos != -1, "guarded bashrc source not found in the operator section"
+    assert guard_pos != -1, "guarded bashrc source not found in dashboard_init_operator_shell"
 
     # A follow-up "source .../shell-env" (re-sourcing shell-env) must appear
     # AFTER the guarded bashrc source, so kanban env is applied last.
     reshell_env_pattern = re.compile(r'"source\s+\$\{KANBAN_ROOT\}/shell-env"')
     reshell_env_match = reshell_env_pattern.search(operator_section, pos=guard_pos)
     assert reshell_env_match is not None, (
-        "create.sh does not re-source shell-env after the guarded bashrc "
-        "source in the operator section; PGAI_* / kanban-env values are "
+        "dashboard_init_operator_shell does not re-source shell-env after the "
+        "guarded bashrc source; PGAI_* / kanban-env values are "
         "not guaranteed to win over a clobbering ~/.bashrc"
     )
 
     # An inline comment near the ordering decision documents the "why".
-    ordering_comment_present = (
-        "clobber" in operator_section.lower()
-        and "LAST" in operator_section
-    )
+    ordering_comment_present = "clobber" in lib_text.lower() and "LAST" in lib_text
     assert ordering_comment_present, (
-        "create.sh's operator section does not document the shell-env / "
+        "lib/operator_shell.sh does not document the shell-env / "
         "bashrc ordering decision in an inline comment (expected wording "
         "referencing clobbering and sourcing shell-env LAST)"
     )
@@ -812,13 +877,11 @@ def test_kill_sh_kills_session_by_name() -> None:
     the operator window (all windows are destroyed when the session ends).
     """
     content = _KILL_SH.read_text(encoding="utf-8")
-    assert 'tmux kill-session' in content, (
-        "kill.sh does not call 'tmux kill-session'; "
-        "the session teardown will not remove the operator window"
+    assert "tmux kill-session" in content, (
+        "kill.sh does not call 'tmux kill-session'; " "the session teardown will not remove the operator window"
     )
-    assert 'SESSION_NAME' in content, (
-        "kill.sh does not reference SESSION_NAME; "
-        "the session targeted for kill may not match the dashboard session"
+    assert "SESSION_NAME" in content, (
+        "kill.sh does not reference SESSION_NAME; " "the session targeted for kill may not match the dashboard session"
     )
 
 
@@ -829,9 +892,7 @@ def test_create_sh_bash_syntax() -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"bash -n {_CREATE_SH} failed:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"bash -n {_CREATE_SH} failed:\n{result.stderr}"
 
 
 def test_kill_sh_bash_syntax() -> None:
@@ -841,9 +902,7 @@ def test_kill_sh_bash_syntax() -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"bash -n {_KILL_SH} failed:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"bash -n {_KILL_SH} failed:\n{result.stderr}"
 
 
 # ===========================================================================
@@ -886,12 +945,12 @@ def test_window0_section_headers_match_fixture(
         "    -e TERM=xterm-256color <image> "
         "    /pgai_agent_kanban/team/scripts/dashboard/create.sh "
         "    --no-tmux --kanban-root /pgai_agent_kanban 2>/dev/null "
-        "  | python3 -c \""
+        '  | python3 -c "'
         "import re,sys;"
         "sep=re.compile(r'^═+$');lab=re.compile(r'^  [A-Z]');"
         "lines=[l.rstrip() for l in sys.stdin];"
         "print('\\n'.join(l for l in lines if sep.match(l) or lab.match(l))+'\\n',end='')"
-        "\" > team/tests/fixtures/golden/window0_section_headers.txt"
+        '" > team/tests/fixtures/golden/window0_section_headers.txt'
     )
 
 
@@ -939,9 +998,7 @@ def test_operator_window_exists_at_index_2_in_session(
 
     window_names = [name for _, name in sorted(window_entries)]
 
-    assert "operator" in window_names, (
-        f"'operator' window not found in tmux session; windows: {window_names}"
-    )
+    assert "operator" in window_names, f"'operator' window not found in tmux session; windows: {window_names}"
 
     operator_idx = window_names.index("operator")
     expected_idx = _operator_window_tmux_index()
@@ -973,8 +1030,7 @@ def test_visibility_window_exists_at_index_3_in_session(
     output = result.stdout + result.stderr
     if "no-session" in output or "no server" in output.lower():
         pytest.skip(
-            "tmux session did not start in container; "
-            "visibility window live test cannot run in this environment"
+            "tmux session did not start in container; " "visibility window live test cannot run in this environment"
         )
 
     lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
@@ -986,9 +1042,7 @@ def test_visibility_window_exists_at_index_3_in_session(
 
     window_names = [name for _, name in sorted(window_entries)]
 
-    assert "visibility" in window_names, (
-        f"'visibility' window not found in tmux session; windows: {window_names}"
-    )
+    assert "visibility" in window_names, f"'visibility' window not found in tmux session; windows: {window_names}"
 
     visibility_idx = window_names.index("visibility")
     expected_idx = _window_tmux_index("visibility")
@@ -999,18 +1053,20 @@ def test_visibility_window_exists_at_index_3_in_session(
     )
 
 
-def test_operator_window_has_ten_panes_in_session(
+def test_operator_window_has_the_default_board_pane_count_in_session(
     operator_test_image: str,
 ) -> None:
     """
-    After create.sh runs, the operator window contains exactly ten panes
-    (census: board + cmdline + legend).
+    After create.sh runs with no [dashboard] operator_board_agents line, the
+    operator window contains exactly the merged census variant's seven panes
+    (board + cmdline + workbench + legend).
 
     The layout:
       panes 0-2 = board input columns (bugs / priority / requirements)
-      panes 3-7 = board agent queue columns (pm / coder / writer / tester / cm)
-      pane 8    = cmdline (interactive bash login shell, full width, 15% h)
-      pane 9    = legend bar (full width, 1 row)
+      pane 3    = board AGENTS column (every task of the five role backlogs)
+      pane 4    = cmdline (interactive bash login shell, board width, 15% h)
+      pane 5    = workbench (interactive bash login shell, far right)
+      pane 6    = legend bar (full width, 1 row)
     """
     result = _run_tmux_session_commands(
         operator_test_image,
@@ -1024,19 +1080,14 @@ def test_operator_window_has_ten_panes_in_session(
 
     output = result.stdout + result.stderr
     if "no-operator" in output or "no server" in output.lower():
-        pytest.skip(
-            "operator window not available in tmux session; "
-            "pane count test cannot run in this environment"
-        )
+        pytest.skip("operator window not available in tmux session; " "pane count test cannot run in this environment")
 
-    pane_lines = [
-        ln.strip() for ln in output.splitlines()
-        if ln.strip() and ln.strip()[0].isdigit()
-    ]
+    pane_lines = [ln.strip() for ln in output.splitlines() if ln.strip() and ln.strip()[0].isdigit()]
 
-    assert len(pane_lines) == 10, (
-        f"Expected 10 panes in the operator window (3 input columns + 5 "
-        f"agent-queue columns + cmdline + legend); found "
+    expected = _operator_window().pane_count
+    assert len(pane_lines) == expected, (
+        f"Expected {expected} panes in the operator window (3 input columns + "
+        f"the AGENTS column + cmdline + workbench + legend); found "
         f"{len(pane_lines)}. tmux list-panes output:\n{output}"
     )
 
@@ -1054,8 +1105,7 @@ def test_operator_window_active_pane_is_shell_pane_after_create(
     display -p on the window's active pane title == 'operator'.
     """
     probe_cmd = (
-        "tmux display -p -t " + _TEST_SESSION_NAME + ":operator "
-        "'#{pane_title}' 2>/dev/null || echo 'no-operator'"
+        "tmux display -p -t " + _TEST_SESSION_NAME + ":operator " "'#{pane_title}' 2>/dev/null || echo 'no-operator'"
     )
     result = _run_tmux_session_commands(
         operator_test_image,
@@ -1149,10 +1199,7 @@ def test_operator_shell_pane_bashrc_alias_resolves_and_env_stays_correct(
 
     setup_commands = [
         f"mkdir -p {home_dir} {kanban_root_dir}",
-        (
-            "printf 'export PGAI_TEST_MARKER=kanban-correct-value\\n' "
-            f"> {kanban_root_dir}/shell-env"
-        ),
+        ("printf 'export PGAI_TEST_MARKER=kanban-correct-value\\n' " f"> {kanban_root_dir}/shell-env"),
         (
             'printf \'alias hello="echo bashrc-alias-worked"\\n'
             "export PGAI_TEST_MARKER=clobbered-by-bashrc\\n' "
@@ -1238,13 +1285,10 @@ def test_operator_shell_pane_resolves_show_sh_help(
         "show.sh or one of its dependencies is missing from the image.\n"
         f"Combined output:\n{combined}"
     )
-    assert result.returncode == 0, (
-        f"show.sh --help exited non-zero ({result.returncode}); "
-        f"output:\n{combined}"
-    )
-    assert "Usage:" in combined or "usage:" in combined.lower(), (
-        f"show.sh --help did not produce a Usage: line; output:\n{combined}"
-    )
+    assert result.returncode == 0, f"show.sh --help exited non-zero ({result.returncode}); " f"output:\n{combined}"
+    assert (
+        "Usage:" in combined or "usage:" in combined.lower()
+    ), f"show.sh --help did not produce a Usage: line; output:\n{combined}"
 
 
 def test_kill_sh_destroys_entire_session(
@@ -1324,8 +1368,7 @@ def test_kill_sh_destroys_entire_session(
 
     # Either SESSION_GONE is explicitly present, or kill.sh printed a
     # confirmation and tmux has-session found nothing.
-    assert "SESSION_GONE" in output or "Killed session" in output or \
-           "does not exist" in output, (
+    assert "SESSION_GONE" in output or "Killed session" in output or "does not exist" in output, (
         f"kill.sh teardown result unclear; expected 'SESSION_GONE', "
         f"'Killed session', or 'does not exist' in output.\n"
         f"Combined output:\n{output}"

@@ -15,7 +15,8 @@ status.md and triage JSON of the two archived task folders that hold triage
 evidence (``task-folders/``). It is stored flat because the repository
 ignores ``projects/``, ``tasks/``, ``artifacts/`` and ``*.log``, and copied
 byte for byte except the operator's home directory and account name,
-rewritten to the placeholder ``op``. Each test lays it out as a kanban root
+rewritten to the placeholder ``op``, and a project name from outside the
+kanban and its demos, rewritten to ``my-app``. Each test lays it out as a kanban root
 under tmp_path (_LAYOUT), with ``/home/op/pgai_agent_kanban`` rewritten to
 the sandbox root so the sentinel-writes log names the sandbox's own
 sentinels, and runs the script with the five live-install names repointed or
@@ -346,7 +347,8 @@ def _status(root: pathlib.Path, task: str, state: str, block_record: str = "") -
     folder = root / "projects" / "demo" / "tasks" / task
     folder.mkdir(parents=True)
     (folder / "status.md").write_text(
-        f"# Status\n\n## Task\n{task}\n\n## State\n{state}\n" + (f"\n## Block Record\n{block_record}\n" if block_record else ""),
+        f"# Status\n\n## Task\n{task}\n\n## State\n{state}\n"
+        + (f"\n## Block Record\n{block_record}\n" if block_record else ""),
         encoding="utf-8",
     )
 
@@ -365,7 +367,7 @@ class TestSyntheticEvidence:
         append_block_start(ledger, "v1.0.0", "task:CM-demo-release", "2026-10-01T02:00:05+00:00")
         halt = root / "projects" / "demo" / "HALT"
         (root / "logs").mkdir()
-        armed = datetime.datetime(2026, 10, 1, 1, 59, 59, tzinfo=datetime.timezone.utc)
+        armed = datetime.datetime(2026, 10, 1, 1, 59, 59, tzinfo=datetime.UTC)
         (root / "logs" / "sentinel-writes.log").write_text(
             f"time={armed.isoformat()}\tepoch={int(armed.timestamp())}\top=halt\tpath={halt}\tsha256=-\t"
             "entry=-\tpid=1\tppid=1\tparent=-\tuser=op\ttest=-\n",
@@ -389,7 +391,9 @@ class TestSyntheticEvidence:
         append_block_start(ledger, "v1.0.0", "task:CODER-still-blocked", "2026-10-01T04:00:00+00:00")
         _status(root, "CODER-still-blocked", "BLOCKED")
         _status(
-            root, "CODER-new-block", "BLOCKED",
+            root,
+            "CODER-new-block",
+            "BLOCKED",
             "reason_code: worktree_create_failed\nowner_role: CODER\nattempts: 0\n"
             "first_blocked_at: 2026-10-02T05:00:00+00:00\nlast_blocked_at: 2026-10-02T05:00:00+00:00\n"
             "cooldown_until: none\nevidence: none\nresume: fresh",

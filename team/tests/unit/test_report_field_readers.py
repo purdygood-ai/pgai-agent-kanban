@@ -45,16 +45,7 @@ def _load_aggregate_tokens():
 aggregate_tokens = _load_aggregate_tokens()
 
 _EMPTY_AGENT = "# Status\n\n## Agent\n\n## Role\nCODER\n"
-_FENCED_FIRST = (
-    "# Status\n\n"
-    "## Notes\n"
-    "```\n"
-    "## Agent\n"
-    "FAKE\n"
-    "```\n\n"
-    "## Agent\n"
-    "REAL\n"
-)
+_FENCED_FIRST = "# Status\n\n" "## Notes\n" "```\n" "## Agent\n" "FAKE\n" "```\n\n" "## Agent\n" "REAL\n"
 
 
 # ---------------------------------------------------------------------------

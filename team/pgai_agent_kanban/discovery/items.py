@@ -36,7 +36,9 @@ Commands (``python3 -m pgai_agent_kanban.discovery.items <command> ...``):
       DIR.
   record-rejection STATE_FILE NAME COUNT WHEN [REASON]
       Rewrite STATE_FILE with NAME's row set to ``NAME\\tCOUNT\\tWHEN\\tREASON``
-      (appended last), keeping every other row as written.
+      (appended last), keeping every other row as written. Like
+      forget-rejection, the rewrite is atomic: a concurrent reader sees the
+      old table or the new one, never a partial file.
   forget-rejection STATE_FILE NAME
       Rewrite STATE_FILE without NAME's row. A missing file is left missing.
   locate-quarantined PROJECT_ROOT REJECTED_DIR NAME
@@ -93,7 +95,7 @@ import pathlib
 import re
 import sys
 import warnings
-from typing import Optional, TextIO
+from typing import TextIO
 
 # Run by file path (``python3 .../items.py``) or loaded from a file outside
 # its package, this module has no parent package and the interpreter puts
@@ -109,6 +111,7 @@ if not __package__:
 
 from pgai_agent_kanban.dashboard._rejected import find_quarantined  # noqa: E402
 from pgai_agent_kanban.lib import bundle_items  # noqa: E402
+from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.bug_filing import load_bug_scanner  # noqa: E402
 from pgai_agent_kanban.lib.ledger_filename_contract import (  # noqa: E402
     build_remedy as _ledger_build_remedy,
@@ -136,7 +139,7 @@ __all__ = [
 
 # TESTER Path C filenames produced in priority/: v<X.Y.Z>-bugfix-<slug>.md,
 # accepted in addition to PRIORITY- names when the prefix is "PRIORITY-".
-_PATH_C_RE = re.compile(r'^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$', re.IGNORECASE)
+_PATH_C_RE = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+-bugfix-\S+\.md$", re.IGNORECASE)
 
 # BUG- and PRIORITY- are siblings: both use the exact-4-digit,
 # date-optional-AFTER-the-number form from ledger_filename_contract. Any
@@ -148,7 +151,7 @@ def scan_unhandled_items(
     dir_path: pathlib.Path,
     id_prefix: str,
     rejected_file: str = "",
-    requirements_dir: Optional[pathlib.Path] = None,
+    requirements_dir: pathlib.Path | None = None,
     *,
     err: TextIO = sys.stderr,
 ) -> list[str]:
@@ -168,7 +171,7 @@ def scan_unhandled_items(
         canonical_re = _ledger_filename_re(id_prefix)
         path_c_re_active = _PATH_C_RE if id_prefix.upper() == "PRIORITY-" else None
     else:
-        canonical_re = re.compile(rf'^{re.escape(id_prefix)}\d{{4,}}-.+\.md$', re.IGNORECASE)
+        canonical_re = re.compile(rf"^{re.escape(id_prefix)}\d{{4,}}-.+\.md$", re.IGNORECASE)
         path_c_re_active = None
     expected_pattern = f"{id_prefix}NNNN-<slug>.md"
 
@@ -247,8 +250,30 @@ def scan_unhandled_items(
     return results
 
 
+#: Scratch-file prefix for the rejection-count TSV rewrites, so a scratch
+#: file left by a killed process names its writer.
+_REJECTION_STATE_TMP_PREFIX = ".discovery_rejections_tmp_"
+
+
+def _write_rejection_state(state_file: pathlib.Path, lines: list[str]) -> None:
+    """Replace the rejection-count TSV with *lines*, one per row, atomically.
+
+    Goes through the shared atomic writer: a concurrent reader sees the old
+    complete table or the new one, never a partial file, and an existing
+    file keeps its permission bits. On failure the ``OSError`` propagates
+    and *state_file* is untouched.
+    """
+    atomic_write(
+        state_file,
+        "\n".join(lines) + "\n",
+        prefix=_REJECTION_STATE_TMP_PREFIX,
+        encoding="utf-8",
+        preserve_mode=True,
+    )
+
+
 def record_rejection(state_file: pathlib.Path, filename: str, new_count: str, now: str, reason: str = "") -> None:
-    """Set *filename*'s row in the rejection-count TSV, appended last."""
+    """Set *filename*'s row in the rejection-count TSV, appended last (atomic rewrite)."""
     lines = []
     if state_file.is_file():
         for line in state_file.read_text(encoding="utf-8").splitlines():
@@ -257,17 +282,18 @@ def record_rejection(state_file: pathlib.Path, filename: str, new_count: str, no
                 continue
             lines.append(line)
     lines.append(f"{filename}\t{new_count}\t{now}\t{reason}")
-    state_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_rejection_state(state_file, lines)
 
 
 def forget_rejection(state_file: pathlib.Path, filename: str) -> None:
-    """Drop *filename*'s row from the rejection-count TSV, if the file exists."""
+    """Drop *filename*'s row from the rejection-count TSV, if the file exists (atomic rewrite)."""
     if state_file.is_file():
         lines = [
-            line for line in state_file.read_text(encoding="utf-8").splitlines()
+            line
+            for line in state_file.read_text(encoding="utf-8").splitlines()
             if not (line.split("\t")[0] == filename)
         ]
-        state_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _write_rejection_state(state_file, lines)
 
 
 def report_bug_id_collisions(bugs_dir: str, scanner_dir: str, *, err: TextIO = sys.stderr) -> None:
@@ -309,7 +335,7 @@ def order_bundle_items(files_raw: str) -> list[str]:
     return marked + unmarked
 
 
-_SEVERITY_RE = re.compile(r'\*\*Severity:\*\*\s*(.+)', re.IGNORECASE)
+_SEVERITY_RE = re.compile(r"\*\*Severity:\*\*\s*(.+)", re.IGNORECASE)
 
 
 def bug_severity(path: str) -> str:
@@ -320,11 +346,11 @@ def bug_severity(path: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-_DATE_LINE_RE = re.compile(r'^[ \t]*\*\*Date:\*\*[ \t]*(.*)$', re.IGNORECASE | re.MULTILINE)
-_LEADING_DATE_RE = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})')
+_DATE_LINE_RE = re.compile(r"^[ \t]*\*\*Date:\*\*[ \t]*(.*)$", re.IGNORECASE | re.MULTILINE)
+_LEADING_DATE_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 
 
-def bug_filed_date(path: str) -> tuple[Optional[datetime.date], str]:
+def bug_filed_date(path: str) -> tuple[datetime.date | None, str]:
     """The date on the ``**Date:**`` header line of the bug file at *path*.
 
     Returns ``(date, raw)``: *raw* is the header's text, stripped (``""``
@@ -350,15 +376,15 @@ def bug_filed_date(path: str) -> tuple[Optional[datetime.date], str]:
         return None, raw
 
 
-def bug_ages(paths: list[str], today: Optional[datetime.date] = None) -> list[tuple[str, Optional[int], str]]:
+def bug_ages(paths: list[str], today: datetime.date | None = None) -> list[tuple[str, int | None, str]]:
     """``(path, age_days, raw_date)`` for each non-blank path, in order.
 
     *age_days* is ``(today - filed date).days`` (UTC today by default), or
     ``None`` when :func:`bug_filed_date` finds no parseable date.
     """
     if today is None:
-        today = datetime.datetime.now(datetime.timezone.utc).date()
-    out: list[tuple[str, Optional[int], str]] = []
+        today = datetime.datetime.now(datetime.UTC).date()
+    out: list[tuple[str, int | None, str]] = []
     for raw_path in paths:
         path = raw_path.strip()
         if not path:
@@ -422,7 +448,7 @@ _ARITY = {
 }
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
@@ -431,13 +457,19 @@ def main(argv: Optional[list] = None) -> int:
     command, rest = args[0], args[1:]
     arity = _ARITY.get(command)
     if arity is None or not arity[0] <= len(rest) <= arity[1]:
-        print("usage: python3 -m pgai_agent_kanban.discovery.items "
-              + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} ..."), file=sys.stderr)
+        print(
+            "usage: python3 -m pgai_agent_kanban.discovery.items "
+            + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} ..."),
+            file=sys.stderr,
+        )
         return 2
     if command == "scan":
         requirements_dir = pathlib.Path(rest[3]) if len(rest) > 3 and rest[3] else None
         for path in scan_unhandled_items(
-            pathlib.Path(rest[0]), rest[1], rest[2] if len(rest) > 2 else "", requirements_dir,
+            pathlib.Path(rest[0]),
+            rest[1],
+            rest[2] if len(rest) > 2 else "",
+            requirements_dir,
         ):
             print(path)
     elif command == "record-rejection":

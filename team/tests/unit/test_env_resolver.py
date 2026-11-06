@@ -23,7 +23,6 @@ import pytest
 
 from pgai_agent_kanban.env import resolve_kanban_root, _FAIL_LOUD_MSG
 
-
 # ---------------------------------------------------------------------------
 # Fail-loud: unset env var
 # ---------------------------------------------------------------------------
@@ -140,3 +139,50 @@ def test_fail_loud_msg_exported() -> None:
     assert _FAIL_LOUD_MSG
     assert "PGAI_AGENT_KANBAN_ROOT_PATH not set" in _FAIL_LOUD_MSG
     assert "shell-env missing or broken" in _FAIL_LOUD_MSG
+
+
+# ---------------------------------------------------------------------------
+# Explicit override and the home default (the roll-up CLIs' form)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_kanban_root_prefers_an_explicit_override_to_the_variable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """An explicit root wins over PGAI_AGENT_KANBAN_ROOT_PATH and is absolutized."""
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path / "from-env"))
+    assert resolve_kanban_root(str(tmp_path / "x" / ".." / "explicit")) == (tmp_path / "explicit").resolve()
+
+
+def test_resolve_kanban_root_reads_the_variable_when_the_override_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """None and an empty override both fall through to the variable."""
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path / "from-env"))
+    assert resolve_kanban_root(None) == (tmp_path / "from-env").resolve()
+    assert resolve_kanban_root("") == (tmp_path / "from-env").resolve()
+
+
+def test_resolve_kanban_root_expands_a_leading_tilde(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """A '~/...' override or variable value expands to the home directory."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", "~/from-env")
+    assert resolve_kanban_root() == (tmp_path / "home" / "from-env").resolve()
+    assert resolve_kanban_root("~/explicit") == (tmp_path / "home" / "explicit").resolve()
+
+
+def test_resolve_kanban_root_home_default_falls_back_to_the_home_kanban(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """With home_default=True an unset variable reads ~/pgai_agent_kanban instead of raising."""
+    monkeypatch.delenv("PGAI_AGENT_KANBAN_ROOT_PATH", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert resolve_kanban_root(home_default=True) == (tmp_path / "home" / "pgai_agent_kanban").resolve()
+    with pytest.raises(RuntimeError, match=_FAIL_LOUD_MSG):
+        resolve_kanban_root(None)

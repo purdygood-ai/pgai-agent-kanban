@@ -71,9 +71,7 @@ def kanban_root(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
         (proj / sub).mkdir(parents=True)
     (root / "logs").mkdir(parents=True)
 
-    (proj / "project.cfg").write_text(
-        f"[project]\nproject_name = {_PROJECT}\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (proj / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\nbranch_prefix = ai_\n", encoding="utf-8")
     (proj / "release-state.md").write_text(
         "# Release State\n\n"
         f"## Active RC\n{_VERSION}\n\n"
@@ -82,8 +80,7 @@ def kanban_root(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
         encoding="utf-8",
     )
     (proj / "HALT").write_text(
-        "# HALT created by CM at 2099-01-01T00:00:00Z\n"
-        "# Reason: TESTER systemic_risk=high\n",
+        "# HALT created by CM at 2099-01-01T00:00:00Z\n" "# Reason: TESTER systemic_risk=high\n",
         encoding="utf-8",
     )
     (proj / "requirements" / f"{_BUNDLE_KEY}.md").write_text(
@@ -132,9 +129,7 @@ class _ScriptStub:
         return self.ok, self.output
 
 
-def _install_stubs(
-    monkeypatch: pytest.MonkeyPatch, unwind_ok: bool, cancel_ok: bool
-) -> tuple:
+def _install_stubs(monkeypatch: pytest.MonkeyPatch, unwind_ok: bool, cancel_ok: bool) -> tuple:
     unwind = _ScriptStub(unwind_ok, "unwound\n" if unwind_ok else _LOCKED_OUTPUT)
     cancel = _ScriptStub(cancel_ok, "cancelled\n" if cancel_ok else _LOCKED_OUTPUT)
     monkeypatch.setattr(resolution_stage, "_run_unwind_rc", unwind)
@@ -314,9 +309,7 @@ class TestActionLogNamesTheFailedStep:
 
         _run_lane_a(kanban_root)
 
-        summary = [
-            line for line in _action_log_lines(kanban_root) if "\tauto-fix:lane-a-recovery\t" in line
-        ]
+        summary = [line for line in _action_log_lines(kanban_root) if "\tauto-fix:lane-a-recovery\t" in line]
         assert len(summary) == 1, summary
         assert "RC unwind FAILED, later steps not run" in summary[0]
         assert "RC cancel FAILED" not in summary[0]

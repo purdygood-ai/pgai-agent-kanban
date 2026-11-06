@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import pathlib
 import unittest.mock
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -99,18 +99,15 @@ def _materialise_traces_fixture(root: pathlib.Path) -> None:
 
     # Trace files
     _write(
-        root / "projects" / _PROJECT_ALPHA / "logs" / "training" / "coder"
-        / f"{_ALPHA_CODER_STEM}.md",
+        root / "projects" / _PROJECT_ALPHA / "logs" / "training" / "coder" / f"{_ALPHA_CODER_STEM}.md",
         _ALPHA_CODER_CONTENT,
     )
     _write(
-        root / "projects" / _PROJECT_ALPHA / "logs" / "training" / "pm"
-        / f"{_ALPHA_PM_STEM}.md",
+        root / "projects" / _PROJECT_ALPHA / "logs" / "training" / "pm" / f"{_ALPHA_PM_STEM}.md",
         _ALPHA_PM_CONTENT,
     )
     _write(
-        root / "projects" / _PROJECT_BETA / "logs" / "training" / "coder"
-        / f"{_BETA_CODER_STEM}.md",
+        root / "projects" / _PROJECT_BETA / "logs" / "training" / "coder" / f"{_BETA_CODER_STEM}.md",
         _BETA_CODER_CONTENT,
     )
 
@@ -201,9 +198,7 @@ class TestTracesIndex:
         body = resp.json()
         assert len(body) > 0
         first = body[0]
-        assert first["id"] == _BETA_CODER_STEM, (
-            f"Expected first entry id={_BETA_CODER_STEM!r}, got {first['id']!r}"
-        )
+        assert first["id"] == _BETA_CODER_STEM, f"Expected first entry id={_BETA_CODER_STEM!r}, got {first['id']!r}"
         assert first["project"] == _PROJECT_BETA
         assert first["agent"] == "coder"
 
@@ -213,9 +208,7 @@ class TestTracesIndex:
         assert resp.status_code == 200
         body = resp.json()
         ids = {e["id"] for e in body}
-        assert _ALPHA_CODER_STEM in ids, (
-            f"Expected {_ALPHA_CODER_STEM!r} in ids; got {ids!r}"
-        )
+        assert _ALPHA_CODER_STEM in ids, f"Expected {_ALPHA_CODER_STEM!r} in ids; got {ids!r}"
         assert _ALPHA_PM_STEM in ids
         assert _BETA_CODER_STEM in ids
 
@@ -225,9 +218,9 @@ class TestTracesIndex:
         assert resp.status_code == 200
         body = resp.json()
         for entry in body:
-            assert entry["path_basename"].endswith(".md"), (
-                f"path_basename should end with .md: {entry['path_basename']!r}"
-            )
+            assert entry["path_basename"].endswith(
+                ".md"
+            ), f"path_basename should end with .md: {entry['path_basename']!r}"
 
     def test_index_task_key_extracted_from_stem(self, traces_client: TestClient) -> None:
         """task_key is the TASK-KEY portion after the timestamp prefix."""
@@ -235,15 +228,13 @@ class TestTracesIndex:
         assert resp.status_code == 200
         body = resp.json()
         # Find the alpha coder entry.
-        alpha_coder = next(
-            (e for e in body if e["id"] == _ALPHA_CODER_STEM), None
-        )
+        alpha_coder = next((e for e in body if e["id"] == _ALPHA_CODER_STEM), None)
         assert alpha_coder is not None, "Expected alpha coder trace in index"
         # task_key strips the leading "<timestamp>-" segment from the trace
         # stem, leaving the task-folder name that follows it.
-        assert alpha_coder["task_key"] == "CODER-20260703-002-entry-point", (
-            f"Unexpected task_key: {alpha_coder['task_key']!r}"
-        )
+        assert (
+            alpha_coder["task_key"] == "CODER-20260703-002-entry-point"
+        ), f"Unexpected task_key: {alpha_coder['task_key']!r}"
 
     def test_index_timestamp_is_iso8601(self, traces_client: TestClient) -> None:
         """timestamp field is an ISO-8601 formatted string."""
@@ -294,9 +285,7 @@ class TestTracesFilter:
         body = resp.json()
         assert len(body) == 2, f"Expected 2 alpha traces, got {len(body)}: {body}"
         for entry in body:
-            assert entry["project"] == _PROJECT_ALPHA, (
-                f"Non-alpha entry in filtered result: {entry}"
-            )
+            assert entry["project"] == _PROJECT_ALPHA, f"Non-alpha entry in filtered result: {entry}"
 
     def test_filter_by_project_beta(self, traces_client: TestClient) -> None:
         """?project=beta-project returns only beta project traces."""
@@ -313,9 +302,7 @@ class TestTracesFilter:
         body = resp.json()
         assert len(body) == 2, f"Expected 2 coder traces, got {len(body)}: {body}"
         for entry in body:
-            assert entry["agent"] == "coder", (
-                f"Non-coder entry in filtered result: {entry}"
-            )
+            assert entry["agent"] == "coder", f"Non-coder entry in filtered result: {entry}"
 
     def test_filter_by_agent_pm(self, traces_client: TestClient) -> None:
         """?agent=pm returns only pm traces."""
@@ -333,25 +320,19 @@ class TestTracesFilter:
         assert len(body) == 1, f"Expected 1 trace, got {len(body)}: {body}"
         assert body[0]["id"] == _ALPHA_CODER_STEM
 
-    def test_filter_by_unknown_project_returns_empty(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_filter_by_unknown_project_returns_empty(self, traces_client: TestClient) -> None:
         """?project=<unknown> returns an empty array (not an error)."""
         resp = traces_client.get("/traces?project=does-not-exist")
         assert resp.status_code == 200
         assert resp.json() == [], f"Expected empty array for unknown project; got {resp.json()}"
 
-    def test_filter_filtered_order_still_newest_first(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_filter_filtered_order_still_newest_first(self, traces_client: TestClient) -> None:
         """Filtered results are still sorted newest-first."""
         resp = traces_client.get(f"/traces?project={_PROJECT_ALPHA}")
         assert resp.status_code == 200
         body = resp.json()
         assert len(body) == 2
-        assert body[0]["timestamp"] >= body[1]["timestamp"], (
-            "Alpha traces not sorted newest-first"
-        )
+        assert body[0]["timestamp"] >= body[1]["timestamp"], "Alpha traces not sorted newest-first"
         # The alpha coder trace (20260703) is newer than alpha pm trace (20260702).
         assert body[0]["id"] == _ALPHA_CODER_STEM
         assert body[1]["id"] == _ALPHA_PM_STEM
@@ -368,9 +349,7 @@ class TestTracesFetch:
     def test_fetch_known_id_returns_200(self, traces_client: TestClient) -> None:
         """GET /traces/<listed-id> returns HTTP 200."""
         resp = traces_client.get(f"/traces/{_ALPHA_CODER_STEM}")
-        assert resp.status_code == 200, (
-            f"Expected 200, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
 
     def test_fetch_known_id_envelope_shape(self, traces_client: TestClient) -> None:
         """Response envelope contains exit_code, stdout, stderr."""
@@ -392,8 +371,7 @@ class TestTracesFetch:
         resp = traces_client.get(f"/traces/{_ALPHA_CODER_STEM}")
         body = resp.json()
         assert body["stdout"] == _ALPHA_CODER_CONTENT, (
-            f"Content mismatch.\nExpected: {_ALPHA_CODER_CONTENT!r}\n"
-            f"Got:      {body['stdout']!r}"
+            f"Content mismatch.\nExpected: {_ALPHA_CODER_CONTENT!r}\n" f"Got:      {body['stdout']!r}"
         )
 
     def test_fetch_known_id_stderr_empty(self, traces_client: TestClient) -> None:
@@ -429,9 +407,7 @@ class TestTracesFetch:
         # Use the first id from the index to fetch the trace.
         first_id = index_body[0]["id"]
         fetch_resp = traces_client.get(f"/traces/{first_id}")
-        assert fetch_resp.status_code == 200, (
-            f"Expected 200 for id {first_id!r}; got {fetch_resp.status_code}"
-        )
+        assert fetch_resp.status_code == 200, f"Expected 200 for id {first_id!r}; got {fetch_resp.status_code}"
         fetch_body = fetch_resp.json()
         assert fetch_body["exit_code"] == 0
         assert fetch_body["stdout"], "stdout must not be empty for a found trace"
@@ -448,17 +424,11 @@ class TestTracesFabricatedId:
     def test_fabricated_id_returns_404(self, traces_client: TestClient) -> None:
         """A completely fabricated id returns 404."""
         resp = traces_client.get("/traces/this-id-does-not-exist")
-        assert resp.status_code == 404, (
-            f"Expected 404 for fabricated id; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 404, f"Expected 404 for fabricated id; got {resp.status_code}: {resp.text}"
 
-    def test_fabricated_id_with_timestamp_format_returns_404(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_fabricated_id_with_timestamp_format_returns_404(self, traces_client: TestClient) -> None:
         """Even a well-formed (timestamp-like) id not in the enumeration → 404."""
-        resp = traces_client.get(
-            "/traces/20260101T000000-NONEXISTENT-00000-00-fake-trace"
-        )
+        resp = traces_client.get("/traces/20260101T000000-NONEXISTENT-00000-00-fake-trace")
         assert resp.status_code == 404
 
     def test_fabricated_id_body_has_error_field(self, traces_client: TestClient) -> None:
@@ -469,9 +439,9 @@ class TestTracesFabricatedId:
         body = resp.json()
         # Either detail contains error dict or is a string with "not found"
         detail = body.get("detail", body)
-        assert "error" in str(detail).lower() or "not found" in str(detail).lower(), (
-            f"404 body should contain 'error' or 'not found': {body}"
-        )
+        assert (
+            "error" in str(detail).lower() or "not found" in str(detail).lower()
+        ), f"404 body should contain 'error' or 'not found': {body}"
 
 
 # ---------------------------------------------------------------------------
@@ -492,13 +462,9 @@ class TestTracesOpaqueIdSecurity:
         resp = traces_client.get("/traces/../../etc/passwd")
         # FastAPI URL routing may interpret path separators differently;
         # the endpoint should return 404 in any case (not 422, not 200).
-        assert resp.status_code == 404, (
-            f"Traversal-shaped id must return 404; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 404, f"Traversal-shaped id must return 404; got {resp.status_code}: {resp.text}"
 
-    def test_unknown_id_with_path_chars_returns_404(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_unknown_id_with_path_chars_returns_404(self, traces_client: TestClient) -> None:
         """An id that looks like a relative path but is not in the enumeration → 404."""
         resp = traces_client.get("/traces/not-a-real-trace-but-has-dashes")
         assert resp.status_code == 404
@@ -509,13 +475,9 @@ class TestTracesOpaqueIdSecurity:
         # The id just won't be in the server's enumeration.
         resp = traces_client.get("/traces/..%2F..%2Fetc%2Fpasswd")
         # May 404 due to routing or due to enumeration miss; either is correct.
-        assert resp.status_code in (404, 422), (
-            f"Traversal id must not return 200; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code in (404, 422), f"Traversal id must not return 200; got {resp.status_code}: {resp.text}"
         # The critical assertion: it must NOT succeed (not 200).
-        assert resp.status_code != 200, (
-            "Traversal-shaped id must not return 200 with trace content."
-        )
+        assert resp.status_code != 200, "Traversal-shaped id must not return 200 with trace content."
 
 
 # ---------------------------------------------------------------------------
@@ -526,55 +488,42 @@ class TestTracesOpaqueIdSecurity:
 class TestTracesParamSecurity:
     """Traversal sequences in project or agent query params return 422."""
 
-    def test_project_dotdot_traversal_returns_422(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_project_dotdot_traversal_returns_422(self, traces_client: TestClient) -> None:
         """project=../../etc/passwd → 422."""
         resp = traces_client.get("/traces?project=../../etc/passwd")
-        assert resp.status_code == 422, (
-            f"Expected 422 for traversal in project param; got {resp.status_code}: {resp.text}"
-        )
+        assert (
+            resp.status_code == 422
+        ), f"Expected 422 for traversal in project param; got {resp.status_code}: {resp.text}"
 
-    def test_project_url_encoded_traversal_returns_422(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_project_url_encoded_traversal_returns_422(self, traces_client: TestClient) -> None:
         """project=..%2F.. (URL-encoded slash) → 422."""
         resp = traces_client.get("/traces?project=..%2F..")
-        assert resp.status_code == 422, (
-            f"Expected 422; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422; got {resp.status_code}: {resp.text}"
 
-    def test_project_slash_traversal_returns_422(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_project_slash_traversal_returns_422(self, traces_client: TestClient) -> None:
         """project=alpha/../../etc → 422."""
         resp = traces_client.get("/traces?project=alpha/../../etc")
         assert resp.status_code == 422
 
-    def test_agent_dotdot_traversal_returns_422(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_agent_dotdot_traversal_returns_422(self, traces_client: TestClient) -> None:
         """agent=../../etc/passwd → 422 (traversal detected before whitelist check)."""
         resp = traces_client.get("/traces?agent=../../etc/passwd")
-        assert resp.status_code == 422, (
-            f"Expected 422 for traversal in agent param; got {resp.status_code}: {resp.text}"
-        )
+        assert (
+            resp.status_code == 422
+        ), f"Expected 422 for traversal in agent param; got {resp.status_code}: {resp.text}"
 
     def test_project_null_byte_returns_422(self, traces_client: TestClient) -> None:
         """project with null byte (%00) → 422."""
         resp = traces_client.get("/traces?project=alpha%00inject")
         assert resp.status_code == 422
 
-    def test_traversal_project_no_filesystem_access(
-        self, traces_client: TestClient
-    ) -> None:
+    def test_traversal_project_no_filesystem_access(self, traces_client: TestClient) -> None:
         """Traversal in project param fires before any open() call."""
         with unittest.mock.patch("builtins.open") as mock_open:
             resp = traces_client.get("/traces?project=../../etc/passwd")
             assert resp.status_code == 422
             assert not mock_open.called, (
-                f"open() must NOT be called for traversal attempt; "
-                f"was called with: {mock_open.call_args_list}"
+                f"open() must NOT be called for traversal attempt; " f"was called with: {mock_open.call_args_list}"
             )
 
 
@@ -599,9 +548,7 @@ class TestTracesLimit:
         assert resp.status_code == 200
         body = resp.json()
         assert len(body) == 1, f"limit=1 should return 1 trace; got {len(body)}"
-        assert body[0]["id"] == _BETA_CODER_STEM, (
-            f"Expected newest trace first; got {body[0]['id']!r}"
-        )
+        assert body[0]["id"] == _BETA_CODER_STEM, f"Expected newest trace first; got {body[0]['id']!r}"
 
     def test_limit_2_returns_two_newest(self, traces_client: TestClient) -> None:
         """limit=2 returns the two newest traces."""
@@ -621,9 +568,7 @@ class TestTracesLimit:
     def test_limit_0_returns_422(self, traces_client: TestClient) -> None:
         """limit=0 returns 422."""
         resp = traces_client.get("/traces?limit=0")
-        assert resp.status_code == 422, (
-            f"Expected 422 for limit=0; got {resp.status_code}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for limit=0; got {resp.status_code}"
 
     def test_limit_negative_returns_422(self, traces_client: TestClient) -> None:
         """limit=-1 returns 422."""
@@ -635,9 +580,7 @@ class TestTracesLimit:
         resp = traces_client.get("/traces?limit=abc")
         assert resp.status_code == 422
 
-    def test_limit_above_cap_is_clamped(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_limit_above_cap_is_clamped(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """limit=9999 is clamped to 2000 (hard cap enforced server-side).
 
         This test creates a fixture with 2200 traces to verify clamping.
@@ -672,9 +615,7 @@ class TestTracesLimit:
             resp = client.get("/traces?limit=9999")
         assert resp.status_code == 200
         body = resp.json()
-        assert len(body) == 2000, (
-            f"limit=9999 should be clamped to 2000; got {len(body)}"
-        )
+        assert len(body) == 2000, f"limit=9999 should be clamped to 2000; got {len(body)}"
 
 
 # ---------------------------------------------------------------------------
@@ -688,9 +629,7 @@ class TestTracesAgentValidation:
     def test_unknown_agent_returns_422(self, traces_client: TestClient) -> None:
         """?agent=<unknown> returns 422 (agent must be in the fixed set)."""
         resp = traces_client.get("/traces?agent=badagent")
-        assert resp.status_code == 422, (
-            f"Expected 422 for unknown agent; got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for unknown agent; got {resp.status_code}: {resp.text}"
 
     def test_valid_agents_accepted(self, traces_client: TestClient) -> None:
         """All valid agent role names are accepted (return 200, possibly empty array)."""
@@ -698,8 +637,7 @@ class TestTracesAgentValidation:
         for agent_name in valid_agents:
             resp = traces_client.get(f"/traces?agent={agent_name}")
             assert resp.status_code == 200, (
-                f"Valid agent {agent_name!r} should return 200; "
-                f"got {resp.status_code}: {resp.text}"
+                f"Valid agent {agent_name!r} should return 200; " f"got {resp.status_code}: {resp.text}"
             )
 
     def test_empty_agent_treated_as_absent(self, traces_client: TestClient) -> None:
@@ -709,15 +647,11 @@ class TestTracesAgentValidation:
         assert resp.status_code == 200
         body = resp.json()
         # Empty agent means no filter — all 3 fixture traces returned.
-        assert len(body) == 3, (
-            f"Empty agent param should return all traces; got {len(body)}"
-        )
+        assert len(body) == 3, f"Empty agent param should return all traces; got {len(body)}"
 
     def test_unknown_agent_body_mentions_agent(self, traces_client: TestClient) -> None:
         """422 body for unknown agent mentions 'agent'."""
         resp = traces_client.get("/traces?agent=notarole")
         assert resp.status_code == 422
         body = resp.json()
-        assert "agent" in str(body).lower(), (
-            f"422 body should mention 'agent': {body}"
-        )
+        assert "agent" in str(body).lower(), f"422 body should mention 'agent': {body}"

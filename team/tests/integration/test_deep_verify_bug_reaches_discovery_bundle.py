@@ -38,7 +38,6 @@ import pathlib
 import subprocess
 import textwrap
 
-import pytest
 
 from tests.fixtures.two_project import PROJECT_A
 from tests.fixtures.scrubbed_subprocess_env import scrub_agent_scoped_env
@@ -130,8 +129,7 @@ def test_deep_verify_filed_bug_is_bundled_by_the_next_discovery_scan(
 
     discovery = _run_discovery(kanban_root, PROJECT_A)
     assert discovery.returncode == 0, (
-        f"discovery_run_pipeline exited non-zero.\nstdout: {discovery.stdout}\n"
-        f"stderr: {discovery.stderr}"
+        f"discovery_run_pipeline exited non-zero.\nstdout: {discovery.stdout}\n" f"stderr: {discovery.stderr}"
     )
     assert "DISCOVERY_STATUS=produced_work" in discovery.stdout
 

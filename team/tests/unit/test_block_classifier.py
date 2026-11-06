@@ -54,7 +54,7 @@ from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
 
 _MODULE_FILE = pathlib.Path(bc.__file__).resolve()
 
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _NOW_ISO = "2026-01-01T12:00:00+00:00"
 _PAST_ISO = "2026-01-01T11:00:00+00:00"
 _FUTURE_ISO = "2026-01-01T12:10:00+00:00"
@@ -120,7 +120,9 @@ _EXPECTED_PARAMS = {
     "worktree_create_failed": {"note": "pruned"},
     "agent_operator_data_action": {"note": "restamp-fixed-in"},
     "agent_transient_provider_error": {"note": "transient provider error; its ## Blockers read: 'the provider aborted"},
-    "agent_unclassified": {"note": "blocked without a reason code; its ## Blockers read: 'the subagent was lost twice'"},
+    "agent_unclassified": {
+        "note": "blocked without a reason code; its ## Blockers read: 'the subagent was lost twice'"
+    },
 }
 
 
@@ -169,9 +171,9 @@ def _representative_decision(code: str, table: bc.ClassifierTable) -> bc.Decisio
 
 
 def test_shipped_table_has_a_row_for_exactly_the_block_record_vocabulary(table):
-    assert set(table.rules) == set(REASON_CODES) == set(_EXPECTED_ROWS), (
-        "the shipped table must classify every Block Record reason_code and nothing else"
-    )
+    assert (
+        set(table.rules) == set(REASON_CODES) == set(_EXPECTED_ROWS)
+    ), "the shipped table must classify every Block Record reason_code and nothing else"
 
 
 @pytest.mark.parametrize("code", sorted(_EXPECTED_ROWS))
@@ -200,9 +202,7 @@ def test_shipped_row_decides_its_action_ceiling_cooldown_and_verification(code, 
 
 def test_merge_not_found_with_a_clean_merge_tree_requeues_the_owner_to_merge(table):
     record = _record("gate_merge_not_found", owner_role="CODER", evidence=_BRANCH_EVIDENCE)
-    decision = bc.decide(
-        record, table, facts={"branch_ancestor_of_source": False, "merge_tree_clean": True}, now=_NOW
-    )
+    decision = bc.decide(record, table, facts={"branch_ancestor_of_source": False, "merge_tree_clean": True}, now=_NOW)
     assert decision.action == "requeue_owner"
     assert decision.params == {"note": "merge only, then re-complete", "resume": "branch"}
 
@@ -214,9 +214,7 @@ def test_merge_not_found_reads_an_already_merged_branch_from_the_evidence(table)
 
 def test_merge_not_found_with_a_conflicting_merge_tree_escalates(table):
     record = _record("gate_merge_not_found", evidence=_BRANCH_EVIDENCE)
-    decision = bc.decide(
-        record, table, facts={"branch_ancestor_of_source": False, "merge_tree_clean": False}, now=_NOW
-    )
+    decision = bc.decide(record, table, facts={"branch_ancestor_of_source": False, "merge_tree_clean": False}, now=_NOW)
     assert decision.action == "escalate"
     assert decision.why == bc.WHY_PRECONDITION_UNMET
     assert "merge_tree_clean" in decision.detail
@@ -364,8 +362,7 @@ def test_unmet_precondition_escalates(code, evidence, facts, table):
 _VALID_DECISION = "    decision: {inbox: 'why does it stop', answer: 'read the task'}\n"
 _VALID_ROW = (
     "    action: requeue_owner\n    params: {note: retry}\n    max_attempts: 1\n"
-    "    cooldown_s: 0\n    backoff: none\n    verification: none\n    preconditions: []\n"
-    + _VALID_DECISION
+    "    cooldown_s: 0\n    backoff: none\n    verification: none\n    preconditions: []\n" + _VALID_DECISION
 )
 _DECISION_ONLY_ROW = _VALID_DECISION
 
@@ -373,25 +370,62 @@ _DECISION_ONLY_ROW = _VALID_DECISION
 @pytest.mark.parametrize(
     "text",
     [
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("requeue_owner", "rebase_it"), id="unknown-action"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("requeue_owner", "not_yet"), id="not-yet-as-action"),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("requeue_owner", "rebase_it"), id="unknown-action"
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("requeue_owner", "not_yet"), id="not-yet-as-action"
+        ),
         pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW + "    surprise: 1\n", id="extra-key"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("    backoff: none\n", ""), id="missing-key"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("max_attempts: 1", "max_attempts: -1"), id="negative-max-attempts"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("max_attempts: 1", "max_attempts: true"), id="boolean-max-attempts"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("max_attempts: 1", "max_attempts: stage"), id="stage-ceiling-on-requeue"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("cooldown_s: 0", "cooldown_s: soon"), id="non-numeric-cooldown"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("backoff: none", "backoff: {factor: 2}"), id="incomplete-backoff"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("verification: none", "verification: looks_fine"), id="unknown-verification"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("preconditions: []", "preconditions: [moon_is_full]"), id="unknown-precondition"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("{note: retry}", "{}"), id="requeue-without-note"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("{note: retry}", "{note: retry, force: true}"), id="unknown-param"),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("    backoff: none\n", ""), id="missing-key"
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("max_attempts: 1", "max_attempts: -1"),
+            id="negative-max-attempts",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("max_attempts: 1", "max_attempts: true"),
+            id="boolean-max-attempts",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("max_attempts: 1", "max_attempts: stage"),
+            id="stage-ceiling-on-requeue",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("cooldown_s: 0", "cooldown_s: soon"),
+            id="non-numeric-cooldown",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("backoff: none", "backoff: {factor: 2}"),
+            id="incomplete-backoff",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("verification: none", "verification: looks_fine"),
+            id="unknown-verification",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n"
+            + _VALID_ROW.replace("preconditions: []", "preconditions: [moon_is_full]"),
+            id="unknown-precondition",
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("{note: retry}", "{}"), id="requeue-without-note"
+        ),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace("{note: retry}", "{note: retry, force: true}"),
+            id="unknown-param",
+        ),
         pytest.param("reason_codes:\n  made_up_code:\n" + _VALID_ROW, id="row-for-unknown-reason-code"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW + "  zero_progress:\n" + _VALID_ROW, id="duplicate-row"),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW + "  zero_progress:\n" + _VALID_ROW, id="duplicate-row"
+        ),
         pytest.param("rows:\n  - zero_progress\n", id="wrong-top-level"),
         pytest.param("reason_codes: [zero_progress]\n", id="rows-not-a-mapping"),
         pytest.param("reason_codes:\n  zero_progress: [\n", id="not-yaml"),
-        pytest.param("reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace(_VALID_DECISION, ""), id="row-without-decision"),
+        pytest.param(
+            "reason_codes:\n  zero_progress:\n" + _VALID_ROW.replace(_VALID_DECISION, ""), id="row-without-decision"
+        ),
         pytest.param("reason_codes:\n  missing_readme: {}\n", id="empty-row"),
         pytest.param("reason_codes:\n  missing_readme:\n    decision: escalate\n", id="escalate-as-decision"),
         pytest.param(
@@ -403,19 +437,29 @@ _DECISION_ONLY_ROW = _VALID_DECISION
             "    backoff: none\n    verification: none\n    preconditions: []\n" + _VALID_DECISION,
             id="escalate-as-action",
         ),
-        pytest.param("reason_codes:\n  missing_readme:\n" + _DECISION_ONLY_ROW + "    max_attempts: 0\n", id="decision-only-row-with-triage-key"),
-        pytest.param("reason_codes:\n  missing_readme:\n    decision: {inbox: q}\n", id="decision-without-answer"),
-        pytest.param("reason_codes:\n  missing_readme:\n    decision: {inbox: '', answer: a}\n", id="decision-blank-question"),
         pytest.param(
-            "reason_codes:\n  missing_readme:\n    decision: {verb: rebase-it, inbox: q, answer: a}\n", id="unknown-decision-verb"
+            "reason_codes:\n  missing_readme:\n" + _DECISION_ONLY_ROW + "    max_attempts: 0\n",
+            id="decision-only-row-with-triage-key",
         ),
-        pytest.param("reason_codes:\n  missing_readme:\n    decision: {budget: 2, inbox: q, answer: a}\n", id="budget-without-verb"),
+        pytest.param("reason_codes:\n  missing_readme:\n    decision: {inbox: q}\n", id="decision-without-answer"),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {inbox: '', answer: a}\n", id="decision-blank-question"
+        ),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {verb: rebase-it, inbox: q, answer: a}\n",
+            id="unknown-decision-verb",
+        ),
+        pytest.param(
+            "reason_codes:\n  missing_readme:\n    decision: {budget: 2, inbox: q, answer: a}\n",
+            id="budget-without-verb",
+        ),
         pytest.param(
             "reason_codes:\n  missing_readme:\n    decision: {verb: reset-to-backlog, budget: 0, inbox: q, answer: a}\n",
             id="zero-budget",
         ),
         pytest.param(
-            "reason_codes:\n  missing_readme:\n    decision: {inbox: q, answer: a, then: ask}\n", id="unknown-decision-key"
+            "reason_codes:\n  missing_readme:\n    decision: {inbox: q, answer: a, then: ask}\n",
+            id="unknown-decision-key",
         ),
     ],
 )
@@ -615,7 +659,9 @@ def test_a_minimal_pipeline_ladder_loads(tmp_path):
         _record("missing_readme", owner_role="PM", cooldown_until=_PAST_ISO), bc.load_table(good), now=_NOW
     )
     assert (decision.action, decision.params["note"], decision.pipeline_ladder) == (
-        "requeue_owner", "retry missing_readme", True,
+        "requeue_owner",
+        "retry missing_readme",
+        True,
     )
 
 
@@ -632,10 +678,13 @@ def test_a_minimal_pipeline_ladder_loads(tmp_path):
         pytest.param(_PIPELINE_LADDER.replace("cap_s: 3600", "cap_s: 60"), "cap_s", id="cap-below-cooldown"),
         pytest.param(
             _PIPELINE_LADDER.replace("cooldown_before_first: true", "cooldown_before_first: soon"),
-            "cooldown_before_first", id="non-boolean-before-first",
+            "cooldown_before_first",
+            id="non-boolean-before-first",
         ),
         pytest.param(_PIPELINE_LADDER + "  verification: gate_passes\n", "verification", id="extra-key"),
-        pytest.param(_PIPELINE_LADDER.replace("pipeline_ladder:", "pipeline_ladders:"), "optionally", id="unknown-top-level-key"),
+        pytest.param(
+            _PIPELINE_LADDER.replace("pipeline_ladder:", "pipeline_ladders:"), "optionally", id="unknown-top-level-key"
+        ),
     ],
 )
 def test_an_invalid_pipeline_ladder_invalidates_the_table(ladder, fault, tmp_path):
@@ -816,7 +865,11 @@ def _run_cli(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     )
     return subprocess.run(
         [sys.executable, str(_MODULE_FILE), *args],
-        capture_output=True, text=True, timeout=60, env=env, cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=str(cwd),
     )
 
 

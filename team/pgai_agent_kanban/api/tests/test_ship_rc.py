@@ -26,7 +26,7 @@ Design notes:
 from __future__ import annotations
 
 import pathlib
-from typing import Generator
+from collections.abc import Generator
 from unittest.mock import patch
 
 import pytest
@@ -106,7 +106,7 @@ class TestShipRcConfirmGate:
 
     def test_wrong_confirm_returns_422_naming_confirm_and_no_subprocess(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
     ) -> None:
         """POST /operations/ship-rc with wrong confirm string returns 422.
 
@@ -127,20 +127,17 @@ class TestShipRcConfirmGate:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, (
-            f"Expected HTTP 422 (confirm gate); got {resp.status_code}.\n"
-            f"body: {resp.text}"
+            f"Expected HTTP 422 (confirm gate); got {resp.status_code}.\n" f"body: {resp.text}"
         )
         body = resp.json()
         assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
         assert body["error"] == "ship_rc.confirm_mismatch", body
-        assert "confirm" in body["message"], (
-            f"422 message must name 'confirm'; got: {body['message']!r}"
-        )
+        assert "confirm" in body["message"], f"422 message must name 'confirm'; got: {body['message']!r}"
         assert body["remedy"].startswith("curl "), body["remedy"]
 
     def test_confirm_mismatch_with_transposed_project_key_returns_422_no_subprocess(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
     ) -> None:
         """POST /operations/ship-rc with transposed project/key in confirm returns 422.
 
@@ -161,20 +158,17 @@ class TestShipRcConfirmGate:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, (
-            f"Expected HTTP 422 (confirm gate with transposed values); "
-            f"got {resp.status_code}.\nbody: {resp.text}"
+            f"Expected HTTP 422 (confirm gate with transposed values); " f"got {resp.status_code}.\nbody: {resp.text}"
         )
         body = resp.json()
         assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
         assert body["error"] == "ship_rc.confirm_mismatch", body
-        assert "confirm" in body["message"], (
-            f"422 message must name 'confirm'; got: {body['message']!r}"
-        )
+        assert "confirm" in body["message"], f"422 message must name 'confirm'; got: {body['message']!r}"
         assert body["remedy"].startswith("curl "), body["remedy"]
 
     def test_missing_confirm_returns_422_and_no_subprocess(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
     ) -> None:
         """POST /operations/ship-rc without confirm field returns 422.
 
@@ -194,8 +188,7 @@ class TestShipRcConfirmGate:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, (
-            f"Expected HTTP 422 (missing confirm); got {resp.status_code}.\n"
-            f"body: {resp.text}"
+            f"Expected HTTP 422 (missing confirm); got {resp.status_code}.\n" f"body: {resp.text}"
         )
         body = resp.json()
         assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
@@ -204,7 +197,7 @@ class TestShipRcConfirmGate:
 
     def test_confirm_with_trailing_space_returns_422_no_subprocess(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
     ) -> None:
         """POST /operations/ship-rc with trailing space in confirm returns 422.
 
@@ -225,15 +218,12 @@ class TestShipRcConfirmGate:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, (
-            f"Expected HTTP 422 (trailing space in confirm); "
-            f"got {resp.status_code}.\nbody: {resp.text}"
+            f"Expected HTTP 422 (trailing space in confirm); " f"got {resp.status_code}.\nbody: {resp.text}"
         )
         body = resp.json()
         assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
         assert body["error"] == "ship_rc.confirm_mismatch", body
-        assert "confirm" in body["message"], (
-            f"422 message must name 'confirm'; got: {body['message']!r}"
-        )
+        assert "confirm" in body["message"], f"422 message must name 'confirm'; got: {body['message']!r}"
         assert body["remedy"].startswith("curl "), body["remedy"]
 
     @staticmethod
@@ -257,7 +247,7 @@ class TestShipRcConfirmGate:
 
     def test_correct_confirm_with_dry_run_reaches_ship_rc_as_a_dry_run(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """POST /operations/ship-rc with correct confirm and dry_run: true returns exit_code 0.
@@ -279,8 +269,7 @@ class TestShipRcConfirmGate:
             mock_run.assert_not_called()
 
         assert resp.status_code == 200, (
-            f"Expected HTTP 200 on exit_code 0 dry-run; "
-            f"got {resp.status_code}.\nbody: {resp.text}"
+            f"Expected HTTP 200 on exit_code 0 dry-run; " f"got {resp.status_code}.\nbody: {resp.text}"
         )
         assert resp.json() == {
             "exit_code": 0,
@@ -295,7 +284,7 @@ class TestShipRcConfirmGate:
 
     def test_correct_confirm_without_dry_run_reaches_ship_rc_live(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """POST /operations/ship-rc with correct confirm but no dry_run calls ship_rc live.
@@ -316,15 +305,12 @@ class TestShipRcConfirmGate:
         )
 
         assert resp.status_code == 500, (
-            f"Expected HTTP 500 for a refused ship; "
-            f"got {resp.status_code}.\nbody: {resp.text}"
+            f"Expected HTTP 500 for a refused ship; " f"got {resp.status_code}.\nbody: {resp.text}"
         )
         body = resp.json()
         assert body["exit_code"] == 1, body
         assert body["stderr"] == "ERROR: branch 'ai_rc/v1.5.0' does not exist locally\n"
         assert body["error"] == "ship_rc.refused"
-        assert body["remedy"].endswith(
-            "team/scripts/ship-rc.sh --project my-project --key v1.5.0"
-        ), body["remedy"]
+        assert body["remedy"].endswith("team/scripts/ship-rc.sh --project my-project --key v1.5.0"), body["remedy"]
         assert len(calls) == 1, calls
         assert calls[0][3]["dry_run"] is False, calls[0][3]

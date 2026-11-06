@@ -25,6 +25,7 @@ not the bug ID or task ID that prompted them.
 from __future__ import annotations
 
 import pathlib
+import shutil
 import textwrap
 
 import pytest
@@ -32,6 +33,7 @@ import pytest
 from tests.unit.shell_harness import run_bash
 
 _LIB = "scripts/lib/workflow.sh"
+_TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 
 
 def _source_lib() -> str:
@@ -234,7 +236,8 @@ def _write_no_manifest_dir(workflows_dir: pathlib.Path, type_name: str) -> None:
     "type_name, build_plugin",
     [
         pytest.param(
-            "no-manifest", _write_no_manifest_dir,
+            "no-manifest",
+            _write_no_manifest_dir,
             id="missing_manifest",
         ),
         pytest.param(
@@ -243,7 +246,8 @@ def _write_no_manifest_dir(workflows_dir: pathlib.Path, type_name: str) -> None:
             id="missing_plugin_sh_despite_valid_manifest",
         ),
         pytest.param(
-            "no-status", _write_manifest_missing_status,
+            "no-status",
+            _write_manifest_missing_status,
             id="manifest_missing_status_field",
         ),
         pytest.param(
@@ -253,9 +257,7 @@ def _write_no_manifest_dir(workflows_dir: pathlib.Path, type_name: str) -> None:
         ),
     ],
 )
-def test_malformed_plugin_returns_nonzero(
-    tmp_path: pathlib.Path, type_name: str, build_plugin
-) -> None:
+def test_malformed_plugin_returns_nonzero(tmp_path: pathlib.Path, type_name: str, build_plugin) -> None:
     """wf_load_plugin returns non-zero for every malformed-plugin shape: an
     absent manifest, a manifest with no workflow.sh, a manifest missing the
     status field, or a manifest with an invalid git_mode value."""
@@ -322,9 +324,7 @@ def test_valid_plugin_wf_git_mode_returns_declared_value(tmp_path: pathlib.Path)
 def test_valid_plugin_wf_agents_returns_declared_roster(tmp_path: pathlib.Path) -> None:
     """After loading a ready plugin, wf_agents returns the agent roster."""
     workflows_dir = tmp_path / "workflows"
-    _build_plugin(
-        workflows_dir, "agent-check", status="ready", git_mode="none", agents="pm,tester"
-    )
+    _build_plugin(workflows_dir, "agent-check", status="ready", git_mode="none", agents="pm,tester")
 
     script = textwrap.dedent(f"""\
         source {_LIB}
@@ -393,8 +393,7 @@ def test_stubs_return_nonzero_before_load(tmp_path: pathlib.Path) -> None:
         script = f"source {_LIB} && {hook}"
         result = run_bash(tmp_path, script)
         assert result.returncode != 0, (
-            f"Expected {hook} to return non-zero before wf_load_plugin, "
-            f"but got returncode={result.returncode}"
+            f"Expected {hook} to return non-zero before wf_load_plugin, " f"but got returncode={result.returncode}"
         )
 
 
@@ -455,3 +454,39 @@ def test_nonexistent_explicit_dir_returns_nonzero(tmp_path: pathlib.Path) -> Non
     """)
     result = run_bash(tmp_path, script)
     assert result.returncode != 0
+
+
+def _resolve_root_without_root_variables(tmp_path: pathlib.Path, lib: pathlib.Path):
+    """Source *lib* with PGAI_AGENT_KANBAN_ROOT_PATH and TEAM_ROOT unset and
+    print what _wf_resolve_workflows_root resolves, from an unrelated cwd."""
+    script = textwrap.dedent(f"""\
+        unset PGAI_AGENT_KANBAN_ROOT_PATH TEAM_ROOT
+        source '{lib}'
+        cd /
+        root="$(_wf_resolve_workflows_root)" && rc=0 || rc=$?
+        echo "rc=$rc"
+        echo "root=$root"
+    """)
+    return run_bash(tmp_path, script)
+
+
+def test_installed_layout_resolves_workflows_with_no_root_variables(tmp_path: pathlib.Path) -> None:
+    """An installed kanban (<root>/scripts/lib/workflow.sh beside <root>/workflows/)
+    resolves <root>/workflows through the last fallback when no root variable
+    is set."""
+    install_root = tmp_path / "inst"
+    shutil.copytree(_TEAM_DIR / "scripts" / "lib", install_root / "scripts" / "lib")
+    (install_root / "workflows" / "release").mkdir(parents=True)
+
+    result = _resolve_root_without_root_variables(tmp_path, install_root / "scripts" / "lib" / "workflow.sh")
+
+    assert "rc=0" in result.stdout, result.stdout + result.stderr
+    assert f"root={install_root}/workflows" in result.stdout.splitlines(), result.stdout + result.stderr
+
+
+def test_dev_tree_resolves_team_workflows_with_no_root_variables(tmp_path: pathlib.Path) -> None:
+    """In a dev tree the same call still resolves <repo>/team/workflows."""
+    result = _resolve_root_without_root_variables(tmp_path, _TEAM_DIR / "scripts" / "lib" / "workflow.sh")
+
+    assert "rc=0" in result.stdout, result.stdout + result.stderr
+    assert f"root={_TEAM_DIR}/workflows" in result.stdout.splitlines(), result.stdout + result.stderr

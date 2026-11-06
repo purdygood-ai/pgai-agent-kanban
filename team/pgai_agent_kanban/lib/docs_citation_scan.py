@@ -71,7 +71,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 # ---------------------------------------------------------------------------
 # The one citation pattern in the tree.
@@ -110,9 +110,7 @@ DOCS_CITATION_RE: re.Pattern[str] = re.compile(r"docs/[A-Za-z0-9._/-]+\.md")
 # occurrence of the same file.
 # ---------------------------------------------------------------------------
 _MARKDOWN_LINK_TARGET_RE: re.Pattern[str] = re.compile(r"\[[^\]\n]*\]\(([^)\s]+\.md)\)")
-_RELATIVE_MD_FILENAME_RE: re.Pattern[str] = re.compile(
-    r"(?<![\w/.-])([A-Za-z0-9._-]+\.md)(?![\w-])"
-)
+_RELATIVE_MD_FILENAME_RE: re.Pattern[str] = re.compile(r"(?<![\w/.-])([A-Za-z0-9._-]+\.md)(?![\w-])")
 
 # "README.md" is excluded from the BARE form only (still recognised as a
 # markdown-link target, a much less ambiguous signal). It is the one
@@ -141,9 +139,7 @@ ROOT_GOVERNANCE_FILES: tuple[str, ...] = (
 )
 
 
-def governance_seed_files(
-    governance_root: Path, *, roles_dirname: str = "roles"
-) -> list[Path]:
+def governance_seed_files(governance_root: Path, *, roles_dirname: str = "roles") -> list[Path]:
     """Every file that can itself carry a docs/ citation: the four flat
     root governance files plus every role file, resolved under
     *governance_root*.
@@ -154,11 +150,7 @@ def governance_seed_files(
     ``roles/`` directory out identically, one hop under the parent that
     differs (an install root vs. ``team/``).
     """
-    seeds = [
-        governance_root / name
-        for name in ROOT_GOVERNANCE_FILES
-        if (governance_root / name).is_file()
-    ]
+    seeds = [governance_root / name for name in ROOT_GOVERNANCE_FILES if (governance_root / name).is_file()]
     roles_dir = governance_root / roles_dirname
     if roles_dir.is_dir():
         seeds.extend(sorted(roles_dir.glob("*.md")))
@@ -190,9 +182,7 @@ def _is_within(candidate: Path, root: Path) -> bool:
         return False
 
 
-def _normalize_relative_citation(
-    citing_dir: Path, raw_target: str, docs_root: Path
-) -> Optional[str]:
+def _normalize_relative_citation(citing_dir: Path, raw_target: str, docs_root: Path) -> str | None:
     """Resolve a bare filename or a markdown link's relative href — text a
     documentation-directory file wrote with no literal "docs/" prefix —
     against *citing_dir*, and return it in the same "docs/<path>.md" form
@@ -224,9 +214,7 @@ def _normalize_relative_citation(
     return "docs/" + target_abs.relative_to(docs_root).as_posix()
 
 
-def scan_citations(
-    path: Path, *, docs_root: Optional[Path] = None
-) -> list[CitationOccurrence]:
+def scan_citations(path: Path, *, docs_root: Path | None = None) -> list[CitationOccurrence]:
     """Return every distinct docs/<path>.md citation textually present in
     *path*, each paired with the 1-based line number of its first
     occurrence in the file.
@@ -256,9 +244,7 @@ def scan_citations(
     first_line: dict[tuple[str, bool], int] = {}
 
     docs_root_resolved = docs_root.resolve() if docs_root is not None else None
-    scan_relative_forms = docs_root_resolved is not None and _is_within(
-        path.resolve(), docs_root_resolved
-    )
+    scan_relative_forms = docs_root_resolved is not None and _is_within(path.resolve(), docs_root_resolved)
 
     for line_no, line_text in enumerate(text.splitlines(), start=1):
         for match in DOCS_CITATION_RE.finditer(line_text):
@@ -274,18 +260,14 @@ def scan_citations(
         # ways (e.g. a genuine `[README.md](README.md)` link whose text
         # also stands alone as a bare token elsewhere on the line) is still
         # read as one citation via the outer per-file dict below.
-        raw_targets = {
-            m.group(1) for m in _MARKDOWN_LINK_TARGET_RE.finditer(line_text)
-        }
+        raw_targets = {m.group(1) for m in _MARKDOWN_LINK_TARGET_RE.finditer(line_text)}
         raw_targets.update(
             m.group(1)
             for m in _RELATIVE_MD_FILENAME_RE.finditer(line_text)
             if m.group(1).lower() not in _AMBIGUOUS_BARE_FILENAMES
         )
         for raw_target in raw_targets:
-            cited = _normalize_relative_citation(
-                path.parent, raw_target, docs_root_resolved
-            )
+            cited = _normalize_relative_citation(path.parent, raw_target, docs_root_resolved)
             if cited is not None:
                 first_line.setdefault((cited, True), line_no)
 
@@ -328,10 +310,7 @@ class ClosureReport:
         if self.findings:
             lines.append(f"{len(self.findings)} citation(s) did NOT resolve:")
             for finding in self.findings:
-                lines.append(
-                    f"  - {finding.source}:{finding.line} cites "
-                    f"{finding.cited!r}, which did not resolve"
-                )
+                lines.append(f"  - {finding.source}:{finding.line} cites " f"{finding.cited!r}, which did not resolve")
         else:
             lines.append("Every citation resolved.")
         return "\n".join(lines)
@@ -342,9 +321,9 @@ def walk_docs_citation_closure(
     *,
     display_name: Callable[[Path], str],
     is_resolved: Callable[[str], bool],
-    resolved_target: Callable[[str], Optional[Path]],
-    docs_root: Optional[Path] = None,
-    is_resolved_relaxed: Optional[Callable[[str], bool]] = None,
+    resolved_target: Callable[[str], Path | None],
+    docs_root: Path | None = None,
+    is_resolved_relaxed: Callable[[str], bool] | None = None,
 ) -> ClosureReport:
     """Breadth-first walk of the transitive closure of docs/ citation
     edges, starting at *seed_files*.
@@ -401,21 +380,111 @@ def walk_docs_citation_closure(
 
         for occurrence in scan_citations(current, docs_root=docs_root):
             checked.add(occurrence.cited)
-            judge = (
-                is_resolved_relaxed
-                if occurrence.relaxed and is_resolved_relaxed is not None
-                else is_resolved
-            )
+            judge = is_resolved_relaxed if occurrence.relaxed and is_resolved_relaxed is not None else is_resolved
             if judge(occurrence.cited):
                 target = resolved_target(occurrence.cited)
                 if target is not None and target not in seen:
                     queue.append(target)
             else:
-                report.findings.append(
-                    ClosureFinding(
-                        source=rel, line=occurrence.line, cited=occurrence.cited
-                    )
-                )
+                report.findings.append(ClosureFinding(source=rel, line=occurrence.line, cited=occurrence.cited))
 
     report.citations_checked = len(checked)
     return report
+
+
+# ---------------------------------------------------------------------------
+# team/<path> citations that name nothing in the tree
+# ---------------------------------------------------------------------------
+
+# A repository path under team/: not the tail of a longer path or name
+# ("projects/x/team/...", "$TEAM/...", "~/team/...").
+_TEAM_PATH_RE = re.compile(r"(?<![\w./~$-])team/[A-Za-z0-9_][A-Za-z0-9_./-]*")
+# A path that continues into a placeholder or glob is a pattern, not a path.
+_TEAM_PATH_PATTERN_CHARS = frozenset("<*{$[")
+# Sentence punctuation a path never ends with.
+_TEAM_PATH_TRAILING = ".,:;)"
+# A document declares a deliberately illustrative team/ path (a placeholder
+# plugin a walkthrough builds, a file a "# BAD" example names) on a comment
+# line of its own, in the shape of the docs' other lint-keyed index lines:
+#
+#   <!-- team-paths: example team/workflows/my-new-type/ — the walkthrough's placeholder -->
+#
+# The leading whitespace-separated team/ tokens are the declared paths; the
+# first token that is not one starts free-text reason. A declaration covers
+# its whole document, so it also reaches citations inside fenced code blocks,
+# where an inline marker would print literally. Whitespace and case around
+# "team-paths:" and "example" are loose.
+_TEAM_PATH_EXAMPLE_RE = re.compile(r"<!--\s*team-paths\s*:\s*example\b(.*?)-->", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class MissingTeamPath:
+    """A ``team/<path>`` a document names that does not exist in the tree."""
+
+    source: str
+    line: int
+    cited: str
+
+
+def team_path_citation_sources(repo_root: Path) -> list[Path]:
+    """The documents whose ``team/<path>`` citations are checked: every
+    ``docs/**/*.md`` and the root ``HOW_TO.md``, in a stable order."""
+    sources = sorted((repo_root / "docs").rglob("*.md")) if (repo_root / "docs").is_dir() else []
+    how_to = repo_root / "HOW_TO.md"
+    if how_to.is_file():
+        sources.append(how_to)
+    return sources
+
+
+def declared_example_team_paths(text: str) -> set[str]:
+    """The illustrative ``team/<path>`` values *text* declares with
+    ``<!-- team-paths: example team/<path> [...] [reason] -->`` lines (see
+    ``_TEAM_PATH_EXAMPLE_RE``), each without a trailing ``/``."""
+    declared: set[str] = set()
+    for match in _TEAM_PATH_EXAMPLE_RE.finditer(text):
+        for token in match.group(1).split():
+            if not token.startswith("team/"):
+                break
+            declared.add(token.rstrip(_TEAM_PATH_TRAILING).rstrip("/"))
+    return declared
+
+
+def _is_declared_example(cited: str, declared: set[str]) -> bool:
+    """True when *cited* is a declared example path or lies under one."""
+    path = cited.rstrip("/")
+    return any(path == example or path.startswith(example + "/") for example in declared)
+
+
+def find_missing_team_paths(repo_root: Path, sources: Iterable[Path] | None = None) -> list[MissingTeamPath]:
+    """Every ``team/<path>`` citation in *sources* that names no file or
+    directory under *repo_root*.
+
+    *sources* defaults to :func:`team_path_citation_sources`. A citation
+    that runs into a placeholder or glob (``team/workflows/<type>/``,
+    ``team/scripts/*.sh``) is a pattern and is not checked; trailing
+    sentence punctuation is not part of the path. A citation the same
+    document declares illustrative (``declared_example_team_paths``) — the
+    declared path itself or anything under it — is not checked either, and
+    the declaration line is not scanned. Each finding names the citing
+    file relative to *repo_root*, its 1-based line and the path.
+    """
+    findings: list[MissingTeamPath] = []
+    for source in (team_path_citation_sources(repo_root) if sources is None else sources):
+        try:
+            display = str(source.relative_to(repo_root))
+        except ValueError:
+            display = str(source)
+        text = source.read_text(encoding="utf-8", errors="replace")
+        declared = declared_example_team_paths(text)
+        for number, line in enumerate(text.splitlines(), start=1):
+            if _TEAM_PATH_EXAMPLE_RE.search(line):
+                continue
+            for match in _TEAM_PATH_RE.finditer(line):
+                if line[match.end() : match.end() + 1] in _TEAM_PATH_PATTERN_CHARS:
+                    continue
+                cited = match.group(0).rstrip(_TEAM_PATH_TRAILING)
+                if not cited or _is_declared_example(cited, declared):
+                    continue
+                if not (repo_root / cited).exists():
+                    findings.append(MissingTeamPath(display, number, cited))
+    return findings

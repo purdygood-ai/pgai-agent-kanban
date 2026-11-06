@@ -191,26 +191,18 @@ def evaluate_freshness(
     age_str = ""
 
     if record_version != target_version:
-        reasons.append(
-            f"record is for version {record_version!r}, promotion target is "
-            f"{target_version!r}"
-        )
+        reasons.append(f"record is for version {record_version!r}, promotion target is " f"{target_version!r}")
 
     try:
         record_time = parse_iso(record_timestamp)
     except ValueError:
-        reasons.append(
-            f"record timestamp {record_timestamp!r} could not be parsed"
-        )
+        reasons.append(f"record timestamp {record_timestamp!r} could not be parsed")
     else:
         elapsed = now - record_time
         age_str = format_days_hours(elapsed)
         window = datetime.timedelta(days=window_days)
         if elapsed > window:
-            reasons.append(
-                f"record is {age_str} old, older than the {window_days}-day "
-                "freshness window"
-            )
+            reasons.append(f"record is {age_str} old, older than the {window_days}-day " "freshness window")
 
     if reasons:
         return FreshnessDecision(RESULT_STALE, tuple(reasons), age_str)
@@ -299,9 +291,7 @@ def main(argv: list | None = None) -> int:
     if found:
         record = {"timestamp": timestamp, "version": version, "verdict": verdict}
 
-    decision = evaluate_freshness(
-        target_version=target_version, record=record, now=now, window_days=window_days
-    )
+    decision = evaluate_freshness(target_version=target_version, record=record, now=now, window_days=window_days)
 
     print(f"result={decision.result}")
     print(f"age={decision.age_str}")

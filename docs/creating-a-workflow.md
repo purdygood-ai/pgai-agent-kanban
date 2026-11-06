@@ -506,6 +506,8 @@ upgrade.
 
 ### Step 2 — Scaffold under `team/workflows/`
 
+<!-- team-paths: example team/workflows/my-new-type/ — the placeholder plugin this walkthrough scaffolds -->
+
 Run the generator from the dev tree. With `PGAI_AGENT_KANBAN_ROOT_PATH`
 unset (or set to a throwaway path outside the repo) and the CWD inside
 the dev tree, the generator resolves the output root as

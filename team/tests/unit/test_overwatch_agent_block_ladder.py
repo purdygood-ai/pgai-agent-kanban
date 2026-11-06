@@ -49,8 +49,8 @@ from pgai_agent_kanban.task_status import read_section, section_value, set_or_ap
 
 _PROJECT = "ladder-proj"
 _TASK = "CM-20260101-001-release-example"
-_BLOCKED_AT = datetime.datetime(2026, 1, 1, 11, 0, 0, tzinfo=datetime.timezone.utc)
-_FIRST_LOOK = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_BLOCKED_AT = datetime.datetime(2026, 1, 1, 11, 0, 0, tzinfo=datetime.UTC)
+_FIRST_LOOK = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _BLOCKERS = "Transient/platform API error: the subagent was lost twice before release.sh ran. Requeue to BACKLOG"
 
 # The operator's ladder, written out by hand: the cool-down recorded at the
@@ -72,8 +72,14 @@ class Root:
         self.project = self.root / "projects" / _PROJECT
         self.task_dir = self.project / "tasks" / _TASK
         self.queue = self.project / "tasks" / "queues" / "cm_backlog.md"
-        for d in (self.project / "overwatch" / "backups", self.queue.parent, self.task_dir / "artifacts",
-                  self.root / "locks", self.root / "tmp", self.root / "logs"):
+        for d in (
+            self.project / "overwatch" / "backups",
+            self.queue.parent,
+            self.task_dir / "artifacts",
+            self.root / "locks",
+            self.root / "tmp",
+            self.root / "logs",
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8")
         (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8")
@@ -120,7 +126,9 @@ class Root:
         ``## Zero Progress`` count at its cap, then a ``provider_refusal`` Block Record."""
         text = self.status.read_text(encoding="utf-8")
         for heading, body in (
-            ("State", "BLOCKED"), ("Needs Human", "yes"), ("Blockers", "The provider refused every dispatch."),
+            ("State", "BLOCKED"),
+            ("Needs Human", "yes"),
+            ("Blockers", "The provider refused every dispatch."),
             ("Zero Progress", "reason_code: clean_exit_no_progress\ncount: 3\nlimit: 3\ndetail: refused dispatches"),
         ):
             text = set_or_append_section(text, heading, body)
@@ -148,8 +156,14 @@ class Root:
 @pytest.fixture()
 def kanban(tmp_path, monkeypatch) -> Root:
     root = Root(tmp_path)
-    for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME", "HALT_OVERWATCH",
-                 "OVERWATCH_FIRING_TIMESTAMP", "OVERWATCH_LOCK_WAIT_SECONDS"):
+    for name in (
+        "PGAI_TASKS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_PROJECT_NAME",
+        "HALT_OVERWATCH",
+        "OVERWATCH_FIRING_TIMESTAMP",
+        "OVERWATCH_LOCK_WAIT_SECONDS",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KANBAN_ROOT", str(root.root))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root.root))
@@ -180,9 +194,11 @@ def test_cm_task_agent_block_is_requeued_three_times_on_the_ladder_before_the_in
         assert kanban.field("State") == "BLOCKED"
 
         acted = kanban.look(due)
-        assert (acted.outcome.kind, acted.outcome.name, acted.result) == ("verb", "requeue", dx.STATUS_EXECUTED), (
-            acted.detail
-        )
+        assert (acted.outcome.kind, acted.outcome.name, acted.result) == (
+            "verb",
+            "requeue",
+            dx.STATUS_EXECUTED,
+        ), acted.detail
         assert kanban.field("State") == "BACKLOG" and kanban.field("Needs Human") == "no"
         record = load_block_record(kanban.status)
         assert (record.attempts, record.requeues) == (requeue, requeue)
@@ -240,9 +256,11 @@ def _walk_the_ladder(kanban: Root, block) -> datetime.datetime:
     for requeue in (1, 2, 3):
         due = kanban.cooldown_until()
         acted = kanban.look(due)
-        assert (acted.outcome.kind, acted.outcome.name, acted.result) == ("verb", "requeue", dx.STATUS_EXECUTED), (
-            acted.detail
-        )
+        assert (acted.outcome.kind, acted.outcome.name, acted.result) == (
+            "verb",
+            "requeue",
+            dx.STATUS_EXECUTED,
+        ), acted.detail
         assert load_block_record(kanban.status).requeues == requeue
         assert kanban.entries() == [] and not kanban.halt.exists()
         block(due + datetime.timedelta(minutes=5))

@@ -99,7 +99,7 @@ def _assert_installed_resume(body: str, root: pathlib.Path, script: str, *args: 
     resume = body.rstrip("\n").splitlines()[-1]
     command = " ".join([shlex.quote(str(root / "scripts" / script)), *args])
     assert resume == f"# Resume: {command}", body
-    assert "team/" not in resume[len(f"# Resume: {root}"):], resume
+    assert "team/" not in resume[len(f"# Resume: {root}") :], resume
 
 
 def _cm_halt(tmp_path: pathlib.Path, root: pathlib.Path, key: str, *, posture: bool = True, inbox: bool = False):
@@ -241,7 +241,11 @@ def _operator_script(tmp_path, root, script: str, *args: str):
         env.pop(name, None)
     return subprocess.run(
         ["bash", str(_TEAM / "scripts" / script), *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=120,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
     )
 
 
@@ -335,24 +339,36 @@ def test_promote_record_superseded_by_unhalt_is_operator(tmp_path):
             "# error:   cm-release.trigger-4.pre-squash-hook-failed\n"
             "# message: The pre-squash hook failed.\n"
             "# remedy:  bash hooks/pre-squash.sh\n",
-            hp.WRITER_CM_RELEASE, "cm-release.trigger-4.pre-squash-hook-failed", "4", "cm-header",
+            hp.WRITER_CM_RELEASE,
+            "cm-release.trigger-4.pre-squash-hook-failed",
+            "4",
+            "cm-header",
         ),
         (
             "# HALT created by CM at 2026-01-01T00:00:00Z\n"
             "# Reason: trigger 2 - systemic risk high and not clear to ship\n"
             "# Resolution: Operator review required. See CM task status.md for full reason.\n",
-            hp.WRITER_CM_RELEASE, "trigger 2 - systemic risk high and not clear to ship", "2", "cm-header",
+            hp.WRITER_CM_RELEASE,
+            "trigger 2 - systemic risk high and not clear to ship",
+            "2",
+            "cm-header",
         ),
         (
             "# HALT created by OVERWATCH while it repairs this project (fix_fn); removed when the repair ends.\n"
             "# overwatch-repair-halt: pid=1 start=1 fn=fix_fn at=2026-01-01T00:00:00Z\n",
-            hp.WRITER_OVERWATCH_REPAIR, "OVERWATCH repair in progress (fix_fn)", None, "repair-marker",
+            hp.WRITER_OVERWATCH_REPAIR,
+            "OVERWATCH repair in progress (fix_fn)",
+            None,
+            "repair-marker",
         ),
         (
             "# HALT created by CM at 2026-01-01T00:00:00Z\r\n"
             "#halt-writer :  CM_Release  \r\n"
             "#  HALT-REASON: cm-release.trigger-7.tag-exists-on-origin\r\n",
-            hp.WRITER_CM_RELEASE, "cm-release.trigger-7.tag-exists-on-origin", "7", "body",
+            hp.WRITER_CM_RELEASE,
+            "cm-release.trigger-7.tag-exists-on-origin",
+            "7",
+            "body",
         ),
     ],
 )
@@ -465,14 +481,22 @@ def test_cli_prints_the_classification(tmp_path, by_path):
 
     plain = subprocess.run(
         [*command, "classify", str(_halt(root))],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
     )
     assert plain.returncode == 0, plain.stderr
     assert plain.stdout == "chain\tcm-release\tcm-release.trigger-8.last-3-rcs-non-functional\t8\tbody\n"
 
     as_json = subprocess.run(
         [*command, "classify", str(_halt(root)), "--json", "--kanban-root", str(root)],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
     )
     assert as_json.returncode == 0, as_json.stderr
     data = json.loads(as_json.stdout)
@@ -494,9 +518,7 @@ _COMMANDS = [
 
 def _bash_words(command: str) -> list:
     """The words bash splits *command* into, one per printf line."""
-    run = subprocess.run(
-        ["bash", "-c", f"printf '%s\\n' {command}"], capture_output=True, text=True, timeout=30
-    )
+    run = subprocess.run(["bash", "-c", f"printf '%s\\n' {command}"], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     return run.stdout.splitlines()
 

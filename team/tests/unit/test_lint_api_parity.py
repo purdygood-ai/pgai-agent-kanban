@@ -48,14 +48,13 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-
 # ---------------------------------------------------------------------------
 # Resolve path to lint_api_parity.py so we can import it as a module.
 # This file lives at team/tests/unit/test_lint_api_parity.py.
 # Going up three levels: unit/ → tests/ → team/
 # ---------------------------------------------------------------------------
 _THIS_FILE = Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent    # team/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_api_parity.py"
 
@@ -95,12 +94,10 @@ _lint = _import_lint_module()
 def _make_model(**fields: Any) -> type[BaseModel]:
     """Dynamically create a Pydantic BaseModel subclass with the given fields.
 
-    Each keyword argument becomes an Optional[str] field on the model.
+    Each keyword argument becomes a ``str | None`` field on the model.
     The model name is ``DynamicBody`` so violation messages are predictable.
     """
-    from typing import Optional
-
-    annotations: dict[str, Any] = {name: Optional[str] for name in fields}
+    annotations: dict[str, Any] = {name: str | None for name in fields}
     defaults: dict[str, Any] = {name: None for name in fields}
     return type("DynamicBody", (BaseModel,), {"__annotations__": annotations, **defaults})
 
@@ -120,8 +117,7 @@ _DRIFT_FIXTURE = _FIXTURES_DIR / "fixture_api_drift_script.sh"
 def test_drift_fixture_exists():
     """Sanity: the drift fixture script must be present in the fixtures directory."""
     assert _DRIFT_FIXTURE.exists(), (
-        f"Drift fixture not found: {_DRIFT_FIXTURE}\n"
-        "Expected at team/tests/fixtures/fixture_api_drift_script.sh"
+        f"Drift fixture not found: {_DRIFT_FIXTURE}\n" "Expected at team/tests/fixtures/fixture_api_drift_script.sh"
     )
 
 
@@ -149,29 +145,22 @@ def test_drift_fixture_detected():
 
     # Violation message must name the script filename.
     assert _DRIFT_FIXTURE.name in joined, (
-        f"Violation message does not name the script filename '{_DRIFT_FIXTURE.name}':\n"
-        f"{joined}"
+        f"Violation message does not name the script filename '{_DRIFT_FIXTURE.name}':\n" f"{joined}"
     )
 
     # Violation message must name the flag.
-    assert "frobnicate" in joined, (
-        f"Violation message does not name the flag 'frobnicate':\n{joined}"
-    )
+    assert "frobnicate" in joined, f"Violation message does not name the flag 'frobnicate':\n{joined}"
 
     # Violation message must name the model class.
     assert drift_body.__name__ in joined, (
-        f"Violation message does not name the model class '{drift_body.__name__}':\n"
-        f"{joined}"
+        f"Violation message does not name the model class '{drift_body.__name__}':\n" f"{joined}"
     )
 
 
 def test_parity_pass_exact_match(tmp_path: Path):
     """A script whose flags exactly match the body fields passes with zero violations."""
     script = tmp_path / "fake_op.sh"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        "OPERATOR_VALID_FLAGS=(project key help)\n"
-    )
+    script.write_text("#!/usr/bin/env bash\n" "OPERATOR_VALID_FLAGS=(project key help)\n")
 
     body = _make_model(project=None, key=None)
     violations = _lint.check_parity(script, body, verbose=False)
@@ -181,10 +170,7 @@ def test_parity_pass_exact_match(tmp_path: Path):
 def test_hyphen_underscore_equivalence(tmp_path: Path):
     """Script flag 'dry-run' is satisfied by body field 'dry_run' (no violation)."""
     script = tmp_path / "fake_dry.sh"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        "OPERATOR_VALID_FLAGS=(project dry-run help)\n"
-    )
+    script.write_text("#!/usr/bin/env bash\n" "OPERATOR_VALID_FLAGS=(project dry-run help)\n")
 
     body = _make_model(project=None, dry_run=None)
     violations = _lint.check_parity(script, body, verbose=False)
@@ -194,10 +180,7 @@ def test_hyphen_underscore_equivalence(tmp_path: Path):
 def test_intake_file_equivalence(tmp_path: Path):
     """Script flag 'file' is satisfied by body fields 'filename' and 'content'."""
     script = tmp_path / "fake_intake.sh"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        "OPERATOR_VALID_FLAGS=(project file help)\n"
-    )
+    script.write_text("#!/usr/bin/env bash\n" "OPERATOR_VALID_FLAGS=(project file help)\n")
 
     body = _make_model(project=None, filename=None, content=None)
     violations = _lint.check_parity(script, body, verbose=False)
@@ -207,10 +190,7 @@ def test_intake_file_equivalence(tmp_path: Path):
 def test_meta_flags_excluded(tmp_path: Path):
     """'help' and 'h' in OPERATOR_VALID_FLAGS are never reported as violations."""
     script = tmp_path / "fake_meta.sh"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        "OPERATOR_VALID_FLAGS=(project help h)\n"
-    )
+    script.write_text("#!/usr/bin/env bash\n" "OPERATOR_VALID_FLAGS=(project help h)\n")
 
     # Body has only 'project' — 'help' and 'h' must not be flagged.
     body = _make_model(project=None)
@@ -221,40 +201,26 @@ def test_meta_flags_excluded(tmp_path: Path):
 def test_missing_flag_reported(tmp_path: Path):
     """A flag present in the script but absent from the body is reported correctly."""
     script = tmp_path / "fake_missing.sh"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        "OPERATOR_VALID_FLAGS=(project missing-field help)\n"
-    )
+    script.write_text("#!/usr/bin/env bash\n" "OPERATOR_VALID_FLAGS=(project missing-field help)\n")
 
     body = _make_model(project=None)
     violations = _lint.check_parity(script, body, verbose=False)
 
     assert len(violations) == 1, f"Expected exactly one violation; got: {violations}"
-    assert "missing-field" in violations[0], (
-        f"Violation does not name the missing flag: {violations[0]}"
-    )
-    assert script.name in violations[0], (
-        f"Violation does not name the script: {violations[0]}"
-    )
-    assert body.__name__ in violations[0], (
-        f"Violation does not name the model class: {violations[0]}"
-    )
+    assert "missing-field" in violations[0], f"Violation does not name the missing flag: {violations[0]}"
+    assert script.name in violations[0], f"Violation does not name the script: {violations[0]}"
+    assert body.__name__ in violations[0], f"Violation does not name the model class: {violations[0]}"
 
 
 def test_intake_file_equivalence_body_missing_one_field(tmp_path: Path):
     """If body has 'filename' but not 'content', the equivalence is not satisfied."""
     script = tmp_path / "fake_intake_partial.sh"
-    script.write_text(
-        "#!/usr/bin/env bash\n"
-        "OPERATOR_VALID_FLAGS=(project file help)\n"
-    )
+    script.write_text("#!/usr/bin/env bash\n" "OPERATOR_VALID_FLAGS=(project file help)\n")
 
     # Missing 'content' from the body → equivalence unsatisfied → violation expected.
     body = _make_model(project=None, filename=None)
     violations = _lint.check_parity(script, body, verbose=False)
-    assert len(violations) >= 1, (
-        "Expected a violation when body is missing 'content' for the intake equivalence"
-    )
+    assert len(violations) >= 1, "Expected a violation when body is missing 'content' for the intake equivalence"
 
 
 # ---------------------------------------------------------------------------
@@ -288,13 +254,10 @@ def test_op_model_missing_dry_run_scratch_negative():
     # Violation must name the model class.
     joined = "\n".join(violations)
     assert stub_without_dry_run.__name__ in joined, (
-        f"Violation does not name the model class '{stub_without_dry_run.__name__}':\n"
-        f"{joined}"
+        f"Violation does not name the model class '{stub_without_dry_run.__name__}':\n" f"{joined}"
     )
     # Violation must mention the missing field.
-    assert "dry_run" in joined, (
-        f"Violation does not mention 'dry_run':\n{joined}"
-    )
+    assert "dry_run" in joined, f"Violation does not mention 'dry_run':\n{joined}"
 
 
 def test_all_current_op_models_have_dry_run():
@@ -307,9 +270,8 @@ def test_all_current_op_models_have_dry_run():
     # is a live regression guard over the actual op-model source, not an
     # isolated behavior a fixture could stand in for.
     violations = _lint.lint_all_op_models_dry_run(_TEAM_DIR)
-    assert violations == [], (
-        "The following operation body models are missing 'dry_run':\n"
-        + "\n".join(f"  {v}" for v in violations)
+    assert violations == [], "The following operation body models are missing 'dry_run':\n" + "\n".join(
+        f"  {v}" for v in violations
     )
 
 
@@ -320,12 +282,11 @@ def test_all_current_op_models_have_dry_run():
 
 def test_response_model_with_warnings_passes():
     """A response model that declares warnings produces no violations."""
-    from typing import List
-
-    # Use List[str] for the warnings field to mirror the real contract.
-    annotations = {"exit_code": int, "stdout": str, "stderr": str, "warnings": List[str]}
+    # Use list[str] for the warnings field to mirror the real contract.
+    annotations = {"exit_code": int, "stdout": str, "stderr": str, "warnings": list[str]}
     defaults = {"exit_code": 0, "stdout": "", "stderr": "", "warnings": []}
     from pydantic import BaseModel
+
     stub_ok = type("OperationEnvelope", (BaseModel,), {"__annotations__": annotations, **defaults})
 
     violations = _lint.check_response_model_has_warnings(stub_ok)
@@ -351,13 +312,10 @@ def test_response_model_missing_warnings_scratch_negative():
     # Violation must name the model class.
     joined = "\n".join(violations)
     assert stub_without_warnings.__name__ in joined, (
-        f"Violation does not name the model class '{stub_without_warnings.__name__}':\n"
-        f"{joined}"
+        f"Violation does not name the model class '{stub_without_warnings.__name__}':\n" f"{joined}"
     )
     # Violation must mention the missing field.
-    assert "warnings" in joined, (
-        f"Violation does not mention 'warnings':\n{joined}"
-    )
+    assert "warnings" in joined, f"Violation does not mention 'warnings':\n{joined}"
 
 
 def test_all_current_response_models_have_warnings():
@@ -373,9 +331,8 @@ def test_all_current_response_models_have_warnings():
     # is a live regression guard over the actual response-model source, not
     # an isolated behavior a fixture could stand in for.
     violations = _lint.lint_all_response_models_warnings(_TEAM_DIR)
-    assert violations == [], (
-        "The following response models are missing 'warnings':\n"
-        + "\n".join(f"  {v}" for v in violations)
+    assert violations == [], "The following response models are missing 'warnings':\n" + "\n".join(
+        f"  {v}" for v in violations
     )
 
 
@@ -488,9 +445,7 @@ def test_check_app_routes_have_census_row_respects_exempt_list():
     verb = _make_verb(rest_route="/probe")
     declared = [_FakeRouteDecl("GET", "/frobnicate", "frobnicate.sh")]
 
-    findings = _lint.check_app_routes_have_census_row(
-        {"probe": verb}, declared, frozenset({"frobnicate.sh"})
-    )
+    findings = _lint.check_app_routes_have_census_row({"probe": verb}, declared, frozenset({"frobnicate.sh"}))
     assert findings == []
 
 
@@ -506,7 +461,7 @@ def test_check_app_routes_have_census_row_ignores_routes_with_no_fronted_script(
 # Class 3: schema_mismatch
 # ---------------------------------------------------------------------------
 
-_ROUTER_FIXTURE_TEMPLATE = '''
+_ROUTER_FIXTURE_TEMPLATE = """
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
@@ -516,7 +471,7 @@ router = APIRouter()
 @router.get("/probe")
 def get_probe():
     return JSONResponse(content={body}, status_code=200)
-'''
+"""
 
 
 def _write_router_fixture(tmp_path: Path, body: str) -> Path:
@@ -530,9 +485,7 @@ def _write_router_fixture(tmp_path: Path, body: str) -> Path:
 def test_check_response_schema_flags_seeded_mismatch(tmp_path: Path):
     # Census declares ShellEnvelope; the handler actually returns
     # VerdictsResponse's shape -- a seeded, deliberate mismatch.
-    team_dir = _write_router_fixture(
-        tmp_path, '{"verdicts": [], "warnings": []}'
-    )
+    team_dir = _write_router_fixture(tmp_path, '{"verdicts": [], "warnings": []}')
     verb = _make_verb(rest_method="GET", rest_route="/probe", schema_ref="ShellEnvelope")
 
     findings = _lint.check_response_schema({"probe": verb}, team_dir)
@@ -573,9 +526,7 @@ def test_check_response_schema_skips_unresolvable_shape(tmp_path: Path):
 def test_check_scripts_have_census_row_flags_unregistered_script(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
-    (scripts_dir / "orphan.sh").write_text(
-        "#!/usr/bin/env bash\nOPERATOR_VALID_FLAGS=(project help)\n"
-    )
+    (scripts_dir / "orphan.sh").write_text("#!/usr/bin/env bash\nOPERATOR_VALID_FLAGS=(project help)\n")
 
     findings = _lint.check_scripts_have_census_row({}, tmp_path, _ovm_module(), frozenset())
 
@@ -587,27 +538,19 @@ def test_check_scripts_have_census_row_flags_unregistered_script(tmp_path: Path)
 def test_check_scripts_have_census_row_passes_for_censused_script(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
-    (scripts_dir / "probe.sh").write_text(
-        "#!/usr/bin/env bash\nOPERATOR_VALID_FLAGS=(project help)\n"
-    )
+    (scripts_dir / "probe.sh").write_text("#!/usr/bin/env bash\nOPERATOR_VALID_FLAGS=(project help)\n")
     verb = _make_verb(script="scripts/probe.sh")
 
-    findings = _lint.check_scripts_have_census_row(
-        {"probe": verb}, tmp_path, _ovm_module(), frozenset()
-    )
+    findings = _lint.check_scripts_have_census_row({"probe": verb}, tmp_path, _ovm_module(), frozenset())
     assert findings == []
 
 
 def test_check_scripts_have_census_row_respects_exempt_list(tmp_path: Path):
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
-    (scripts_dir / "orphan.sh").write_text(
-        "#!/usr/bin/env bash\nOPERATOR_VALID_FLAGS=(project help)\n"
-    )
+    (scripts_dir / "orphan.sh").write_text("#!/usr/bin/env bash\nOPERATOR_VALID_FLAGS=(project help)\n")
 
-    findings = _lint.check_scripts_have_census_row(
-        {}, tmp_path, _ovm_module(), frozenset({"orphan.sh"})
-    )
+    findings = _lint.check_scripts_have_census_row({}, tmp_path, _ovm_module(), frozenset({"orphan.sh"}))
     assert findings == []
 
 
@@ -644,9 +587,8 @@ def test_run_census_gate_is_clean_on_the_real_tree():
     exempt-list entry) makes this test fail.
     """
     findings = _lint.run_census_gate(_TEAM_DIR)
-    assert findings == [], (
-        "The following census-walk violations were found on the live tree:\n"
-        + "\n".join(f"  [{f.kind}] {f.text}" for f in findings)
+    assert findings == [], "The following census-walk violations were found on the live tree:\n" + "\n".join(
+        f"  [{f.kind}] {f.text}" for f in findings
     )
 
 
@@ -678,9 +620,7 @@ def _action_verb(name: str) -> Verb:
 def test_check_action_verbs_have_parity_fixture_flags_an_unfixtured_action_verb():
     """An active action verb absent from the ledger is reported by name."""
     verbs = {"probe-act": _action_verb("probe-act"), "covered": _action_verb("covered")}
-    findings = _lint.check_action_verbs_have_parity_fixture(
-        verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered"})
-    )
+    findings = _lint.check_action_verbs_have_parity_fixture(verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered"}))
     assert len(findings) == 1, findings
     assert findings[0].kind == "action_fixture_missing"
     assert "'probe-act'" in findings[0].text
@@ -845,9 +785,7 @@ def test_check_read_verbs_have_parity_fixture_flags_an_unfixtured_read_verb():
     """An active read verb absent from the read-parity ledger is reported
     by name, as a missing golden pair, naming the ledger to add it to."""
     verbs = {"probe-read": _read_verb("probe-read"), "covered": _read_verb("covered")}
-    findings = _lint.check_read_verbs_have_parity_fixture(
-        verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered"})
-    )
+    findings = _lint.check_read_verbs_have_parity_fixture(verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered"}))
     assert len(findings) == 1, findings
     assert findings[0].kind == "read_fixture_missing"
     assert "'probe-read'" in findings[0].text
@@ -896,14 +834,10 @@ def test_check_read_verbs_have_parity_fixture_skips_an_unrouted_read_verb():
     "unknown", since the census does carry the verb."""
     verbs = {"frob": _unrouted_active_verb("frob"), "covered": _read_verb("covered")}
 
-    findings = _lint.check_read_verbs_have_parity_fixture(
-        verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered"})
-    )
+    findings = _lint.check_read_verbs_have_parity_fixture(verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered"}))
     assert findings == []
 
-    findings = _lint.check_read_verbs_have_parity_fixture(
-        verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered", "frob"})
-    )
+    findings = _lint.check_read_verbs_have_parity_fixture(verbs, _TEAM_DIR, ledger_verbs=frozenset({"covered", "frob"}))
     assert findings == []
 
 

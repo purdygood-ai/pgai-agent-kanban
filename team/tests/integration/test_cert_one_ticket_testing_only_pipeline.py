@@ -45,9 +45,7 @@ import pathlib
 import re
 import shutil
 import subprocess
-import textwrap
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants derived from this file's location.
@@ -109,10 +107,7 @@ def _build_testing_only_kanban_root(
 
     # projects.cfg
     (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\n"
-        "priority=1\n"
-        "description=certification fixture project\n"
-        "enabled=true\n",
+        f"[project:{project_name}]\n" "priority=1\n" "description=certification fixture project\n" "enabled=true\n",
         encoding="utf-8",
     )
 
@@ -154,8 +149,7 @@ def _build_testing_only_kanban_root(
     (queues_dir / "plans").mkdir(parents=True, exist_ok=True)
     for agent in ("coder", "pm", "writer", "tester", "cm", "bug", "priority"):
         (queues_dir / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n\n"
-            "<!-- Format: - [ ] TASK-ID -->\n",
+            f"# {agent.upper()} Backlog\n\n" "<!-- Format: - [ ] TASK-ID -->\n",
             encoding="utf-8",
         )
 
@@ -377,9 +371,7 @@ def _has_blocked_sibling_sharing_requirements(
             readme_text = readme.read_text(encoding="utf-8")
         except OSError:
             continue
-        inputs_match = re.search(
-            r"^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)", readme_text, re.S | re.M
-        )
+        inputs_match = re.search(r"^##\s+Inputs\s*\n(.*?)(?=\n##|\Z)", readme_text, re.S | re.M)
         if not inputs_match or req_path not in inputs_match.group(1):
             continue
         try:
@@ -422,9 +414,7 @@ class TestOneTicketTestingOnlyPipeline:
         assertions are checked.
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
@@ -436,9 +426,7 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -460,9 +448,7 @@ class TestOneTicketTestingOnlyPipeline:
         This is an earlier defect acceptance criterion #1.
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
@@ -474,19 +460,14 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) == 2, (
             f"Expected exactly 2 TESTER task folders (plan ticket + injected companion) "
             f"under {tasks_root}; found {len(tester_dirs)}: "
@@ -499,12 +480,10 @@ class TestOneTicketTestingOnlyPipeline:
         work_ticket = [d for d in tester_dirs if "verify-the-implementation" in d.name]
         companion = [d for d in tester_dirs if "verify-and-report" in d.name]
         assert work_ticket, (
-            f"Expected a TESTER folder with slug 'verify-the-implementation'; "
-            f"found: {sorted(slugs)}"
+            f"Expected a TESTER folder with slug 'verify-the-implementation'; " f"found: {sorted(slugs)}"
         )
         assert companion, (
-            f"Expected an injected TESTER folder with slug 'verify-and-report'; "
-            f"found: {sorted(slugs)}"
+            f"Expected an injected TESTER folder with slug 'verify-and-report'; " f"found: {sorted(slugs)}"
         )
 
     def test_both_tester_readmes_carry_plan_source_branch(
@@ -523,9 +502,7 @@ class TestOneTicketTestingOnlyPipeline:
         This is an earlier defect acceptance criterion #1 (source_branch propagation).
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
@@ -537,19 +514,14 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
             f"Expected at least 2 TESTER task folders under {tasks_root}; "
             f"found: {[d.name for d in tester_dirs]}\n"
@@ -585,9 +557,7 @@ class TestOneTicketTestingOnlyPipeline:
         edits to the README or status file content.
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
@@ -599,22 +569,16 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
-            f"Expected at least 2 TESTER task folders; "
-            f"found: {[d.name for d in tester_dirs]}"
+            f"Expected at least 2 TESTER task folders; " f"found: {[d.name for d in tester_dirs]}"
         )
 
         # Simulate zero-touch dispatch: write DONE to each status.md.
@@ -622,18 +586,13 @@ class TestOneTicketTestingOnlyPipeline:
         # by pm_materialize) and can accept DONE without operator edits.
         for tester_dir in tester_dirs:
             status_path = tester_dir / "status.md"
-            assert status_path.is_file(), (
-                f"Expected status.md to exist at {status_path} after materialization."
-            )
+            assert status_path.is_file(), f"Expected status.md to exist at {status_path} after materialization."
             # Verify the initial state is a valid dispatch-ready state
             # (BACKLOG, WAITING) — not an error state requiring operator repair.
             status_text = status_path.read_text(encoding="utf-8")
-            initial_state_match = re.search(
-                r"^##\s+State\s*\n\s*(\S+)", status_text, re.MULTILINE
-            )
+            initial_state_match = re.search(r"^##\s+State\s*\n\s*(\S+)", status_text, re.MULTILINE)
             assert initial_state_match is not None, (
-                f"No ## State field found in {status_path}.\n"
-                f"Content:\n{status_text}"
+                f"No ## State field found in {status_path}.\n" f"Content:\n{status_text}"
             )
             initial_state = initial_state_match.group(1).upper()
             assert initial_state in ("BACKLOG", "WAITING"), (
@@ -653,12 +612,8 @@ class TestOneTicketTestingOnlyPipeline:
 
             # Verify DONE was written cleanly.
             final_state_text = status_path.read_text(encoding="utf-8")
-            final_match = re.search(
-                r"^##\s+State\s*\n\s*(\S+)", final_state_text, re.MULTILINE
-            )
-            assert final_match and final_match.group(1).upper() == "DONE", (
-                f"Failed to set DONE state in {status_path}."
-            )
+            final_match = re.search(r"^##\s+State\s*\n\s*(\S+)", final_state_text, re.MULTILINE)
+            assert final_match and final_match.group(1).upper() == "DONE", f"Failed to set DONE state in {status_path}."
 
     def test_intake_item_closed_after_both_tickets_complete(
         self,
@@ -682,9 +637,7 @@ class TestOneTicketTestingOnlyPipeline:
         caught by this fixture.
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
@@ -696,41 +649,30 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert result.returncode == 0, (
-            f"pm_materialize.py exited {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"pm_materialize.py exited {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         # Locate the terminal TESTER task (the verify-and-report companion
         # injected by pm_materialize for testing-only workflows).
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
             f"Expected at least 2 TESTER task folders; "
             f"found: {[d.name for d in tester_dirs]}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        terminal_dir = next(
-            (d for d in tester_dirs if "verify-and-report" in d.name), None
-        )
+        terminal_dir = next((d for d in tester_dirs if "verify-and-report" in d.name), None)
         assert terminal_dir is not None, (
-            f"No 'verify-and-report' TESTER task folder found.\n"
-            f"Tester dirs: {[d.name for d in tester_dirs]}"
+            f"No 'verify-and-report' TESTER task folder found.\n" f"Tester dirs: {[d.name for d in tester_dirs]}"
         )
 
         # Simulate DONE on all tickets (zero-touch dispatch).
         for tester_dir in tester_dirs:
             status_path = tester_dir / "status.md"
-            assert status_path.is_file(), (
-                f"Expected status.md to exist at {status_path} after materialization."
-            )
+            assert status_path.is_file(), f"Expected status.md to exist at {status_path} after materialization."
             status_text = status_path.read_text(encoding="utf-8")
             done_status = re.sub(
                 r"(^##\s+State\s*\n)\s*\S+",
@@ -746,16 +688,12 @@ class TestOneTicketTestingOnlyPipeline:
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "report.md"
         report_path.write_text(
-            "# Verification Report\n\n"
-            "## Recommendation\nSHIP\n\n"
-            "## Summary\nAll acceptance criteria pass.\n",
+            "# Verification Report\n\n" "## Recommendation\nSHIP\n\n" "## Summary\nAll acceptance criteria pass.\n",
             encoding="utf-8",
         )
 
         # Assert (a): report artifact exists at the expected finalize location.
-        assert report_path.is_file(), (
-            f"Report artifact not found at expected finalize location: {report_path}"
-        )
+        assert report_path.is_file(), f"Report artifact not found at expected finalize location: {report_path}"
 
         # Close the intake item via the production entry point — same mechanism
         # the wake script invokes after a finalize=report terminal ticket completes.
@@ -771,8 +709,13 @@ class TestOneTicketTestingOnlyPipeline:
 
         close_result = subprocess.run(
             [
-                "python3", "-m", "pgai_agent_kanban.ops",
-                "close_item", str(proj), req_key, "done",
+                "python3",
+                "-m",
+                "pgai_agent_kanban.ops",
+                "close_item",
+                str(proj),
+                req_key,
+                "done",
             ],
             capture_output=True,
             text=True,
@@ -787,12 +730,9 @@ class TestOneTicketTestingOnlyPipeline:
 
         # Assert (b): requirements intake item's ## Status is 'done'.
         final_req = req_path.read_text(encoding="utf-8")
-        status_match = re.search(
-            r"^##\s+Status\s*\n\s*(\S+)", final_req, re.MULTILINE
-        )
+        status_match = re.search(r"^##\s+Status\s*\n\s*(\S+)", final_req, re.MULTILINE)
         assert status_match and status_match.group(1).lower() == "done", (
-            f"Requirements doc ## Status is not 'done' after production closure.\n"
-            f"Content:\n{final_req}"
+            f"Requirements doc ## Status is not 'done' after production closure.\n" f"Content:\n{final_req}"
         )
 
     def test_intake_item_stays_running_when_roster_ticket_blocked(
@@ -812,9 +752,7 @@ class TestOneTicketTestingOnlyPipeline:
         running (close_item is not called when a sibling is BLOCKED).
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = proj / "requirements" / "v1.0.0-one-ticket-testing-run.md"
 
@@ -826,41 +764,29 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert result.returncode == 0, (
-            f"pm_materialize.py exited {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"pm_materialize.py exited {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
-            f"Expected at least 2 TESTER task folders; "
-            f"found: {[d.name for d in tester_dirs]}"
+            f"Expected at least 2 TESTER task folders; " f"found: {[d.name for d in tester_dirs]}"
         )
 
         # Set the work ticket (verify-the-implementation) to BLOCKED.
         # The terminal ticket (verify-and-report) is set to DONE.
         # This simulates a mid-run failure: the work failed, the roster is
         # not fully complete, so the intake item must stay running.
-        work_dir = next(
-            (d for d in tester_dirs if "verify-the-implementation" in d.name), None
-        )
-        terminal_dir = next(
-            (d for d in tester_dirs if "verify-and-report" in d.name), None
-        )
+        work_dir = next((d for d in tester_dirs if "verify-the-implementation" in d.name), None)
+        terminal_dir = next((d for d in tester_dirs if "verify-and-report" in d.name), None)
         assert work_dir is not None, (
             f"No 'verify-the-implementation' TESTER task folder found.\n"
             f"Tester dirs: {[d.name for d in tester_dirs]}"
         )
         assert terminal_dir is not None, (
-            f"No 'verify-and-report' TESTER task folder found.\n"
-            f"Tester dirs: {[d.name for d in tester_dirs]}"
+            f"No 'verify-and-report' TESTER task folder found.\n" f"Tester dirs: {[d.name for d in tester_dirs]}"
         )
 
         # Set work ticket BLOCKED.
@@ -899,9 +825,7 @@ class TestOneTicketTestingOnlyPipeline:
 
         # Guard check: any sibling TESTER task sharing this requirements path
         # that is BLOCKED prevents intake closure.
-        blocked_sibling_found = _has_blocked_sibling_sharing_requirements(
-            tasks_root, str(req_path)
-        )
+        blocked_sibling_found = _has_blocked_sibling_sharing_requirements(tasks_root, str(req_path))
         assert blocked_sibling_found, (
             f"Expected to find a BLOCKED sibling task for requirements path "
             f"{req_path}; guard check returned False.\n"
@@ -911,9 +835,7 @@ class TestOneTicketTestingOnlyPipeline:
         # Because a BLOCKED sibling was found, close_item is NOT called.
         # The intake item must remain at running.
         intake_text = req_path.read_text(encoding="utf-8")
-        status_match = re.search(
-            r"^##\s+Status\s*\n\s*(\S+)", intake_text, re.MULTILINE
-        )
+        status_match = re.search(r"^##\s+Status\s*\n\s*(\S+)", intake_text, re.MULTILINE)
         assert status_match and status_match.group(1).lower() == "running", (
             f"Requirements doc ## Status must stay 'running' when a roster ticket "
             f"is BLOCKED; got {status_match.group(1)!r}.\n"
@@ -932,9 +854,7 @@ class TestOneTicketTestingOnlyPipeline:
         accumulating duplicate ticket sets.
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
@@ -947,28 +867,22 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
         # First run must succeed.
-        first_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        first_result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert first_result.returncode == 0, (
             f"First pm_materialize.py run exited {first_result.returncode}.\n"
             f"stdout: {first_result.stdout}\nstderr: {first_result.stderr}"
         )
 
         # Second run against identical plan must exit 2 (idempotent no-op).
-        second_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        second_result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert second_result.returncode == 2, (
             f"Second pm_materialize.py run exited {second_result.returncode}; "
             f"expected 2 (idempotent no-op via plan-hash marker).\n"
             f"stdout: {second_result.stdout}\nstderr: {second_result.stderr}"
         )
         # Confirm the idempotent message is present in stderr.
-        assert "already materialized" in second_result.stderr.lower() or \
-               "idempotent" in second_result.stderr.lower(), (
-            f"Expected idempotent-skip message in stderr.\n"
-            f"stderr: {second_result.stderr}"
+        assert "already materialized" in second_result.stderr.lower() or "idempotent" in second_result.stderr.lower(), (
+            f"Expected idempotent-skip message in stderr.\n" f"stderr: {second_result.stderr}"
         )
 
     def test_tester_backlog_receives_both_ticket_entries(
@@ -984,9 +898,7 @@ class TestOneTicketTestingOnlyPipeline:
         operator edits to the backlog file.
         """
         source_branch = "rc/v1.22.5"
-        root = _build_testing_only_kanban_root(
-            tmp_path, source_branch=source_branch
-        )
+        root = _build_testing_only_kanban_root(tmp_path, source_branch=source_branch)
         proj = root / "projects" / "cert-proj"
         req_path = str(proj / "requirements" / "v1.0.0-one-ticket-testing-run.md")
 
@@ -998,12 +910,9 @@ class TestOneTicketTestingOnlyPipeline:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
-            f"pm_materialize.py exited {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"pm_materialize.py exited {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         tester_backlog_path = proj / "tasks" / "queues" / "tester_backlog.md"
@@ -1015,18 +924,11 @@ class TestOneTicketTestingOnlyPipeline:
 
         # Both ticket IDs must appear in the backlog (as pending [ ] entries).
         tasks_root = proj / "tasks"
-        tester_task_ids = sorted(
-            d.name
-            for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
-        assert len(tester_task_ids) >= 2, (
-            f"Expected at least 2 TESTER task folders; found: {tester_task_ids}"
-        )
+        tester_task_ids = sorted(d.name for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
+        assert len(tester_task_ids) >= 2, f"Expected at least 2 TESTER task folders; found: {tester_task_ids}"
         for task_id in tester_task_ids:
             assert task_id in backlog_text, (
-                f"Expected task ID {task_id!r} in tester_backlog.md.\n"
-                f"Backlog content:\n{backlog_text}"
+                f"Expected task ID {task_id!r} in tester_backlog.md.\n" f"Backlog content:\n{backlog_text}"
             )
 
 
@@ -1057,9 +959,7 @@ def _build_harness_kanban_root(
     Returns:
         pathlib.Path — the kanban root.
     """
-    root = _build_testing_only_kanban_root(
-        parent, project_name=project_name, source_branch=source_branch
-    )
+    root = _build_testing_only_kanban_root(parent, project_name=project_name, source_branch=source_branch)
     # Overwrite kanban.cfg to add [providers] active = harness.
     # wake_common.sh's load_config reads this on startup; the harness's own
     # active-provider guard also reads it directly via Python.
@@ -1118,9 +1018,7 @@ def _run_wake_harness(
     # `python3 -m pgai_agent_kanban.ops close_item`, and the package lives
     # under team/ (two levels up from this test file).
     existing_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        f"{str(_TEAM_DIR)}:{existing_pp}" if existing_pp else str(_TEAM_DIR)
-    )
+    env["PYTHONPATH"] = f"{str(_TEAM_DIR)}:{existing_pp}" if existing_pp else str(_TEAM_DIR)
 
     cmd = [
         "bash",
@@ -1253,9 +1151,7 @@ class TestOneTicketWakeDispatchClosure:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        mat_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        mat_result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert mat_result.returncode == 0, (
             f"pm_materialize.py exited {mat_result.returncode}.\n"
             f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
@@ -1289,14 +1185,8 @@ class TestOneTicketWakeDispatchClosure:
 
         # Guard 3: at least one report artifact must be present.
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
-        report_found = any(
-            (d / "artifacts" / "report.md").is_file()
-            for d in tester_dirs
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
+        report_found = any((d / "artifacts" / "report.md").is_file() for d in tester_dirs)
         assert report_found, (
             f"Expected at least one TESTER task artifacts/report.md; "
             f"found none under {tasks_root}.\n"
@@ -1335,9 +1225,7 @@ class TestOneTicketWakeDispatchClosure:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        mat_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        mat_result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert mat_result.returncode == 0, (
             f"pm_materialize.py exited {mat_result.returncode}.\n"
             f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
@@ -1345,13 +1233,9 @@ class TestOneTicketWakeDispatchClosure:
 
         # Pre-seed one TESTER sibling to WORKING to simulate a mid-run scenario.
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
-            f"Expected at least 2 TESTER task folders for mid-run test; "
-            f"found {len(tester_dirs)}"
+            f"Expected at least 2 TESTER task folders for mid-run test; " f"found {len(tester_dirs)}"
         )
         # Mark the second TESTER task as WORKING (simulates a sibling in progress).
         sibling_status = tester_dirs[1] / "status.md"
@@ -1416,9 +1300,7 @@ class TestOneTicketWakeDispatchClosure:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        mat_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        mat_result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert mat_result.returncode == 0, (
             f"pm_materialize.py exited {mat_result.returncode}.\n"
             f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
@@ -1426,13 +1308,9 @@ class TestOneTicketWakeDispatchClosure:
 
         # Pre-seed one TESTER task as WONT-DO (prior-run corpse).
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
-            f"Expected at least 2 TESTER task folders for corpse test; "
-            f"found {len(tester_dirs)}"
+            f"Expected at least 2 TESTER task folders for corpse test; " f"found {len(tester_dirs)}"
         )
         corpse_status = tester_dirs[1] / "status.md"
         _plant_task_state(corpse_status, "WONT-DO")

@@ -46,7 +46,6 @@ Function names describe the behavior under test.
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
 import subprocess
@@ -66,6 +65,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="committed-version-fixtures")
+
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts under test
@@ -142,9 +142,7 @@ def _git_cmd(repo: pathlib.Path, *args: str) -> str:
 class TestShipWriteFixture:
     """cm-release produces a commit containing VERSION == the new tag."""
 
-    def test_committed_version_equals_release_tag(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_committed_version_equals_release_tag(self, tmp_path: pathlib.Path) -> None:
         """Release commit contains VERSION == tag; git show <tag>:VERSION returns the tag.
 
         Simulates the cm-release.sh Step 11d write path: the clean release
@@ -194,20 +192,14 @@ git -C "$repo" tag "$tag"
 
         # Assert: git show <tag>:VERSION returns exactly the tag (no trailing newline
         # artifacts — git show strips trailing newlines from file content).
-        assert version_in_commit == tag, (
-            f"git show {tag}:VERSION returned {version_in_commit!r}, expected {tag!r}"
-        )
+        assert version_in_commit == tag, f"git show {tag}:VERSION returned {version_in_commit!r}, expected {tag!r}"
 
         # Assert: the tag points at a commit that carries VERSION.
         # (Confirm the tag was created — no tag means the step failed.)
         tags = _git_cmd(repo, "tag", "-l", tag)
-        assert tags == tag, (
-            f"Release tag {tag!r} was not created; got {tags!r}"
-        )
+        assert tags == tag, f"Release tag {tag!r} was not created; got {tags!r}"
 
-    def test_version_file_content_is_clean_tag_without_suffix(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_version_file_content_is_clean_tag_without_suffix(self, tmp_path: pathlib.Path) -> None:
         """VERSION committed into the release commit is the clean tag, not a describe suffix.
 
         Confirms the committed VERSION carries no describe-style suffix
@@ -231,12 +223,10 @@ git -C "$repo" tag "$tag"
         committed = _git_cmd(repo, "show", f"{tag}:VERSION").strip()
 
         assert "-g" not in committed, (
-            f"Committed VERSION must not contain a git describe suffix.\n"
-            f"Got: {committed!r}"
+            f"Committed VERSION must not contain a git describe suffix.\n" f"Got: {committed!r}"
         )
         assert committed == tag, (
-            f"Committed VERSION must equal the clean tag.\n"
-            f"Expected: {tag!r}\nGot: {committed!r}"
+            f"Committed VERSION must equal the clean tag.\n" f"Expected: {tag!r}\nGot: {committed!r}"
         )
 
 
@@ -253,9 +243,7 @@ git -C "$repo" tag "$tag"
 class TestPreTagMismatchGate:
     """Doctored pre-tag VERSION causes exit 1; no tag is created."""
 
-    def test_mismatch_gate_exits_nonzero_and_names_both_values(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_mismatch_gate_exits_nonzero_and_names_both_values(self, tmp_path: pathlib.Path) -> None:
         """Pre-tag VERSION mismatch causes exit 1 naming both on-disk and expected values.
 
         Replicates the Step 13 pre-tag gate from cm-release.sh in isolation:
@@ -317,26 +305,19 @@ git -C "$repo" tag "$release_tag"
 
         # Stderr must name the on-disk value (the wrong version).
         assert wrong_version in result.stderr, (
-            f"Gate stderr must name the on-disk VERSION value '{wrong_version}'.\n"
-            f"stderr: {result.stderr!r}"
+            f"Gate stderr must name the on-disk VERSION value '{wrong_version}'.\n" f"stderr: {result.stderr!r}"
         )
 
         # Stderr must name the expected value (the tag).
         assert tag in result.stderr, (
-            f"Gate stderr must name the expected tag value '{tag}'.\n"
-            f"stderr: {result.stderr!r}"
+            f"Gate stderr must name the expected tag value '{tag}'.\n" f"stderr: {result.stderr!r}"
         )
 
         # No tag must have been created.
         existing_tags = _git_cmd(repo, "tag", "-l", tag)
-        assert existing_tags == "", (
-            f"Pre-tag mismatch gate must NOT create the tag.\n"
-            f"Found tag: {existing_tags!r}"
-        )
+        assert existing_tags == "", f"Pre-tag mismatch gate must NOT create the tag.\n" f"Found tag: {existing_tags!r}"
 
-    def test_mismatch_gate_matching_version_allows_tag(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_mismatch_gate_matching_version_allows_tag(self, tmp_path: pathlib.Path) -> None:
         """Pre-tag gate passes when VERSION matches the tag; tag is created.
 
         Happy-path counterpart to the mismatch test: confirms the gate logic
@@ -384,10 +365,7 @@ git -C "$repo" tag "$release_tag"
         )
 
         created_tag = _git_cmd(repo, "tag", "-l", tag)
-        assert created_tag == tag, (
-            f"Tag {tag!r} must be created when the gate passes.\n"
-            f"Got: {created_tag!r}"
-        )
+        assert created_tag == tag, f"Tag {tag!r} must be created when the gate passes.\n" f"Got: {created_tag!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -402,9 +380,7 @@ class TestPreTagMismatchGateRemedyBlock:
     """The Step 13 pre-tag VERSION gate prints Cause(s)/To-fix/Rule, and the
     printed 'To fix' commands, executed verbatim, clear the gate on re-run."""
 
-    def test_remedy_block_has_cause_to_fix_and_rule(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_remedy_block_has_cause_to_fix_and_rule(self, tmp_path: pathlib.Path) -> None:
         """Failure output contains the three required remedy-block parts
         (Cause(s), a numbered To-fix command block, and the Rule line) with
         no angle-bracket placeholders, mirroring the current Step 13 text."""
@@ -460,9 +436,7 @@ git -C "$REPO_ROOT" tag "$RELEASE_TAG"
         # a literal shell redirect operator, not a placeholder marker).
         assert not re.search(r"<[^\s<>]+>", result.stderr), result.stderr
 
-    def test_remedy_commands_clear_the_gate_when_executed_verbatim(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_remedy_commands_clear_the_gate_when_executed_verbatim(self, tmp_path: pathlib.Path) -> None:
         """Executing the printed 'To fix' commands verbatim (site-specific
         values already substituted, exactly as a reader would copy-paste
         them) clears the gate on re-run and the tag is created."""
@@ -525,18 +499,13 @@ fi
         remedy strings this class exercises, so a future edit to the gate that
         changes the wording is caught here rather than only via silent
         fixture drift between this replica and the real script."""
-        assert _CM_RELEASE_STOP_INBOX_SH.exists(), (
-            f"release_stop_inbox.sh not found at {_CM_RELEASE_STOP_INBOX_SH}"
-        )
+        assert _CM_RELEASE_STOP_INBOX_SH.exists(), f"release_stop_inbox.sh not found at {_CM_RELEASE_STOP_INBOX_SH}"
         assert "cm_release_version_gate_report" in _CM_RELEASE_FINALIZE_SH.read_text(encoding="utf-8")
         src = _CM_RELEASE_STOP_INBOX_SH.read_text(encoding="utf-8")
         assert "[Pre-tag VERSION gate] FAIL" in src
         assert "Cause(s):" in src
         assert "To fix:" in src
-        assert (
-            "Rule: the committed VERSION file must equal the release tag being cut"
-            in src
-        )
+        assert "Rule: the committed VERSION file must equal the release tag being cut" in src
 
 
 # ---------------------------------------------------------------------------
@@ -558,9 +527,7 @@ fi
 class TestZipShapeInstallFixture:
     """A .git-less source tree yields VERSION at the live install via stamp_version_files."""
 
-    def test_committed_version_reaches_live_install_without_git_directory(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_committed_version_reaches_live_install_without_git_directory(self, tmp_path: pathlib.Path) -> None:
         """stamp_version_files copies committed VERSION to live install when .git is absent.
 
         Builds a source tree WITHOUT a .git directory (mirroring a zip/tarball
@@ -584,9 +551,7 @@ class TestZipShapeInstallFixture:
         (zip_source / "VERSION").write_text(f"{committed_version}\n", encoding="utf-8")
 
         # Explicitly confirm there is no .git directory.
-        assert not (zip_source / ".git").exists(), (
-            "Fixture error: .git must not exist in the zip-shape source tree."
-        )
+        assert not (zip_source / ".git").exists(), "Fixture error: .git must not exist in the zip-shape source tree."
 
         # The live install root (where install.sh writes KANBAN_ROOT).
         live_install = tmp_path / "live_install"
@@ -600,9 +565,7 @@ class TestZipShapeInstallFixture:
             f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{zip_source!s}' '{live_install!s}'",
             extra_env={"PYTHONHASHSEED": "0"},
         )
-        assert result.returncode == 0, (
-            f"stamp_version_files exited non-zero on zip-shape tree: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stamp_version_files exited non-zero on zip-shape tree: {result.stderr}"
 
         # The live install VERSION must exist and match the committed version.
         version_file = live_install / "VERSION"
@@ -624,9 +587,7 @@ class TestZipShapeInstallFixture:
             f"Found: {detail_file.read_text(encoding='utf-8')!r}"
         )
 
-    def test_zip_shape_version_survives_install_unchanged(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_zip_shape_version_survives_install_unchanged(self, tmp_path: pathlib.Path) -> None:
         """Committed VERSION content is preserved byte-for-byte in the live install.
 
         Verifies that stamp_version_files does not rewrite, strip, or modify
@@ -649,9 +610,7 @@ class TestZipShapeInstallFixture:
             f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{zip_source!s}' '{live_install!s}'",
             extra_env={"PYTHONHASHSEED": "0"},
         )
-        assert result.returncode == 0, (
-            f"stamp_version_files failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stamp_version_files failed: {result.stderr}"
 
         source_content = source_version_file.read_text(encoding="utf-8")
         installed_content = (live_install / "VERSION").read_text(encoding="utf-8")
@@ -662,9 +621,7 @@ class TestZipShapeInstallFixture:
             f"Installed: {installed_content!r}"
         )
 
-    def test_zip_shape_version_readable_by_direct_cat(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_zip_shape_version_readable_by_direct_cat(self, tmp_path: pathlib.Path) -> None:
         """Live install VERSION is readable via direct cat (as dashboard/health read it).
 
         The dashboard's status-right.sh and the /health metadata path both read
@@ -695,9 +652,7 @@ class TestZipShapeInstallFixture:
             tmp_path,
             f"cat '{live_install!s}/VERSION'",
         )
-        assert cat_result.returncode == 0, (
-            f"cat KANBAN_ROOT/VERSION failed: {cat_result.stderr}"
-        )
+        assert cat_result.returncode == 0, f"cat KANBAN_ROOT/VERSION failed: {cat_result.stderr}"
         cat_value = cat_result.stdout.strip()
         assert cat_value == committed_version, (
             f"cat KANBAN_ROOT/VERSION must return the committed version.\n"
@@ -721,9 +676,7 @@ class TestZipShapeInstallFixture:
 class TestFreshCloneInstallFixture:
     """Fresh clone + install: VERSION present and correct with zero extra stamping steps."""
 
-    def test_fresh_clone_version_is_copied_to_live_install(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fresh_clone_version_is_copied_to_live_install(self, tmp_path: pathlib.Path) -> None:
         """stamp_version_files copies committed VERSION from fresh clone to live install.
 
         Builds a git repo with a committed VERSION file (simulating a fresh
@@ -752,9 +705,7 @@ class TestFreshCloneInstallFixture:
             f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{clone_repo!s}' '{live_install!s}'",
             extra_env={"PYTHONHASHSEED": "0"},
         )
-        assert result.returncode == 0, (
-            f"stamp_version_files failed on fresh clone: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stamp_version_files failed on fresh clone: {result.stderr}"
 
         version_file = live_install / "VERSION"
         assert version_file.exists(), "VERSION was not written to the live install."
@@ -764,9 +715,7 @@ class TestFreshCloneInstallFixture:
             f"Expected: {committed_version!r}\nGot: {installed_version!r}"
         )
 
-    def test_fresh_clone_with_committed_version_does_not_need_git_describe(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fresh_clone_with_committed_version_does_not_need_git_describe(self, tmp_path: pathlib.Path) -> None:
         """Committed VERSION is used directly; git describe is not needed.
 
         When a committed VERSION file is present in the source tree,
@@ -803,9 +752,7 @@ class TestFreshCloneInstallFixture:
             f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{clone_repo!s}' '{live_install!s}'",
             extra_env={"PYTHONHASHSEED": "0"},
         )
-        assert result.returncode == 0, (
-            f"stamp_version_files failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stamp_version_files failed: {result.stderr}"
 
         version_file = live_install / "VERSION"
         assert version_file.exists(), "VERSION was not written."
@@ -821,9 +768,7 @@ class TestFreshCloneInstallFixture:
             f"The committed VERSION file must win over git describe."
         )
 
-    def test_fresh_clone_version_detail_carries_deposit_provenance(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fresh_clone_version_detail_carries_deposit_provenance(self, tmp_path: pathlib.Path) -> None:
         """On a fresh clone with .git, VERSION_DETAIL carries deposit provenance.
 
         When a git repo is present, stamp_version_files also writes
@@ -853,25 +798,20 @@ class TestFreshCloneInstallFixture:
             f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{clone_repo!s}' '{live_install!s}'",
             extra_env={"PYTHONHASHSEED": "0"},
         )
-        assert result.returncode == 0, (
-            f"stamp_version_files failed: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stamp_version_files failed: {result.stderr}"
 
         # VERSION: still the clean committed value.
         version_file = live_install / "VERSION"
         assert version_file.exists(), "VERSION was not written."
         installed_version = version_file.read_text(encoding="utf-8").strip()
-        assert installed_version == committed_version, (
-            f"VERSION must equal the committed version; got: {installed_version!r}"
-        )
+        assert (
+            installed_version == committed_version
+        ), f"VERSION must equal the committed version; got: {installed_version!r}"
 
         # VERSION_DETAIL: must carry the deposit SHA.
         detail_file = live_install / "VERSION_DETAIL"
-        assert detail_file.exists(), (
-            "VERSION_DETAIL must be written when .git is present (deposit provenance)."
-        )
+        assert detail_file.exists(), "VERSION_DETAIL must be written when .git is present (deposit provenance)."
         detail = detail_file.read_text(encoding="utf-8").strip()
         assert deposit_sha[:7] in detail or deposit_sha in detail, (
-            f"VERSION_DETAIL must carry the deposit SHA.\n"
-            f"SHA: {deposit_sha!r}\nVERSION_DETAIL: {detail!r}"
+            f"VERSION_DETAIL must carry the deposit SHA.\n" f"SHA: {deposit_sha!r}\nVERSION_DETAIL: {detail!r}"
         )

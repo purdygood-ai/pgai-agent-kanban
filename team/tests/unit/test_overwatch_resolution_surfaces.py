@@ -23,6 +23,13 @@ Coverage:
   - pgai_agent_kanban.dashboard.scan_attention.scan_overwatch_section: the
     attention window's OVERWATCH pane renders the same two states, visually
     distinct from a needs-human action-log entry.
+  - pgai_agent_kanban.overwatch.resolution_stage.log_action: the action log
+    that pane reads gets one six-field line per record, whatever line
+    breaks or tabs any field holds.
+  - _parse_overwatch_action_log reads a log written through both real
+    writers (Python and bash) back as one entry per LF-terminated line,
+    whatever other line-break characters a reason holds, an empty reason
+    included.
 
 Naming: function names describe behavior under test, never bug IDs or task
 IDs (see roles/TESTER.md "Test Authoring Guidelines").
@@ -34,11 +41,15 @@ import os
 import pathlib
 import subprocess
 
+import pytest
+
 from pgai_agent_kanban.overwatch.resolution_stage import (
     clear_resolving_marker,
+    log_action,
     write_resolving_marker,
 )
-from pgai_agent_kanban.dashboard.scan_attention import scan_overwatch_section
+from pgai_agent_kanban.dashboard.scan_attention import _parse_overwatch_action_log, scan_overwatch_section
+from tests.unit.shell_harness import run_bash
 
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _WHY_SH = _TEAM_DIR / "scripts" / "why.sh"
@@ -53,9 +64,7 @@ def test_write_resolving_marker_creates_a_file_with_all_four_fields(tmp_path: pa
     project_root = tmp_path / "proj"
     project_root.mkdir()
 
-    write_resolving_marker(
-        str(project_root), lane="A", attempt=1, version="v2.23.0", timestamp="2026-09-15T12:00:00Z"
-    )
+    write_resolving_marker(str(project_root), lane="A", attempt=1, version="v2.23.0", timestamp="2026-09-15T12:00:00Z")
 
     marker = project_root / "overwatch" / "resolving.md"
     assert marker.is_file()
@@ -120,9 +129,7 @@ def _run_why(args: list, kanban_root: pathlib.Path) -> subprocess.CompletedProce
 
 
 def _write_projects_cfg(kanban_root: pathlib.Path, name: str) -> None:
-    (kanban_root / "projects.cfg").write_text(
-        f"[project:{name}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (kanban_root / "projects.cfg").write_text(f"[project:{name}]\npriority=1\nenabled=true\n", encoding="utf-8")
 
 
 def _make_project_dir(kanban_root: pathlib.Path, name: str) -> pathlib.Path:
@@ -134,8 +141,7 @@ def _make_project_dir(kanban_root: pathlib.Path, name: str) -> pathlib.Path:
 def _write_ship_policy_halt(project_dir: pathlib.Path) -> pathlib.Path:
     halt_path = project_dir / "HALT"
     halt_path.write_text(
-        "# HALT created by CM at 2026-09-15T00:00:00Z\n"
-        "# Reason: TESTER systemic_risk=high (TESTER-20260915-001)\n",
+        "# HALT created by CM at 2026-09-15T00:00:00Z\n" "# Reason: TESTER systemic_risk=high (TESTER-20260915-001)\n",
         encoding="utf-8",
     )
     return halt_path
@@ -145,9 +151,7 @@ def test_why_names_lane_and_attempt_while_a_resolving_marker_is_present(tmp_path
     _write_projects_cfg(tmp_path, "demo")
     project_dir = _make_project_dir(tmp_path, "demo")
     _write_ship_policy_halt(project_dir)
-    write_resolving_marker(
-        str(project_dir), lane="A", attempt=1, version="v2.23.0", timestamp="2026-09-15T12:00:00Z"
-    )
+    write_resolving_marker(str(project_dir), lane="A", attempt=1, version="v2.23.0", timestamp="2026-09-15T12:00:00Z")
 
     result = _run_why(["--project", "demo"], tmp_path)
 
@@ -248,14 +252,10 @@ def test_why_renders_byte_identically_to_a_plain_halt_when_overwatch_never_ran(
 # ---------------------------------------------------------------------------
 
 
-def test_scan_overwatch_section_renders_resolving_distinctly_from_needs_human(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_scan_overwatch_section_renders_resolving_distinctly_from_needs_human(tmp_path: pathlib.Path, capsys) -> None:
     project_dir = tmp_path / "projects" / "demo"
     project_dir.mkdir(parents=True)
-    write_resolving_marker(
-        str(project_dir), lane="A", attempt=1, version="v2.23.0", timestamp="2026-09-15T12:00:00Z"
-    )
+    write_resolving_marker(str(project_dir), lane="A", attempt=1, version="v2.23.0", timestamp="2026-09-15T12:00:00Z")
     # A needs-human entry in the same project's action log, to prove the two
     # render as visually distinct labels within the same section.
     ow_dir = project_dir / "overwatch"
@@ -275,9 +275,7 @@ def test_scan_overwatch_section_renders_resolving_distinctly_from_needs_human(
     assert out.index("resolving") != out.index("needs-human")
 
 
-def test_scan_overwatch_section_renders_decision_once_marker_is_cleared(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_scan_overwatch_section_renders_decision_once_marker_is_cleared(tmp_path: pathlib.Path, capsys) -> None:
     project_dir = tmp_path / "projects" / "demo"
     project_dir.mkdir(parents=True)
     (project_dir / "HALT").write_text("# HALT created by CM at 2026-09-15T00:00:00Z\n", encoding="utf-8")
@@ -316,3 +314,102 @@ def test_scan_overwatch_section_shows_no_resolving_or_decision_when_neither_exis
     assert "resolving" not in out
     assert "decision" not in out
     assert "no recent OVERWATCH activity" in out
+
+
+# ---------------------------------------------------------------------------
+# log_action -- one record per line in the action log the pane reads
+# ---------------------------------------------------------------------------
+
+_MULTI_LINE_REASON = (
+    "remote: pushes are frozen\r\n"
+    "To /srv/origin.git\n"
+    " ! [remote rejected] main -> main (pre-receive hook declined)\n"
+    "error:\tfailed to push some refs\n"
+)
+_ONE_LINE_REASON = " already one line,  inner  spacing kept "
+
+
+@pytest.mark.parametrize(
+    ("reason", "written"),
+    [
+        (
+            _MULTI_LINE_REASON,
+            "remote: pushes are frozen To /srv/origin.git ! [remote rejected] main -> main "
+            "(pre-receive hook declined) error: failed to push some refs",
+        ),
+        (_ONE_LINE_REASON, _ONE_LINE_REASON),
+    ],
+    ids=["newline-cr-tab-flattened", "one-line-unchanged"],
+)
+def test_log_action_writes_one_six_field_line_whatever_the_reason_holds(
+    tmp_path: pathlib.Path, reason: str, written: str
+) -> None:
+    log_action(str(tmp_path), "demo", "check-push-lag", "main", "push-main-failed", reason)
+
+    # Bytes, not read_text(): universal newlines would turn a written CR into LF.
+    log = (tmp_path / "projects" / "demo" / "overwatch" / "actions.log").read_bytes().decode("utf-8")
+    assert log.endswith("\n") and log.count("\n") == 1 and "\r" not in log, repr(log)
+    fields = log[:-1].split("\t")
+    assert len(fields) == 6, fields
+    assert fields[1:5] == ["check-push-lag", "main", "push-main-failed", "none"]
+    assert fields[5] == written
+    assert fields[5].split() == reason.split(), "every word of every original line is kept, in order"
+
+
+_BROKEN_FIELD = "first\tpart\r\nsecond  part\n"
+_FLATTENED_FIELD = "first part second part"
+_WRITER_ARGS = {"name": "check-push-lag", "target": "main", "action": "push-main-failed", "backup_path": "none"}
+
+
+@pytest.mark.parametrize("field", list(_WRITER_ARGS))
+def test_log_action_writes_one_six_field_line_whatever_any_field_holds(tmp_path: pathlib.Path, field: str) -> None:
+    args = dict(_WRITER_ARGS, **{field: _BROKEN_FIELD})
+
+    log_action(str(tmp_path), "demo", reason="one line", **args)
+
+    log = (tmp_path / "projects" / "demo" / "overwatch" / "actions.log").read_bytes().decode("utf-8")
+    assert log.endswith("\n") and log.count("\n") == 1 and "\r" not in log, repr(log)
+    fields = log[:-1].split("\t")
+    assert len(fields) == 6, fields
+    expected = dict(args, **{field: _FLATTENED_FIELD})
+    assert fields[1:] == [expected[key] for key in _WRITER_ARGS] + ["one line"]
+
+
+# Reasons the reader once cut short or dropped, and the form each writer stores.
+_ROUND_TRIP_REASONS = {
+    "vt-ff": ("a\vb\fc", "a\vb\fc"),
+    "line-separator": ("p\u2028q", "p\u2028q"),
+    "empty": ("", ""),
+    "breaks-only": ("\n\t\r\n", ""),
+    "plain": ("fine", "fine"),
+}
+
+
+def test_a_log_from_both_writers_reads_back_one_entry_per_record(tmp_path: pathlib.Path) -> None:
+    proj_dir = tmp_path / "projects" / "demo"
+    for target, (reason, _stored) in _ROUND_TRIP_REASONS.items():
+        log_action(str(tmp_path), "demo", "py-writer", target, "act", reason)
+    calls = "\n".join(
+        f'overwatch_log_action sh-writer {target} act none "$REASON_{index}"'
+        for index, target in enumerate(_ROUND_TRIP_REASONS)
+    )
+    reasons_env = {f"REASON_{index}": reason for index, (reason, _stored) in enumerate(_ROUND_TRIP_REASONS.values())}
+    script = f"""set -euo pipefail
+source scripts/lib/overwatch_protocol.sh
+export KANBAN_ROOT="{tmp_path}"
+export OVERWATCH_PROJECT=demo
+{calls}
+"""
+    result = run_bash(tmp_path, script, extra_env=reasons_env)
+    assert result.returncode == 0, result.stderr
+
+    log_path = proj_dir / "overwatch" / "actions.log"
+    entries = _parse_overwatch_action_log(log_path, 0)
+
+    assert len(entries) == log_path.read_bytes().count(b"\n") == 2 * len(_ROUND_TRIP_REASONS)
+    expected = sorted(
+        (writer, target, stored)
+        for writer in ("py-writer", "sh-writer")
+        for target, (_reason, stored) in _ROUND_TRIP_REASONS.items()
+    )
+    assert sorted((entry["name"], entry["target"], entry["reason"]) for entry in entries) == expected

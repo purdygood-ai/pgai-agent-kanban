@@ -62,13 +62,11 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import shutil
 import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import pytest
 
@@ -88,6 +86,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="overwatch-wake-driven-fixtures")
 
+
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _WAKE_CLAUDE_REL = pathlib.Path("scripts") / "wake" / "claude.sh"
 
@@ -98,9 +97,7 @@ _WAKE_CLAUDE_REL = pathlib.Path("scripts") / "wake" / "claude.sh"
 
 
 def _run_git(repo_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(repo_path), *args], capture_output=True, text=True, check=True
-    )
+    return subprocess.run(["git", "-C", str(repo_path), *args], capture_output=True, text=True, check=True)
 
 
 def _init_git_repo(repo_path: pathlib.Path, main_branch: str, rc_branch: str) -> None:
@@ -110,7 +107,8 @@ def _init_git_repo(repo_path: pathlib.Path, main_branch: str, rc_branch: str) ->
     repo_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "init", f"--initial-branch={main_branch}", str(repo_path)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     _run_git(repo_path, "config", "--local", "user.email", "test@pgai.local")
     _run_git(repo_path, "config", "--local", "user.name", "PGAI Test")
@@ -135,9 +133,7 @@ def _write_queue_file(path: pathlib.Path, title: str) -> None:
     """An always-empty per-agent backlog: no bracket-marker lines, so
     process_one_task's get_first_pending_task finds nothing and returns
     immediately — no dispatch, no real CLI invocation, ever."""
-    path.write_text(
-        f"# {title}\n\nNo tasks queued by this fixture.\n", encoding="utf-8"
-    )
+    path.write_text(f"# {title}\n\nNo tasks queued by this fixture.\n", encoding="utf-8")
 
 
 def _build_kanban_root(
@@ -269,7 +265,9 @@ def _write_bug(bugs_dir: pathlib.Path, bug_id: str, status: str = "assigned") ->
     return path
 
 
-def _write_bundle(requirements_dir: pathlib.Path, version: str, bug_basenames: list, bugs_dir: pathlib.Path) -> pathlib.Path:
+def _write_bundle(
+    requirements_dir: pathlib.Path, version: str, bug_basenames: list, bugs_dir: pathlib.Path
+) -> pathlib.Path:
     bundle_path = requirements_dir / f"{version}-bugfix-bundle-20260727.md"
     lines = [
         f"# Requirements: {version} — BUG bundle\n\n",
@@ -299,9 +297,7 @@ class Fixture:
     ledger_path: pathlib.Path = field(init=False)
 
     def __post_init__(self) -> None:
-        self.ledger_path = pathlib.Path(
-            ledger_path_for_project(str(self.kanban_root), self.proj.name)
-        )
+        self.ledger_path = pathlib.Path(ledger_path_for_project(str(self.kanban_root), self.proj.name))
 
 
 def _build_golden_fixture(
@@ -349,13 +345,19 @@ def _build_golden_fixture(
     _write_tester_report(proj / "tasks", "TESTER-20260727-001-verify", version, bug_id + ".md")
 
     return Fixture(
-        kanban_root=kanban_root, proj=proj, repo_path=repo_path, version=version,
-        halt_path=halt_path, task_id=task_id, cm_task_id=cm_task_id, bug_id=bug_id,
+        kanban_root=kanban_root,
+        proj=proj,
+        repo_path=repo_path,
+        version=version,
+        halt_path=halt_path,
+        task_id=task_id,
+        cm_task_id=cm_task_id,
+        bug_id=bug_id,
         bundle_path=bundle_path,
     )
 
 
-def _run_wake(kanban_root: pathlib.Path, agent: str, timeout: int = 90) -> "subprocess.CompletedProcess":
+def _run_wake(kanban_root: pathlib.Path, agent: str, timeout: int = 90) -> subprocess.CompletedProcess:
     """Invoke the REAL production entry point: bash scripts/wake/claude.sh
     --agent=<agent> --max-tasks=1, against *kanban_root*. This is the exact
     subprocess a cron firing runs; nothing here is a shortcut or a stub of
@@ -430,9 +432,7 @@ class TestGoldenFixtureWakeDriven:
         # Zero interventions: nothing above required any action beyond the
         # single wake/claude.sh --agent=overwatch firing.
 
-    def test_next_discovery_tick_rebundles_the_reopened_bug_via_real_pm_wake(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_next_discovery_tick_rebundles_the_reopened_bug_via_real_pm_wake(self, tmp_path: pathlib.Path) -> None:
         fx = _build_golden_fixture(tmp_path, "wd-golden-rebundle")
 
         overwatch_result = _run_wake(fx.kanban_root, "overwatch")
@@ -457,9 +457,9 @@ class TestGoldenFixtureWakeDriven:
             f"pm wake stdout:\n{pm_result.stdout}\nstderr:\n{pm_result.stderr}"
         )
         new_bundle_text = "\n".join(p.read_text(encoding="utf-8") for p in new_files)
-        assert fx.bug_id in new_bundle_text, (
-            f"Reopened bug {fx.bug_id} not present in newly bundled requirements file(s): {new_files}"
-        )
+        assert (
+            fx.bug_id in new_bundle_text
+        ), f"Reopened bug {fx.bug_id} not present in newly bundled requirements file(s): {new_files}"
 
 
 # ---------------------------------------------------------------------------
@@ -512,9 +512,9 @@ class TestFailClosedWakeDriven:
         assert result.returncode == 0, result.stderr
 
         stage_log = _resolution_stage_log(fx.kanban_root)
-        assert "status=declined" in stage_log, (
-            f"case={case_name}: expected a declined outcome; resolution-stage log:\n{stage_log}"
-        )
+        assert (
+            "status=declined" in stage_log
+        ), f"case={case_name}: expected a declined outcome; resolution-stage log:\n{stage_log}"
 
         # No action taken: HALT, bug, and task state are exactly as the
         # fixture set them up (except for the specific mutation this case
@@ -537,9 +537,7 @@ class TestFailClosedWakeDriven:
 
 
 class TestCeilingFixtureWakeDriven:
-    def test_third_consecutive_family_failure_halt_hards_with_full_history(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_third_consecutive_family_failure_halt_hards_with_full_history(self, tmp_path: pathlib.Path) -> None:
         project_name = "wd-ceiling"
         fx = _build_golden_fixture(
             tmp_path, project_name, bug_id="BUG-0001-foo", version="v2.0.3", attempt=3, ceiling=3
@@ -676,9 +674,7 @@ class TestOperatorHaltInviolabilityWakeDriven:
 
 
 class TestCounterKeyingWakeDriven:
-    def test_same_cargo_increments_and_different_cargo_starts_fresh_family(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_same_cargo_increments_and_different_cargo_starts_fresh_family(self, tmp_path: pathlib.Path) -> None:
         # Run 1: family A, first attempt (1 -> 2).
         fx_a1 = _build_golden_fixture(
             tmp_path, "wd-counter-a1", bug_id="BUG-0001-foo", version="v2.0.1", attempt=1, ceiling=5
@@ -736,18 +732,14 @@ def _write_hanging_cancel_rc_stub(kanban_root: pathlib.Path, marker_path: pathli
     speed."""
     stub = kanban_root / "scripts" / "cm" / "cancel-rc.sh"
     stub.write_text(
-        "#!/usr/bin/env bash\n"
-        f"touch {marker_path}\n"
-        "sleep 3600\n",
+        "#!/usr/bin/env bash\n" f"touch {marker_path}\n" "sleep 3600\n",
         encoding="utf-8",
     )
     stub.chmod(0o755)
 
 
 class TestLedgerAtomicityWakeDriven:
-    def test_kill_mid_execution_leaves_recorded_entry_and_next_sweep_reconciles(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_kill_mid_execution_leaves_recorded_entry_and_next_sweep_reconciles(self, tmp_path: pathlib.Path) -> None:
         fx = _build_golden_fixture(tmp_path, "wd-atomicity")
         marker_path = tmp_path / "drill_started.marker"
         _write_hanging_cancel_rc_stub(fx.kanban_root, marker_path)
@@ -758,13 +750,16 @@ class TestLedgerAtomicityWakeDriven:
         # --kanban-root ...) — the production module entry point for this
         # process, launched in its own session so it can be killed cleanly.
         env = dict(os.environ)
-        env["PYTHONPATH"] = str(fx.kanban_root) + (
-            os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
-        )
+        env["PYTHONPATH"] = str(fx.kanban_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         proc = subprocess.Popen(
             [
-                "python3", "-m", "pgai_agent_kanban.overwatch.resolution_stage",
-                "--project", fx.proj.name, "--kanban-root", str(fx.kanban_root),
+                "python3",
+                "-m",
+                "pgai_agent_kanban.overwatch.resolution_stage",
+                "--project",
+                fx.proj.name,
+                "--kanban-root",
+                str(fx.kanban_root),
             ],
             env=env,
             cwd=str(fx.kanban_root),

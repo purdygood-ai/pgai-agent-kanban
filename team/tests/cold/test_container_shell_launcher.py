@@ -64,9 +64,7 @@ def _make_fake_engine(bin_dir: pathlib.Path, name: str) -> None:
     bin_dir.mkdir(parents=True, exist_ok=True)
     script = bin_dir / name
     script.write_text(
-        "#!/bin/sh\n"
-        f'echo "FAKE_ENGINE={name}"\n'
-        'for arg in "$@"; do printf "ARG:%s\\n" "$arg"; done\n',
+        "#!/bin/sh\n" f'echo "FAKE_ENGINE={name}"\n' 'for arg in "$@"; do printf "ARG:%s\\n" "$arg"; done\n',
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
@@ -110,23 +108,19 @@ def test_help_flag_exits_zero_and_documents_every_option(tmp_path: pathlib.Path)
     """--help exits 0 and documents each accepted flag."""
     result = run_bash(tmp_path, f"bash {_LAUNCHER} --help")
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
     usage = result.stderr  # usage() writes to stderr in this script
     for expected in ("--image-tag", "--mount", "--kanban-root", "--help"):
         assert expected in usage, f"usage text missing {expected!r}:\n{usage}"
-    assert _DEFAULT_IMAGE_TAG in usage, (
-        f"usage text does not document the corrected default tag {_DEFAULT_IMAGE_TAG!r}:\n{usage}"
-    )
+    assert (
+        _DEFAULT_IMAGE_TAG in usage
+    ), f"usage text does not document the corrected default tag {_DEFAULT_IMAGE_TAG!r}:\n{usage}"
 
 
 def test_short_help_flag_exits_zero(tmp_path: pathlib.Path) -> None:
     """-h behaves identically to --help."""
     result = run_bash(tmp_path, f"bash {_LAUNCHER} -h")
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -137,9 +131,7 @@ def test_short_help_flag_exits_zero(tmp_path: pathlib.Path) -> None:
 def test_unknown_flag_exits_two(tmp_path: pathlib.Path) -> None:
     """An unrecognized flag is a usage error (exit 2), not a silent no-op."""
     result = run_bash(tmp_path, f"bash {_LAUNCHER} --not-a-real-flag")
-    assert result.returncode == 2, (
-        f"expected exit 2; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 2, f"expected exit 2; got {result.returncode}\nstderr: {result.stderr!r}"
 
 
 def test_mount_value_without_colon_exits_two(tmp_path: pathlib.Path) -> None:
@@ -154,9 +146,7 @@ def test_mount_value_without_colon_exits_two(tmp_path: pathlib.Path) -> None:
         f"bash {_LAUNCHER} --mount not-a-valid-mount-spec",
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home),
     )
-    assert result.returncode == 2, (
-        f"expected exit 2; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 2, f"expected exit 2; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "--mount" in result.stderr, f"error does not name --mount:\n{result.stderr!r}"
 
 
@@ -175,12 +165,8 @@ def test_missing_kanban_root_exits_one_naming_the_variable(tmp_path: pathlib.Pat
         _unset_script("PGAI_AGENT_KANBAN_ROOT_PATH") + f"bash {_LAUNCHER}",
         extra_env={"HOME": str(home)},
     )
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, (
-        f"variable name not named in stderr:\n{result.stderr!r}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert "PGAI_AGENT_KANBAN_ROOT_PATH" in result.stderr, f"variable name not named in stderr:\n{result.stderr!r}"
 
 
 def test_kanban_root_pointing_at_absent_directory_exits_one_naming_it(
@@ -196,12 +182,8 @@ def test_kanban_root_pointing_at_absent_directory_exits_one_naming_it(
         f"bash {_LAUNCHER} --kanban-root {missing_root}",
         extra_env={"HOME": str(home)},
     )
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert str(missing_root) in result.stderr, (
-        f"missing root path not named in stderr:\n{result.stderr!r}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert str(missing_root) in result.stderr, f"missing root path not named in stderr:\n{result.stderr!r}"
 
 
 def test_missing_home_exits_one_naming_it(tmp_path: pathlib.Path) -> None:
@@ -213,9 +195,7 @@ def test_missing_home_exits_one_naming_it(tmp_path: pathlib.Path) -> None:
         tmp_path,
         _unset_script("HOME") + f"bash {_LAUNCHER} --kanban-root {kanban_root}",
     )
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "HOME" in result.stderr, f"$HOME not named in stderr:\n{result.stderr!r}"
 
 
@@ -232,12 +212,8 @@ def test_home_pointing_at_absent_directory_exits_one_naming_it(
         f"bash {_LAUNCHER} --kanban-root {kanban_root}",
         extra_env={"HOME": str(missing_home)},
     )
-    assert result.returncode == 1, (
-        f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert str(missing_home) in result.stderr, (
-        f"missing HOME path not named in stderr:\n{result.stderr!r}"
-    )
+    assert result.returncode == 1, f"expected exit 1; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert str(missing_home) in result.stderr, f"missing HOME path not named in stderr:\n{result.stderr!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -260,12 +236,10 @@ def test_default_engine_is_docker_when_unconfigured(tmp_path: pathlib.Path) -> N
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert "FAKE_ENGINE=docker" in result.stdout, (
-        f"launcher did not exec the resolved docker engine:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert (
+        "FAKE_ENGINE=docker" in result.stdout
+    ), f"launcher did not exec the resolved docker engine:\n{result.stdout!r}"
     assert "ARG:run" in result.stdout, f"engine not invoked with 'run':\n{result.stdout!r}"
 
 
@@ -286,18 +260,13 @@ def test_default_engine_mounts_kanban_root_and_home_at_matching_paths(
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert f"ARG:{home}:{home}" in result.stdout, (
-        f"HOME mount missing or mismatched:\n{result.stdout!r}"
-    )
-    assert f"ARG:{kanban_root}:{kanban_root}" in result.stdout, (
-        f"kanban-root mount missing or mismatched:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert f"ARG:{home}:{home}" in result.stdout, f"HOME mount missing or mismatched:\n{result.stdout!r}"
+    assert (
+        f"ARG:{kanban_root}:{kanban_root}" in result.stdout
+    ), f"kanban-root mount missing or mismatched:\n{result.stdout!r}"
     assert f"ARG:PGAI_AGENT_KANBAN_ROOT_PATH={kanban_root}" in result.stdout, (
-        f"PGAI_AGENT_KANBAN_ROOT_PATH env not passed through with the resolved path:\n"
-        f"{result.stdout!r}"
+        f"PGAI_AGENT_KANBAN_ROOT_PATH env not passed through with the resolved path:\n" f"{result.stdout!r}"
     )
 
 
@@ -316,12 +285,8 @@ def test_extra_mount_flag_is_forwarded_to_the_engine(tmp_path: pathlib.Path) -> 
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert "ARG:/extra/host:/extra/container" in result.stdout, (
-        f"extra mount not forwarded:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert "ARG:/extra/host:/extra/container" in result.stdout, f"extra mount not forwarded:\n{result.stdout!r}"
 
 
 def test_image_tag_flag_overrides_the_default(tmp_path: pathlib.Path) -> None:
@@ -339,12 +304,8 @@ def test_image_tag_flag_overrides_the_default(tmp_path: pathlib.Path) -> None:
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert "ARG:custom-image:v9" in result.stdout, (
-        f"custom image tag not forwarded:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert "ARG:custom-image:v9" in result.stdout, f"custom image tag not forwarded:\n{result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +317,7 @@ def test_configured_podman_is_used_when_present_on_path(tmp_path: pathlib.Path) 
     """kanban.cfg [docker] docker_exe = podman -> the launcher execs "podman run ..."."""
     kanban_root = tmp_path / "root"
     kanban_root.mkdir()
-    (kanban_root / "kanban.cfg").write_text(
-        "[docker]\ndocker_exe = podman\n", encoding="utf-8"
-    )
+    (kanban_root / "kanban.cfg").write_text("[docker]\ndocker_exe = podman\n", encoding="utf-8")
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = tmp_path / "fakebin"
@@ -370,12 +329,10 @@ def test_configured_podman_is_used_when_present_on_path(tmp_path: pathlib.Path) 
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
-    assert "FAKE_ENGINE=podman" in result.stdout, (
-        f"launcher did not exec the configured podman engine:\n{result.stdout!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
+    assert (
+        "FAKE_ENGINE=podman" in result.stdout
+    ), f"launcher did not exec the configured podman engine:\n{result.stdout!r}"
 
 
 def test_configured_invalid_engine_fails_loud_naming_key_and_value(
@@ -403,18 +360,13 @@ def test_configured_invalid_engine_fails_loud_naming_key_and_value(
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=empty_bin),
     )
 
-    assert result.returncode != 0, (
-        f"expected a non-zero exit; got {result.returncode}\nstdout: {result.stdout!r}"
-    )
-    assert "docker_exe" in result.stderr, (
-        f"error does not name the docker_exe key:\n{result.stderr!r}"
-    )
-    assert "nonexistent-container-engine-xyz" in result.stderr, (
-        f"error does not name the offending value:\n{result.stderr!r}"
-    )
+    assert result.returncode != 0, f"expected a non-zero exit; got {result.returncode}\nstdout: {result.stdout!r}"
+    assert "docker_exe" in result.stderr, f"error does not name the docker_exe key:\n{result.stderr!r}"
+    assert (
+        "nonexistent-container-engine-xyz" in result.stderr
+    ), f"error does not name the offending value:\n{result.stderr!r}"
     assert "FAKE_ENGINE" not in result.stdout, (
-        f"launcher execed an engine despite the configured value being invalid:\n"
-        f"{result.stdout!r}"
+        f"launcher execed an engine despite the configured value being invalid:\n" f"{result.stdout!r}"
     )
 
 
@@ -462,19 +414,16 @@ def test_zero_flag_launch_uses_the_corrected_default_tag(tmp_path: pathlib.Path)
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
     assert f"ARG:{_DEFAULT_IMAGE_TAG}" in result.stdout, (
-        f"zero-flag launch did not use the corrected default tag {_DEFAULT_IMAGE_TAG!r}:\n"
-        f"{result.stdout!r}"
+        f"zero-flag launch did not use the corrected default tag {_DEFAULT_IMAGE_TAG!r}:\n" f"{result.stdout!r}"
     )
-    assert f"ARG:{home}:{home}" in result.stdout, (
-        f"zero-flag launch did not resolve HOME as a mount:\n{result.stdout!r}"
-    )
-    assert f"ARG:{kanban_root}:{kanban_root}" in result.stdout, (
-        f"zero-flag launch did not resolve the kanban root as a mount:\n{result.stdout!r}"
-    )
+    assert (
+        f"ARG:{home}:{home}" in result.stdout
+    ), f"zero-flag launch did not resolve HOME as a mount:\n{result.stdout!r}"
+    assert (
+        f"ARG:{kanban_root}:{kanban_root}" in result.stdout
+    ), f"zero-flag launch did not resolve the kanban root as a mount:\n{result.stdout!r}"
 
 
 def test_assembled_invocation_carries_the_rm_flag(tmp_path: pathlib.Path) -> None:
@@ -494,9 +443,7 @@ def test_assembled_invocation_carries_the_rm_flag(tmp_path: pathlib.Path) -> Non
         extra_env=_base_env(tmp_path, kanban_root=kanban_root, home=home, fake_bin_dir=fake_bin),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "ARG:--rm" in result.stdout, (
         f"assembled invocation is missing --rm; container state would accumulate "
         f"across launches:\n{result.stdout!r}"
@@ -524,12 +471,8 @@ def test_relaunch_against_same_kanban_root_presents_the_same_board(
     first = run_bash(tmp_path, f"bash {_LAUNCHER} --kanban-root {kanban_root}", extra_env=env)
     second = run_bash(tmp_path, f"bash {_LAUNCHER} --kanban-root {kanban_root}", extra_env=env)
 
-    assert first.returncode == 0, (
-        f"first launch: expected exit 0; got {first.returncode}\nstderr: {first.stderr!r}"
-    )
-    assert second.returncode == 0, (
-        f"second launch: expected exit 0; got {second.returncode}\nstderr: {second.stderr!r}"
-    )
+    assert first.returncode == 0, f"first launch: expected exit 0; got {first.returncode}\nstderr: {first.stderr!r}"
+    assert second.returncode == 0, f"second launch: expected exit 0; got {second.returncode}\nstderr: {second.stderr!r}"
 
     first_values = _flag_values(first.stdout, "-v", "-e")
     second_values = _flag_values(second.stdout, "-v", "-e")

@@ -27,7 +27,7 @@ the visibility columns (column-render.sh, both input and queue subcommands,
 show-metrics.sh, the recent-logs tail, and human-review.sh.
 
 Four render-path / git-window scripts are NOT reached by ``--no-tmux``
-mode because their tmux windows are wired directly to ``watch`` rather than
+mode because they are wired to tmux (``cadence-loop.sh`` panes, the status bar) rather than
 into the one-shot block: ``show-header.sh`` (main window in single-project
 tmux mode, and every drill-N window), ``metadata.sh`` (5:metadata window),
 ``git-recent-tags.sh`` (4:git window, right pane), and ``status-bottom.sh``
@@ -105,10 +105,10 @@ def _run(
 
 
 def _assert_no_network_calls(log_file: pathlib.Path, *, label: str) -> None:
-    assert not log_file.exists(), (
-        f"{label}: expected ZERO remote git operations, but the network-call "
-        f"log recorded at least one:\n"
-        + (log_file.read_text(encoding="utf-8") if log_file.exists() else "")
+    assert (
+        not log_file.exists()
+    ), f"{label}: expected ZERO remote git operations, but the network-call " f"log recorded at least one:\n" + (
+        log_file.read_text(encoding="utf-8") if log_file.exists() else ""
     )
 
 
@@ -117,9 +117,7 @@ def _assert_no_network_calls(log_file: pathlib.Path, *, label: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_create_sh_no_tmux_full_refresh_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env
-) -> None:
+def test_create_sh_no_tmux_full_refresh_makes_zero_network_calls(tmp_path: pathlib.Path, network_stub_env) -> None:
     """create.sh --no-tmux drives header/queues/progress/cron-firings/
     attention/visibility(x8 columns)/legend/cron-logs/git-status/metrics/
     recent-logs/human-review in one process — the same entry point the
@@ -136,8 +134,7 @@ def test_create_sh_no_tmux_full_refresh_makes_zero_network_calls(
     )
 
     assert result.returncode == 0, (
-        f"create.sh --no-tmux exited {result.returncode}.\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"create.sh --no-tmux exited {result.returncode}.\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     _assert_no_network_calls(log_file, label="create.sh --no-tmux (full refresh)")
 
@@ -197,8 +194,10 @@ _SINGLE_SCRIPT_CASES = [
             "input",
             str(f.kanban_root / "projects" / f.project_name / "requirements"),
             "none",
-            "--label", "REQUIREMENTS",
-            "--kanban-root", str(f.kanban_root),
+            "--label",
+            "REQUIREMENTS",
+            "--kanban-root",
+            str(f.kanban_root),
         ],
         None,
     ),
@@ -217,7 +216,11 @@ _SINGLE_SCRIPT_IDS = [name for name, _, _ in _SINGLE_SCRIPT_CASES]
     ids=_SINGLE_SCRIPT_IDS,
 )
 def test_single_script_invocation_makes_zero_network_calls(
-    tmp_path: pathlib.Path, network_stub_env, script_name: str, build_args, expected_substring,
+    tmp_path: pathlib.Path,
+    network_stub_env,
+    script_name: str,
+    build_args,
+    expected_substring,
 ) -> None:
     """Every render-path / git-window script not reached by --no-tmux mode,
     plus the drill-window single-project call shapes for column-render.sh
@@ -241,8 +244,7 @@ def test_single_script_invocation_makes_zero_network_calls(
         assert fixture.project_name in result.stdout
     elif expected_substring is not None:
         assert expected_substring in result.stdout, (
-            f"{script_name}: expected {expected_substring!r} to render; "
-            f"got: {result.stdout!r}"
+            f"{script_name}: expected {expected_substring!r} to render; " f"got: {result.stdout!r}"
         )
 
 

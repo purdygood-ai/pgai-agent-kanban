@@ -39,7 +39,6 @@ import pathlib
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Optional
 
 from tests.unit.shell_harness import BashResult, run_bash
 
@@ -97,16 +96,28 @@ _KNOWN_ISSUE_FINDINGS = """### Finding 1: Dashboard legend misaligned
 
 # fixture -> (recommendation, systemic risk, findings, {bug id: symptom})
 _REPORTS = {
-    "trigger-2": ("SHIP-WITH-SERIOUS-CONCERNS", "high", _TRIGGER_2_FINDINGS,
-                  {"BUG-0058": "The parallel unit lane collects different tests in each worker."}),
-    "trigger-3": ("SHIP-WITH-SERIOUS-CONCERNS", "medium", _TRIGGER_3_FINDINGS,
-                  {"BUG-0071": "Two shell verbs still have no module behind them."}),
+    "trigger-2": (
+        "SHIP-WITH-SERIOUS-CONCERNS",
+        "high",
+        _TRIGGER_2_FINDINGS,
+        {"BUG-0058": "The parallel unit lane collects different tests in each worker."},
+    ),
+    "trigger-3": (
+        "SHIP-WITH-SERIOUS-CONCERNS",
+        "medium",
+        _TRIGGER_3_FINDINGS,
+        {"BUG-0071": "Two shell verbs still have no module behind them."},
+    ),
     "trigger-8": ("PASS", "low", "", {}),
     "pass": ("PASS", "low", "", {}),
     "concerns": ("SHIP-WITH-CONCERNS", "low", "", {}),
     "serious-small": ("SHIP-WITH-SERIOUS-CONCERNS", "medium", "", {}),
-    "known-issue": ("SHIP-WITH-SERIOUS-CONCERNS", "high", _KNOWN_ISSUE_FINDINGS,
-                    {"BUG-0090": "The dashboard legend is misaligned on narrow terminals."}),
+    "known-issue": (
+        "SHIP-WITH-SERIOUS-CONCERNS",
+        "high",
+        _KNOWN_ISSUE_FINDINGS,
+        {"BUG-0090": "The dashboard legend is misaligned on narrow terminals."},
+    ),
 }
 FIXTURES = tuple(_REPORTS)
 
@@ -140,7 +151,7 @@ def _git(repo: pathlib.Path, *args: str) -> None:
 def build_lane(
     tmp_path: pathlib.Path,
     fixture: str,
-    posture: Optional[str],
+    posture: str | None,
     *,
     writer_notes: bool = False,
 ) -> ShipPolicyLane:
@@ -162,8 +173,7 @@ def build_lane(
         project_cfg += f"\n[release]\nship_posture = {posture}\n"
     (project_root / "project.cfg").write_text(project_cfg, encoding="utf-8")
     (project_root / "release-state.md").write_text(
-        f"# Release State\n\n## Active RC\n{VERSION}\n\n## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        f"# Release State\n\n## Active RC\n{VERSION}\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
     for bug_id, symptom in bugs.items():
@@ -174,7 +184,8 @@ def build_lane(
     task_dir = project_root / "tasks" / TESTER_TASK
     (task_dir / "artifacts").mkdir(parents=True)
     (task_dir / "README.md").write_text(
-        f"# Task: {TESTER_TASK}\n\n## Role\nTESTER\n\n## Release Version\n{VERSION}\n", encoding="utf-8",
+        f"# Task: {TESTER_TASK}\n\n## Role\nTESTER\n\n## Release Version\n{VERSION}\n",
+        encoding="utf-8",
     )
     (task_dir / "status.md").write_text("# Status\n\n## State\nDONE\n", encoding="utf-8")
     (task_dir / "artifacts" / "report.md").write_text(
@@ -192,7 +203,8 @@ def build_lane(
     if fixture == "trigger-8":
         for earlier in ("v1.1.0", "v1.2.0", "v1.3.0"):
             (repo / "release-notes" / f"{earlier}.md").write_text(
-                f"# Release Notes: {PROJECT} {earlier}\n\n## Status\nNON-FUNCTIONAL\n", encoding="utf-8",
+                f"# Release Notes: {PROJECT} {earlier}\n\n## Status\nNON-FUNCTIONAL\n",
+                encoding="utf-8",
             )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "base")
@@ -209,26 +221,32 @@ def _q(value: str) -> str:
 
 
 def run_ship_policy(
-    tmp_path: pathlib.Path, lane: ShipPolicyLane, after: str = "", *, before: str = "",
+    tmp_path: pathlib.Path,
+    lane: ShipPolicyLane,
+    after: str = "",
+    *,
+    before: str = "",
 ) -> BashResult:
     """Run cm_release_apply_ship_policy for *lane*, then the bash in *after*.
 
     *before* runs after the libraries are sourced and before the stage, so a
     test can replace one library function with a stub.
     """
-    script = "\n".join([
-        "set -euo pipefail",
-        "unset PGAI_PROJECT_ROOT PGAI_TASKS_DIR PGAI_PROJECT_NAME",
-        *(f"source {lib}" for lib in _LIBS),
-        before,
-        "git_step() { shift; \"$@\"; }",
-        "_noop_pre_squash_hook() { :; }",
-        f"PROJECT_NAME={_q(PROJECT)} ACTIVE_RC={_q(VERSION)} REPO_ROOT={_q(str(lane.repo))}",
-        f"MAIN_BRANCH=main RC_BRANCH={_q(RC_BRANCH)} _CM_PROJECT_ROOT={_q(str(lane.project_root))}",
-        "PROJECT_HALT_FILE=\"$_CM_PROJECT_ROOT/HALT\" RELEASE_STATE=\"$_CM_PROJECT_ROOT/release-state.md\"",
-        "cm_release_apply_ship_policy _noop_pre_squash_hook",
-        after,
-    ])
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            "unset PGAI_PROJECT_ROOT PGAI_TASKS_DIR PGAI_PROJECT_NAME",
+            *(f"source {lib}" for lib in _LIBS),
+            before,
+            'git_step() { shift; "$@"; }',
+            "_noop_pre_squash_hook() { :; }",
+            f"PROJECT_NAME={_q(PROJECT)} ACTIVE_RC={_q(VERSION)} REPO_ROOT={_q(str(lane.repo))}",
+            f"MAIN_BRANCH=main RC_BRANCH={_q(RC_BRANCH)} _CM_PROJECT_ROOT={_q(str(lane.project_root))}",
+            'PROJECT_HALT_FILE="$_CM_PROJECT_ROOT/HALT" RELEASE_STATE="$_CM_PROJECT_ROOT/release-state.md"',
+            "cm_release_apply_ship_policy _noop_pre_squash_hook",
+            after,
+        ]
+    )
     env = {
         "KANBAN_ROOT": str(lane.root),
         "PGAI_AGENT_KANBAN_ROOT_PATH": str(lane.root),
@@ -254,10 +272,10 @@ def generate_notes_bash(generator: pathlib.Path, out_root: pathlib.Path) -> str:
     other than Status, Bugs Skipped and Known Issues read "None")."""
     return (
         f"mkdir -p {_q(str(out_root))}\n"
-        "PGAI_CM_INTERNAL_ID_SCRUB_DIR=\"$PWD/scripts/lib/cm\" python3 "
-        f"{_q(str(generator))} none {_q(str(out_root))} \"$ACTIVE_RC\" "
-        "\"${_RELEASE_NOTES_STATUS:-FUNCTIONAL}\" 2026-01-01 \"$PROJECT_NAME\" none \"$RC_BRANCH\" "
-        "\"${_KNOWN_ISSUE_NOTES_BLOCK:-}\" \"${_BUGS_SKIPPED_NOTES_BLOCK:-}\""
+        'PGAI_CM_INTERNAL_ID_SCRUB_DIR="$PWD/scripts/lib/cm" python3 '
+        f'{_q(str(generator))} none {_q(str(out_root))} "$ACTIVE_RC" '
+        '"${_RELEASE_NOTES_STATUS:-FUNCTIONAL}" 2026-01-01 "$PROJECT_NAME" none "$RC_BRANCH" '
+        '"${_KNOWN_ISSUE_NOTES_BLOCK:-}" "${_BUGS_SKIPPED_NOTES_BLOCK:-}"'
     )
 
 

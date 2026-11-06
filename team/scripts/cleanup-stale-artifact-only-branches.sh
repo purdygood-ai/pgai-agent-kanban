@@ -60,16 +60,16 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 # shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
 # pp_branch_prefix, the one bash branch_prefix reader (RC auto-detection)
 # shellcheck source=lib/project_paths.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/project_paths.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/project_paths.sh"
 # read_md_field, the one bash section reader (every README and status.md
 # section read below)
 # shellcheck source=lib/md_field.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/md_field.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/md_field.sh"
 
 # ---------------------------------------------------------------------------
 # Constants

@@ -249,7 +249,7 @@ def _build_fixture_repo(
         with (scripts_dir / "lib" / "temp.sh").open("a", encoding="utf-8") as handle:
             handle.write(
                 "\n# Fixture override: list the file named by FIXTURE_TMP_LISTING.\n"
-                "pgai_tmp_snapshot() { sort -- \"${FIXTURE_TMP_LISTING}\"; }\n"
+                'pgai_tmp_snapshot() { sort -- "${FIXTURE_TMP_LISTING}"; }\n'
             )
         residue = ", ".join(repr(name) for name in _SEEDED_RESIDUE)
         (failing_dir / "test_fixture_hygiene_residue.py").write_text(
@@ -419,9 +419,7 @@ def _seed_stale_findings_file(temp_dir: pathlib.Path, findings_name: str) -> pat
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_findings_file_replaced_on_pytest_failure(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_findings_file_replaced_on_pytest_failure(runner_name: str, tmp_path: pathlib.Path) -> None:
     """Regression guard for the acceptance-criteria case.
 
     Seeds a stale findings file, forces this run's own pytest phase to
@@ -461,8 +459,7 @@ def test_findings_file_replaced_on_pytest_failure(
         "fixture is a no-op stub), not a prior invocation's"
     )
     assert doc["findings"] == [], (
-        "every quality-class lint in this fixture is a no-op stub, so a "
-        "correctly-generated findings array is empty"
+        "every quality-class lint in this fixture is a no-op stub, so a " "correctly-generated findings array is empty"
     )
     assert doc["runner"] == runner_name
 
@@ -470,9 +467,7 @@ def test_findings_file_replaced_on_pytest_failure(
         "the '[gated-runner] findings file written: ...' narration line must "
         "print on the failure path exactly as it does on the success path"
     )
-    assert str(findings_path) in result.stdout, (
-        "the narration line must name the file that was actually written"
-    )
+    assert str(findings_path) in result.stdout, "the narration line must name the file that was actually written"
     assert "set unchanged by the suite" in result.stdout, (
         "the post-suite sentinel check must still run and print its "
         "'[pgai-sentinel] ... set unchanged by the suite' verdict on a "
@@ -482,9 +477,7 @@ def test_findings_file_replaced_on_pytest_failure(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_findings_file_still_written_on_pytest_success(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_findings_file_still_written_on_pytest_success(runner_name: str, tmp_path: pathlib.Path) -> None:
     """Regression guard: moving the write from an unconditional bottom-of-
     script call to a CLEANUP_ON_EXIT_PRE_HOOK must not break the pre-existing
     success-path write."""
@@ -514,9 +507,7 @@ def test_findings_file_still_written_on_pytest_success(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_sentinel_removal_reported_on_pytest_failure(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_sentinel_removal_reported_on_pytest_failure(runner_name: str, tmp_path: pathlib.Path) -> None:
     """A failing suite that also removed the live root's fleet HALT must
     still print the '[pgai-sentinel] REMOVED: <path>' narration, record a
     sentinel_leak finding in the findings file, and exit with pytest's own
@@ -528,9 +519,7 @@ def test_sentinel_removal_reported_on_pytest_failure(
     removed HALT is asserted to stay removed -- the runner narrates the
     mutation and never repairs it.
     """
-    fixture_root = _build_fixture_repo(
-        tmp_path, runner_name, deliberately_fail=True, removes_root_sentinel=True
-    )
+    fixture_root = _build_fixture_repo(tmp_path, runner_name, deliberately_fail=True, removes_root_sentinel=True)
     kanban_root = tmp_path / "safe_kanban_root"
     kanban_root.mkdir()
     temp_dir = tmp_path / "temp"
@@ -556,8 +545,7 @@ def test_sentinel_removal_reported_on_pytest_failure(
         f"the removed path\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "sentinel_leak: quality-class finding(s)" in result.stderr, (
-        "the gated-runner wrapper must narrate the sentinel finding as "
-        "non-blocking rather than aborting on it"
+        "the gated-runner wrapper must narrate the sentinel finding as " "non-blocking rather than aborting on it"
     )
 
     doc = json.loads(findings_path.read_text(encoding="utf-8"))
@@ -568,14 +556,12 @@ def test_sentinel_removal_reported_on_pytest_failure(
         f"a failing suite that mutated the sentinel set; got {doc['findings']!r}"
     )
     assert sentinel_findings[0]["severity"] == "quality"
-    assert sentinel_findings[0]["path"] == str(halt), (
-        "the per-instance finding must name the removed sentinel's path"
-    )
+    assert sentinel_findings[0]["path"] == str(halt), "the per-instance finding must name the removed sentinel's path"
     assert sentinel_findings[0]["kind"] == "sentinel-removed", sentinel_findings[0]
     assert str(halt) in sentinel_findings[0]["cause"], sentinel_findings[0]
-    assert "exit_code" not in sentinel_findings[0], (
-        "a sentinel difference is recorded per instance, not as a coarse exit-code entry"
-    )
+    assert (
+        "exit_code" not in sentinel_findings[0]
+    ), "a sentinel difference is recorded per instance, not as a coarse exit-code entry"
 
 
 # ---------------------------------------------------------------------------
@@ -588,9 +574,7 @@ def test_sentinel_removal_reported_on_pytest_failure(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_findings_file_replaced_on_forced_breakage_class_abort(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_findings_file_replaced_on_forced_breakage_class_abort(runner_name: str, tmp_path: pathlib.Path) -> None:
     """Guards against a breakage-class abort leaving a stale findings file.
 
     Seeds a stale findings file, then forces the breakage-class pre-flight
@@ -607,9 +591,7 @@ def test_findings_file_replaced_on_forced_breakage_class_abort(
     honestly-aborted run from a clean pass that also produced zero
     findings.
     """
-    fixture_root = _build_fixture_repo(
-        tmp_path, runner_name, deliberately_fail=False, breakage_class_fails=True
-    )
+    fixture_root = _build_fixture_repo(tmp_path, runner_name, deliberately_fail=False, breakage_class_fails=True)
     kanban_root = tmp_path / "safe_kanban_root"
     kanban_root.mkdir()
     temp_dir = tmp_path / "temp"
@@ -626,12 +608,10 @@ def test_findings_file_replaced_on_forced_breakage_class_abort(
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "synthetic breakage-class failure" in result.stderr, (
-        "the breakage-class gate's own diagnostic must still print exactly, "
-        "unaltered by the findings-file claim"
+        "the breakage-class gate's own diagnostic must still print exactly, " "unaltered by the findings-file claim"
     )
     assert "error:   run-" in result.stderr and "breakage-class-gate" in result.stderr, (
-        "the dual-channel error contract's machine key must still print "
-        "unchanged"
+        "the dual-channel error contract's machine key must still print " "unchanged"
     )
 
     assert findings_path.is_file(), "the findings file must exist after a forced abort"
@@ -641,9 +621,9 @@ def test_findings_file_replaced_on_forced_breakage_class_abort(
         "means the findings-file write was skipped on this abort path"
     )
     finding_lints = [f.get("lint") for f in doc["findings"]]
-    assert "stale_finding_from_another_worktree" not in finding_lints, (
-        "the stale finding from the pre-seeded file must be gone"
-    )
+    assert (
+        "stale_finding_from_another_worktree" not in finding_lints
+    ), "the stale finding from the pre-seeded file must be gone"
     assert finding_lints == ["runner_incomplete"], (
         "a run aborted at the breakage-class gate must carry exactly one "
         "runner_incomplete finding recording why -- this is what makes the "
@@ -654,9 +634,7 @@ def test_findings_file_replaced_on_forced_breakage_class_abort(
 
 
 @pytest.mark.parametrize("runner_name", _RUNNER_NAMES)
-def test_findings_file_replaced_on_forced_pytest_missing_abort(
-    runner_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_findings_file_replaced_on_forced_pytest_missing_abort(runner_name: str, tmp_path: pathlib.Path) -> None:
     """Same regression guard as the breakage-class case above, for the
     OTHER fatal pre-flight gate that sits before the quality-class lint
     block: pytest itself being unavailable."""
@@ -669,9 +647,7 @@ def test_findings_file_replaced_on_forced_pytest_missing_abort(
     config = _RUNNER_CONFIG[runner_name]
     findings_path = _seed_stale_findings_file(temp_dir, config["findings_name"])
 
-    result = _run_runner_script_without_pytest(
-        fixture_root, runner_name, kanban_root, temp_dir, tmp_path
-    )
+    result = _run_runner_script_without_pytest(fixture_root, runner_name, kanban_root, temp_dir, tmp_path)
 
     assert result.returncode == 2, (
         f"a forced pytest-missing abort must still exit 2 (the findings-file "
@@ -679,8 +655,7 @@ def test_findings_file_replaced_on_forced_pytest_missing_abort(
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     assert "pytest is not installed" in result.stderr, (
-        "the pytest-missing gate's own diagnostic must still print exactly, "
-        "unaltered by the findings-file claim"
+        "the pytest-missing gate's own diagnostic must still print exactly, " "unaltered by the findings-file claim"
     )
 
     assert findings_path.is_file(), "the findings file must exist after a forced abort"
@@ -692,8 +667,7 @@ def test_findings_file_replaced_on_forced_pytest_missing_abort(
     finding_lints = [f.get("lint") for f in doc["findings"]]
     assert "stale_finding_from_another_worktree" not in finding_lints
     assert finding_lints == ["runner_incomplete"], (
-        "a run aborted because pytest is missing must carry exactly one "
-        "runner_incomplete finding recording why"
+        "a run aborted because pytest is missing must carry exactly one " "runner_incomplete finding recording why"
     )
     assert "pytest is not installed" in doc["findings"][0]["summary"]
 
@@ -729,7 +703,10 @@ def test_post_suite_residue_and_sentinel_changes_are_each_their_own_finding(
     findings_path = temp_dir / "lint" / _RUNNER_CONFIG[runner_name]["findings_name"]
 
     result = _run_runner_script(
-        fixture_root, runner_name, kanban_root, temp_dir,
+        fixture_root,
+        runner_name,
+        kanban_root,
+        temp_dir,
         extra_env={"FIXTURE_TMP_LISTING": str(listing)},
     )
 
@@ -741,9 +718,7 @@ def test_post_suite_residue_and_sentinel_changes_are_each_their_own_finding(
     doc = json.loads(findings_path.read_text(encoding="utf-8"))
     residue = [f for f in doc["findings"] if f.get("lint") == "bare_tmp_cleanliness"]
     sentinels = [f for f in doc["findings"] if f.get("lint") == "sentinel_leak"]
-    assert sorted(pathlib.Path(f["path"]).name for f in residue) == sorted(_SEEDED_RESIDUE), (
-        doc["findings"]
-    )
+    assert sorted(pathlib.Path(f["path"]).name for f in residue) == sorted(_SEEDED_RESIDUE), doc["findings"]
     assert {(f["kind"], f["path"]) for f in sentinels} == {
         ("sentinel-removed", str(halt)),
         ("sentinel-added", str(added)),

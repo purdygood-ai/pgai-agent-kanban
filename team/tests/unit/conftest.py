@@ -100,7 +100,6 @@ from tests.fixtures.binary_guard import require_binary  # noqa: F401
 from tests.fixtures.binary_guard import require_docker_daemon  # noqa: F401
 from tests.fixtures.binary_guard import try_resolve_binary  # noqa: F401
 
-
 # ---------------------------------------------------------------------------
 # Unit-specific fixture: minimal_kanban_root
 # ---------------------------------------------------------------------------

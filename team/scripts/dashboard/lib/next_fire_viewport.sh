@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # next_fire_viewport.sh — shared pane-geometry query and row-fit-with-marker
 # helpers for the two next-fire schedule renderers: next-cron-firings.sh's
-# window-4 pane and show-header.sh's window-0 cron-firings column (reached
-# through show-multi.sh's header-mode single-project delegation).
+# drill-window CRON pane and show-header.sh's window-0 cron-firings column
+# (reached through show-multi.sh's header-mode single-project delegation).
 #
 # A roster that grows past the space its pane allots it must never scroll
 # rows off the top with no signal anything was cut. These functions query

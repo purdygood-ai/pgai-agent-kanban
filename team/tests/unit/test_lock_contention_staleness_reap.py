@@ -177,8 +177,7 @@ def test_live_pid_holder_lock_is_deferred_with_no_reap(tmp_path: pathlib.Path) -
         )
         assert "lock.provenance.contended" in result.stderr
         assert "stale_reaped" not in result.stderr, (
-            f"no reap narration is expected on the unchanged live-holder path.\n"
-            f"stderr: {result.stderr}"
+            f"no reap narration is expected on the unchanged live-holder path.\n" f"stderr: {result.stderr}"
         )
     finally:
         done_file.touch()
@@ -305,25 +304,24 @@ def test_live_pid_lock_older_than_derived_floor_is_deferred_and_narrated_overdue
             f"a lock older than the derived floor whose recorded pid is alive "
             f"must be deferred, never reaped.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "stale_reaped" not in result.stderr, (
-            f"no reap of any kind is allowed against a live holder.\nstderr: {result.stderr}"
-        )
-        assert lock_file.exists() and "holder=writer" in lock_file.read_text(), (
-            "the live holder's lock file must be left exactly as it was"
-        )
+        assert (
+            "stale_reaped" not in result.stderr
+        ), f"no reap of any kind is allowed against a live holder.\nstderr: {result.stderr}"
+        assert (
+            lock_file.exists() and "holder=writer" in lock_file.read_text()
+        ), "the live holder's lock file must be left exactly as it was"
         assert "lock.provenance.holder_overdue" in result.stderr
         assert "kill -0" in result.stderr, (
-            f"expected the overdue narration to note the pid is still alive.\n"
-            f"stderr: {result.stderr}"
+            f"expected the overdue narration to note the pid is still alive.\n" f"stderr: {result.stderr}"
         )
         assert "derivation:" in result.stderr, (
             f"expected the overdue narration to state the derivation "
             f"(which inputs produced the threshold), not just the seconds "
             f"value.\nstderr: {result.stderr}"
         )
-        assert "--force" in result.stderr, (
-            f"expected the overdue remedy to name release-locks --force.\nstderr: {result.stderr}"
-        )
+        assert (
+            "--force" in result.stderr
+        ), f"expected the overdue remedy to name release-locks --force.\nstderr: {result.stderr}"
         assert "lock.provenance.contended" in result.stderr
     finally:
         done_file.touch()
@@ -374,15 +372,13 @@ def test_live_pid_lock_just_under_derived_floor_is_deferred_not_reaped(
             f"never reaped.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "stale_reaped" not in result.stderr, (
-            f"no reap narration is expected below the derived floor.\n"
-            f"stderr: {result.stderr}"
+            f"no reap narration is expected below the derived floor.\n" f"stderr: {result.stderr}"
         )
-        assert "holder_overdue" not in result.stderr, (
-            f"a live holder under the floor is not overdue.\nstderr: {result.stderr}"
-        )
+        assert (
+            "holder_overdue" not in result.stderr
+        ), f"a live holder under the floor is not overdue.\nstderr: {result.stderr}"
         assert "lock.provenance.contended" in result.stderr, (
-            f"expected the deferral itself to be narrated dual-channel.\n"
-            f"stderr: {result.stderr}"
+            f"expected the deferral itself to be narrated dual-channel.\n" f"stderr: {result.stderr}"
         )
     finally:
         done_file.touch()
@@ -671,8 +667,7 @@ def test_configured_periods_product_below_floor_is_clamped_silently_via_public_w
         f"not the unclamped shipped-default periods product.\nstdout: {result.stdout}"
     )
     assert result.stderr == "", (
-        f"a read-only threshold query must never narrate or write anywhere.\n"
-        f"stderr: {result.stderr}"
+        f"a read-only threshold query must never narrate or write anywhere.\n" f"stderr: {result.stderr}"
     )
 
 
@@ -699,8 +694,7 @@ def test_configured_periods_product_below_floor_is_narrated_when_acted_on(
     )
     assert "error:   lock.stale_threshold.floor_enforced" in result.stderr
     assert f"{_SMALL_FLOOR_SECONDS}s" in result.stderr, (
-        f"expected the clamp narration to name the floor value.\n"
-        f"stderr: {result.stderr}"
+        f"expected the clamp narration to name the floor value.\n" f"stderr: {result.stderr}"
     )
 
 
@@ -723,12 +717,9 @@ def test_floor_enforced_narration_fires_once_per_process_when_unchanged(
     """)
     result = run_bash(tmp_path, script, extra_env=_SMALL_FLOOR_ENV)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    threshold_lines = [
-        ln for ln in result.stdout.splitlines() if ln.startswith("THRESHOLD=")
-    ]
+    threshold_lines = [ln for ln in result.stdout.splitlines() if ln.startswith("THRESHOLD=")]
     assert threshold_lines == [f"THRESHOLD={_SMALL_FLOOR_SECONDS}"] * 5, (
-        f"every call must still resolve to the same clamped floor.\n"
-        f"stdout: {result.stdout}"
+        f"every call must still resolve to the same clamped floor.\n" f"stdout: {result.stdout}"
     )
     narration_count = result.stderr.count("error:   lock.stale_threshold.floor_enforced")
     assert narration_count == 1, (
@@ -764,12 +755,11 @@ def test_floor_enforced_narration_absent_when_config_at_or_above_floor(
         },
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert "THRESHOLD=360" in result.stdout, (
-        f"expected the unclamped configured product (360s).\nstdout: {result.stdout}"
-    )
+    assert (
+        "THRESHOLD=360" in result.stdout
+    ), f"expected the unclamped configured product (360s).\nstdout: {result.stdout}"
     assert result.stderr == "", (
-        f"expected no narration at all when the config already clears the "
-        f"floor.\nstderr: {result.stderr}"
+        f"expected no narration at all when the config already clears the " f"floor.\nstderr: {result.stderr}"
     )
 
 

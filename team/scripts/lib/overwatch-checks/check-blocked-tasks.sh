@@ -33,6 +33,11 @@
 #   1 — internal error (KANBAN_ROOT, OVERWATCH_PROJECT or the project root
 #       missing, or the shared module runner unavailable)
 
+# The lib directory above this file, as an absolute path
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CBT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || _CBT_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # overwatch_check_blocked_tasks [--dry-run]
 # ---------------------------------------------------------------------------
@@ -51,7 +56,7 @@ overwatch_check_blocked_tasks() {
         return 1
     fi
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || lib_dir=""
+    lib_dir="${_CBT_LIB_DIR}"
     if ! declare -F pp_run_ops >/dev/null 2>&1; then
         # shellcheck source=../pp_run_ops.sh
         source "${lib_dir}/pp_run_ops.sh" 2>/dev/null || {

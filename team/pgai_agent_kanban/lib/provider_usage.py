@@ -55,7 +55,8 @@ import json
 import os
 import pathlib
 import sys
-from typing import Callable, Optional, Union
+from typing import Union
+from collections.abc import Callable
 
 __all__ = [
     "CLAUDE_WARNING_PREFIX",
@@ -77,6 +78,7 @@ CLAUDE_WARNING_PREFIX = "token_capture"
 class UnparseableOutputError(ValueError):
     """The captured provider output holds no JSON document at all."""
 
+
 PathLike = Union[str, "os.PathLike[str]"]
 
 
@@ -97,8 +99,7 @@ def _claude_result_text(result: object) -> str:
     anything else as ``str(result)``."""
     if isinstance(result, list):
         return "\n".join(
-            block.get("text", "") for block in result
-            if isinstance(block, dict) and block.get("type") == "text"
+            block.get("text", "") for block in result if isinstance(block, dict) and block.get("type") == "text"
         )
     if not isinstance(result, str):
         return str(result)
@@ -126,7 +127,7 @@ def parse_claude_json(
     json_path: PathLike,
     result_path: PathLike,
     requested_model: str = "",
-    warn: Optional[Callable[[str], None]] = None,
+    warn: Callable[[str], None] | None = None,
 ) -> dict:
     """Parse a captured ``claude -p --output-format json`` response.
 
@@ -244,7 +245,7 @@ def parse_claude_json(
 def parse_codex_jsonl(
     jsonl_path: PathLike,
     result_path: PathLike,
-    warn: Optional[Callable[[str], None]] = None,
+    warn: Callable[[str], None] | None = None,
 ) -> dict:
     """Parse a captured ``codex exec --json`` event stream.
 

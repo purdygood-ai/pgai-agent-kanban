@@ -96,9 +96,7 @@ def test_fixture_serves_a_request_on_an_ephemeral_port_and_shuts_down_cleanly(
     server_logs = tmp_path / "server_logs"
     server_logs.mkdir(parents=True, exist_ok=True)
     with api_server_fixture(server_logs, kanban_root=board_root) as handle:
-        assert handle.port != _PRODUCTION_DEFAULT_PORT, (
-            "Fixture must never bind the production default port 8300."
-        )
+        assert handle.port != _PRODUCTION_DEFAULT_PORT, "Fixture must never bind the production default port 8300."
         recorded_port = handle.port
 
         body = _get_json(f"http://127.0.0.1:{handle.port}/health")
@@ -128,9 +126,7 @@ def test_two_concurrent_fixture_instances_do_not_collide_on_a_port(
     server_b_logs.mkdir(parents=True, exist_ok=True)
     with api_server_fixture(server_a_logs, kanban_root=board_a) as handle_a:
         with api_server_fixture(server_b_logs, kanban_root=board_b) as handle_b:
-            assert handle_a.port != handle_b.port, (
-                f"Two concurrent fixture instances collided on port {handle_a.port}."
-            )
+            assert handle_a.port != handle_b.port, f"Two concurrent fixture instances collided on port {handle_a.port}."
 
             body_a = _get_json(f"http://127.0.0.1:{handle_a.port}/health")
             body_b = _get_json(f"http://127.0.0.1:{handle_b.port}/health")
@@ -184,9 +180,9 @@ def test_synthetic_board_seeds_every_task_state_a_deferred_bug_and_a_campaign_fi
     # Nothing was written outside board_root itself.
     for path in board_root.rglob("*"):
         resolved = path if path.is_symlink() else path.resolve()
-        assert str(resolved).startswith(str(board_root.resolve())) or path.is_symlink(), (
-            f"fixture wrote outside its own board directory: {path}"
-        )
+        assert (
+            str(resolved).startswith(str(board_root.resolve())) or path.is_symlink()
+        ), f"fixture wrote outside its own board directory: {path}"
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +265,7 @@ def test_golden_pair_why_verdict_matches_between_real_cli_and_real_rest_route(
     server_logs = tmp_path / "server_logs"
     server_logs.mkdir(parents=True, exist_ok=True)
     with api_server_fixture(server_logs, kanban_root=board_root) as handle:
-        body = _get_json(
-            f"http://127.0.0.1:{handle.port}/verdicts?project={PROJECT_NAME}"
-        )
+        body = _get_json(f"http://127.0.0.1:{handle.port}/verdicts?project={PROJECT_NAME}")
 
     entries = [entry for entry in body["verdicts"] if entry.get("project") == PROJECT_NAME]
     assert len(entries) == 1, f"expected exactly one verdict entry for {PROJECT_NAME}: {body}"

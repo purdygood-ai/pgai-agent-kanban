@@ -8,7 +8,7 @@ Neither overrides `DIRECTIVES.md` or the autonomy principle in `OVERVIEW.md`, an
 
 CODER owns code: scripts, configuration, automated tests, technical analysis, and the documentation that lives *inside* code — docstrings, comments, `--help` text. Standalone documents belong to WRITER.
 
-**All produced code follows the project's coding standard** — the project README names it (for the kanban, `docs/coding-standards.md`). Project-specific contracts — gate censuses, interface versions, required pre-merge checks — are in the project README too, and bind you exactly as this file does.
+**All produced code follows the project's coding standard** — the project README names it (for the kanban, `docs/coding-standards.md`). Project-specific contracts — gate censuses, interface versions, required pre-merge checks — are in the project README too, and bind you exactly as this file does. The README may also state standards of its own — a language version floor, a style guide, a formatter and line length — and code you write or touch meets them; a deviation in code you did not touch is a note in `## Summary`, never a reason to stop.
 
 ## Workflow type dispatch
 
@@ -51,6 +51,7 @@ The wake has already created your feature branch from what `## Source Branch` na
 - **Run only the tests for what you changed.** Use the project's targeted test command (the project README names it) on the test files you added or changed and the ones that cover your change. The full gated suites run once per release in the TESTER task.
 - **Version comparisons always call a semver helper**, never a string compare (`v0.9.7` sorts above `v0.17.1` as text). The project README names the helper.
 - **Tests you author follow the project's test-authoring guidelines** (the project README names them).
+- **A test for a change to module X lives in X's existing test file.** Add a case there; when only the input or expected value differs from an existing test, parametrise that test instead of writing a sibling. Create a new test file only when the change creates a new source module. A test file named after a ticket or a bug is never the right place. A test your change makes meaningless is deleted in the same commit, not left to drift.
 - Commit as you go and update `status.md` after each significant step. Never `git stash`; to leave a branch, commit first or discard with `git checkout -- .`.
 
 ### Parsers are liberal in what they accept, strict in what they produce
@@ -120,6 +121,8 @@ Write `## State` as `DONE`, and fill in the sections around it: `## Summary`, `#
 **The container tier is operator-only, and synthetic load is forbidden** — core's "Resource safety".
 
 **Live-install safety.** Never run a script that writes under the kanban root against the operator's live install; the project README gives the sandbox recipe where the project has such scripts (the kanban does). A copied worktree is not a sandbox either — its `.git` points at the shared repository; clone instead.
+
+**The dev tree is data, never a dependency.** New or changed code never shells to `git`, reads a `.git`, imports from, sources, or resolves `PGAI_DEV_TREE_PATH` unless it is one of core's permitted readers ("Git Repositories: Roles and Boundaries"), and then only through the project's `dev_tree_path`, with a stated skip when the tree is absent. The keyboard test: the operator moves the checkout and every live verb behaves identically except those readers, which say so.
 
 **Process artifacts stay out of the codebase.** Verification reports and every other process-provenance artifact go to the task's `artifacts/` directory, never into a dev tree.
 

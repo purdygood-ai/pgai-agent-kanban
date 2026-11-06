@@ -63,9 +63,7 @@ def _bug_text(symptom_body: str, *, after: str = "## Expected\nIt keeps working.
 
 
 def _assert_no_comment_text(value: str) -> None:
-    assert "<!--" not in value and "-->" not in value, (
-        f"comment text leaked into the value: {value!r}"
-    )
+    assert "<!--" not in value and "-->" not in value, f"comment text leaked into the value: {value!r}"
 
 
 def _bug_from_template() -> str:
@@ -79,9 +77,9 @@ def _bug_from_template() -> str:
         f"{_BUG_TEMPLATE} no longer opens ## Symptom with a guidance comment; "
         "this fixture no longer exercises comment skipping"
     )
-    assert _TEMPLATE_PLACEHOLDER in template, (
-        f"{_BUG_TEMPLATE} no longer carries the placeholder {_TEMPLATE_PLACEHOLDER!r}"
-    )
+    assert (
+        _TEMPLATE_PLACEHOLDER in template
+    ), f"{_BUG_TEMPLATE} no longer carries the placeholder {_TEMPLATE_PLACEHOLDER!r}"
     return (
         template.replace("# BUG-NNNN-slug", "# BUG-0998-new-template", 1)
         .replace(_TEMPLATE_PLACEHOLDER, _PROSE, 1)
@@ -157,9 +155,7 @@ def test_bug_from_shipped_template_reads_its_prose(tmp_path: pathlib.Path) -> No
         pytest.param("<!-- one -->\n\n<!-- two -->", id="several-comments"),
     ],
 )
-def test_comment_only_symptom_matches_empty_symptom(
-    tmp_path: pathlib.Path, comment_only: str, after: str
-) -> None:
+def test_comment_only_symptom_matches_empty_symptom(tmp_path: pathlib.Path, comment_only: str, after: str) -> None:
     """A Symptom holding only a comment yields what an empty Symptom yields, never comment text."""
     commented = BugItem(_write_bug(tmp_path / "c", "BUG-0001-sample.md", _bug_text(comment_only, after=after)))
     empty = BugItem(_write_bug(tmp_path / "e", "BUG-0001-sample.md", _bug_text("", after=after)))
@@ -267,9 +263,7 @@ def test_real_comment_after_a_quoted_opener_is_still_skipped(tmp_path: pathlib.P
         pytest.param("", "", "", id="empty-last-section"),
     ],
 )
-def test_comment_free_symptom_reads_as_before(
-    tmp_path: pathlib.Path, body: str, after: str, expected: str
-) -> None:
+def test_comment_free_symptom_reads_as_before(tmp_path: pathlib.Path, body: str, after: str, expected: str) -> None:
     """Without an HTML comment, the Symptom value and one-liner are the first non-heading line, as written."""
     bug = BugItem(_write_bug(tmp_path, "BUG-0001-sample.md", _bug_text(body, after=after)))
 

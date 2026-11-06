@@ -136,8 +136,8 @@ def _make_sandbox(tmp_path: pathlib.Path, *, feature_commits: int = 0) -> Sandbo
     wrapper.write_text(
         "#!/usr/bin/env bash\n"
         f"printf '%s\\n' \"$*\" >> {shlex.quote(str(sb.trace))}\n"
-        f"PATH=\"${{PATH#{shlex.quote(str(sb.bin_dir))}:}}\"\n"
-        "exec git \"$@\"\n",
+        f'PATH="${{PATH#{shlex.quote(str(sb.bin_dir))}:}}"\n'
+        'exec git "$@"\n',
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
@@ -178,10 +178,13 @@ def _run(sb: Sandbox, body: str) -> subprocess.CompletedProcess:
 
 def _create(sb: Sandbox, *mode: str) -> subprocess.CompletedProcess:
     mode_arg = " ".join(shlex.quote(m) for m in mode)
-    return _run(sb, textwrap.dedent(f"""\
+    return _run(
+        sb,
+        textwrap.dedent(f"""\
         create_task_worktree '{_TASK_ID}' '{_RC_BRANCH}' '{_FEATURE_BRANCH}' '{sb.repo}' {mode_arg}
         printf 'RC=[%s]\\n' "$?"
-        """))
+        """),
+    )
 
 
 def _git_calls(sb: Sandbox) -> list[list[str]]:
@@ -240,7 +243,9 @@ def test_branch_mode_reattaches_when_a_registered_worktree_directory_is_still_pr
 
 
 @pytest.mark.parametrize("spelling", ["Branch", " BRANCH ", "bogus-mode"])
-def test_branch_mode_spellings_and_unknown_values_never_delete_the_branch(tmp_path: pathlib.Path, spelling: str) -> None:
+def test_branch_mode_spellings_and_unknown_values_never_delete_the_branch(
+    tmp_path: pathlib.Path, spelling: str
+) -> None:
     sb = _make_sandbox(tmp_path, feature_commits=2)
     tip_before = _git(sb.repo, "rev-parse", _FEATURE_BRANCH)
 
@@ -291,8 +296,7 @@ def test_branch_mode_without_the_branch_creates_it_fresh_and_names_it_once_with_
     # Count the library's own log lines; git's "Preparing worktree (new
     # branch ...)" progress line on stderr is git's, not a log line.
     naming = [
-        line for line in result.stderr.splitlines()
-        if line.startswith("worktree.sh:") and _FEATURE_BRANCH in line
+        line for line in result.stderr.splitlines() if line.startswith("worktree.sh:") and _FEATURE_BRANCH in line
     ]
     assert len(naming) == 1, f"expected exactly one log line naming the missing branch; got {naming}"
     assert "does not exist" in naming[0] and _RC_BRANCH in naming[0], naming[0]
@@ -312,7 +316,9 @@ def _setup_stage(sb: Sandbox) -> subprocess.CompletedProcess:
     """Drive the real wd_setup_task_worktree with the real create_task_worktree
     and Block Record reader; only collaborators outside the sandbox are stubbed.
     TEAM_ROOT under tmp_path makes the stage skip dev-tree parking."""
-    return _run(sb, textwrap.dedent(f"""\
+    return _run(
+        sb,
+        textwrap.dedent(f"""\
         set -e
         export LOG_FILE='{sb.root}/wake.log'
         log() {{ echo "[test] wake: $*" | tee -a "$LOG_FILE" >&2; }}
@@ -334,11 +340,14 @@ def _setup_stage(sb: Sandbox) -> subprocess.CompletedProcess:
         set_block() {{ :; }}; normalize_status_file() {{ :; }}; mark_backlog() {{ :; }}
         wd_setup_task_worktree
         printf 'FINAL=[%s]\\nPATH_OUT=[%s]\\n' "$LAST_TASK_FINAL_STATE" "$_task_worktree_path"
-        """))
+        """),
+    )
 
 
 def _record(sb: Sandbox, resume: str) -> None:
-    write_block_record(sb.status, "per_task_timeout", "CODER", ["worktree=gone", f"branch={_FEATURE_BRANCH}", "ahead=2"])
+    write_block_record(
+        sb.status, "per_task_timeout", "CODER", ["worktree=gone", f"branch={_FEATURE_BRANCH}", "ahead=2"]
+    )
     if resume != "fresh":
         update_block_record(sb.status, resume=resume)
 
@@ -352,9 +361,9 @@ def test_wake_stage_resumes_the_branch_when_the_block_record_says_branch(tmp_pat
     result = _setup_stage(sb)
 
     assert result.returncode == 0, result.stderr
-    assert "FINAL=[]" in result.stdout and f"PATH_OUT=[{sb.worktree}]" in result.stdout, (
-        f"stdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "FINAL=[]" in result.stdout and f"PATH_OUT=[{sb.worktree}]" in result.stdout
+    ), f"stdout={result.stdout}\nstderr={result.stderr}"
     assert "Block Record resume mode: branch" in result.stderr, result.stderr
     assert _git(sb.worktree, "rev-parse", "HEAD") == tip_before
     assert _git(sb.repo, "rev-list", "--count", f"{_RC_BRANCH}..{_FEATURE_BRANCH}") == "2"

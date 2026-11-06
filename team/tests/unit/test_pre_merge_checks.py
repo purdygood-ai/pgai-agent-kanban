@@ -133,10 +133,8 @@ _AUTHORED = {
     "team/scripts/check_docs_citations.py": _GUARD_STAND_IN,
     "team/pgai_agent_kanban/utils.py": _UTILS_BASE,
     "team/pgai_agent_kanban/greeting.py": (
-        "\"\"\"Print a greeting.\"\"\"\n"
-        "import argparse\nimport pathlib\nimport sys\n\n"
-        + textwrap.dedent(_SELF_LOCATION_GUARD)
-        + textwrap.dedent("""\
+        '"""Print a greeting."""\n'
+        "import argparse\nimport pathlib\nimport sys\n\n" + textwrap.dedent(_SELF_LOCATION_GUARD) + textwrap.dedent("""\
 
             from pgai_agent_kanban.utils import add_tax  # noqa: E402,F401
 
@@ -170,9 +168,7 @@ _AUTHORED = {
         print("hello", sys.argv[1])
         PY
         """,
-    "team/config/inline-python-allowlist.txt": (
-        "# fixture allowlist\nteam/scripts/greet.sh\t1\t2\n"
-    ),
+    "team/config/inline-python-allowlist.txt": ("# fixture allowlist\nteam/scripts/greet.sh\t1\t2\n"),
     "team/config/operator_verbs.manifest": "# fixture manifest: no verbs\n",
     "team/config/section-parser-allowlist.txt": "# fixture allowlist: no sites\n",
     "team/config/api-route-impl-baseline.txt": "shell_rows\t0\n",
@@ -232,9 +228,11 @@ class _FixtureRepo:
         # base records whatever the fixture tree carries, as the real
         # allowlist records the real tree, so the base starts clean.
         done = subprocess.run(
-            [sys.executable, str(self.path / "team/scripts/lint_python_duplicates.py"),
-             "--emit-allowlist"],
-            cwd=str(self.path), capture_output=True, text=True, check=False,
+            [sys.executable, str(self.path / "team/scripts/lint_python_duplicates.py"), "--emit-allowlist"],
+            cwd=str(self.path),
+            capture_output=True,
+            text=True,
+            check=False,
             env=_env(self.tmp_path),
         )
         assert done.returncode == 0, _diagnostic(done)
@@ -242,9 +240,21 @@ class _FixtureRepo:
 
     def git(self, *args: str) -> str:
         done = subprocess.run(
-            ["git", "-C", str(self.path), "-c", "user.name=Fixture",
-             "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", *args],
-            capture_output=True, text=True, check=False,
+            [
+                "git",
+                "-C",
+                str(self.path),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert done.returncode == 0, f"git {' '.join(args)} failed\n{_diagnostic(done)}"
         return done.stdout
@@ -259,8 +269,12 @@ class _FixtureRepo:
         workdir.mkdir(exist_ok=True)
         return subprocess.run(
             [sys.executable, str(_ENGINE), "--repo", str(self.path), "--workers", "1", *args],
-            cwd=str(workdir), env=_env(self.tmp_path), capture_output=True, text=True,
-            timeout=300, check=False,
+            cwd=str(workdir),
+            env=_env(self.tmp_path),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
         )
 
 
@@ -298,19 +312,28 @@ def _summary_rows(output: str) -> dict[str, tuple[str, str]]:
 
 
 _GUARD_ROWS = [
-    "guard: env-bootstrap", "guard: operator-verb-docs",
-    "guard: dashboard-window-docs", "guard: docs-citations",
+    "guard: env-bootstrap",
+    "guard: operator-verb-docs",
+    "guard: dashboard-window-docs",
+    "guard: docs-citations",
 ]
 
 _UNIT_CHECKS = {
-    "by-path", "lint: inline-python", "lint: python-duplicates",
-    "lint: engine-size", "lint: api-route-impl", "lint: echo-pipe-grep-q", "lint: section-parsers",
-    "lint: tracked-ignored", *_GUARD_ROWS,
+    "by-path",
+    "lint: inline-python",
+    "lint: python-duplicates",
+    "lint: engine-size",
+    "lint: api-route-impl",
+    "lint: echo-pipe-grep-q",
+    "lint: section-parsers",
+    "lint: tracked-ignored",
+    *_GUARD_ROWS,
     "affected tests",
 }
 
 _BUDGET_LINE_RE = re.compile(
-    r"^guards:  4 always-run guard\(s\) added \d+\.\ds (of|over) the 5\.0s budget", re.M,
+    r"^guards:  4 always-run guard\(s\) added \d+\.\ds (of|over) the 5\.0s budget",
+    re.M,
 )
 
 
@@ -322,7 +345,8 @@ _BUDGET_LINE_RE = re.compile(
 def test_heredoc_over_its_inline_python_allowance_fails_naming_file_and_allowance(
     fixture_repo: _FixtureRepo,
 ) -> None:
-    fixture_repo.commit({"team/scripts/greet.sh": """\
+    fixture_repo.commit(
+        {"team/scripts/greet.sh": """\
         #!/usr/bin/env bash
         # Greets the name given, through one small inline Python block.
         python3 - "$1" <<'PY'
@@ -330,7 +354,9 @@ def test_heredoc_over_its_inline_python_allowance_fails_naming_file_and_allowanc
         name = sys.argv[1].strip()
         print("hello", name)
         PY
-        """}, "grow the heredoc")
+        """},
+        "grow the heredoc",
+    )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
 
@@ -340,9 +366,9 @@ def test_heredoc_over_its_inline_python_allowance_fails_naming_file_and_allowanc
     assert "team/scripts/greet.sh" in result.stdout
     assert "above its allowlist entry of 1 / 2" in result.stdout, _diagnostic(result)
     # Only the lint that found something failed.
-    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {
-        "lint: inline-python"
-    }, _diagnostic(result)
+    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {"lint: inline-python"}, _diagnostic(
+        result
+    )
     assert "error:   pre_merge.checks_failed" in result.stderr
     # The remedy re-runs this same engine with the same base, as printed.
     assert f"remedy:  python3 {_ENGINE} --repo {fixture_repo.path}" in result.stderr, result.stderr
@@ -352,7 +378,8 @@ def test_heredoc_over_its_inline_python_allowance_fails_naming_file_and_allowanc
 def test_package_module_with_main_but_no_self_location_guard_fails_the_by_path_check(
     fixture_repo: _FixtureRepo,
 ) -> None:
-    fixture_repo.commit({"team/pgai_agent_kanban/receipt.py": """\
+    fixture_repo.commit(
+        {"team/pgai_agent_kanban/receipt.py": """\
         \"\"\"Print a receipt line.\"\"\"
         import sys
 
@@ -366,7 +393,9 @@ def test_package_module_with_main_but_no_self_location_guard_fails_the_by_path_c
 
         if __name__ == "__main__":
             sys.exit(main())
-        """}, "add an unguarded command-line module")
+        """},
+        "add an unguarded command-line module",
+    )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
 
@@ -380,8 +409,7 @@ def test_package_module_with_main_but_no_self_location_guard_fails_the_by_path_c
 def test_untouched_test_asserting_the_old_behaviour_is_selected_and_fails_by_name(
     fixture_repo: _FixtureRepo,
 ) -> None:
-    fixture_repo.commit({"team/pgai_agent_kanban/utils.py": _UTILS_BASE.replace("1.10", "1.20")},
-                        "raise the tax rate")
+    fixture_repo.commit({"team/pgai_agent_kanban/utils.py": _UTILS_BASE.replace("1.10", "1.20")}, "raise the tax rate")
     test_text = (fixture_repo.path / "team/tests/unit/test_pricing.py").read_text(encoding="utf-8")
     # The stale test cites the function by name. The module name it also
     # cites, utils, is one the finder drops as generic, so the function's
@@ -392,9 +420,9 @@ def test_untouched_test_asserting_the_old_behaviour_is_selected_and_fails_by_nam
 
     assert result.returncode == 1, _diagnostic(result)
     assert "pre-merge:   tests/unit/test_pricing.py" in result.stdout, _diagnostic(result)
-    assert "tests/unit/test_greeting_words.py" not in result.stdout, (
-        f"a test citing no changed name was selected\n{_diagnostic(result)}"
-    )
+    assert (
+        "tests/unit/test_greeting_words.py" not in result.stdout
+    ), f"a test citing no changed name was selected\n{_diagnostic(result)}"
     rows = _summary_rows(result.stdout)
     assert rows["affected tests"][0] == "FAIL", _diagnostic(result)
     assert "failing test file: tests/unit/test_pricing.py" in result.stdout, _diagnostic(result)
@@ -418,7 +446,8 @@ _CAP_FILES = {
 }
 
 _UTILS_COMMENTED = _UTILS_BASE.replace(
-    "        return round", "        # Rounded to whole cents.\n        return round",
+    "        return round",
+    "        # Rounded to whole cents.\n        return round",
 )
 
 
@@ -437,9 +466,7 @@ def test_clean_change_passes_every_check_and_the_cap_runs_only_the_most_referenc
     assert all(verdict == "PASS" for verdict, _ in rows.values()), _diagnostic(result)
     assert "3 affected test files; cap 2 applied, running the 2 most-referencing" in result.stdout
     selected = re.findall(r"^pre-merge:   (tests/\S+)$", result.stdout, re.M)
-    assert selected == ["tests/unit/test_rounding.py", "tests/unit/test_pricing.py"], (
-        _diagnostic(result)
-    )
+    assert selected == ["tests/unit/test_rounding.py", "tests/unit/test_pricing.py"], _diagnostic(result)
     assert f"base:    {_BASE_BRANCH} (given with --base)" in result.stdout
     assert _BUDGET_LINE_RE.search(result.stdout), _diagnostic(result)
     assert "pre-merge: PASS -- all 13 check(s) passed" in result.stdout
@@ -469,31 +496,30 @@ def test_direct_kanban_root_read_in_a_package_module_fails_the_env_bootstrap_gua
 ) -> None:
     # No test cites the new module, so affected selection picks nothing: the
     # guard runs because it always runs, not because the diff named it.
-    fixture_repo.commit({"team/pgai_agent_kanban/rootpeek.py": """\
+    fixture_repo.commit(
+        {"team/pgai_agent_kanban/rootpeek.py": """\
         \"\"\"Report where the kanban root is.\"\"\"
         import os
 
 
         def kanban_root():
             return os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-        """}, "read the kanban root directly")
+        """},
+        "read the kanban root directly",
+    )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
 
     assert result.returncode == 1, _diagnostic(result)
     rows = _summary_rows(result.stdout)
-    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {
-        "guard: env-bootstrap"
-    }, _diagnostic(result)
+    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {"guard: env-bootstrap"}, _diagnostic(
+        result
+    )
     assert rows["affected tests"][0] == "PASS", _diagnostic(result)
     # The guard's own finding names the module, and its fix follows it.
     assert "team/pgai_agent_kanban/rootpeek.py" in result.stdout, _diagnostic(result)
-    assert "    fix: read the kanban root through resolve_kanban_root()" in result.stdout, (
-        _diagnostic(result)
-    )
-    assert "pre-merge: FAIL -- 1 of 13 check(s) failed (guard: env-bootstrap)" in result.stdout, (
-        _diagnostic(result)
-    )
+    assert "    fix: read the kanban root through resolve_kanban_root()" in result.stdout, _diagnostic(result)
+    assert "pre-merge: FAIL -- 1 of 13 check(s) failed (guard: env-bootstrap)" in result.stdout, _diagnostic(result)
     assert "error:   pre_merge.checks_failed" in result.stderr
     assert "guard: env-bootstrap" in result.stderr, result.stderr
 
@@ -503,24 +529,27 @@ def test_a_shell_function_collision_fails_the_engine_size_ratchet_through_its_fi
 ) -> None:
     # lint_engine_size_dupe.py exits 0 whatever it finds; the ratchet reads
     # the collision from the lint's findings file, not from its exit code.
-    fixture_repo.commit({
-        "team/scripts/fixture_driver.sh": """\
+    fixture_repo.commit(
+        {
+            "team/scripts/fixture_driver.sh": """\
             #!/usr/bin/env bash
             SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
             source "${SCRIPT_DIR}/lib/fixture_stage_a.sh"
             source "${SCRIPT_DIR}/lib/fixture_stage_b.sh"
             """,
-        "team/scripts/lib/fixture_stage_a.sh": "shadowed_fixture_helper() { :; }\n",
-        "team/scripts/lib/fixture_stage_b.sh": "shadowed_fixture_helper() { :; }\n",
-    }, "define one helper in two co-sourced stages")
+            "team/scripts/lib/fixture_stage_a.sh": "shadowed_fixture_helper() { :; }\n",
+            "team/scripts/lib/fixture_stage_b.sh": "shadowed_fixture_helper() { :; }\n",
+        },
+        "define one helper in two co-sourced stages",
+    )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
 
     assert result.returncode == 1, _diagnostic(result)
     rows = _summary_rows(result.stdout)
-    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {
-        "lint: engine-size"
-    }, _diagnostic(result)
+    assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {"lint: engine-size"}, _diagnostic(
+        result
+    )
     assert "[duplicate-function] shadowed_fixture_helper()" in result.stdout, _diagnostic(result)
 
 
@@ -531,10 +560,13 @@ def test_a_copied_python_def_is_narrated_by_the_engine_size_ratchet_without_fail
     # name as a duplicate-python-def finding; the ratchet counts it in the
     # row's note and the run still passes.
     copied = "def fixture_flatten(value):\n    return ' '.join(str(value).split())\n"
-    fixture_repo.commit({
-        "team/pgai_agent_kanban/fixture_copy_a.py": copied,
-        "team/pgai_agent_kanban/fixture_copy_b.py": copied,
-    }, "copy one helper into two modules")
+    fixture_repo.commit(
+        {
+            "team/pgai_agent_kanban/fixture_copy_a.py": copied,
+            "team/pgai_agent_kanban/fixture_copy_b.py": copied,
+        },
+        "copy one helper into two modules",
+    )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
 
@@ -549,7 +581,8 @@ def test_a_guard_finding_fails_the_run_and_every_other_check_still_runs(
     fixture_repo: _FixtureRepo,
 ) -> None:
     fixture_repo.commit(
-        {"team/scripts/dashboard/generate_window_docs.py": _GUARD_FINDING}, "a guard with a finding",
+        {"team/scripts/dashboard/generate_window_docs.py": _GUARD_FINDING},
+        "a guard with a finding",
     )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
@@ -560,7 +593,7 @@ def test_a_guard_finding_fails_the_run_and_every_other_check_still_runs(
     assert {name for name, (verdict, _) in rows.items() if verdict == "FAIL"} == {
         "guard: dashboard-window-docs"
     }, _diagnostic(result)
-    block = result.stdout[result.stdout.index("guard: dashboard-window-docs  FAIL"):]
+    block = result.stdout[result.stdout.index("guard: dashboard-window-docs  FAIL") :]
     beneath = block.splitlines()[1:3]
     assert beneath == [
         "    DRIFT -- docs/DASHBOARD-PANES.md window=1 disagrees with the census",
@@ -572,19 +605,23 @@ def test_a_guard_finding_fails_the_run_and_every_other_check_still_runs(
 
 
 def test_a_guard_that_cannot_run_fails_the_run_naming_its_exit(fixture_repo: _FixtureRepo) -> None:
-    fixture_repo.commit({"team/scripts/check_docs_citations.py": """\
+    fixture_repo.commit(
+        {"team/scripts/check_docs_citations.py": """\
         import sys
 
         print("check_docs_citations: docs-manifest.txt is missing")
         sys.exit(2)
-        """}, "a guard that cannot run")
+        """},
+        "a guard that cannot run",
+    )
 
     result = fixture_repo.run_engine("--base", _BASE_BRANCH)
 
     assert result.returncode == 1, _diagnostic(result)
     assert re.search(
         r"^guard: docs-citations\s+FAIL\s+\d+\.\ds  the guard could not run \(exit 2\)$",
-        result.stdout, re.M,
+        result.stdout,
+        re.M,
     ), _diagnostic(result)
     assert "    check_docs_citations: docs-manifest.txt is missing" in result.stdout
 
@@ -595,9 +632,13 @@ def test_a_guard_that_cannot_run_fails_the_run_naming_its_exit(fixture_repo: _Fi
 
 
 def test_default_base_is_the_rc_branch_and_the_summary_names_it(fixture_repo: _FixtureRepo) -> None:
-    fixture_repo.commit({"team/scripts/greet.sh": (
-        fixture_repo.path / "team/scripts/greet.sh").read_text(encoding="utf-8") + "# trailing\n"},
-        "touch a script")
+    fixture_repo.commit(
+        {
+            "team/scripts/greet.sh": (fixture_repo.path / "team/scripts/greet.sh").read_text(encoding="utf-8")
+            + "# trailing\n"
+        },
+        "touch a script",
+    )
 
     result = fixture_repo.run_engine("--suite", "integration")
 
@@ -653,9 +694,21 @@ class _Branches:
 
     def git(self, *args: str) -> str:
         done = subprocess.run(
-            ["git", "-C", str(self.path), "-c", "user.name=Fixture",
-             "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", *args],
-            capture_output=True, text=True, check=False,
+            [
+                "git",
+                "-C",
+                str(self.path),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert done.returncode == 0, f"git {' '.join(args)} failed\n{_diagnostic(done)}"
         return done.stdout
@@ -719,8 +772,21 @@ def test_default_base_with_no_rc_or_main_branch_is_refused(tmp_path: pathlib.Pat
     repo.mkdir()
     subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "work"], check=True)
     subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=F", "-c", "user.email=f@example.invalid",
-         "commit", "-q", "--allow-empty", "-m", "root"], check=True,
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=F",
+            "-c",
+            "user.email=f@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "root",
+        ],
+        check=True,
     )
 
     with pytest.raises(InvocationError) as caught:
@@ -770,8 +836,13 @@ def test_the_by_path_test_and_runner_ignored_files_are_never_selected_twice() ->
 
 def test_each_ratchet_lint_names_a_script_in_the_tree() -> None:
     assert [lint.name for lint in pre_merge.RATCHET_LINTS] == [
-        "inline-python", "python-duplicates", "engine-size", "api-route-impl", "echo-pipe-grep-q",
-        "section-parsers", "tracked-ignored",
+        "inline-python",
+        "python-duplicates",
+        "engine-size",
+        "api-route-impl",
+        "echo-pipe-grep-q",
+        "section-parsers",
+        "tracked-ignored",
     ]
     for lint in pre_merge.RATCHET_LINTS:
         assert (_TEAM_DIR / lint.script).is_file(), lint.script
@@ -810,8 +881,7 @@ def test_docs_citations_fix_agrees_with_the_checker_on_a_recorded_exclusion(
         shutil.copy2(_TEAM_DIR / rel, team / rel)
     (team / "config").mkdir()
     (team / "config" / "docs-manifest.txt").write_text(
-        "# Fixture docs manifest.\n#\n"
-        "# EXCLUDED-CITATION-TARGETS: PANES-REFERENCE.md\n\nguide.md\n",
+        "# Fixture docs manifest.\n#\n" "# EXCLUDED-CITATION-TARGETS: PANES-REFERENCE.md\n\nguide.md\n",
         encoding="utf-8",
     )
     (team / "README.md").write_text(
@@ -823,9 +893,7 @@ def test_docs_citations_fix_agrees_with_the_checker_on_a_recorded_exclusion(
     docs = tmp_path / "repo" / "docs"
     docs.mkdir()
     (docs / "guide.md").write_text("# Guide\n", encoding="utf-8")
-    (docs / "PANES-REFERENCE.md").write_text(
-        "# Panes\n\nRepository checkout only.\n", encoding="utf-8"
-    )
+    (docs / "PANES-REFERENCE.md").write_text("# Panes\n\nRepository checkout only.\n", encoding="utf-8")
     guard = next(g for g in pre_merge.WHOLE_TREE_GUARDS if g.name == "docs-citations")
 
     result = pre_merge.check_whole_tree_guard(team, guard)
@@ -839,16 +907,24 @@ def test_docs_citations_fix_agrees_with_the_checker_on_a_recorded_exclusion(
         "the fix prescribes a manifest line unconditionally, which the checker "
         f"forbids for a recorded exclusion: {guard.fix}"
     )
-    for remedy in ("team/config/docs-manifest.txt", "EXCLUDED-CITATION-TARGETS",
-                   "drop the docs/ prefix", "remove the citation"):
+    for remedy in (
+        "team/config/docs-manifest.txt",
+        "EXCLUDED-CITATION-TARGETS",
+        "drop the docs/ prefix",
+        "remove the citation",
+    ):
         assert remedy in guard.fix, f"the fix no longer names {remedy!r}: {guard.fix}"
     assert guard.fix.endswith("python3 team/scripts/check_docs_citations.py")
 
 
 def _guarded_run(guard_seconds: Sequence[float]) -> pre_merge.PreMergeRun:
     run = pre_merge.PreMergeRun(
-        repo=pathlib.Path("/repo"), suite="unit", base="ai_rc/v1.0.0",
-        base_reason="given with --base", cap=60, workers=1,
+        repo=pathlib.Path("/repo"),
+        suite="unit",
+        base="ai_rc/v1.0.0",
+        base_reason="given with --base",
+        cap=60,
+        workers=1,
     )
     run.checks.append(pre_merge.CheckResult("by-path", passed=True, duration=30.0))
     run.checks.extend(
@@ -873,8 +949,7 @@ def test_guards_over_the_budget_narrate_one_line_and_never_fail_the_run() -> Non
 
     over = [line for line in summary.splitlines() if "budget" in line]
     assert over == [
-        "guards:  2 always-run guard(s) added 6.5s, over the 5.0s budget "
-        "(a soft estimate; it never fails the run)"
+        "guards:  2 always-run guard(s) added 6.5s, over the 5.0s budget " "(a soft estimate; it never fails the run)"
     ], summary
     assert run.passed
     assert "pre-merge: PASS -- all 3 check(s) passed" in summary
@@ -892,7 +967,5 @@ def test_a_long_guard_output_keeps_its_first_lines_and_names_the_rerun() -> None
     kept = pre_merge._head(text, 20, "python3 team/scripts/check_docs_citations.py")
 
     assert kept[:20] == [f"finding {i}" for i in range(20)]
-    assert kept[20] == (
-        "... 5 more line(s); to see them all: python3 team/scripts/check_docs_citations.py"
-    )
+    assert kept[20] == ("... 5 more line(s); to see them all: python3 team/scripts/check_docs_citations.py")
     assert pre_merge._head("one\n\ntwo\n", 20, "x") == ["one", "two"]

@@ -135,7 +135,8 @@ import pathlib
 import re
 import sys
 import time
-from typing import Optional, Sequence, Union
+from typing import Union
+from collections.abc import Sequence
 
 # Run by file path (``python3 .../verdict.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -262,7 +263,7 @@ class ProjectVerdict:
     line: str
     task_id: str = ""
     task_state: str = ""
-    minutes_in_state: Optional[int] = None
+    minutes_in_state: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -304,7 +305,7 @@ class ReleaseLockDetail:
     path: str
     record: str
     age_seconds: int
-    held_seconds: Optional[int]
+    held_seconds: int | None
     provenance: str
     violation: bool
 
@@ -377,9 +378,9 @@ class ProjectDetails:
 
     locks: tuple[ReleaseLockDetail, ...]
     stale_threshold: ops_locks.StaleThreshold
-    queue_tails: Optional[tuple[QueueTail, ...]]
-    posture: Optional[PostureDetail]
-    posture_error: Optional[defer_posture.DeferPostureError]
+    queue_tails: tuple[QueueTail, ...] | None
+    posture: PostureDetail | None
+    posture_error: defer_posture.DeferPostureError | None
     pending_bundles: tuple[PendingBundle, ...]
     now: int
     kanban_root: str
@@ -389,8 +390,8 @@ class ProjectDetails:
 class VerdictReport:
     """Every verdict asked for, in order, and the details when asked for."""
 
-    entries: tuple[Union[ProjectVerdict, UnresolvedProject], ...]
-    details: Optional[ProjectDetails] = None
+    entries: tuple[ProjectVerdict | UnresolvedProject, ...]
+    details: ProjectDetails | None = None
 
     @property
     def worst_exit_code(self) -> int:
@@ -412,7 +413,7 @@ class DecisionEvent:
 # ---------------------------------------------------------------------------
 
 
-def _read_text(path: PathLike) -> Optional[str]:
+def _read_text(path: PathLike) -> str | None:
     """The file's text, undecodable bytes kept as surrogates; None when unreadable."""
     try:
         data = pathlib.Path(path).read_bytes()
@@ -435,7 +436,7 @@ def _lstrip_space(value: str) -> str:
     return value.lstrip(_SPACE)
 
 
-def _xargs_tokens(line: str) -> Optional[list[str]]:
+def _xargs_tokens(line: str) -> list[str] | None:
     """Split *line* the way xargs splits its input; None on an unmatched quote."""
     tokens: list[str] = []
     current: list[str] = []
@@ -661,7 +662,7 @@ def _halt_reason(halt_file: str) -> str:
     return line or "no reason recorded in the HALT file (likely an operator-initiated manual pause)"
 
 
-def _resolving_marker(project_root: str) -> Optional[tuple[str, str, str]]:
+def _resolving_marker(project_root: str) -> tuple[str, str, str] | None:
     """``(lane, attempt, version)`` from ``overwatch/resolving.md``; None when absent or partial."""
     marker = f"{project_root}/overwatch/resolving.md"
     if not os.path.isfile(marker):
@@ -680,7 +681,7 @@ def _resolving_marker(project_root: str) -> Optional[tuple[str, str, str]]:
     return lane, attempt, version
 
 
-def _last_decision(release_state_path: str) -> Optional[DecisionEvent]:
+def _last_decision(release_state_path: str) -> DecisionEvent | None:
     """The last ``## OVERWATCH Decision`` block of release-state.md (it is append-only).
 
     The block is read by :func:`task_status.read_section` with ``last=True``:
@@ -701,7 +702,7 @@ def _last_decision(release_state_path: str) -> Optional[DecisionEvent]:
     for line in block.split("\n"):
         for key in last:
             if line.startswith(f"{key}:"):
-                last[key] = line[len(key) + 1:].lstrip(" \t")
+                last[key] = line[len(key) + 1 :].lstrip(" \t")
     lane, version, outcome = _read_tab_fields(f"{last['Lane']}\t{last['Version']}\t{last['Outcome']}", 3)
     return DecisionEvent(lane, version, outcome)
 
@@ -725,7 +726,7 @@ def _posture_active_rc(release_state_path: str) -> str:
     return value if _VERSION_RE.fullmatch(value) else "none"
 
 
-def _now(now: Optional[int]) -> int:
+def _now(now: int | None) -> int:
     if now is not None:
         return now
     pinned = os.environ.get(NOW_EPOCH_ENV, "")
@@ -747,7 +748,7 @@ class _StuckLock:
     orphan_held: bool = False
 
 
-def _find_stuck_lock(kanban_root: str, project: str, now: int) -> Optional[_StuckLock]:
+def _find_stuck_lock(kanban_root: str, project: str, now: int) -> _StuckLock | None:
     """The project's first lock with no provenance or aged past the threshold."""
     threshold = ops_locks.project_stale_age_threshold(_lock_ctx(kanban_root), project).seconds
     for path in ops_locks.project_lock_files(f"{kanban_root}/locks", project):
@@ -799,7 +800,9 @@ def _halted(kanban_root: str, project: str, project_root: str) -> ProjectVerdict
             "none needed -- OVERWATCH is attempting an autonomous recovery; re-run why.sh once it "
             "completes, or see the OVERWATCH Decision event in release-state.md."
         )
-        return ProjectVerdict(project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}")
+        return ProjectVerdict(
+            project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}"
+        )
 
     release_state = f"{project_root}/release-state.md"
     decision = _last_decision(release_state)
@@ -815,7 +818,9 @@ def _halted(kanban_root: str, project: str, project_root: str) -> ProjectVerdict
                 f"resolve the block, a human resolves it as usual ({_sop_core(kanban_root)}, 'HALT Flags') — "
                 f"once the underlying issue is resolved, run: {unhalt_command(kanban_root, project)}"
             )
-            return ProjectVerdict(project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}")
+            return ProjectVerdict(
+                project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}"
+            )
 
     halt_file = f"{project_root}/HALT"
     cause = f"{halt_file} is present ({_halt_reason(halt_file)})"
@@ -823,10 +828,12 @@ def _halted(kanban_root: str, project: str, project_root: str) -> ProjectVerdict
         f"only the operator may remove a HALT file ({_sop_core(kanban_root)}, 'HALT Flags') — once the "
         f"underlying issue is resolved, run: {unhalt_command(kanban_root, project)}"
     )
-    return ProjectVerdict(project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}")
+    return ProjectVerdict(
+        project, VERDICT_HALTED, EXIT_HALTED, cause, remedy, f"{project}: HALTED — {cause}; remedy: {remedy}"
+    )
 
 
-def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optional[int] = None) -> ProjectVerdict:
+def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: int | None = None) -> ProjectVerdict:
     """Resolve *project*'s verdict by the precedence in the module docstring. Read-only.
 
     Args:
@@ -846,7 +853,9 @@ def resolve_project_verdict(kanban_root: PathLike, project: str, *, now: Optiona
     if _project_disabled(root, project):
         cause = "project is disabled in projects.cfg (enabled=false), so it produces no work"
         remedy = "set enabled=true in projects.cfg to re-enable it."
-        return ProjectVerdict(project, VERDICT_IDLE, EXIT_IDLE, cause, remedy, f"{project}: IDLE — cause: {cause}; remedy: {remedy}")
+        return ProjectVerdict(
+            project, VERDICT_IDLE, EXIT_IDLE, cause, remedy, f"{project}: IDLE — cause: {cause}; remedy: {remedy}"
+        )
 
     if os.path.isfile(f"{project_root}/HALT"):
         return _halted(root, project, project_root)
@@ -964,7 +973,7 @@ def _queue_entries(queue_file: str) -> list[str]:
     return [line for line in ini.split_lines(text) if _QUEUE_LINE_RE.match(line)]
 
 
-def _queue_tails(project_root: str) -> Optional[tuple[QueueTail, ...]]:
+def _queue_tails(project_root: str) -> tuple[QueueTail, ...] | None:
     queues_dir = f"{project_root}/tasks/queues"
     if not os.path.isdir(queues_dir) or os.path.islink(queues_dir):
         return None
@@ -995,7 +1004,7 @@ def _queue_tails(project_root: str) -> Optional[tuple[QueueTail, ...]]:
 ARCHIVED_SUFFIX = " (archived)"
 
 
-def _archived_entry_state(project_root: str, item_id: str) -> Optional[str]:
+def _archived_entry_state(project_root: str, item_id: str) -> str | None:
     """The state of a queue entry's item read from the project's archive, or ``None``.
 
     The lookup by ID behind a queue-tail entry whose ``tasks/<ID>/status.md``
@@ -1038,8 +1047,7 @@ def _archived_entry_state(project_root: str, item_id: str) -> Optional[str]:
     else:
         text = _read_text(path)
         fields = _universal_newlines(_json_text(text)) if text is not None else ""
-        state = (md_fields.field_value(fields, "Status") or md_fields.field_value(fields, "State")
-                 or "(no Status field)")
+        state = md_fields.field_value(fields, "Status") or md_fields.field_value(fields, "State") or "(no Status field)"
     return f"{state}{ARCHIVED_SUFFIX}"
 
 
@@ -1086,8 +1094,8 @@ def _pending_bundles(project_root: str) -> tuple[PendingBundle, ...]:
 def _project_details(kanban_root: str, project: str, now: int) -> ProjectDetails:
     project_root = f"{kanban_root}/projects/{project}"
     halt_state, halt_event = _halt_state(project_root)
-    posture: Optional[PostureDetail] = None
-    error: Optional[defer_posture.DeferPostureError] = None
+    posture: PostureDetail | None = None
+    error: defer_posture.DeferPostureError | None = None
     try:
         defer = defer_posture.resolve_defer_posture(kanban_root, project)
     except defer_posture.DeferPostureError as exc:
@@ -1113,12 +1121,12 @@ def _project_details(kanban_root: str, project: str, now: int) -> ProjectDetails
 
 def resolve_verdicts(
     kanban_root: PathLike,
-    projects: Optional[Sequence[str]] = None,
+    projects: Sequence[str] | None = None,
     *,
     details: bool = False,
     unresolved_missing: bool = True,
-    now: Optional[int] = None,
-    details_now: Optional[int] = None,
+    now: int | None = None,
+    details_now: int | None = None,
 ) -> VerdictReport:
     """Resolve the verdict of every project in *projects*, in order. Read-only.
 
@@ -1148,7 +1156,7 @@ def resolve_verdicts(
     names = list(projects) if projects is not None else [e.name for e in ini.projects_registry(root)]
     if details and len(names) != 1:
         raise ValueError(f"details are per-project: name exactly one project (got {len(names)})")
-    entries: list[Union[ProjectVerdict, UnresolvedProject]] = []
+    entries: list[ProjectVerdict | UnresolvedProject] = []
     for name in names:
         project_root = f"{root}/projects/{name}"
         if unresolved_missing and not os.path.isdir(project_root):
@@ -1228,8 +1236,11 @@ def _render_posture_text(details: ProjectDetails) -> str:
         token = posture.halt_event
         described = _describe_token(token)
         lines = [
-            f"HALT-AFTER: draining (token={token}, {described})" if described != token
-            else f"HALT-AFTER: draining (token={token})"
+            (
+                f"HALT-AFTER: draining (token={token}, {described})"
+                if described != token
+                else f"HALT-AFTER: draining (token={token})"
+            )
         ]
     else:
         lines = ["HALT/HALT-AFTER: none in force"]
@@ -1278,14 +1289,18 @@ def _block(fields: Sequence[tuple[str, object]]) -> str:
     return "".join(f"{key}={value}\n" for key, value in fields)
 
 
-def _verdict_block(entry: Union[ProjectVerdict, UnresolvedProject]) -> str:
+def _verdict_block(entry: ProjectVerdict | UnresolvedProject) -> str:
     if isinstance(entry, UnresolvedProject):
         return _block(
             (("project", entry.project), ("error", entry.error), ("cause", entry.cause), ("remedy", entry.remedy))
         )
     fields: list[tuple[str, object]] = [
-        ("project", entry.project), ("verdict", entry.verdict), ("exit_code", entry.exit_code),
-        ("cause", entry.cause), ("remedy", entry.remedy), ("line", entry.line),
+        ("project", entry.project),
+        ("verdict", entry.verdict),
+        ("exit_code", entry.exit_code),
+        ("cause", entry.cause),
+        ("remedy", entry.remedy),
+        ("line", entry.line),
     ]
     if entry.task_id:
         fields.append(("task_id", entry.task_id))
@@ -1301,17 +1316,24 @@ def _detail_blocks_before_posture(project: str, details: ProjectDetails) -> list
     groups: list[list[str]] = []
     threshold = details.stale_threshold
     if details.locks:
-        groups.append([
-            _block((
-                ("kind", "release_lock"), ("project", project), ("path", lock.path),
-                ("age_seconds", lock.age_seconds),
-                ("held_seconds", "none" if lock.held_seconds is None else lock.held_seconds),
-                ("provenance", lock.provenance), ("stale_threshold_seconds", threshold.seconds),
-                ("stale_threshold_derivation", threshold.derivation),
-                ("violation", "true" if lock.violation else "false"),
-            ))
-            for lock in details.locks
-        ])
+        groups.append(
+            [
+                _block(
+                    (
+                        ("kind", "release_lock"),
+                        ("project", project),
+                        ("path", lock.path),
+                        ("age_seconds", lock.age_seconds),
+                        ("held_seconds", "none" if lock.held_seconds is None else lock.held_seconds),
+                        ("provenance", lock.provenance),
+                        ("stale_threshold_seconds", threshold.seconds),
+                        ("stale_threshold_derivation", threshold.derivation),
+                        ("violation", "true" if lock.violation else "false"),
+                    )
+                )
+                for lock in details.locks
+            ]
+        )
     else:
         groups.append([_block((("kind", "release_lock"), ("project", project), ("none", "true")))])
     if details.queue_tails is None:
@@ -1324,10 +1346,18 @@ def _detail_blocks_before_posture(project: str, details: ProjectDetails) -> list
                     _block((("kind", "queue_tail"), ("project", project), ("agent", tail.agent), ("none", "true")))
                 )
             for entry in tail.entries:
-                queue_blocks.append(_block((
-                    ("kind", "queue_entry"), ("project", project), ("agent", tail.agent),
-                    ("marker", entry.marker), ("task_id", entry.task_id), ("status_state", entry.status_state),
-                )))
+                queue_blocks.append(
+                    _block(
+                        (
+                            ("kind", "queue_entry"),
+                            ("project", project),
+                            ("agent", tail.agent),
+                            ("marker", entry.marker),
+                            ("task_id", entry.task_id),
+                            ("status_state", entry.status_state),
+                        )
+                    )
+                )
         groups.append(queue_blocks)
     return ["\n" + "\n".join(group) for group in groups]
 
@@ -1340,11 +1370,14 @@ def _posture_block(project: str, details: ProjectDetails) -> str:
     if posture.halt_state != "normal" and posture.halt_event:
         fields.append(("halt_event", posture.halt_event))
     fields += [
-        ("deferred_bugs", defer.deferred_bugs.value), ("deferred_bugs_tier", defer.deferred_bugs.tier),
+        ("deferred_bugs", defer.deferred_bugs.value),
+        ("deferred_bugs_tier", defer.deferred_bugs.tier),
         ("deferred_bug_level", defer.deferred_bug_level.value),
         ("deferred_bug_level_tier", defer.deferred_bug_level.tier),
-        ("defer_piggyback", defer.defer_piggyback.value), ("defer_piggyback_tier", defer.defer_piggyback.tier),
-        ("until", defer.until.value or "(none)"), ("until_tier", defer.until.tier),
+        ("defer_piggyback", defer.defer_piggyback.value),
+        ("defer_piggyback_tier", defer.defer_piggyback.tier),
+        ("until", defer.until.value or "(none)"),
+        ("until_tier", defer.until.tier),
     ]
     if defer.until.tier == defer_posture.TIER_CAMPAIGN_FILE:
         fields.append(("campaign_file", defer.campaign_file.value))
@@ -1390,15 +1423,21 @@ def _json_text(value: str) -> str:
     return value.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
-def _verdict_json(entry: Union[ProjectVerdict, UnresolvedProject]) -> dict:
+def _verdict_json(entry: ProjectVerdict | UnresolvedProject) -> dict:
     if isinstance(entry, UnresolvedProject):
         return {
-            "project": _json_text(entry.project), "error": entry.error,
-            "cause": _json_text(entry.cause), "remedy": entry.remedy,
+            "project": _json_text(entry.project),
+            "error": entry.error,
+            "cause": _json_text(entry.cause),
+            "remedy": entry.remedy,
         }
     body: dict = {
-        "project": _json_text(entry.project), "verdict": entry.verdict, "exit_code": entry.exit_code,
-        "cause": _json_text(entry.cause), "remedy": _json_text(entry.remedy), "line": _json_text(entry.line),
+        "project": _json_text(entry.project),
+        "verdict": entry.verdict,
+        "exit_code": entry.exit_code,
+        "cause": _json_text(entry.cause),
+        "remedy": _json_text(entry.remedy),
+        "line": _json_text(entry.line),
     }
     if entry.task_id:
         body["task_id"] = _json_text(entry.task_id)
@@ -1457,7 +1496,11 @@ def _queue_tails_json(details: ProjectDetails) -> list[dict]:
         {
             "agent": _json_text(tail.agent),
             "entries": [
-                {"marker": _json_text(e.marker), "task_id": _json_text(e.task_id), "status_state": _json_text(e.status_state)}
+                {
+                    "marker": _json_text(e.marker),
+                    "task_id": _json_text(e.task_id),
+                    "status_state": _json_text(e.status_state),
+                }
                 for e in tail.entries
             ],
         }
@@ -1531,18 +1574,12 @@ def _cli_parser() -> argparse.ArgumentParser:
         "--render",
         required=True,
         choices=("why", "report"),
-        help=(
-            "why: one verdict line per project, exit with the worst code; report: key=value "
-            "blocks, exit 0"
-        ),
+        help=("why: one verdict line per project, exit with the worst code; report: key=value " "blocks, exit 0"),
     )
     parser.add_argument(
         "--details",
         action="store_true",
-        help=(
-            "with --render why and exactly one project, also print the locks, queue and posture "
-            "sections"
-        ),
+        help=("with --render why and exactly one project, also print the locks, queue and posture " "sections"),
     )
     parser.add_argument(
         "projects",
@@ -1552,7 +1589,7 @@ def _cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run ``resolve_verdicts`` from the command line (see the module docstring)."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] not in CLI_VERBS:
@@ -1567,7 +1604,10 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
         return EXIT_REFUSED
     why = opts.render == "why"
     report = resolve_verdicts(
-        opts.kanban_root, opts.projects, details=opts.details, unresolved_missing=not why,
+        opts.kanban_root,
+        opts.projects,
+        details=opts.details,
+        unresolved_missing=not why,
     )
     if why and opts.details:
         return _cli_why_details(opts.kanban_root, report)

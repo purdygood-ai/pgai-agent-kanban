@@ -13,7 +13,7 @@
 # When neither flag is on and no project has a corpus, shows a placeholder and
 # exits.
 #
-# Designed to be run under watch -t -n 30 so the view refreshes automatically.
+# Designed to be run under cadence-loop.sh --interval 30 so the view refreshes automatically.
 #
 # Color scheme (same as dashboard/logs.sh — reused, not reinvented):
 #   pm      = cyan
@@ -39,13 +39,19 @@
 #   PGAI_REASONING_TRACE         — set to 1 to activate trace display globally
 #   NO_COLOR                     — set to 1 to disable color
 
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 # Source shared ANSI color primitive (single home for the color-name ->
 # escape-code table -- see team/scripts/lib/script_common.sh).
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 
 MAX_LINES_PER_AGENT=80
 
@@ -58,12 +64,6 @@ while [[ $# -gt 0 ]]; do
     --kanban-root)
       KANBAN_ROOT_OVERRIDE="${2:-}"
       shift 2
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     --*)
       shift
@@ -83,7 +83,7 @@ if [[ -n "$KANBAN_ROOT_OVERRIDE" ]]; then
 fi
 export KANBAN_ROOT
 
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${_SCRIPT_DIR}/../lib/project_paths.sh"
 # shellcheck source=lib/projects.sh

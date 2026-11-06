@@ -1,0 +1,39 @@
+{
+  "providers": [
+    {
+      "home": "$TMP/homes/claude",
+      "provider": "claude",
+      "skills": [
+        {
+          "error": "description-missing",
+          "message": "the front matter has no non-empty 'description'",
+          "name": "broken",
+          "origin": "operator-added",
+          "state": "invalid"
+        },
+        {
+          "name": "my-skill",
+          "origin": "operator-added",
+          "state": "new"
+        },
+        {
+          "name": "pgai-agent-kanban",
+          "origin": "shipped",
+          "state": "same"
+        }
+      ]
+    },
+    {
+      "home": "$TMP/homes/codex",
+      "provider": "codex",
+      "skills": [
+        {
+          "name": "pgai-agent-kanban",
+          "origin": "shipped",
+          "state": "changed"
+        }
+      ]
+    }
+  ],
+  "source": "$TMP/staging"
+}

@@ -241,8 +241,16 @@ def test_suite_exit_codes_combine_first_failure_in_suite_order(codes: list[int],
 
 def test_plan_records_round_trip_through_the_cli() -> None:
     result = subprocess.run(
-        [sys.executable, str(_LIB_DIR / "gated_suites.py"), "plan", "--workers", "3", "--coverage",
-         "--coverage-root", "/cov"],
+        [
+            sys.executable,
+            str(_LIB_DIR / "gated_suites.py"),
+            "plan",
+            "--workers",
+            "3",
+            "--coverage",
+            "--coverage-root",
+            "/cov",
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -254,8 +262,16 @@ def test_plan_records_round_trip_through_the_cli() -> None:
     assert tokens[:2] == ["mode", "concurrent"]
     unit_at = tokens.index("run")
     assert tokens[unit_at : unit_at + 10] == [
-        "run", "unit", "run-unit-tests.sh", "1", "COVERAGE_FILE=/cov/unit-data/.coverage",
-        "4", "--workers", "2", "--no-scratch-sweep", "--coverage",
+        "run",
+        "unit",
+        "run-unit-tests.sh",
+        "1",
+        "COVERAGE_FILE=/cov/unit-data/.coverage",
+        "4",
+        "--workers",
+        "2",
+        "--no-scratch-sweep",
+        "--coverage",
     ]
 
 
@@ -376,9 +392,9 @@ def test_workers_three_starts_both_stub_runners_together_with_the_split_argv(tmp
     result = tree.run(STUB_RENDEZVOUS="1")
 
     assert result.returncode == 0, _describe(result)
-    assert tree.marker("unit.met_other") and tree.marker("integration.met_other"), (
-        "each suite must see the other start before it finishes\n" + _describe(result)
-    )
+    assert tree.marker("unit.met_other") and tree.marker(
+        "integration.met_other"
+    ), "each suite must see the other start before it finishes\n" + _describe(result)
     assert tree.argv("unit") == ["--workers", "2", "--no-scratch-sweep"]
     assert tree.argv("integration") == ["--workers", "1", "--no-scratch-sweep"]
     assert "-- 3 workers in total" in result.stdout, _describe(result)
@@ -435,7 +451,10 @@ def test_out_dir_receives_the_exit_files_and_logs(tmp_path: pathlib.Path) -> Non
 
     assert result.returncode == 0, _describe(result)
     assert sorted(p.name for p in tree.out_dir.iterdir()) == [
-        "integration.exit", "integration.log", "unit.exit", "unit.log",
+        "integration.exit",
+        "integration.log",
+        "unit.exit",
+        "unit.log",
     ]
     assert not (tree.temp_dir / "unit.exit").exists()
 
@@ -532,8 +551,19 @@ def test_help_exits_zero_and_describes_every_flag(tmp_path: pathlib.Path) -> Non
     result = tree.run("--help")
 
     assert result.returncode == 0, _describe(result)
-    for flag in ("--coverage", "--verbose", "--reuse-if-green", "--out-dir DIR", "--help", "[testing] workers",
-                 "<suite>.exit", "<suite>.log", "--no-scratch-sweep", "COVERAGE_FILE", "PGAI_TESTING_COVERAGE=1"):
+    for flag in (
+        "--coverage",
+        "--verbose",
+        "--reuse-if-green",
+        "--out-dir DIR",
+        "--help",
+        "[testing] workers",
+        "<suite>.exit",
+        "<suite>.log",
+        "--no-scratch-sweep",
+        "COVERAGE_FILE",
+        "PGAI_TESTING_COVERAGE=1",
+    ):
         assert flag in result.stdout, f"--help does not mention {flag!r}\n" + _describe(result)
     assert not any(tree.stub_dir.iterdir()), "--help started a runner"
 
@@ -572,9 +602,9 @@ def test_run_prints_each_suites_evidence_location_before_and_after_it_runs(
         coverage = f"{tree.temp_dir}/coverage/{suite}.json"
         announce = [i for i, ln in enumerate(lines) if ln.startswith(f"{suite}: this run's evidence:")]
         started = [i for i, ln in enumerate(lines) if ln.startswith(f"{suite}: started ")]
-        assert announce and started and announce[0] < started[0], (
-            f"the {suite} evidence location must print before the suite starts\n" + _describe(result)
-        )
+        assert (
+            announce and started and announce[0] < started[0]
+        ), f"the {suite} evidence location must print before the suite starts\n" + _describe(result)
         assert findings in lines[announce[0]] and coverage in lines[announce[0]], lines[announce[0]]
         assert "never read" in lines[announce[0]], lines[announce[0]]
         exited = [ln for ln in lines if ln.startswith(f"{suite}: exit 0;")]
@@ -752,7 +782,9 @@ def test_real_runner_refuses_a_non_numeric_workers_flag(runner_name: str, tmp_pa
 
 
 @pytest.mark.parametrize("runner_name", ["run-unit-tests.sh", "run-integration-tests.sh"])
-def test_real_runner_help_documents_the_workers_and_scratch_sweep_flags(runner_name: str, tmp_path: pathlib.Path) -> None:
+def test_real_runner_help_documents_the_workers_and_scratch_sweep_flags(
+    runner_name: str, tmp_path: pathlib.Path
+) -> None:
     team = _both_runner_fixture(tmp_path, integration_fails=False)
     sandbox = _RealSandbox(tmp_path, "runner", "3")
 

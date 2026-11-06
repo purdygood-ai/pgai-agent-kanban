@@ -77,7 +77,6 @@ COVERAGE
 
 from __future__ import annotations
 
-import datetime as _dt
 import os
 import pathlib
 import re
@@ -88,6 +87,7 @@ import warnings
 import pytest
 
 from tests.fixtures.process_progress import require_procfs, run_until_exit
+from tests.fixtures.local_timestamps import local_at, shift, today_local_iso
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
@@ -118,25 +118,12 @@ def _pane_refresh_interval_seconds() -> float:
     duplicating that number as a second literal here -- the band should
     render inside THIS interval, not an arbitrary test-side constant
     that could drift from it unnoticed."""
-    match = re.search(
-        r"^_DEFAULT_REFRESH=(\d+)\s*$", _CREATE_SH.read_text(encoding="utf-8"), re.MULTILINE
-    )
+    match = re.search(r"^_DEFAULT_REFRESH=(\d+)\s*$", _CREATE_SH.read_text(encoding="utf-8"), re.MULTILINE)
     assert match, (
         f"expected a '_DEFAULT_REFRESH=<N>' assignment in {_CREATE_SH} -- "
         "the pane refresh default this test's render-time budget must track"
     )
     return float(match.group(1))
-
-
-def _today_iso(hour: int, minute: int, second: int) -> str:
-    """An ISO-8601 timestamp for "today" at the given local time, in the
-    same shape team/scripts/lib/wake_bootstrap.sh's log() function writes
-    (`date -Iseconds`) -- date, "T", time, and the host's local UTC
-    offset.
-    """
-    now = _dt.datetime.now().astimezone()
-    stamped = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
-    return stamped.isoformat(timespec="seconds")
 
 
 def _write_log(path: pathlib.Path, lines: list[str]) -> None:
@@ -225,20 +212,17 @@ def test_merges_multiple_agent_logs_in_ascending_timestamp_order_with_agent_tags
     _write_log(
         logs_dir / "cron-pm.log",
         [
-            f"[{_today_iso(9, 0, 5)}] wake(pm): re-check complete: "
-            "promoted 1 task(s) from WAITING to BACKLOG",
-            f"[{_today_iso(9, 0, 40)}] wake(pm): project demo: "
-            'done: completed=1 project_elapsed=10s batch_elapsed=10s '
+            f"[{today_local_iso(9, 0, 5)}] wake(pm): re-check complete: " "promoted 1 task(s) from WAITING to BACKLOG",
+            f"[{today_local_iso(9, 0, 40)}] wake(pm): project demo: "
+            "done: completed=1 project_elapsed=10s batch_elapsed=10s "
             'reason="no more BACKLOG tasks in pm queue"',
         ],
     )
     _write_log(
         logs_dir / "cron-coder.log",
         [
-            f"[{_today_iso(9, 0, 20)}] wake(coder): task CODER-example: "
-            "transitioned to WORKING [A]",
-            f"[{_today_iso(9, 1, 0)}] wake(coder): "
-            "finished task CODER-example with state DONE",
+            f"[{today_local_iso(9, 0, 20)}] wake(coder): task CODER-example: " "transitioned to WORKING [A]",
+            f"[{today_local_iso(9, 1, 0)}] wake(coder): " "finished task CODER-example with state DONE",
         ],
     )
 
@@ -272,8 +256,8 @@ def test_unstamped_continuation_lines_inherit_parent_timestamp_and_stay_adjacent
     kanban_root = tmp_path / "kanroot"
     logs_dir = kanban_root / "logs"
 
-    parent_time = _today_iso(10, 15, 30)
-    next_parent_time = _today_iso(10, 16, 0)
+    parent_time = today_local_iso(10, 15, 30)
+    next_parent_time = today_local_iso(10, 16, 0)
     # error/message keys deliberately avoid lock.provenance.contended and
     # lock.stale_threshold.floor_enforced: event-band.sh folds those two
     # specific keys' error:/message:/remedy: triples into one row
@@ -285,12 +269,10 @@ def test_unstamped_continuation_lines_inherit_parent_timestamp_and_stay_adjacent
     _write_log(
         logs_dir / "cron-coder.log",
         [
-            f"[{parent_time}] wake(coder): "
-            "finished task CODER-example with state BLOCKED",
+            f"[{parent_time}] wake(coder): " "finished task CODER-example with state BLOCKED",
             "error:   gate.refusal.example",
             "message: could not acquire the release lock",
-            f"[{next_parent_time}] wake(coder): task CODER-next: "
-            "transitioned to WORKING [A]",
+            f"[{next_parent_time}] wake(coder): task CODER-next: " "transitioned to WORKING [A]",
         ],
     )
 
@@ -306,9 +288,7 @@ def test_unstamped_continuation_lines_inherit_parent_timestamp_and_stay_adjacent
     # render-time "now", and stay adjacent to it in their original
     # source order (error: before message:).
     assert lines[1] == "[coder 10:15:30] error:   gate.refusal.example", lines[1]
-    assert (
-        lines[2] == "[coder 10:15:30] message: could not acquire the release lock"
-    ), lines[2]
+    assert lines[2] == "[coder 10:15:30] message: could not acquire the release lock", lines[2]
     assert lines[3].startswith("[coder 10:16:00]"), lines[3]
 
 
@@ -324,13 +304,12 @@ def test_unstamped_continuation_line_with_no_prior_parent_is_dropped(
     kanban_root = tmp_path / "kanroot"
     logs_dir = kanban_root / "logs"
 
-    parent_time = _today_iso(11, 0, 0)
+    parent_time = today_local_iso(11, 0, 0)
     _write_log(
         logs_dir / "cron-coder.log",
         [
             "error:   orphaned continuation with no parent above it",
-            f"[{parent_time}] wake(coder): task CODER-example: "
-            "transitioned to WORKING [A]",
+            f"[{parent_time}] wake(coder): task CODER-example: " "transitioned to WORKING [A]",
         ],
     )
 
@@ -356,19 +335,16 @@ def test_render_is_deterministic_across_repeated_invocations(
     _write_log(
         logs_dir / "cron-coder.log",
         [
-            f"[{_today_iso(12, 0, 0)}] wake(coder): "
-            "finished task CODER-a with state BLOCKED",
+            f"[{today_local_iso(12, 0, 0)}] wake(coder): " "finished task CODER-a with state BLOCKED",
             "error:   lock.provenance.contended",
             "message: could not acquire the release lock",
-            f"[{_today_iso(12, 0, 0)}] wake(coder): task CODER-b: "
-            "transitioned to WORKING [A]",
+            f"[{today_local_iso(12, 0, 0)}] wake(coder): task CODER-b: " "transitioned to WORKING [A]",
         ],
     )
     _write_log(
         logs_dir / "cron-pm.log",
         [
-            f"[{_today_iso(12, 0, 0)}] wake(pm): re-check complete: "
-            "promoted 1 task(s) from WAITING to BACKLOG",
+            f"[{today_local_iso(12, 0, 0)}] wake(pm): re-check complete: " "promoted 1 task(s) from WAITING to BACKLOG",
             "error:   a second agent's bare continuation line",
         ],
     )
@@ -378,8 +354,7 @@ def test_render_is_deterministic_across_repeated_invocations(
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
     assert first.stdout == second.stdout, (
-        f"renders diverged on identical input:\nfirst:\n{first.stdout!r}\n"
-        f"second:\n{second.stdout!r}"
+        f"renders diverged on identical input:\nfirst:\n{first.stdout!r}\n" f"second:\n{second.stdout!r}"
     )
 
 
@@ -393,10 +368,9 @@ def test_no_rendered_timestamp_is_absent_from_the_input_logs(
     kanban_root = tmp_path / "kanroot"
     logs_dir = kanban_root / "logs"
 
-    parent_time = _today_iso(13, 45, 10)
+    parent_time = today_local_iso(13, 45, 10)
     log_lines = [
-        f"[{parent_time}] wake(coder): "
-        "finished task CODER-example with state BLOCKED",
+        f"[{parent_time}] wake(coder): " "finished task CODER-example with state BLOCKED",
         "error:   lock.provenance.contended",
         "message: could not acquire the release lock",
     ]
@@ -410,8 +384,7 @@ def test_no_rendered_timestamp_is_absent_from_the_input_logs(
     assert rendered_times, f"expected at least one rendered row, got: {result.stdout!r}"
     for rendered_time in rendered_times:
         assert rendered_time in raw_input_text, (
-            f"rendered timestamp {rendered_time!r} does not appear anywhere "
-            f"in the input logs:\n{raw_input_text}"
+            f"rendered timestamp {rendered_time!r} does not appear anywhere " f"in the input logs:\n{raw_input_text}"
         )
 
 
@@ -427,27 +400,21 @@ def test_idle_cycle_filtered_dispatch_cycle_survives(tmp_path: pathlib.Path) -> 
     logs_dir = kanban_root / "logs"
 
     idle_lines = [
-        f"[{_today_iso(8, 0, 0)}] wake(writer): "
-        "re-checking WAITING tasks for satisfied prerequisites...",
-        f"[{_today_iso(8, 0, 1)}] wake(writer): no WAITING tasks to re-check",
-        f"[{_today_iso(8, 0, 2)}] wake(writer): "
-        "re-checking BLOCKED tasks for cleared blockers...",
-        f"[{_today_iso(8, 0, 3)}] wake(writer): no BLOCKED tasks to re-check",
-        f"[{_today_iso(8, 0, 4)}] wake(writer): "
-        "discovery_run_pipeline: no work pending, idle exit",
-        f"[{_today_iso(8, 0, 5)}] wake(writer): "
-        "sleeping 21s before work (--sleep stagger)",
-        f"[{_today_iso(8, 0, 6)}] wake(writer): "
+        f"[{today_local_iso(8, 0, 0)}] wake(writer): " "re-checking WAITING tasks for satisfied prerequisites...",
+        f"[{today_local_iso(8, 0, 1)}] wake(writer): no WAITING tasks to re-check",
+        f"[{today_local_iso(8, 0, 2)}] wake(writer): " "re-checking BLOCKED tasks for cleared blockers...",
+        f"[{today_local_iso(8, 0, 3)}] wake(writer): no BLOCKED tasks to re-check",
+        f"[{today_local_iso(8, 0, 4)}] wake(writer): " "discovery_run_pipeline: no work pending, idle exit",
+        f"[{today_local_iso(8, 0, 5)}] wake(writer): " "sleeping 21s before work (--sleep stagger)",
+        f"[{today_local_iso(8, 0, 6)}] wake(writer): "
         "timing: work_begin=1785107882 work_end=1785107882 work_delta=0s",
-        f"[{_today_iso(8, 0, 7)}] wake(writer): project demo: "
-        'done: completed=0 project_elapsed=3s batch_elapsed=3s '
+        f"[{today_local_iso(8, 0, 7)}] wake(writer): project demo: "
+        "done: completed=0 project_elapsed=3s batch_elapsed=3s "
         'reason="no more BACKLOG tasks in writer queue"',
     ]
     dispatch_lines = [
-        f"[{_today_iso(9, 30, 0)}] wake(tester): task TESTER-example: "
-        "transitioned to WORKING [A]",
-        f"[{_today_iso(9, 31, 0)}] wake(tester): "
-        "finished task TESTER-example with state DONE",
+        f"[{today_local_iso(9, 30, 0)}] wake(tester): task TESTER-example: " "transitioned to WORKING [A]",
+        f"[{today_local_iso(9, 31, 0)}] wake(tester): " "finished task TESTER-example with state DONE",
     ]
 
     _write_log(logs_dir / "cron-writer.log", idle_lines)
@@ -472,8 +439,7 @@ def test_idle_cycle_filtered_dispatch_cycle_survives(tmp_path: pathlib.Path) -> 
     )
     for marker in boilerplate_markers:
         assert marker not in result.stdout, (
-            f"boilerplate marker {marker!r} leaked into the signal-only band: "
-            f"{result.stdout!r}"
+            f"boilerplate marker {marker!r} leaked into the signal-only band: " f"{result.stdout!r}"
         )
 
 
@@ -483,9 +449,7 @@ def test_idle_cycle_filtered_dispatch_cycle_survives(tmp_path: pathlib.Path) -> 
 
 
 @pytest.mark.parametrize("build_logs_dir", [True, False], ids=["empty-dir", "no-dir"])
-def test_no_events_prints_literal_empty_state(
-    tmp_path: pathlib.Path, build_logs_dir: bool
-) -> None:
+def test_no_events_prints_literal_empty_state(tmp_path: pathlib.Path, build_logs_dir: bool) -> None:
     kanban_root = tmp_path / "kanroot"
     if build_logs_dir:
         (kanban_root / "logs").mkdir(parents=True)
@@ -503,11 +467,7 @@ def test_only_prior_day_events_prints_literal_empty_state(
     stale, not signal."""
     kanban_root = tmp_path / "kanroot"
     logs_dir = kanban_root / "logs"
-    yesterday = (
-        (_dt.datetime.now().astimezone() - _dt.timedelta(days=1))
-        .replace(hour=12, minute=0, second=0, microsecond=0)
-        .isoformat(timespec="seconds")
-    )
+    yesterday = local_at(days_ago=1, hour=12).isoformat(timespec="seconds")
     _write_log(
         logs_dir / "cron-cm.log",
         [f"[{yesterday}] wake(cm): task CM-example: transitioned to WORKING [A]"],
@@ -529,9 +489,7 @@ def test_sources_shared_signal_library_and_defines_no_pattern_list_of_its_own() 
         capture_output=True,
         text=True,
     )
-    assert grep.returncode == 0, (
-        "expected event-band.sh to source lib/event_signal_patterns.sh"
-    )
+    assert grep.returncode == 0, "expected event-band.sh to source lib/event_signal_patterns.sh"
     assert "source" in grep.stdout, grep.stdout
 
     script_text = _SCRIPT.read_text(encoding="utf-8")
@@ -603,6 +561,7 @@ def _narrate_render_time(elapsed: float, meta: dict) -> None:
     if elapsed >= _RENDER_TIME_BUDGET_SECONDS:
         warnings.warn(line, RenderTimeOverBudgetWarning, stacklevel=2)
 
+
 # A fixture carrying a large pre-today body but only TWO today-dated
 # lines passes the time bound while production, whose cost scales with
 # TODAY's signal volume rather than the historical body, keeps climbing
@@ -645,7 +604,7 @@ def _build_large_pre_today_log(agent: str) -> list[str]:
         "wake({agent}): no BLOCKED tasks to re-check",
         "wake({agent}): discovery_run_pipeline: no work pending, idle exit",
         "wake({agent}): sleeping 21s before work (--sleep stagger)",
-        'wake({agent}): project demo: done: completed=0 project_elapsed=3s '
+        "wake({agent}): project demo: done: completed=0 project_elapsed=3s "
         'batch_elapsed=3s reason="no more BACKLOG tasks in {agent} queue"',
     ]
     # Anchored at yesterday noon rather than counting forward from "now":
@@ -653,28 +612,20 @@ def _build_large_pre_today_log(agent: str) -> list[str]:
     # what wall-clock hour this test happens to run at, so every
     # generated line -- even the newest one -- keeps a comfortable
     # margin before midnight.
-    anchor = (
-        (_dt.datetime.now().astimezone() - _dt.timedelta(days=1))
-        .replace(hour=12, minute=0, second=0, microsecond=0)
-    )
+    anchor = local_at(days_ago=1, hour=12)
     n = _LARGE_PRE_TODAY_LINE_COUNT
     lines: list[str] = []
     for i in range(n):
         # i=0 is the oldest line, i=n-1 the newest (closest to the
         # anchor) -- ascending order, matching how a real append-only
         # log is written, so tail -n bounding reads the newest lines.
-        ts = (anchor - _dt.timedelta(minutes=2 * (n - 1 - i))).isoformat(
-            timespec="seconds"
-        )
+        ts = shift(anchor, minutes=-2 * (n - 1 - i)).isoformat(timespec="seconds")
         if i % 5000 == 0:
             # A prior-day SIGNAL-class line every 5000 cycles: must be
             # excluded by the TODAY filter even though it survives the
             # signal pre-filter -- bounding the read must never leak
             # stale signal content into today's band.
-            lines.append(
-                f"[{ts}] wake({agent}): finished task {agent.upper()}-stale "
-                "with state DONE"
-            )
+            lines.append(f"[{ts}] wake({agent}): finished task {agent.upper()}-stale " "with state DONE")
         else:
             tmpl = boilerplate_templates[i % len(boilerplate_templates)]
             lines.append(f"[{ts}] {tmpl.format(agent=agent)}")
@@ -723,67 +674,82 @@ _DIVERSE_SIGNAL_CLASSES = (
     # 0: sweep-census skip -- the one class that declares a collapse
     # identity (EVENT_SIGNAL_COLLAPSE_KEYS in the library), so every
     # occurrence of the SAME distinct_id here folds to one output row.
-    (_DIVERSE_DOMINANT_CLASS_WEIGHT, False, lambda agent, i: (
-        f"wake({agent}): sweep-census: skipped — "
-        f"v2.24.{i}-bugfix-bundle-diverse.md: finalize=tag — not report"
-    )),
+    (
+        _DIVERSE_DOMINANT_CLASS_WEIGHT,
+        False,
+        lambda agent, i: (
+            f"wake({agent}): sweep-census: skipped — " f"v2.24.{i}-bugfix-bundle-diverse.md: finalize=tag — not report"
+        ),
+    ),
     # 1: finished task -- a one-shot event per task, never repeats.
-    (1, False, lambda agent, i: (
-        f"wake({agent}): finished task {agent.upper()}-repro-{i:03d} "
-        "with state DONE"
-    )),
+    (1, False, lambda agent, i: (f"wake({agent}): finished task {agent.upper()}-repro-{i:03d} " "with state DONE")),
     # 2: dispatch -- likewise one-shot.
-    (1, False, lambda agent, i: (
-        f"wake({agent}): task {agent.upper()}-repro-{i:03d}: "
-        "transitioned to WORKING [A]"
-    )),
+    (1, False, lambda agent, i: (f"wake({agent}): task {agent.upper()}-repro-{i:03d}: " "transitioned to WORKING [A]")),
     # 3: non-zero completed-task count.
-    (3, False, lambda agent, i: (
-        f'wake({agent}): project demo: done: completed=1 '
-        f'project_elapsed={i}s batch_elapsed={i}s '
-        f'reason="no more BACKLOG tasks in {agent} queue"'
-    )),
+    (
+        3,
+        False,
+        lambda agent, i: (
+            f"wake({agent}): project demo: done: completed=1 "
+            f"project_elapsed={i}s batch_elapsed={i}s "
+            f'reason="no more BACKLOG tasks in {agent} queue"'
+        ),
+    ),
     # 4: HALT flag detected.
-    (2, False, lambda agent, i: (
-        f"wake({agent}): HALT flag detected, exiting (probe {i})"
-    )),
+    (2, False, lambda agent, i: (f"wake({agent}): HALT flag detected, exiting (probe {i})")),
     # 5: per-project HALT present -- repeats each wake while a project
     # stays halted, so a moderate weight.
-    (4, False, lambda agent, i: (
-        f"wake({agent}): project proj-{i}: per-project HALT present, "
-        "skipping"
-    )),
+    (4, False, lambda agent, i: (f"wake({agent}): project proj-{i}: per-project HALT present, " "skipping")),
     # 6: non-zero WAITING-to-BACKLOG promotion count.
-    (2, False, lambda agent, i: (
-        f"wake({agent}): re-check complete: promoted {(i % 9) + 1} "
-        f"task(s) from WAITING to BACKLOG (batch {i})"
-    )),
+    (
+        2,
+        False,
+        lambda agent, i: (
+            f"wake({agent}): re-check complete: promoted {(i % 9) + 1} " f"task(s) from WAITING to BACKLOG (batch {i})"
+        ),
+    ),
     # 7: one task's own prerequisites clearing -- one-shot.
-    (1, False, lambda agent, i: (
-        f"wake({agent}): task {agent.upper()}-repro-{i:03d}: "
-        "prerequisites satisfied, promoting to BACKLOG"
-    )),
+    (
+        1,
+        False,
+        lambda agent, i: (
+            f"wake({agent}): task {agent.upper()}-repro-{i:03d}: " "prerequisites satisfied, promoting to BACKLOG"
+        ),
+    ),
     # 8: an abandoned worktree reap -- one-shot.
-    (1, False, lambda agent, i: (
-        f"wake({agent}): tearing down prior worktree for task "
-        f"{agent.upper()}-repro-{i:03d} (interrupted wake)"
-    )),
+    (
+        1,
+        False,
+        lambda agent, i: (
+            f"wake({agent}): tearing down prior worktree for task " f"{agent.upper()}-repro-{i:03d} (interrupted wake)"
+        ),
+    ),
     # 9: stale-active reconciliation.
-    (2, False, lambda agent, i: (
-        f"wake({agent}): stale-active reconciliation: reset "
-        f"{(i % 9) + 1} orphaned task(s) to BACKLOG (batch {i})"
-    )),
+    (
+        2,
+        False,
+        lambda agent, i: (
+            f"wake({agent}): stale-active reconciliation: reset "
+            f"{(i % 9) + 1} orphaned task(s) to BACKLOG (batch {i})"
+        ),
+    ),
     # 10: dual-channel error: continuation -- bare (no leading
     # timestamp), and one of the classes measured as dominant in a live
     # root, so weighted heavily.
-    (_DIVERSE_DOMINANT_CLASS_WEIGHT, True, lambda agent, i: (
-        f"error:   lock.provenance.contended (holder pid {9000 + i})"
-    )),
+    (
+        _DIVERSE_DOMINANT_CLASS_WEIGHT,
+        True,
+        lambda agent, i: (f"error:   lock.provenance.contended (holder pid {9000 + i})"),
+    ),
     # 11: dual-channel message: continuation -- bare.
-    (50, True, lambda agent, i: (
-        "message: pgai_lock_stale_age_threshold_seconds: configured "
-        f"value {i}s is below the max-chain-budget floor"
-    )),
+    (
+        50,
+        True,
+        lambda agent, i: (
+            "message: pgai_lock_stale_age_threshold_seconds: configured "
+            f"value {i}s is below the max-chain-budget floor"
+        ),
+    ),
     # 12: dual-channel remedy: continuation -- bare, the other class
     # measured as dominant in a live root. Carries a literal apostrophe
     # ("project.cfg's") immediately followed by a bracketed section name
@@ -797,10 +763,13 @@ _DIVERSE_SIGNAL_CLASSES = (
     # narration below reports, so a future regression of that hit test
     # shows up in this test's narrated timing too, not just in a value
     # it happens to compute.
-    (_DIVERSE_DOMINANT_CLASS_WEIGHT, True, lambda agent, i: (
-        "remedy:  No action needed -- raise it in kanban.cfg's [locks] "
-        f"section instead -- probe {i}."
-    )),
+    (
+        _DIVERSE_DOMINANT_CLASS_WEIGHT,
+        True,
+        lambda agent, i: (
+            "remedy:  No action needed -- raise it in kanban.cfg's [locks] " f"section instead -- probe {i}."
+        ),
+    ),
 )
 
 # The single collapsing class index above -- kept as one named constant
@@ -882,8 +851,7 @@ def _build_diverse_today_volume_fixture(
         active_ids = next_active
 
     expected_output_row_count = sum(
-        1 if class_by_id[i] == _DIVERSE_COLLAPSING_CLASS_INDEX else occurrences[i]
-        for i in range(distinct_text_count)
+        1 if class_by_id[i] == _DIVERSE_COLLAPSING_CLASS_INDEX else occurrences[i] for i in range(distinct_text_count)
     )
 
     meta = {
@@ -936,9 +904,7 @@ def test_large_pre_today_body_renders_correctly_and_narrates_render_time(
     # class's realistic repetition weight -- never repeated copies of
     # one line. A stagger_seconds of 1 keeps every occurrence inside one
     # day from the 08:00:00 start.
-    per_agent_today, meta = _build_diverse_today_volume_fixture(
-        _DIVERSE_TODAY_DISTINCT_TEXT_COUNT, stagger_seconds=1
-    )
+    per_agent_today, meta = _build_diverse_today_volume_fixture(_DIVERSE_TODAY_DISTINCT_TEXT_COUNT, stagger_seconds=1)
 
     # Guard against a fixture-composition regression: a future edit that
     # makes this fixture uniform again (or only lightly diverse) would
@@ -991,13 +957,10 @@ def test_large_pre_today_body_renders_correctly_and_narrates_render_time(
     sweep_agent, sweep_id, sweep_text = meta["sample"][_DIVERSE_COLLAPSING_CLASS_INDEX]
     sweep_rows = [ln for ln in out_lines if sweep_text in ln]
     assert len(sweep_rows) == 1, (
-        f"the collapsing sweep-census identity must fold to exactly one "
-        f"row, got {len(sweep_rows)}: {sweep_rows!r}"
+        f"the collapsing sweep-census identity must fold to exactly one " f"row, got {len(sweep_rows)}: {sweep_rows!r}"
     )
     assert sweep_rows[0].startswith(f"[{sweep_agent} "), sweep_rows[0]
-    assert (
-        f"(x{meta['occurrences'][sweep_id]}, first seen" in sweep_rows[0]
-    ), sweep_rows[0]
+    assert f"(x{meta['occurrences'][sweep_id]}, first seen" in sweep_rows[0], sweep_rows[0]
 
     for class_index, (agent, distinct_id, text) in meta["sample"].items():
         if class_index == _DIVERSE_COLLAPSING_CLASS_INDEX:
@@ -1009,9 +972,7 @@ def test_large_pre_today_body_renders_correctly_and_narrates_render_time(
             f"{len(matches)}"
         )
 
-    assert "CODER-stale" not in result.stdout, (
-        "a prior-day SIGNAL-class line leaked into today's band"
-    )
+    assert "CODER-stale" not in result.stdout, "a prior-day SIGNAL-class line leaked into today's band"
 
 
 # ---------------------------------------------------------------------------
@@ -1047,12 +1008,8 @@ _SWEEP_CENSUS_SUFFIX = (
 def _stamp(base_hour: int, base_minute: int, base_second: int, offset_seconds: int):
     """Return (iso_timestamp, "HH:MM:SS") for "today" at
     base_hour:base_minute:base_second plus offset_seconds, in the same
-    local-offset ISO-8601 shape _today_iso produces."""
-    now = _dt.datetime.now().astimezone()
-    base = now.replace(
-        hour=base_hour, minute=base_minute, second=base_second, microsecond=0
-    )
-    stamped = base + _dt.timedelta(seconds=offset_seconds)
+    local-offset ISO-8601 shape today_local_iso produces."""
+    stamped = shift(local_at(0, base_hour, base_minute, base_second), seconds=offset_seconds)
     return stamped.isoformat(timespec="seconds"), stamped.strftime("%H:%M:%S")
 
 
@@ -1089,8 +1046,7 @@ def _build_repetition_fixture(
         agent = _FIXTURE_AGENT_ORDER[i % len(_FIXTURE_AGENT_ORDER)]
         iso, _hms = _stamp(8, 0, 0, offset)
         per_agent_lines[agent].append(
-            f"[{iso}] wake({agent}): finished task "
-            f"{agent.upper()}-repro-{i:03d} with state DONE"
+            f"[{iso}] wake({agent}): finished task " f"{agent.upper()}-repro-{i:03d} with state DONE"
         )
         offset += 30
 
@@ -1108,9 +1064,7 @@ def test_repeated_signal_class_folds_to_one_row_with_count_and_first_seen(
     kanban_root = tmp_path / "kanroot"
     logs_dir = kanban_root / "logs"
 
-    per_agent_lines = _build_repetition_fixture(
-        _REPEATED_LINE_COUNT, _DISTINCT_EVENT_COUNT
-    )
+    per_agent_lines = _build_repetition_fixture(_REPEATED_LINE_COUNT, _DISTINCT_EVENT_COUNT)
     for agent, lines in per_agent_lines.items():
         _write_log(logs_dir / f"cron-{agent}.log", lines)
 
@@ -1129,8 +1083,7 @@ def test_repeated_signal_class_folds_to_one_row_with_count_and_first_seen(
 
     sweep_rows = [ln for ln in out_lines if "sweep-census: skipped" in ln]
     assert len(sweep_rows) == 1, (
-        f"the repeated identity must fold to exactly one row, got "
-        f"{len(sweep_rows)}: {sweep_rows!r}"
+        f"the repeated identity must fold to exactly one row, got " f"{len(sweep_rows)}: {sweep_rows!r}"
     )
 
     # The whole day's true count, and the earliest occurrence's own
@@ -1140,9 +1093,7 @@ def test_repeated_signal_class_folds_to_one_row_with_count_and_first_seen(
     assert expected_first_hms == "08:00:00"
     folded_row = sweep_rows[0]
     assert folded_row.startswith(f"[pm {expected_first_hms}]"), folded_row
-    assert f"(x{_REPEATED_LINE_COUNT}, first seen {expected_first_hms})" in folded_row, (
-        folded_row
-    )
+    assert f"(x{_REPEATED_LINE_COUNT}, first seen {expected_first_hms})" in folded_row, folded_row
 
     # Every distinct event survives, none dropped and none duplicated.
     for i in range(_DISTINCT_EVENT_COUNT):
@@ -1151,8 +1102,7 @@ def test_repeated_signal_class_folds_to_one_row_with_count_and_first_seen(
         matches = [ln for ln in out_lines if task_id in ln]
         assert len(matches) == 1, f"expected exactly one row for {task_id}, got {matches!r}"
         assert "(x" not in matches[0], (
-            f"a non-collapsing distinct event must never carry a fold suffix: "
-            f"{matches[0]!r}"
+            f"a non-collapsing distinct event must never carry a fold suffix: " f"{matches[0]!r}"
         )
 
 
@@ -1171,9 +1121,7 @@ def test_folded_row_count_does_not_grow_with_repetition_count(
     # TODAY filter -- a 1s stagger keeps the whole large fixture inside
     # one day regardless of repetition count.
     for root, count, stagger in ((small_root, 50, 12), (large_root, 5000, 1)):
-        per_agent_lines = _build_repetition_fixture(
-            count, distinct_event_count=5, stagger_seconds=stagger
-        )
+        per_agent_lines = _build_repetition_fixture(count, distinct_event_count=5, stagger_seconds=stagger)
         for agent, lines in per_agent_lines.items():
             _write_log(root / "logs" / f"cron-{agent}.log", lines)
 
@@ -1218,17 +1166,14 @@ def test_one_line_per_class_fixture_leaves_non_collapsing_classes_unchanged(
         logs_dir / "cron-pm.log",
         [
             f"[{sweep_iso}] wake(pm): {_SWEEP_CENSUS_SUFFIX}",
-            f"[{promoted_iso}] wake(pm): re-check complete: "
-            "promoted 1 task(s) from WAITING to BACKLOG",
+            f"[{promoted_iso}] wake(pm): re-check complete: " "promoted 1 task(s) from WAITING to BACKLOG",
         ],
     )
     _write_log(
         logs_dir / "cron-coder.log",
         [
-            f"[{dispatch_iso}] wake(coder): task CODER-onceper-class: "
-            "transitioned to WORKING [A]",
-            f"[{finished_iso}] wake(coder): "
-            "finished task CODER-onceper-class with state DONE",
+            f"[{dispatch_iso}] wake(coder): task CODER-onceper-class: " "transitioned to WORKING [A]",
+            f"[{finished_iso}] wake(coder): " "finished task CODER-onceper-class with state DONE",
         ],
     )
     _write_log(
@@ -1243,18 +1188,14 @@ def test_one_line_per_class_fixture_leaves_non_collapsing_classes_unchanged(
     assert len(out_lines) == 5, out_lines
 
     non_collapsing_expected = {
-        f"[coder {dispatch_hms}] wake(coder): task CODER-onceper-class: "
-        "transitioned to WORKING [A]",
-        f"[coder {finished_hms}] wake(coder): "
-        "finished task CODER-onceper-class with state DONE",
-        f"[pm {promoted_hms}] wake(pm): re-check complete: "
-        "promoted 1 task(s) from WAITING to BACKLOG",
+        f"[coder {dispatch_hms}] wake(coder): task CODER-onceper-class: " "transitioned to WORKING [A]",
+        f"[coder {finished_hms}] wake(coder): " "finished task CODER-onceper-class with state DONE",
+        f"[pm {promoted_hms}] wake(pm): re-check complete: " "promoted 1 task(s) from WAITING to BACKLOG",
         f"[tester {halt_hms}] wake(tester): HALT flag detected, exiting",
     }
     for expected in non_collapsing_expected:
         assert expected in out_lines, (
-            f"non-collapsing class rendering changed -- expected {expected!r} "
-            f"unchanged in {out_lines!r}"
+            f"non-collapsing class rendering changed -- expected {expected!r} " f"unchanged in {out_lines!r}"
         )
         # None of these carry a fold suffix -- collapsing is opt-in per
         # pattern, and none of these four patterns opt in.
@@ -1293,14 +1234,8 @@ def test_tab_bearing_signal_lines_keep_distinct_identity_and_print_full_text_onc
     kanban_root = tmp_path / "kanroot"
     logs_dir = kanban_root / "logs"
 
-    alpha_text = (
-        "wake(pm): sweep-census: skipped"
-        f"{_TAB}— /p/req/ALPHA.md: finalize=tag — not report"
-    )
-    beta_text = (
-        "wake(pm): sweep-census: skipped"
-        f"{_TAB}— /p/req/BETA.md: finalize=report — other reason"
-    )
+    alpha_text = "wake(pm): sweep-census: skipped" f"{_TAB}— /p/req/ALPHA.md: finalize=tag — not report"
+    beta_text = "wake(pm): sweep-census: skipped" f"{_TAB}— /p/req/BETA.md: finalize=report — other reason"
 
     alpha_isos = [_stamp(9, 0, 0, i * 60)[0] for i in (1, 2, 3)]
     beta_isos = [_stamp(10, 0, 0, i * 60)[0] for i in (1, 2, 3, 4)]
@@ -1316,19 +1251,14 @@ def test_tab_bearing_signal_lines_keep_distinct_identity_and_print_full_text_onc
 
     out_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     assert len(out_lines) == 2, (
-        f"expected two rows, one per distinct tab-bearing identity, got "
-        f"{len(out_lines)}: {out_lines!r}"
+        f"expected two rows, one per distinct tab-bearing identity, got " f"{len(out_lines)}: {out_lines!r}"
     )
 
     # Exact-match, not substring: a garbled/duplicated line (the failure
     # shape this test guards) would fail this even if it happened to contain the
     # right substrings somewhere in its scrambled text.
-    expected_alpha = (
-        f"[pm {alpha_first_hms}] {alpha_text} (x3, first seen {alpha_first_hms})"
-    )
-    expected_beta = (
-        f"[pm {beta_first_hms}] {beta_text} (x4, first seen {beta_first_hms})"
-    )
+    expected_alpha = f"[pm {alpha_first_hms}] {alpha_text} (x3, first seen {alpha_first_hms})"
+    expected_beta = f"[pm {beta_first_hms}] {beta_text} (x4, first seen {beta_first_hms})"
 
     assert expected_alpha in out_lines, (
         f"expected the ALPHA identity's row printed once, in full, tab "
@@ -1362,11 +1292,8 @@ def _agent_anchor_line(agent: str, hour: int, minute: int, second: int) -> str:
     itself filtered out as non-signal, leaving the nearest EARLIER
     signal-classified timestamped line as what event-band.sh's
     continuation-line handling actually inherits from."""
-    ts = _today_iso(hour, minute, second)
-    return (
-        f"[{ts}] wake({agent}): finished task {agent.upper()}-anchor "
-        "with state BLOCKED"
-    )
+    ts = today_local_iso(hour, minute, second)
+    return f"[{ts}] wake({agent}): finished task {agent.upper()}-anchor " "with state BLOCKED"
 
 
 def _lock_narration_block(key: str) -> list[str]:
@@ -1382,9 +1309,7 @@ def _lock_narration_block(key: str) -> list[str]:
 
 
 class TestLockNarrationEventBandFolding:
-    def test_thirty_contended_probes_across_four_agents_fold_to_one_row(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_thirty_contended_probes_across_four_agents_fold_to_one_row(self, tmp_path: pathlib.Path) -> None:
         kanban_root = tmp_path / "kanroot"
         logs_dir = kanban_root / "logs"
 
@@ -1409,16 +1334,13 @@ class TestLockNarrationEventBandFolding:
         )
         row = contended_rows[0]
         assert "error:" not in row and "message:" not in row and "remedy:" not in row, (
-            f"the folded row must show the bare key, not the raw "
-            f"error:/message:/remedy: lines: {row!r}"
+            f"the folded row must show the bare key, not the raw " f"error:/message:/remedy: lines: {row!r}"
         )
         assert "(x30, first seen" in row, row
         for agent in probe_counts:
             assert agent in row, f"expected agent {agent!r} named in the row: {row!r}"
 
-    def test_contended_and_floor_enforced_each_fold_to_their_own_row(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_contended_and_floor_enforced_each_fold_to_their_own_row(self, tmp_path: pathlib.Path) -> None:
         """A fixture carrying both known lock-narration keys, from
         several agents each, folds each key to exactly one row -- never
         merged with the other, never left uncollapsed."""
@@ -1444,23 +1366,17 @@ class TestLockNarrationEventBandFolding:
         contended_rows = [ln for ln in out_lines if "lock.provenance.contended" in ln]
         floor_rows = [ln for ln in out_lines if "lock.stale_threshold.floor_enforced" in ln]
         assert len(contended_rows) == 1, (
-            f"expected exactly one collapsed contended row, got "
-            f"{contended_rows!r}\nfull output: {out_lines!r}"
+            f"expected exactly one collapsed contended row, got " f"{contended_rows!r}\nfull output: {out_lines!r}"
         )
         assert len(floor_rows) == 1, (
-            f"expected exactly one collapsed clamp row, got "
-            f"{floor_rows!r}\nfull output: {out_lines!r}"
+            f"expected exactly one collapsed clamp row, got " f"{floor_rows!r}\nfull output: {out_lines!r}"
         )
         assert "(x3, first seen" in contended_rows[0], contended_rows[0]
         assert "(x2, first seen" in floor_rows[0], floor_rows[0]
         for row in (contended_rows[0], floor_rows[0]):
-            assert "pm" in row and "cm" in row, (
-                f"expected both contributing agents named: {row!r}"
-            )
+            assert "pm" in row and "cm" in row, f"expected both contributing agents named: {row!r}"
 
-    def test_other_dual_channel_blocks_are_not_folded(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_other_dual_channel_blocks_are_not_folded(self, tmp_path: pathlib.Path) -> None:
         """A dual-channel block whose key is NOT one of the two known
         lock narrations renders all three lines separately, exactly as
         before this feature -- the fold is scoped to those two literal

@@ -23,6 +23,7 @@ try:
     from pm_agent.lib import acceptance_policy as ap
 except ImportError:
     import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib import acceptance_policy as ap  # type: ignore[no-redef]
 
@@ -93,7 +94,9 @@ def test_non_runner_criterion_is_unchanged() -> None:
 def test_two_rewrites_to_the_same_text_collapse_to_one_criterion() -> None:
     result = _apply("CODER", [BARE_UNIT, NON_RUNNER, BARE_INTEGRATION], [])
     assert result.acceptance_criteria == [
-        TARGETED_RUN_CRITERION, NON_RUNNER, PRE_MERGE_CRITERION,
+        TARGETED_RUN_CRITERION,
+        NON_RUNNER,
+        PRE_MERGE_CRITERION,
     ]
     assert [r.merged for r in result.rewrites] == [False, True]
 
@@ -101,7 +104,10 @@ def test_two_rewrites_to_the_same_text_collapse_to_one_criterion() -> None:
 def test_criterion_order_is_preserved_around_a_rewrite() -> None:
     result = _apply("CODER", [NON_RUNNER, BARE_UNIT, "Docs updated."], [])
     assert result.acceptance_criteria == [
-        NON_RUNNER, TARGETED_RUN_CRITERION, "Docs updated.", PRE_MERGE_CRITERION,
+        NON_RUNNER,
+        TARGETED_RUN_CRITERION,
+        "Docs updated.",
+        PRE_MERGE_CRITERION,
     ]
 
 
@@ -163,26 +169,30 @@ def test_kanban_commands_yield_the_kanban_criteria_texts_unchanged() -> None:
         "Run only the tests for the files you changed using `--files`. "
         "The full gated suites run once per RC in the TESTER task."
     )
-    assert PRE_MERGE_CRITERION == (
-        "`bash team/scripts/run-unit-tests.sh --pre-merge` exits 0 before merging."
-    )
+    assert PRE_MERGE_CRITERION == ("`bash team/scripts/run-unit-tests.sh --pre-merge` exits 0 before merging.")
 
 
 @pytest.mark.parametrize("role", ["CODER", "WRITER", "coder", "Writer", " WRITER "])
 def test_pre_merge_criterion_is_appended_last_for_coder_and_writer(role: str) -> None:
     result = _apply(role, [NON_RUNNER, BARE_UNIT], ["Be careful."])
     assert result.acceptance_criteria == [
-        NON_RUNNER, TARGETED_RUN_CRITERION, PRE_MERGE_CRITERION,
+        NON_RUNNER,
+        TARGETED_RUN_CRITERION,
+        PRE_MERGE_CRITERION,
     ]
     assert result.acceptance_criteria.count(PRE_MERGE_CRITERION) == 1
 
 
-@pytest.mark.parametrize("plan_criteria", [
-    [PRE_MERGE_CRITERION, NON_RUNNER],
-    [NON_RUNNER, PRE_MERGE_CRITERION],
-    [PRE_MERGE_CRITERION, NON_RUNNER, PRE_MERGE_CRITERION],
-    ["  " + PRE_MERGE_CRITERION.replace(" exits", "\n   exits"), NON_RUNNER],
-], ids=["first", "last", "twice", "rewrapped"])
+@pytest.mark.parametrize(
+    "plan_criteria",
+    [
+        [PRE_MERGE_CRITERION, NON_RUNNER],
+        [NON_RUNNER, PRE_MERGE_CRITERION],
+        [PRE_MERGE_CRITERION, NON_RUNNER, PRE_MERGE_CRITERION],
+        ["  " + PRE_MERGE_CRITERION.replace(" exits", "\n   exits"), NON_RUNNER],
+    ],
+    ids=["first", "last", "twice", "rewrapped"],
+)
 def test_plan_supplied_pre_merge_criterion_ends_up_last_exactly_once(plan_criteria) -> None:
     result = _apply("CODER", plan_criteria, [])
     assert result.acceptance_criteria == [NON_RUNNER, PRE_MERGE_CRITERION]
@@ -190,7 +200,9 @@ def test_plan_supplied_pre_merge_criterion_ends_up_last_exactly_once(plan_criter
 
 def test_pre_merge_criterion_is_never_rewritten_to_the_targeted_run() -> None:
     result = _apply(
-        "WRITER", [PRE_MERGE_CRITERION], [PRE_MERGE_CRITERION],
+        "WRITER",
+        [PRE_MERGE_CRITERION],
+        [PRE_MERGE_CRITERION],
     )
     assert result.rewrites == []
     assert TARGETED_RUN_CRITERION not in result.acceptance_criteria
@@ -209,17 +221,19 @@ def test_pre_merge_command_with_a_further_option_is_rewritten_as_a_full_runner()
     assert [r.original for r in result.rewrites] == [other]
 
 
-PRE_MERGE_IN_PLAN_WORDING = (
-    "Before merging, `bash team/scripts/run-unit-tests.sh --pre-merge` must exit 0"
+PRE_MERGE_IN_PLAN_WORDING = "Before merging, `bash team/scripts/run-unit-tests.sh --pre-merge` must exit 0"
+
+
+@pytest.mark.parametrize(
+    "plan_criteria",
+    [
+        [PRE_MERGE_IN_PLAN_WORDING, NON_RUNNER],
+        [NON_RUNNER, PRE_MERGE_IN_PLAN_WORDING],
+        [PRE_MERGE_IN_PLAN_WORDING, NON_RUNNER, PRE_MERGE_CRITERION],
+        ["Run bash team/scripts/run-unit-tests.sh --pre-merge\nbefore you merge.", NON_RUNNER],
+    ],
+    ids=["first", "last", "with-canonical", "unquoted-wrapped"],
 )
-
-
-@pytest.mark.parametrize("plan_criteria", [
-    [PRE_MERGE_IN_PLAN_WORDING, NON_RUNNER],
-    [NON_RUNNER, PRE_MERGE_IN_PLAN_WORDING],
-    [PRE_MERGE_IN_PLAN_WORDING, NON_RUNNER, PRE_MERGE_CRITERION],
-    ["Run bash team/scripts/run-unit-tests.sh --pre-merge\nbefore you merge.", NON_RUNNER],
-], ids=["first", "last", "with-canonical", "unquoted-wrapped"])
 def test_pre_merge_command_in_other_wording_is_kept_once_last_without_a_rewrite(
     plan_criteria,
 ) -> None:
@@ -236,15 +250,18 @@ def test_pre_merge_command_in_other_wording_is_left_as_written_in_constraints() 
     assert result.rewrites == []
 
 
-@pytest.mark.parametrize("text, expected", [
-    (PRE_MERGE_CRITERION, True),
-    (PRE_MERGE_IN_PLAN_WORDING, True),
-    ("bash  team/scripts/run-unit-tests.sh\t--pre-merge passes", True),
-    ("`bash team/scripts/run-unit-tests.sh --pre-merge --base ai_main` exits 0", False),
-    ("`bash team/scripts/run-unit-tests.sh --pre-merge-all` exits 0", False),
-    ("`bash team/scripts/run-unit-tests.sh` exits 0", False),
-    (NON_RUNNER, False),
-])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (PRE_MERGE_CRITERION, True),
+        (PRE_MERGE_IN_PLAN_WORDING, True),
+        ("bash  team/scripts/run-unit-tests.sh\t--pre-merge passes", True),
+        ("`bash team/scripts/run-unit-tests.sh --pre-merge --base ai_main` exits 0", False),
+        ("`bash team/scripts/run-unit-tests.sh --pre-merge-all` exits 0", False),
+        ("`bash team/scripts/run-unit-tests.sh` exits 0", False),
+        (NON_RUNNER, False),
+    ],
+)
 def test_pre_merge_command_detection(text: str, expected: bool) -> None:
     assert KANBAN.names_pre_merge(text) is expected
 
@@ -254,13 +271,17 @@ def test_pre_merge_command_detection_is_false_with_no_command_configured() -> No
 
 
 @pytest.mark.parametrize("role", ["CODER", "WRITER"])
-@pytest.mark.parametrize("plan_criteria", [
-    [],
-    [BARE_UNIT, NON_RUNNER],
-    [PRE_MERGE_CRITERION, BARE_INTEGRATION],
-])
+@pytest.mark.parametrize(
+    "plan_criteria",
+    [
+        [],
+        [BARE_UNIT, NON_RUNNER],
+        [PRE_MERGE_CRITERION, BARE_INTEGRATION],
+    ],
+)
 def test_policy_with_pre_merge_applied_to_its_own_output_is_identical(
-    role: str, plan_criteria,
+    role: str,
+    plan_criteria,
 ) -> None:
     first = _apply(role, plan_criteria, [BARE_INTEGRATION])
     second = _apply(role, first.acceptance_criteria, first.constraints)
@@ -306,16 +327,19 @@ def test_none_lists_are_treated_as_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text, expected", [
-    (BARE_UNIT, True),
-    (BARE_INTEGRATION, True),
-    ("run_unit_tests.sh exits 0", True),
-    (TARGETED_UNIT, False),
-    ("bash team/scripts/run-unit-tests.sh --files=tests/unit/test_x.py", False),
-    ("run-unit-tests.sh --files-from list.txt", True),
-    (NON_RUNNER, False),
-    ("run-unit-tests is mentioned without the script suffix", False),
-])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (BARE_UNIT, True),
+        (BARE_INTEGRATION, True),
+        ("run_unit_tests.sh exits 0", True),
+        (TARGETED_UNIT, False),
+        ("bash team/scripts/run-unit-tests.sh --files=tests/unit/test_x.py", False),
+        ("run-unit-tests.sh --files-from list.txt", True),
+        (NON_RUNNER, False),
+        ("run-unit-tests is mentioned without the script suffix", False),
+    ],
+)
 def test_invokes_full_runner_detection(text: str, expected: bool) -> None:
     assert ap.invokes_full_runner(text, KANBAN) is expected
 
@@ -367,17 +391,22 @@ def test_project_with_both_commands_gets_exactly_its_own_two_criteria() -> None:
         "The full gated suites run once per RC in the TESTER task.",
     ]
     assert [r.original for r in result.rewrites] == ["`npx jest` exits 0"]
-    added = [c for c in result.acceptance_criteria + result.constraints
-             if c not in ("It works.", "Be careful.", BARE_UNIT)]
+    added = [
+        c for c in result.acceptance_criteria + result.constraints if c not in ("It works.", "Be careful.", BARE_UNIT)
+    ]
     for text in added:
         assert "team/scripts" not in text and "--files" not in text
 
 
-@pytest.mark.parametrize("config", [
-    None,
-    ap.RunnerConfig(),
-    ap.RunnerConfig(targeted_command="   ", pre_merge_command=""),
-], ids=["none", "empty", "blank"])
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,
+        ap.RunnerConfig(),
+        ap.RunnerConfig(targeted_command="   ", pre_merge_command=""),
+    ],
+    ids=["none", "empty", "blank"],
+)
 @pytest.mark.parametrize("role", ["CODER", "WRITER"])
 def test_project_with_no_commands_gets_no_runner_criterion_or_constraint(role, config) -> None:
     acceptance = ["It works.", BARE_UNIT, PRE_MERGE_CRITERION]
@@ -424,9 +453,7 @@ def test_runner_without_its_flag_is_rewritten_on_the_configured_project_only() -
 
 # A runner that takes its files as plain arguments, with no flag.
 POSITIONAL = ap.RunnerConfig(targeted_command="scripts/run-unit-tests.sh {files}")
-POSITIONAL_CRITERION = (
-    "`scripts/run-unit-tests.sh <the test files this ticket adds or changes>` exits 0."
-)
+POSITIONAL_CRITERION = "`scripts/run-unit-tests.sh <the test files this ticket adds or changes>` exits 0."
 POSITIONAL_CONSTRAINT = (
     "Run only the tests for the files you changed using "
     "`scripts/run-unit-tests.sh <the test files this ticket adds or changes>`. "
@@ -454,29 +481,46 @@ def test_positional_files_runner_policy_applied_to_its_own_output_changes_nothin
     assert second.rewrites == []
 
 
-@pytest.mark.parametrize("text, expected", [
-    ("`scripts/run-unit-tests.sh` exits 0", True),
-    ("Run scripts/run-unit-tests.sh and confirm it passes.", True),
-    ("`scripts/run-unit-tests.sh --verbose` exits 0", True),
-    ("`scripts/run-unit-tests.sh tests/unit/test_x.py` exits 0", False),
-    ("`scripts/run-unit-tests.sh -v tests/unit/test_x.py` exits 0", False),
-    ("scripts/run-unit-tests.sh test_x.py, then commit", False),
-    ("`scripts/run-unit-tests.sh 'tests/unit/test_*.py'` exits 0", False),
-    (POSITIONAL_CRITERION, False),
-    (NON_RUNNER, False),
-], ids=["code-span", "prose", "option-only", "path", "option-then-path",
-        "file-name", "glob", "own-criterion", "non-runner"])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("`scripts/run-unit-tests.sh` exits 0", True),
+        ("Run scripts/run-unit-tests.sh and confirm it passes.", True),
+        ("`scripts/run-unit-tests.sh --verbose` exits 0", True),
+        ("`scripts/run-unit-tests.sh tests/unit/test_x.py` exits 0", False),
+        ("`scripts/run-unit-tests.sh -v tests/unit/test_x.py` exits 0", False),
+        ("scripts/run-unit-tests.sh test_x.py, then commit", False),
+        ("`scripts/run-unit-tests.sh 'tests/unit/test_*.py'` exits 0", False),
+        (POSITIONAL_CRITERION, False),
+        (NON_RUNNER, False),
+    ],
+    ids=[
+        "code-span",
+        "prose",
+        "option-only",
+        "path",
+        "option-then-path",
+        "file-name",
+        "glob",
+        "own-criterion",
+        "non-runner",
+    ],
+)
 def test_positional_files_runner_detection(text: str, expected: bool) -> None:
     assert ap.invokes_full_runner(text, POSITIONAL) is expected
 
 
-@pytest.mark.parametrize("template, script, flag", [
-    ("bash team/scripts/run-unit-tests.sh --files {files}", "run-unit-tests.sh", "--files"),
-    ("bash team/scripts/run-unit-tests.sh --files={files}", "run-unit-tests.sh", "--files"),
-    ("scripts/run-unit-tests.sh {files}", "run-unit-tests.sh", ""),
-    ("scripts/run-unit-tests.sh --files", "run-unit-tests.sh", "--files"),
-    ("python3 -m pytest {files}", "pytest", ""),
-], ids=["flag", "flag-equals", "positional", "no-placeholder", "module"])
+@pytest.mark.parametrize(
+    "template, script, flag",
+    [
+        ("bash team/scripts/run-unit-tests.sh --files {files}", "run-unit-tests.sh", "--files"),
+        ("bash team/scripts/run-unit-tests.sh --files={files}", "run-unit-tests.sh", "--files"),
+        ("scripts/run-unit-tests.sh {files}", "run-unit-tests.sh", ""),
+        ("scripts/run-unit-tests.sh --files", "run-unit-tests.sh", "--files"),
+        ("python3 -m pytest {files}", "pytest", ""),
+    ],
+    ids=["flag", "flag-equals", "positional", "no-placeholder", "module"],
+)
 def test_targeted_template_parses_into_runner_and_flag(template, script, flag) -> None:
     (runner,) = ap.RunnerConfig(targeted_command=template).runners()
     assert (runner.script, runner.flag) == (script, flag)
@@ -493,9 +537,7 @@ def test_and_joined_value_is_one_command_unless_every_part_takes_files() -> None
 
 
 def test_each_further_runner_is_named_after_the_first() -> None:
-    config = ap.RunnerConfig(targeted_command=(
-        "tools/unit.sh -f {files} && tools/run_e2e_tests.py -f {files}"
-    ))
+    config = ap.RunnerConfig(targeted_command=("tools/unit.sh -f {files} && tools/run_e2e_tests.py -f {files}"))
     assert config.targeted_criterion() == (
         "`tools/unit.sh -f <the test files this ticket adds or changes>` "
         "(and the e2e runner the same way, if e2e tests were touched) exits 0."

@@ -95,9 +95,7 @@ def test_recovery_sweep_completes_interrupted_release(tmp_path: pathlib.Path) ->
         "the recovery acquisition must succeed, not be blocked by the "
         f"interrupted release.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "recovery sweep" in result.stderr, (
-        f"expected a narrated recovery-sweep diagnostic.\nstderr: {result.stderr}"
-    )
+    assert "recovery sweep" in result.stderr, f"expected a narrated recovery-sweep diagnostic.\nstderr: {result.stderr}"
     assert "FILE_EXISTS_AFTER=no" in result.stdout, (
         f"no orphan lock file may remain after the recovering acquisition "
         f"releases cleanly.\nstdout: {result.stdout}"
@@ -143,8 +141,7 @@ def test_early_exit_without_explicit_release_still_releases_via_trap(
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "pgai_lock_release_all_held" in result.stderr, (
-        "expected the sweep to narrate that it found and released a "
-        f"still-held lock.\nstderr: {result.stderr}"
+        "expected the sweep to narrate that it found and released a " f"still-held lock.\nstderr: {result.stderr}"
     )
 
 
@@ -182,9 +179,7 @@ def test_sigterm_releases_lock_and_provenance_before_exit(
         while not ready_file.exists() and time.time() < deadline:
             time.sleep(0.05)
         assert ready_file.exists(), "holder process did not signal readiness"
-        assert lock_file.exists(), (
-            "holder should have written provenance before signaling ready"
-        )
+        assert lock_file.exists(), "holder should have written provenance before signaling ready"
 
         holder.send_signal(signal.SIGTERM)
         holder.wait(timeout=5.0)
@@ -227,8 +222,7 @@ def test_two_consecutive_generations_leave_no_orphan_lock(
     gen1 = run_bash(tmp_path, gen1_script)
     assert gen1.returncode == 0, f"stdout:\n{gen1.stdout}\nstderr:\n{gen1.stderr}"
     assert not lock_file.exists(), (
-        "generation 1 must leave no lock file behind after its own exit.\n"
-        f"stderr: {gen1.stderr}"
+        "generation 1 must leave no lock file behind after its own exit.\n" f"stderr: {gen1.stderr}"
     )
 
     # Generation 2: a fresh process, a fresh firing, same lock name -- must
@@ -245,9 +239,6 @@ def test_two_consecutive_generations_leave_no_orphan_lock(
     gen2 = run_bash(tmp_path, gen2_script)
     assert gen2.returncode == 0, f"stdout:\n{gen2.stdout}\nstderr:\n{gen2.stderr}"
     assert "RC=0" in gen2.stdout, (
-        "generation 2 must acquire without contention.\n"
-        f"stdout: {gen2.stdout}\nstderr: {gen2.stderr}"
+        "generation 2 must acquire without contention.\n" f"stdout: {gen2.stdout}\nstderr: {gen2.stderr}"
     )
-    assert not lock_file.exists(), (
-        "no lock file may survive its creating process by more than one firing."
-    )
+    assert not lock_file.exists(), "no lock file may survive its creating process by more than one firing."

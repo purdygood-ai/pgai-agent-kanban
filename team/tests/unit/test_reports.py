@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import json
 import pathlib
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from datetime import datetime, UTC
+from unittest.mock import patch
 
 import pytest
 
@@ -38,7 +38,6 @@ from pgai_agent_kanban.reports.agent_timing import (
 # ---------------------------------------------------------------------------
 
 from pgai_agent_kanban.reports.project_summary import (
-    _kanban_root,
     _list_projects,
     _extract_field,
     _extract_bold_field,
@@ -58,23 +57,17 @@ from pgai_agent_kanban.reports.project_summary import (
     apply_offline_summaries,
     render_project_report,
     render_aggregate,
-    _render_json,
     _load_bugs,
     _load_priorities,
     _load_requirements,
     _load_release_notes,
     _load_task_events,
-    _offline_oneliner_bug,
-    _offline_oneliner_priority,
-    _offline_oneliner_requirement,
-    _offline_oneliner_release,
     _fmt_date,
     _hr,
     _section_header,
     _bullet,
     _sort_key_date,
 )
-
 
 # ===========================================================================
 # agent_timing — _parse_timestamp
@@ -119,9 +112,9 @@ def test_parse_log_file_extracts_wake_done_entries(tmp_path: pathlib.Path) -> No
     log = tmp_path / "batch.log"
     log.write_text(
         "[2026-05-24T18:03:44+00:00] wake(cm): project pgai-agent-kanban:"
-        " done: completed=1 elapsed=103s reason=\"ok\"\n"
+        ' done: completed=1 elapsed=103s reason="ok"\n'
         "[2026-05-24T18:05:00+00:00] wake(coder): project pgai-agent-kanban:"
-        " done: completed=2 elapsed=42s reason=\"ok\"\n",
+        ' done: completed=2 elapsed=42s reason="ok"\n',
         encoding="utf-8",
     )
     entries = parse_log_file(log, cutoff=None)
@@ -137,12 +130,12 @@ def test_parse_log_file_skips_lines_before_cutoff(tmp_path: pathlib.Path) -> Non
     log = tmp_path / "batch.log"
     log.write_text(
         "[2026-01-01T00:00:00+00:00] wake(cm): project pgai-agent-kanban:"
-        " done: completed=1 elapsed=10s reason=\"old\"\n"
+        ' done: completed=1 elapsed=10s reason="old"\n'
         "[2026-06-01T00:00:00+00:00] wake(cm): project pgai-agent-kanban:"
-        " done: completed=1 elapsed=20s reason=\"new\"\n",
+        ' done: completed=1 elapsed=20s reason="new"\n',
         encoding="utf-8",
     )
-    cutoff = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    cutoff = datetime(2026, 3, 1, tzinfo=UTC)
     entries = parse_log_file(log, cutoff=cutoff)
     assert len(entries) == 1
     assert entries[0].elapsed_seconds == 20
@@ -155,7 +148,7 @@ def test_parse_log_file_skips_non_matching_lines(tmp_path: pathlib.Path) -> None
         "INFO: starting agent\n"
         "DEBUG: doing something\n"
         "[2026-05-24T18:03:44+00:00] wake(pm): project proj:"
-        " done: completed=1 elapsed=55s reason=\"ok\"\n",
+        ' done: completed=1 elapsed=55s reason="ok"\n',
         encoding="utf-8",
     )
     entries = parse_log_file(log, cutoff=None)
@@ -207,9 +200,9 @@ def test_collect_log_files_returns_empty_for_nonexistent_dir(
 def test_aggregate_groups_by_agent_and_project() -> None:
     """aggregate returns one bucket per (agent, project) key with elapsed values."""
     entries = [
-        WakeEntry(ts=datetime(2026, 6, 1, tzinfo=timezone.utc), agent="cm", project="proj-a", elapsed_seconds=100),
-        WakeEntry(ts=datetime(2026, 6, 1, tzinfo=timezone.utc), agent="cm", project="proj-a", elapsed_seconds=200),
-        WakeEntry(ts=datetime(2026, 6, 1, tzinfo=timezone.utc), agent="coder", project="proj-a", elapsed_seconds=50),
+        WakeEntry(ts=datetime(2026, 6, 1, tzinfo=UTC), agent="cm", project="proj-a", elapsed_seconds=100),
+        WakeEntry(ts=datetime(2026, 6, 1, tzinfo=UTC), agent="cm", project="proj-a", elapsed_seconds=200),
+        WakeEntry(ts=datetime(2026, 6, 1, tzinfo=UTC), agent="coder", project="proj-a", elapsed_seconds=50),
     ]
     buckets = aggregate(entries)
     key_cm = RoleProjectKey(agent="cm", project="proj-a")
@@ -491,9 +484,7 @@ def test_safe_read_returns_empty_string_for_missing_file(tmp_path: pathlib.Path)
         ),  # does not cross section boundary
     ],
 )
-def test_read_ini_value(
-    tmp_path: pathlib.Path, cfg_content: str, section: str, key: str, expected: str
-) -> None:
+def test_read_ini_value(tmp_path: pathlib.Path, cfg_content: str, section: str, key: str, expected: str) -> None:
     """_read_ini_value reads a key from the correct INI section, else returns ''."""
     cfg = tmp_path / "project.cfg"
     cfg.write_text(cfg_content, encoding="utf-8")
@@ -520,12 +511,7 @@ def _write_bug_file(
 
 def test_bug_item_parses_status_and_severity(tmp_path: pathlib.Path) -> None:
     """BugItem parses Status and Severity fields from a bug markdown file."""
-    content = (
-        "# A Test Bug\n\n"
-        "## Status\nopen\n\n"
-        "**Severity:** high\n\n"
-        "## Symptom\nSomething is broken\n"
-    )
+    content = "# A Test Bug\n\n" "## Status\nopen\n\n" "**Severity:** high\n\n" "## Symptom\nSomething is broken\n"
     p = _write_bug_file(tmp_path / "bugs", "BUG-0001-test-bug.md", content)
     bug = BugItem(p)
     assert bug.status == "open"
@@ -574,11 +560,7 @@ def test_bug_item_extracts_title_from_h1(tmp_path: pathlib.Path) -> None:
 
 def test_bug_item_parses_date_from_bold_field(tmp_path: pathlib.Path) -> None:
     """BugItem parses a date from the **Date:** bold field."""
-    content = (
-        "# Bug\n\n"
-        "## Status\nopen\n\n"
-        "**Date:** 2026-05-01\n"
-    )
+    content = "# Bug\n\n" "## Status\nopen\n\n" "**Date:** 2026-05-01\n"
     p = _write_bug_file(tmp_path / "bugs", "BUG-0007.md", content)
     bug = BugItem(p)
     assert bug.date is not None
@@ -890,6 +872,7 @@ def test_project_report_most_recent_bug_returns_latest_dated(tmp_path: pathlib.P
 
 def test_project_report_recent_events_sorts_descending_by_date(tmp_path: pathlib.Path) -> None:
     """ProjectReport.recent_events returns events in reverse chronological order."""
+
     def _make_event(task_id: str) -> TaskEvent:
         tdir = tmp_path / "tasks" / task_id
         tdir.mkdir(parents=True, exist_ok=True)
@@ -1213,7 +1196,7 @@ def test_load_task_events_filters_by_cutoff(tmp_path: pathlib.Path) -> None:
         "## Task\nCODER-20260601-002-new\n\n## State\nDONE\n",
         encoding="utf-8",
     )
-    cutoff = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    cutoff = datetime(2026, 3, 1, tzinfo=UTC)
     events = _load_task_events(tmp_path, cutoff=cutoff)
     assert len(events) == 1
     assert "20260601" in events[0].task_id
@@ -1246,7 +1229,7 @@ def test_list_projects_returns_empty_when_no_projects_dir(tmp_path: pathlib.Path
 
 def test_fmt_date_formats_datetime_as_yyyy_mm_dd() -> None:
     """_fmt_date returns 'YYYY-MM-DD' formatted string."""
-    dt = datetime(2026, 6, 15, tzinfo=timezone.utc)
+    dt = datetime(2026, 6, 15, tzinfo=UTC)
     assert _fmt_date(dt) == "2026-06-15"
 
 
@@ -1295,7 +1278,7 @@ def test_sort_key_date_returns_epoch_for_none() -> None:
 
 def test_sort_key_date_returns_datetime_unchanged() -> None:
     """_sort_key_date returns the datetime unchanged when it is not None."""
-    dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    dt = datetime(2026, 6, 1, tzinfo=UTC)
     assert _sort_key_date(dt) == dt
 
 

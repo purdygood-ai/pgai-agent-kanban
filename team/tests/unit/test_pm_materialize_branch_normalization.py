@@ -38,9 +38,7 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 
@@ -159,9 +157,7 @@ def test_validate_release_source_branches_does_not_exit(
     tmp_path: pathlib.Path, source_branch: str, target_version: str
 ) -> None:
     """No SystemExit for canonical branches, accepted corruption spellings, or a 'none' target_version."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     tasks = [_release_task("CODER-20260101-001-impl", source_branch)]
     pm._validate_and_normalize_release_source_branches(tasks, str(tmp_path), target_version)
 
@@ -171,9 +167,7 @@ def test_validate_release_source_branches_exits_on_irreconcilable_value(
     capsys: pytest.CaptureFixture,
 ) -> None:
     """An irreconcilable source_branch causes sys.exit(1) naming given vs expected."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     tasks = [_release_task("CODER-20260101-001-impl", "rc/v8.8.8")]
     with pytest.raises(SystemExit) as exc_info:
         pm._validate_and_normalize_release_source_branches(tasks, str(tmp_path), "v9.9.9")
@@ -188,9 +182,7 @@ def test_validate_release_source_branches_skips_cm_open_bookend(
     tmp_path: pathlib.Path,
 ) -> None:
     """A CM-open task (cm_operation='open-rc') is excluded from the RC-branch check."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     tasks = [_release_task("CM-20260101-001-open-rc", "main", cm_operation="open-rc")]
     # 'main' would not normalize against the RC canonical, but CM-open is excluded.
     pm._validate_and_normalize_release_source_branches(tasks, str(tmp_path), "v9.9.9")
@@ -200,9 +192,7 @@ def test_validate_release_source_branches_skips_tasks_with_no_value(
     tmp_path: pathlib.Path,
 ) -> None:
     """Tasks without an explicit source_branch (synthetic bookends) are skipped."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     tasks = [_release_task("TESTER-20260101-002-verify", "none")]
     pm._validate_and_normalize_release_source_branches(tasks, str(tmp_path), "v9.9.9")
 
@@ -216,9 +206,7 @@ def test_validate_parent_branch_returns_canonical_on_bare_main(
     tmp_path: pathlib.Path,
 ) -> None:
     """The default 'main' normalizes to the configured (prefixed) mainline."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     result = pm._validate_and_normalize_parent_branch("main", str(tmp_path))
     assert result == "ai_main"
 
@@ -227,9 +215,7 @@ def test_validate_parent_branch_accepts_doubled_prefix_corruption(
     tmp_path: pathlib.Path,
 ) -> None:
     """A doubled-prefix parent_branch normalizes to the canonical mainline."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     result = pm._validate_and_normalize_parent_branch("ai_ai_main", str(tmp_path))
     assert result == "ai_main"
 
@@ -239,9 +225,7 @@ def test_validate_parent_branch_exits_on_irreconcilable_value(
     capsys: pytest.CaptureFixture,
 ) -> None:
     """An irreconcilable parent_branch causes sys.exit(1) naming given vs expected."""
-    (tmp_path / "project.cfg").write_text(
-        "[project]\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (tmp_path / "project.cfg").write_text("[project]\nbranch_prefix = ai_\n", encoding="utf-8")
     with pytest.raises(SystemExit) as exc_info:
         pm._validate_and_normalize_parent_branch("develop", str(tmp_path))
     assert exc_info.value.code == 1

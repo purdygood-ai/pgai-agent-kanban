@@ -86,15 +86,25 @@ class _Rooted:
                 fcntl.ioctl(secondary, termios.TIOCSCTTY, 0)
 
             proc = subprocess.Popen(
-                argv, cwd=str(cwd), stdin=secondary, stdout=secondary, stderr=secondary,
-                preexec_fn=_take_terminal, close_fds=True, pass_fds=(secondary,),
+                argv,
+                cwd=str(cwd),
+                stdin=secondary,
+                stdout=secondary,
+                stderr=secondary,
+                preexec_fn=_take_terminal,
+                close_fds=True,
+                pass_fds=(secondary,),
             )
             os.close(secondary)
             proc._pgai_primary = primary  # type: ignore[attr-defined]
         else:
             proc = subprocess.Popen(
-                argv, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, start_new_session=True,
+                argv,
+                cwd=str(cwd),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
         self.procs.append(proc)
         return proc

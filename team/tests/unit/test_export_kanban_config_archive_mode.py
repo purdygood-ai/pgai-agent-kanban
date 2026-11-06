@@ -61,8 +61,13 @@ def _export(tmp_path: pathlib.Path, root: pathlib.Path, out: pathlib.Path, *args
     )
     command = " ".join(shlex.quote(a) for a in (str(_EXPORT_SH), "--file", str(out), *args))
     return subprocess.run(
-        ["bash", "-c", f"umask 022; {command}; rc=$?; echo \"UMASK_AFTER=$(umask)\"; exit $rc"],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=120, stdin=subprocess.DEVNULL,
+        ["bash", "-c", f'umask 022; {command}; rc=$?; echo "UMASK_AFTER=$(umask)"; exit $rc'],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
     )
 
 

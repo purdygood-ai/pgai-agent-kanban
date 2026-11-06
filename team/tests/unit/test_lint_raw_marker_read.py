@@ -78,9 +78,10 @@ def test_real_discovery_decision_files_have_zero_findings() -> None:
     regression class this lint exists to catch.
     """
     violations = _lint.scan_paths([_REAL_DISCOVERY_GUARDS, _REAL_DISCOVERY_SH])
-    assert violations == [], (
-        "Unexpected raw-marker-read finding(s) on the real discovery decision "
-        "files:\n" + "\n".join(f"  {v.path}:{v.line} ({v.kind}) {v.snippet}" for v in violations)
+    assert (
+        violations == []
+    ), "Unexpected raw-marker-read finding(s) on the real discovery decision " "files:\n" + "\n".join(
+        f"  {v.path}:{v.line} ({v.kind}) {v.snippet}" for v in violations
     )
 
 
@@ -185,9 +186,7 @@ def test_generic_skip_pattern_for_task_id_extraction_is_not_flagged(tmp_path: Pa
 
     violations = _lint.scan_paths([fixture])
 
-    assert violations == [], (
-        f"Legitimate task-ID extraction pattern was incorrectly flagged: {violations}"
-    )
+    assert violations == [], f"Legitimate task-ID extraction pattern was incorrectly flagged: {violations}"
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +211,7 @@ def test_comment_only_mention_is_not_flagged(tmp_path: Path) -> None:
 
     violations = _lint.scan_paths([fixture])
 
-    assert violations == [], (
-        f"Comment-only mention of marker shapes was incorrectly flagged: {violations}"
-    )
+    assert violations == [], f"Comment-only mention of marker shapes was incorrectly flagged: {violations}"
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +255,7 @@ def test_main_returns_two_on_missing_default_scope_file(tmp_path: Path) -> None:
     team_dir = tmp_path / "team"
     (team_dir / "scripts" / "lib").mkdir(parents=True, exist_ok=True)
     rc = _lint.main(["--team-dir", str(team_dir)])
-    assert rc == 2, (
-        f"Expected main() to return 2 when the default scope files are absent, got {rc}"
-    )
+    assert rc == 2, f"Expected main() to return 2 when the default scope files are absent, got {rc}"
 
 
 # ---------------------------------------------------------------------------

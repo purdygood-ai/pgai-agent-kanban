@@ -134,9 +134,9 @@ def test_another_tasks_stale_registration_is_not_pruned(tmp_path: pathlib.Path) 
     result = _create(tmp_path, base, dev_tree, _TASK, "ai_rc/v1.0.0")
 
     assert "RC=[0]" in result.stdout, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert f"worktree {other}" in _git(dev_tree, "worktree", "list", "--porcelain"), (
-        "another task's stale registration was pruned"
-    )
+    assert f"worktree {other}" in _git(
+        dev_tree, "worktree", "list", "--porcelain"
+    ), "another task's stale registration was pruned"
 
 
 def test_symlink_to_a_worktree_outside_the_base_is_refused_and_kept(tmp_path: pathlib.Path) -> None:

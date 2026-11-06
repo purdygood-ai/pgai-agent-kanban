@@ -143,8 +143,16 @@ class TestRestamp:
 
         result = _run(
             root,
-            ["--project", _PROJECT, "--version", "v2.26.1",
-             "BUG-0001", "BUG-0002-second-fix.md", "BUG-0003-already-recorded", "BUG-0004"],
+            [
+                "--project",
+                _PROJECT,
+                "--version",
+                "v2.26.1",
+                "BUG-0001",
+                "BUG-0002-second-fix.md",
+                "BUG-0003-already-recorded",
+                "BUG-0004",
+            ],
             tmp_path=tmp_path,
         )
         output = result.stdout + result.stderr
@@ -228,13 +236,16 @@ class TestRestamp:
         (["--version", "v2.26.1", "BUG-0001"], "fixed_in_restamp.project_required"),
     ],
     ids=[
-        "missing-version", "short-version", "word-version", "nonexistent-bug-among-valid",
-        "nonexistent-file-name", "no-bugs-named", "no-project",
+        "missing-version",
+        "short-version",
+        "word-version",
+        "nonexistent-bug-among-valid",
+        "nonexistent-file-name",
+        "no-bugs-named",
+        "no-project",
     ],
 )
-def test_bad_invocation_is_refused_and_writes_nothing(
-    tmp_path: pathlib.Path, args: list[str], error_key: str
-) -> None:
+def test_bad_invocation_is_refused_and_writes_nothing(tmp_path: pathlib.Path, args: list[str], error_key: str) -> None:
     root = tmp_path / "root"
     bugs = _ledger(root)
     before = _snapshot(bugs)
@@ -251,9 +262,7 @@ def test_bad_invocation_is_refused_and_writes_nothing(
 def test_ambiguous_bug_id_is_refused_and_writes_nothing(tmp_path: pathlib.Path) -> None:
     root = tmp_path / "root"
     bugs = _ledger(root)
-    (bugs / "BUG-0001-a-second-file.md").write_text(
-        _bug_text("BUG-0001-a-second-file", "done"), encoding="utf-8"
-    )
+    (bugs / "BUG-0001-a-second-file.md").write_text(_bug_text("BUG-0001-a-second-file", "done"), encoding="utf-8")
     before = _snapshot(bugs)
 
     result = _run(root, ["--project", _PROJECT, "--version", "v2.26.1", "BUG-0001"], tmp_path=tmp_path)
@@ -292,12 +301,17 @@ _MODULE_REFUSALS = [
     (["BUG-0001"], "fixed_in_restamp.version_missing", True),
     (["--version", "latest", "BUG-0001"], "fixed_in_restamp.version_malformed", True),
     (["--version", "v2.26.1"], "fixed_in_restamp.no_bugs_named", True),
-    (["--version", "v2.26.1", "--replace-from", "latest", "BUG-0001"],
-     "fixed_in_restamp.replace_from_malformed", True),
-    (["--version", "v2.26.1", "--replace-from", "v2.26.4", "BUG-0001", "BUG-0003"],
-     "fixed_in_restamp.replace_from_mismatch", True),
-    (["--version", "v2.26.1", "--replace-from", "v2.26.4", "BUG-0003"],
-     "fixed_in_restamp.replace_from_mismatch", False),
+    (["--version", "v2.26.1", "--replace-from", "latest", "BUG-0001"], "fixed_in_restamp.replace_from_malformed", True),
+    (
+        ["--version", "v2.26.1", "--replace-from", "v2.26.4", "BUG-0001", "BUG-0003"],
+        "fixed_in_restamp.replace_from_mismatch",
+        True,
+    ),
+    (
+        ["--version", "v2.26.1", "--replace-from", "v2.26.4", "BUG-0003"],
+        "fixed_in_restamp.replace_from_mismatch",
+        False,
+    ),
     (["--version", "v2.26.1", "BUG-9999"], "fixed_in_restamp.bug_not_found", False),
     (["--version", "v2.26.1", "BUG-0005"], "fixed_in_restamp.bug_ambiguous", False),
 ]
@@ -307,8 +321,14 @@ _MODULE_REFUSALS = [
     ("args", "error_key", "reruns_script"),
     _MODULE_REFUSALS,
     ids=[
-        "version-missing", "version-malformed", "no-bugs-named", "replace-from-malformed",
-        "replace-from-mismatch-rerun", "replace-from-mismatch-inspect", "bug-not-found", "bug-ambiguous",
+        "version-missing",
+        "version-malformed",
+        "no-bugs-named",
+        "replace-from-malformed",
+        "replace-from-mismatch-rerun",
+        "replace-from-mismatch-inspect",
+        "bug-not-found",
+        "bug-ambiguous",
     ],
 )
 def test_every_module_remedy_names_the_installed_script(
@@ -432,8 +452,7 @@ class TestCorrectionMode:
 
         result = _run(
             root,
-            ["--project", _PROJECT, "--version", _RIGHT, "--replace-from", _WRONG,
-             "BUG-0011", "BUG-0001", "BUG-0004"],
+            ["--project", _PROJECT, "--version", _RIGHT, "--replace-from", _WRONG, "BUG-0011", "BUG-0001", "BUG-0004"],
             tmp_path=tmp_path,
         )
 
@@ -453,8 +472,7 @@ class TestCorrectionMode:
         # bug carries v1.0.0, which is neither empty nor the named wrong version.
         result = _run(
             root,
-            ["--project", _PROJECT, "--version", _RIGHT, "--replace-from", _WRONG,
-             "BUG-0011", "BUG-0003"],
+            ["--project", _PROJECT, "--version", _RIGHT, "--replace-from", _WRONG, "BUG-0011", "BUG-0003"],
             tmp_path=tmp_path,
         )
 
@@ -464,8 +482,14 @@ class TestCorrectionMode:
         assert "\nmessage: " in result.stderr and "\nremedy:  " in result.stderr, result.stderr
         # The remedy re-runs the correction on the bugs that do qualify.
         assert _remedy_words(result.stderr) == [
-            _installed_script(root), "--project", _PROJECT, "--version", _RIGHT,
-            "--replace-from", _WRONG, "BUG-0011-shipped-earlier",
+            _installed_script(root),
+            "--project",
+            _PROJECT,
+            "--version",
+            _RIGHT,
+            "--replace-from",
+            _WRONG,
+            "BUG-0011-shipped-earlier",
         ], result.stderr
         assert "replaced" not in result.stdout and "stamped" not in result.stdout, result.stdout
         assert _snapshot(bugs) == before
@@ -523,9 +547,7 @@ def test_replace_fixed_in_swaps_only_the_value(tmp_path: pathlib.Path) -> None:
     path.write_text(original, encoding="utf-8")
 
     assert replace_fixed_in(path, "v2.26.4", "v2.26.1") is True
-    assert path.read_text(encoding="utf-8") == original.replace(
-        "\nv2.26.4  \n", "\nv2.26.1  \n"
-    )
+    assert path.read_text(encoding="utf-8") == original.replace("\nv2.26.4  \n", "\nv2.26.1  \n")
 
 
 @pytest.mark.parametrize("fixed_in", ["", "v2.26.2", "v2.26.40"])

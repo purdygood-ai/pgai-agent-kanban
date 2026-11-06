@@ -72,7 +72,12 @@ def _run_cli(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -95,10 +100,7 @@ def test_identical_reports_return_zero_and_say_so(tmp_path: pathlib.Path) -> Non
 
     assert rc == 0
     assert text == (
-        "Forward order:  4 tests collected\n"
-        "Reversed order: 4 tests collected\n"
-        "\n"
-        f"{_NO_DIFFERENCE}\n"
+        "Forward order:  4 tests collected\n" "Reversed order: 4 tests collected\n" "\n" f"{_NO_DIFFERENCE}\n"
     )
 
 

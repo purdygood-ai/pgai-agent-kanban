@@ -105,7 +105,9 @@ pytestmark = pytest.mark.skipif(
 def test_liveness_record_carries_the_start_time_and_boot_id_and_reads_held(
     tmp_path: pathlib.Path, live_pid: int
 ) -> None:
-    out = _bash(tmp_path, f'task_liveness_record "{_TASK}" claude {live_pid} dispatch\ntask_liveness_verdict "{_TASK}"\n')
+    out = _bash(
+        tmp_path, f'task_liveness_record "{_TASK}" claude {live_pid} dispatch\ntask_liveness_verdict "{_TASK}"\n'
+    )
 
     record = (tmp_path / "root" / "locks" / "task-liveness" / f"{_TASK}.record").read_text(encoding="utf-8")
     assert f"pid_start={_start_time(live_pid)}\n" in record, record

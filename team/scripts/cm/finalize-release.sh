@@ -66,13 +66,13 @@
 #                       from the project's project.cfg dev_tree_path)
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Source the temp-root wrapper (Step 2b's polish set-aside patch path) ---
 # Resolved from this script's own location, so it is the copy shipped beside
 # it in the repo and the installed layout alike. A missing copy refuses before
 # anything is read or pushed rather than guessing a root of its own.
-_FINALIZE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+_FINALIZE_LIB_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib" && pwd)"
 _FINALIZE_TEMP_SH="${_FINALIZE_LIB_DIR}/temp.sh"
 if [[ ! -f "$_FINALIZE_TEMP_SH" ]]; then
   # shellcheck source=../lib/error_contract.sh
@@ -97,24 +97,24 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT"
 
 # --- Source project path helpers ---
 # shellcheck source=lib/project_paths.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/project_paths.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/project_paths.sh"
 
 # --- Source version stamp helper for git_describe_tag_pattern ---
 # shellcheck source=lib/version_stamp.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/version_stamp.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/version_stamp.sh"
 
 # --- Source the shared Python invocation helper ---
 # shellcheck source=lib/pp_run_ops.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/pp_run_ops.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/pp_run_ops.sh"
 
 # --- Source the same-directory atomic replace (Step 2b's CHANGELOG.md) ---
 # shellcheck source=lib/atomic_write.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/atomic_write.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/atomic_write.sh"
 
 set -euo pipefail
 
@@ -260,23 +260,12 @@ fi
 # --- Resolve REPO_ROOT from project.cfg dev_tree_path ---
 # REPO_ROOT may be overridden by the environment; otherwise derive from project.cfg.
 if [[ -z "${REPO_ROOT:-}" ]]; then
-  pp_load_config "$PROJECT_NAME" || {
-    echo "ERROR: could not load project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Expected: $(pp_project_root "$PROJECT_NAME" 2>/dev/null || echo "<unresolvable>")/project.cfg" >&2
-    # BLOCK-WORTHY: an unloadable project.cfg leaves REPO_ROOT unknown --
-    # finalize-release cannot push to a dev tree it cannot locate.
-    # CENSUS-ANCHOR: cm-finalize-release-config-unloadable-01
-    exit 1
-  }
-  REPO_ROOT="${PP_dev_tree_path:-}"
-  if [[ -z "$REPO_ROOT" ]]; then
-    echo "ERROR: dev_tree_path is not set in project.cfg for project '$PROJECT_NAME'" >&2
-    echo "  Add 'dev_tree_path=<path>' to $(pp_project_root "$PROJECT_NAME")/project.cfg" >&2
-    # BLOCK-WORTHY: same reasoning as cm-finalize-release-config-unloadable-01
-    # -- a blank dev_tree_path is as unusable as a missing project.cfg.
-    # CENSUS-ANCHOR: cm-finalize-release-dev-tree-path-unset-01
-    exit 1
-  fi
+  # BLOCK-WORTHY: an unloadable project.cfg, or one naming no dev_tree_path,
+  # leaves REPO_ROOT unknown -- finalize-release cannot push to a dev tree it
+  # cannot locate. pp_load_project_repo_root has named which.
+  # CENSUS-ANCHOR: cm-finalize-release-repo-root-01
+  pp_load_project_repo_root "$PROJECT_NAME" || exit 1
+  REPO_ROOT="$PP_REPO_ROOT"
 fi
 
 # --- Resolve MAIN_BRANCH via pp_prefix_branch ---

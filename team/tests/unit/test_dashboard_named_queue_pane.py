@@ -51,7 +51,9 @@ def task_id_pattern() -> str:
     """The canonical task-ID shape, as task_ids.sh prints it."""
     result = subprocess.run(
         ["bash", "-c", f'source "{_TASK_IDS_SH}"\nkanban_task_id_pattern'],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
@@ -86,7 +88,7 @@ class _Root:
         body = "".join(f"[project:{name}]\npriority={index}\n\n" for index, name in enumerate(projects, 1))
         (self.root / "projects.cfg").write_text(body, encoding="utf-8")
 
-    def run(self, *args: str, project_name: "str | None" = None) -> subprocess.CompletedProcess:
+    def run(self, *args: str, project_name: str | None = None) -> subprocess.CompletedProcess:
         extra = {
             "KANBAN_ROOT": str(self.root),
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
@@ -96,10 +98,17 @@ class _Root:
         if project_name is not None:
             extra["PGAI_PROJECT_NAME"] = project_name
         env = build_scrubbed_env(
-            home_dir=self.home, extra_path_dirs=[pathlib.Path(sys.executable).parent], extra_env=extra,
+            home_dir=self.home,
+            extra_path_dirs=[pathlib.Path(sys.executable).parent],
+            extra_env=extra,
         )
         return subprocess.run(
-            [str(_QUEUE_PANE), *args], capture_output=True, text=True, env=env, cwd=str(self.root), timeout=60,
+            [str(_QUEUE_PANE), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(self.root),
+            timeout=60,
         )
 
 
@@ -193,7 +202,11 @@ def test_renderer_lists_current_and_legacy_ids_and_skips_other_lines(tmp_path, t
     tasks = tmp_path / "tasks"
     tasks.mkdir()
     text = named_queue_pane.render_named_queue(
-        queue, tasks, "coder", task_id_pattern, now=datetime.datetime(2026, 1, 1, 12, 0, 0),
+        queue,
+        tasks,
+        "coder",
+        task_id_pattern,
+        now=datetime.datetime(2026, 1, 1, 12, 0, 0),
     )
     assert text.splitlines() == [
         "=== coder ===  1 done, 1 pending",
@@ -216,7 +229,7 @@ def test_waiting_entry_lists_unmet_prerequisites_in_either_id_form(kr, task_id_p
     text = named_queue_pane.render_named_queue(tasks / "queues" / "coder_backlog.md", tasks, "coder", task_id_pattern)
     lines = text.splitlines()
     start = lines.index(f"  [WAITING] {waiting_id}")
-    assert lines[start + 1:start + 4] == [
+    assert lines[start + 1 : start + 4] == [
         "    waiting on:",
         f"      [WORKING] {_CURRENT_ID}",
         f"      [BACKLOG] {_LEGACY_ID}",
@@ -239,7 +252,11 @@ def test_renderer_lists_and_counts_an_empty_bracket_entry_as_pending(tmp_path, t
     tasks = tmp_path / "tasks"
     tasks.mkdir()
     text = named_queue_pane.render_named_queue(
-        queue, tasks, "coder", task_id_pattern, now=datetime.datetime(2026, 1, 1, 12, 0, 0),
+        queue,
+        tasks,
+        "coder",
+        task_id_pattern,
+        now=datetime.datetime(2026, 1, 1, 12, 0, 0),
     )
     lines = text.splitlines()
     assert lines[0] == "=== coder ===  1 done, 1 working, 2 pending", text

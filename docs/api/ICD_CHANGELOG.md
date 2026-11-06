@@ -48,6 +48,59 @@ objects of two adjacent baselines.
 
 ---
 
+## 1.23.0
+
+`POST /operations/reset` gains an optional request field that deletes an
+agent task's feature branch even when it holds unmerged commits. Additive
+minor bump over 1.22.0: no route was added or removed, one optional request
+field was added to an existing route, no field was removed, renamed or made
+required, and no response schema changed.
+
+### Routes added
+
+None.
+
+### Existing routes extended (additive)
+
+- **`POST /operations/reset`** (`reset`, action; body `ResetBody`, response
+  `DualChannelShellEnvelope`) — new optional body field `discard_branch`
+  (boolean, default `false`), the REST twin of `reset.sh --discard-branch`.
+  Without it, an agent-task reset whose feature branch holds commits no other
+  branch has keeps the branch, names its tip and commit count in `stderr`,
+  keeps the task's `logs/progress.log`, and leaves the task to resume from
+  the branch on its next dispatch; with it the branch is deleted and
+  `stderr` reads `discarding N commits at <hash>`. A fully merged branch is
+  deleted either way. Ignored for intake resets.
+
+## 1.22.0
+
+The skill staging directory over HTTP: one read route. Additive minor bump
+over 1.21.3: one route was added, no route was removed, no request or
+response field was added to, removed from or renamed on an existing route,
+and no response schema changed.
+
+### Routes added
+
+- **`GET /skills`** (`install-skills`; response `SkillsResponse`, refusal
+  `SkillsRefusal`) — the skills in `<kanban_root>/skills/<provider>/`,
+  `{source, providers, warnings}`, each provider `{provider, home, skills}`
+  and each skill `{name, state, origin}` with `state` one of `new`, `same`,
+  `changed` or `invalid` against that provider's skill home and `origin`
+  `shipped` or `operator-added`; an `invalid` skill also carries `error`
+  and `message`. Read through
+  `pgai_agent_kanban.lib.skills_install.list_skills`, the module
+  `install-skills.sh --list --json` prints. No staging directory answers
+  200 with every provider's `skills` empty. A staging layout the module
+  refuses answers 422 `{error, message, remedy, warnings}`
+  (`skills_install.flat_needs_one_provider`,
+  `skills_install.source_missing`,
+  `skills_install.shipped_manifest_unreadable`). The route takes no query
+  parameters.
+
+### Existing routes extended (additive)
+
+None.
+
 ## 1.21.3
 
 Description-only patch bump over 1.21.2. The description of

@@ -6,6 +6,30 @@
 
 ---
 
+## v3.5.0 — 2026-11-07
+
+### Implemented
+- **Operator window: workbench pane.** Window 1 now carries a second, tall interactive shell on the far right, beside the board and the command line. Its width is `[dashboard] operator_workbench_pct` (percent of the window, default 40; `0` removes it). When the window is narrower than `operator_workbench_min_cols` (default 160), or a board column would get fewer than 15 columns beside it, the workbench is left out; a client that attaches from a narrower terminal, or a resize, moves it to its own window named `workbench` until the window is wide enough again.
+- **Operator window: one AGENTS column.** By default the board shows BUGS, PRIORITIES, REQUIREMENTS and one AGENTS column listing every PM, CODER, WRITER, TESTER and CM task, newest first per project. `[dashboard] operator_board_agents = split` restores the five role columns. The visibility window keeps its eight columns either way.
+- **Operator skills.** The repository ships one skill per assistant CLI, staged under `skills/claude/pgai-agent-kanban/` and `skills/codex/pgai-agent-kanban/` in the kanban root. `scripts/install-skills.sh` copies every staged skill into the Claude Code and Codex skill homes; `--list` shows each skill as `new`, `same`, `changed` or `invalid` per provider, `--dry-run` prints the plan, `--force` overwrites a changed copy, `--dir` and `--provider` install your own skills from another directory. Install removes nothing and skips a provider whose CLI is not on `PATH`. `GET /skills` lists the staging directory over REST.
+- **Reset keeps unmerged work.** `scripts/reset.sh` on a task whose feature branch holds commits no other ref reaches now keeps the branch and the progress log, prints the tip and commit count, and marks the task to resume from that branch on its next dispatch. `--discard-branch` deletes the branch instead, warning how many commits it drops. `--force` alone never discards a branch. The wake's stale-active sweep keeps an orphaned task's branch the same way instead of force-deleting it.
+- **Release hooks are bounded.** Every pre-squash, pre-tag and post-tag hook runs in its own process group under `[release] hook_timeout_seconds` (default 900). Past the limit the whole group, including anything the hook forked, gets SIGTERM and then SIGKILL after 5 seconds, and the hook counts as failed.
+- **OVERWATCH verbs are bounded.** The cancel, unwind and release verbs the decision wake runs are limited by `[overwatch] verb_timeout_seconds` (default 3600) in their own process group; a verb that overruns is recorded as failed and the wake continues.
+- **Six runtime knobs moved into `kanban.cfg`.** `[discovery] settle_seconds` and `reject_threshold`, `[cleanup] task_retention_days`, `[verify] deep_verify_freshness_window_days`, `[dashboard] status_max_width` and `arm_timeout_seconds`. The matching `PGAI_*` environment variables still win when set.
+- **Planner ticket sizing.** Hygiene ride-alongs carried on a bug bundle are grouped by area into tickets of at most four items each, however many tickets that takes, instead of being packed into at most two tickets. A ticket is one agent session with one time budget; small tickets finish, show on the board and verify on their own.
+- **Entry scripts work through a symlink.** Every operator script under `scripts/` finds its library directory from the resolved script path, so a symlink to it on your `PATH` runs like the real file.
+- **The last-released version survives a missing tag.** When a project's dev tree holds no release tag carrying the project's branch prefix, the resolver answers from `release-state.md`'s `## Last Released` instead of `v0.0.0`. Before, deleting the tag made the board show every finished requirement as unreleased and would have numbered the next bundle from `v0.0.0`.
+
+### Fixed
+None
+
+### Known Issues
+None
+
+*Details: [release-notes/v3.5.0.md](release-notes/v3.5.0.md)*
+
+---
+
 ## v3.0.0 — 2026-10-28
 
 ### Implemented
@@ -65,7 +89,8 @@ KI-2.42.0.2 — `team/verification/verify_quarantine_visibility.sh` exits 1 with
 None
 
 ### Known Issues
-None
+KI-2.41.0.1 — The bare-/tmp litter report in `wake_tmp_litter_check_and_report` (`team/scripts/lib/temp.sh`) builds its remedy as `rm -f ${litter[*]}`, joining the entry paths with spaces and quoting none of them; affects v2.41.0 · fixed in v3.5.0
+KI-2.41.0.2 — The header comment of `wake_tmp_litter_check_and_report` in `team/scripts/lib/temp.sh` states that "every report (status.md, the log line, and the OVERWATCH actions.log entry) carries a runnable `rm -f` remedy", but the actions.log record the function writes contains no remedy; affects v2.41.0 · fixed in v3.5.0
 
 *Details: [release-notes/v2.41.0.md](release-notes/v2.41.0.md)*
 
@@ -288,7 +313,13 @@ this release:
 - KI-1.0.0.5 — resolved
 
 ### Known Issues
-None
+KI-1.23.0.2 — `_wf_resolve_workflows_root` in `team/scripts/lib/workflow.sh` fails with "workflow dispatcher: no workflows root found" in an installed kanban layout when neither `PGAI_AGENT_KANBAN_ROOT_PATH` nor `TEAM_ROOT` is set, because its final fallback computes `<lib dir>/../workflows` (`scripts/workflows`) instead of the sibling of `scripts/` its own comment describes; affects v1.23.0 · fixed in v3.5.0
+KI-1.23.0.3 — `wake_tmp_litter_check_and_report` (`team/scripts/lib/temp.sh`) appends a `## Temp Litter` section to the task's status.md with `printf 'created %s — SOP Temporary File Convention\n'` and writes its wake-log summary line with the entry names unflattened; affects v1.23.0 · fixed in v3.5.0
+KI-1.23.0.4 — The bare-/tmp litter report names a pre-existing /tmp entry whose name contains a line feed as session litter, with an `rm -f` remedy for it, whenever that entry is modified during the session; affects v1.23.0 · fixed in v3.5.0
+KI-1.23.0.5 — The bare-/tmp litter report never reports a top-level /tmp entry whose name starts with a dot, although its header says it diffs all top-level entries against the pre-dispatch snapshot; affects v1.23.0 · fixed in v3.5.0
+KI-1.23.0.6 — The OVERWATCH bare-/tmp litter check reports a pre-existing /tmp entry whose basename contains a line feed as session litter, and writes the name to its dedup file split across lines; affects v1.23.0 · fixed in v3.5.0
+KI-1.23.0.7 — The OVERWATCH bare-/tmp litter check never reports a top-level /tmp entry whose name begins with a dot, although its header says it scans /tmp top-level entries; affects v1.23.0 · fixed in v3.5.0
+KI-1.23.0.8 — The OVERWATCH bare-/tmp litter check (Check 13) never discovers a pre-dispatch snapshot written by the wake, so every sweep logs `skipped-no-snapshots` and litter left by a crashed session is never reported; affects v1.23.0 · fixed in v3.5.0
 
 *Details: [release-notes/v1.23.0.md](release-notes/v1.23.0.md)*
 
@@ -303,7 +334,8 @@ None (bugfix release)
 None
 
 ### Known Issues
-None
+KI-1.0.0.6 — `team/scripts/dashboard/verify-window0-geometry.sh` cannot find the queues pane through its grandchild search whenever the child PID is narrower than `ps`'s pid column, so it prints "WARNING: No pane found with a child process containing '--mode queues'" and falls back to the geometry-only check even when the queues process is running; affects v1.0.0 · fixed in v3.5.0
+KI-1.0.0.7 — The last-released resolver answers `v0.0.0` for a code project whose dev tree holds no release tag with the project's branch prefix, although that project's `release-state.md` states `## Last Released` as a valid version, so the dashboard renders every done requirement as unreleased and discovery numbers the next bundle from `v0.0.0`; affects v1.0.0 · fixed in v3.5.0
 
 *Details: [release-notes/v1.0.0.md](release-notes/v1.0.0.md)*
 

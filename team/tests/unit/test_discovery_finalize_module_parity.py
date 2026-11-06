@@ -89,19 +89,13 @@ def _script(impl: str, calls: str) -> str:
     the reference so both implementations see the same collaborators.
     """
     reference = f'source "{_REFERENCE_LIB}"\n' if impl == "reference" else ""
-    return (
-        textwrap.dedent(f"""\
+    return textwrap.dedent(f"""\
             #!/usr/bin/env bash
             set -uo pipefail
             log() {{ printf 'LOG: %s\\n' "$*"; }}
             source "{_DISCOVERY_STATE}"
             source "{_FINALIZE}"
-        """)
-        + reference
-        + "resolve_dominant_output_token_model() { echo model-b; }\n"
-        + calls
-        + "\n"
-    )
+        """) + reference + "resolve_dominant_output_token_model() { echo model-b; }\n" + calls + "\n"
 
 
 def _run(impl: str, root: pathlib.Path, files: dict[str, str], calls: str) -> dict:
@@ -130,9 +124,7 @@ def _run(impl: str, root: pathlib.Path, files: dict[str, str], calls: str) -> di
         env=env,
         cwd=str(root),
     )
-    snapshot = {
-        str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()
-    }
+    snapshot = {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
     return {"rc": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr, "files": snapshot}
 
 
@@ -152,9 +144,9 @@ def _assert_same(module: dict, reference: dict) -> None:
 
 
 def _assert_differs(module: dict, reference: dict, field: str = "files") -> None:
-    assert module[field] != reference[field], (
-        f"expected the module-backed {field} to differ from the reference here\n{module[field]!r}"
-    )
+    assert (
+        module[field] != reference[field]
+    ), f"expected the module-backed {field} to differ from the reference here\n{module[field]!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -357,13 +349,9 @@ def test_cache_flip_matches_reference(tmp_path: pathlib.Path, variant: str) -> N
 
 
 def test_cache_flip_creates_a_missing_cache_and_directory_like_reference(tmp_path: pathlib.Path) -> None:
-    module, reference = _both(
-        tmp_path, {}, f'_disc_mark_cache_bundled new/dir/bug_backlog.md {_ITEM}; echo "RC=$?"'
-    )
+    module, reference = _both(tmp_path, {}, f'_disc_mark_cache_bundled new/dir/bug_backlog.md {_ITEM}; echo "RC=$?"')
     _assert_same(module, reference)
-    assert module["files"]["new/dir/bug_backlog.md"] == (
-        f"# Backlog Cache\n\n## Queue\n\n- [x] {_ITEM}\n".encode()
-    )
+    assert module["files"]["new/dir/bug_backlog.md"] == (f"# Backlog Cache\n\n## Queue\n\n- [x] {_ITEM}\n".encode())
 
 
 def test_cache_flip_is_idempotent_like_reference(tmp_path: pathlib.Path) -> None:
@@ -405,7 +393,7 @@ def test_summary_append_matches_reference(tmp_path: pathlib.Path, variant: str) 
 
 
 def test_summary_append_twice_matches_reference(tmp_path: pathlib.Path) -> None:
-    calls = '_wd_append_summary_finding status.md first\n_wd_append_summary_finding status.md second'
+    calls = "_wd_append_summary_finding status.md first\n_wd_append_summary_finding status.md second"
     module, reference = _both(tmp_path, {"status.md": _SUMMARY_VARIANTS["empty-then-next"]}, calls)
     _assert_same(module, reference)
 
@@ -424,9 +412,7 @@ def test_inline_status_heading_is_rewritten_in_place(tmp_path: pathlib.Path) -> 
 
 def test_empty_bundle_field_reads_empty_not_the_next_heading(tmp_path: pathlib.Path) -> None:
     text = "# R\n\n## PM Task\n\n## Target Version\n\nv9.9.9\n"
-    module, reference = _both(
-        tmp_path, {"b.md": text}, 'echo "[$(_disc_read_bundle_field b.md "PM Task")] RC=$?"'
-    )
+    module, reference = _both(tmp_path, {"b.md": text}, 'echo "[$(_disc_read_bundle_field b.md "PM Task")] RC=$?"')
     assert module["stdout"] == "[] RC=0\n"
     assert reference["stdout"] == "[## Target Version] RC=0\n"
 
@@ -442,9 +428,7 @@ def test_bold_bundle_value_reads_as_the_text_inside(tmp_path: pathlib.Path) -> N
 def test_pm_task_none_with_trailing_spaces_is_replaced_whole(tmp_path: pathlib.Path) -> None:
     text = "# R\n\n## Status\n\nopen\n\n## PM Task\n\nnone  \n\n## Notes\nn\n"
     module, reference = _both(tmp_path, {"b.md": text}, f"_disc_update_bundle_pm_queued b.md {_PM_ID}")
-    assert module["files"]["b.md"] == (
-        f"# R\n\n## Status\nrunning\n\n## PM Task\n\n{_PM_ID}\n\n## Notes\nn\n".encode()
-    )
+    assert module["files"]["b.md"] == (f"# R\n\n## Status\nrunning\n\n## PM Task\n\n{_PM_ID}\n\n## Notes\nn\n".encode())
     # The heredoc matched only "none" and left the trailing spaces on a line of their own.
     assert f"{_PM_ID}\n  \n".encode() in reference["files"]["b.md"]
 

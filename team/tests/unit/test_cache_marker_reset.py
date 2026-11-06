@@ -64,7 +64,12 @@ def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProce
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, "--", *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -127,8 +132,13 @@ def _reset_step(tmp_path: pathlib.Path, cache: pathlib.Path, item_id: str) -> su
     """)
     env = build_scrubbed_env(home_dir=tmp_path / "home")
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(tmp_path), timeout=60, check=False,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 

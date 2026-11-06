@@ -339,7 +339,7 @@ V	why	active	scripts/why.sh	project|details|help	no	read-only	GET	/verdicts	NONE
 V	release-locks	active	scripts/release-locks.sh	release|force|help	yes	idempotent	POST	/operations/release-locks	ReleaseLocksBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.locks.release_lock
 V	unwind-rc	active	scripts/unwind-rc.sh	project|key|dry-run|confirm|force|help	yes	idempotent	POST	/operations/unwind-rc	UnwindRcBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.cm.unwind.unwind_rc
 V	verify-rc-state	active	scripts/verify-rc-state.sh	help|verbose	no	read-only	GET	/verify-rc-state	NONE	read	ShellEnvelope	module:pgai_agent_kanban.ops.rc_state.verify_rc_state
-V	reset	active	scripts/reset.sh	project|key|keep-artifacts|force|help	yes	idempotent	POST	/operations/reset	ResetBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.reset_item
+V	reset	active	scripts/reset.sh	project|key|keep-artifacts|force|discard-branch|help	yes	idempotent	POST	/operations/reset	ResetBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.reset_item
 V	close	active	scripts/close.sh	project|key|state|note|dry-run|help	yes	idempotent	POST	/operations/close	CloseBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.close_item
 V	wontdo	active	scripts/wontdo.sh	project|key|help	yes	idempotent	POST	/operations/wontdo	WontdoBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.wontdo_item
 V	delete	active	scripts/delete.sh	project|key|force|dry-run|help	yes	non-idempotent	POST	/operations/delete	DeleteBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.ops.write.delete_item
@@ -379,3 +379,13 @@ V	archive	active	scripts/archive.sh	project|dry-run|count|restore|reconcile-queu
 # inbox.sh close has no REST twin. A second close of the same entry
 # refuses, so the row is "non-idempotent".
 V	inbox	active	scripts/inbox.sh	project|id|answer|help	yes	non-idempotent	POST	/operations/inbox-answer	InboxAnswerBody	action	DualChannelShellEnvelope	module:pgai_agent_kanban.overwatch.inbox.answer_entry
+# install-skills copies the skills under a source directory into the
+# provider CLI skill homes; its REST twin is the listing, GET /skills, which
+# calls skills_install.list_skills in process -- the function
+# install-skills.sh --list reaches through pp_run_ops -- so --list --json
+# and the route return one object. The class is "read" because the twin is
+# that GET listing, and the read-parity ledger proves it; no HTTP route
+# installs skills. mutates/idempotence describe the script itself: an
+# install writes into the provider homes, and a second run with the same
+# arguments reports every skill "same", writes nothing and exits 0.
+V	install-skills	active	scripts/install-skills.sh	dir|provider|claude-home|codex-home|list|json|dry-run|force|help	yes	idempotent	GET	/skills	NONE	read	SkillsResponse	module:pgai_agent_kanban.lib.skills_install.list_skills

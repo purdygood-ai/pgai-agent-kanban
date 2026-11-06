@@ -8,9 +8,9 @@
 #   │ HEADER (top ~11% height)                │                              │
 #   ├─────────────────────────────────────────┤ QUEUES / per-project status  │
 #   │ LIVE LOGS (middle ~40% — logs.sh)       │ (full height)                │
-#   ├─────────────────────────────────────────┤ watch show-multi queues      │
+#   ├─────────────────────────────────────────┤ show-multi --mode queues     │
 #   │ PROGRESS (full width of left column)    │ all projects' 5-agent        │
-#   │ watch show-multi --mode progress        │ breakdown + working task     │
+#   │ show-multi --mode progress              │ breakdown + working task     │
 #   └─────────────────┴───────────────────────┴──────────────────────────────┘
 #
 # QUEUES right pane is full-height so all registered projects fit without
@@ -21,25 +21,42 @@
 # Auxiliary windows (in creation order — see team/config/dashboard_windows.census
 # for the authoritative, machine-readable window/pane list this comment
 # summarizes in prose; the census is what create.sh is checked against):
-#   operator       — the visibility window plus a command line, three stacked rows:
+#   operator       — the board plus a command line, three stacked rows,
+#                           and a workbench column beside the top two:
 #                           Rationale: inside a container attach there is no "just open another
 #                           terminal" — this window is the container operator's whole workspace:
 #                           watch the board and run commands, one screen.
-#                           Top row (board): the visibility window's eight columns at the
-#                             same widths, running the same column-render.sh commands.
-#                           Middle row (cmdline, 15% height, min 3 rows, full width):
+#                           Top row (board), chosen by [dashboard] operator_board_agents:
+#                             merged (default) — BUGS, PRIORITIES, REQUIREMENTS and one
+#                               AGENTS column listing every task of the five role backlogs
+#                               (column-render.sh --column-type agents);
+#                             split — the visibility window's eight columns, running the
+#                               same column-render.sh commands.
+#                           Middle row (cmdline, 15% height, min 3 rows, board width):
 #                             interactive bash login shell with shell-env sourced,
 #                             cwd = $KANBAN_ROOT; pane title "operator".
-#                           Bottom row: the visibility window's 1-row legend bar.
+#                           Right column (workbench, [dashboard] operator_workbench_pct
+#                             of the width, default 40; board and cmdline height): the
+#                             same interactive shell, pane title "workbench". Not built
+#                             when the percentage is 0, the window is narrower than
+#                             [dashboard] operator_workbench_min_cols (default 160), or a
+#                             board column would get fewer than 15 columns beside it.
+#                             The same test runs again whenever the window changes size
+#                             (a client attaching at another width, a terminal resize):
+#                             too narrow, the workbench moves to its own window named
+#                             "workbench" and the board takes the full width; wide
+#                             enough, it moves back (dashboard/board-reflow.sh).
+#                           Bottom row: the visibility window's 1-row legend bar, full width.
 #                           Both windows are built by lib/board_window.sh's
 #                           dashboard_build_board_window, so their columns cannot drift.
-#   visibility     — unified 3+5 visibility window (Dashboard 2.1)
+#   visibility     — unified 3+5 visibility window (Dashboard 2.1); always the
+#                           eight columns, whatever operator_board_agents says
 #                           LEFT region (~40%): bugs / priority / requirements
 #                           RIGHT region (~60%): pm / coder / writer / tester / cm
 #                           Side-by-side horizontal split
-#                           Each pane runs: watch -c -n <interval> dashboard/column-render.sh <args>
+#                           Each pane runs: cadence-loop.sh --interval <interval> -- dashboard/column-render.sh <args>
 #                           Designed for 120-char-wide terminals
-#   attention      — watch dashboard/attention.sh (BLOCKED tasks)
+#   attention      — cadence-loop.sh -- dashboard/attention.sh (BLOCKED tasks)
 #   schedule       — cron/schedule content, split out of window "main"'s former
 #                           CRON FIRINGS pane into its own window: two
 #                           full-width bands stacked top to bottom.
@@ -143,23 +160,34 @@
 #                           SCHED_EVENT_MIN_H) and exit before any tmux
 #                           session is touched
 #   --kanban-root           Override the kanban root path
-#   --session               Override the tmux session name (default: pgai-kanban-dashboard)
+#   --session               Override the tmux session name. Resolved as --session,
+#                           then PGAI_DASHBOARD_SESSION_NAME, then kanban.cfg
+#                           [dashboard] session_name, then pgai-kanban-dashboard
 #   -h, --help              Show this help and exit
 #
 # Environment variables:
 #   PGAI_DASHBOARD_REFRESH_SECONDS  Refresh interval in seconds (default: 5, range: 1-3600)
+#   PGAI_DASHBOARD_SESSION_NAME     tmux session name when --session is not given
+#                                   (outranks kanban.cfg [dashboard] session_name)
+#   DASHBOARD_ROWS_PER_COLUMN       Rows each board column renders; outranks kanban.cfg
+#                                   [dashboard] rows_per_column (default: 21)
 #
 # Requirements:
 #   tmux >= 3.1
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
@@ -197,12 +225,21 @@ source "${SCRIPT_DIR}/lib/pane_readiness.sh"
 source "${SCRIPT_DIR}/lib/activation_hook.sh"
 # shellcheck source=lib/schedule_layout.sh
 source "${SCRIPT_DIR}/lib/schedule_layout.sh"
+# The one session-name resolution create, attach, detach and kill share.
+# shellcheck source=lib/session_name.sh
+source "${SCRIPT_DIR}/lib/session_name.sh"
 
 # Source the shared board-window builder: the one split ladder and
 # absolute-width resize pass both the operator and visibility windows are
 # built from (see lib/board_window.sh's header for the sizing rules).
 # shellcheck source=lib/board_window.sh
 source "${SCRIPT_DIR}/lib/board_window.sh"
+
+# Source the operator shell start-up sequence: login shell, re-armed pane
+# signal trap, guarded ~/.bashrc, shell-env after it, screen clear, pane
+# title (see lib/operator_shell.sh's header for the ordering rules).
+# shellcheck source=lib/operator_shell.sh
+source "${SCRIPT_DIR}/lib/operator_shell.sh"
 
 # Source the dual-channel error-contract emitter for the all-armed timeout
 # refusal below (BLOCK-WORTHY; see that refusal site for the classification
@@ -214,7 +251,9 @@ source "${SCRIPT_DIR}/../lib/error_contract.sh"
 # Defaults
 # ---------------------------------------------------------------------------
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
-SESSION_NAME="pgai-kanban-dashboard"
+# The --session value; the session name itself is resolved after kanban.cfg
+# is known (dashboard_resolve_session_name, below).
+SESSION_FLAG=""
 NO_TMUX=false
 PRINT_SCHEDULE_FLOORS=false
 
@@ -243,16 +282,8 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --session)
-      SESSION_NAME="${2:-$SESSION_NAME}"
+      SESSION_FLAG="${2:-$SESSION_FLAG}"
       shift 2
-      ;;
-    -h|--help)
-      # The whole leading header is the usage text: description, layout
-      # notes, then the Usage:/Flags:/Environment/Requirements block.
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2
@@ -295,13 +326,20 @@ config_startup_prelude "$KANBAN_ROOT"
 # read_ini available via project_paths.sh (sourced above).
 # ---------------------------------------------------------------------------
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_DASHBOARD_SESSION_NAME="${PGAI_DASHBOARD_SESSION_NAME:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard session_name pgai-kanban-dashboard)}"
     export PGAI_DASHBOARD_REFRESH_SECONDS="${PGAI_DASHBOARD_REFRESH_SECONDS:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard refresh_seconds 5)}"
+    _raw_workbench_pct="$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard operator_workbench_pct "")"
+    _raw_workbench_min_cols="$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard operator_workbench_min_cols "")"
+    _raw_board_agents="$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard operator_board_agents merged)"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "${KANBAN_ROOT}/kanban.cfg")"
 fi
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
-# Allow session name override from kanban.cfg
-SESSION_NAME="${PGAI_DASHBOARD_SESSION_NAME:-$SESSION_NAME}"
+# Session name: --session, then PGAI_DASHBOARD_SESSION_NAME, then kanban.cfg
+# [dashboard] session_name, then the default (lib/session_name.sh). Exported
+# so every child this script starts sees the session it is building.
+SESSION_NAME="$(dashboard_resolve_session_name "$SESSION_FLAG" "$KANBAN_ROOT")"
+export PGAI_DASHBOARD_SESSION_NAME="$SESSION_NAME"
+unset SESSION_FLAG
 
 # ---------------------------------------------------------------------------
 # Refresh interval — PGAI_DASHBOARD_REFRESH_SECONDS (default: 5)
@@ -322,24 +360,90 @@ fi
 unset _raw_refresh _DEFAULT_REFRESH
 
 # ---------------------------------------------------------------------------
-# Rows per column — DASHBOARD_ROWS_PER_COLUMN (default: 13)
+# Operator workbench column — [dashboard] operator_workbench_pct (default 40)
+# and operator_workbench_min_cols (default 160), read from kanban.cfg above.
+# operator_workbench_pct is the workbench's share of the operator window's
+# width, a whole number 0-99; 0 builds no workbench and leaves the window
+# exactly as it is without one. operator_workbench_min_cols is the
+# narrow-window guard, a whole number 0-10000: a window narrower than it
+# gets no workbench (at creation the board builder prints one NOTICE line
+# naming both numbers); 0 turns the guard off. Independently of it, no
+# workbench is built where a board column would get fewer than 15 columns
+# beside it (one NOTICE line naming the width). The session is created
+# 220 columns wide; a client that attaches narrower, or a terminal resized
+# narrower, re-runs both tests (dashboard/board-reflow.sh). An invalid
+# value falls back to its default with one warning line naming the key.
+# ---------------------------------------------------------------------------
+_DEFAULT_WORKBENCH_PCT=40
+_raw_workbench_pct="${_raw_workbench_pct:-}"
+if [[ -z "$_raw_workbench_pct" ]]; then
+  OPERATOR_WORKBENCH_PCT=$_DEFAULT_WORKBENCH_PCT
+elif [[ "$_raw_workbench_pct" =~ ^[0-9]{1,3}$ ]] && [[ "$((10#$_raw_workbench_pct))" -le 99 ]]; then
+  OPERATOR_WORKBENCH_PCT=$((10#$_raw_workbench_pct))
+else
+  echo "WARNING: [dashboard] operator_workbench_pct='${_raw_workbench_pct}' is invalid (must be a whole number 0-99); defaulting to ${_DEFAULT_WORKBENCH_PCT}." >&2
+  OPERATOR_WORKBENCH_PCT=$_DEFAULT_WORKBENCH_PCT
+fi
+unset _raw_workbench_pct _DEFAULT_WORKBENCH_PCT
+
+_DEFAULT_WORKBENCH_MIN_COLS=160
+_raw_workbench_min_cols="${_raw_workbench_min_cols:-}"
+if [[ -z "$_raw_workbench_min_cols" ]]; then
+  OPERATOR_WORKBENCH_MIN_COLS=$_DEFAULT_WORKBENCH_MIN_COLS
+elif [[ "$_raw_workbench_min_cols" =~ ^[0-9]{1,5}$ ]] && [[ "$((10#$_raw_workbench_min_cols))" -le 10000 ]]; then
+  OPERATOR_WORKBENCH_MIN_COLS=$((10#$_raw_workbench_min_cols))
+else
+  echo "WARNING: [dashboard] operator_workbench_min_cols='${_raw_workbench_min_cols}' is invalid (must be a whole number 0-10000); defaulting to ${_DEFAULT_WORKBENCH_MIN_COLS}." >&2
+  OPERATOR_WORKBENCH_MIN_COLS=$_DEFAULT_WORKBENCH_MIN_COLS
+fi
+unset _raw_workbench_min_cols _DEFAULT_WORKBENCH_MIN_COLS
+
+# ---------------------------------------------------------------------------
+# Operator board column set — [dashboard] operator_board_agents (default
+# merged), read from kanban.cfg above. merged builds the operator window's
+# board as BUGS, PRIORITIES, REQUIREMENTS and one AGENTS column (3 + 1);
+# split builds the visibility window's eight columns (3 + 5). The
+# visibility window ignores the key. Absent or blank means merged, and the
+# value is matched case-insensitively; anything else falls back to merged
+# with one warning line naming the key.
+# ---------------------------------------------------------------------------
+_DEFAULT_BOARD_AGENTS=merged
+_raw_board_agents="${_raw_board_agents:-}"
+case "${_raw_board_agents,,}" in
+  "")
+    OPERATOR_BOARD_AGENTS=$_DEFAULT_BOARD_AGENTS
+    ;;
+  merged|split)
+    OPERATOR_BOARD_AGENTS="${_raw_board_agents,,}"
+    ;;
+  *)
+    echo "WARNING: [dashboard] operator_board_agents='${_raw_board_agents}' is invalid (must be merged or split); defaulting to ${_DEFAULT_BOARD_AGENTS}." >&2
+    OPERATOR_BOARD_AGENTS=$_DEFAULT_BOARD_AGENTS
+    ;;
+esac
+unset _raw_board_agents _DEFAULT_BOARD_AGENTS
+
+# ---------------------------------------------------------------------------
+# Rows per column — DASHBOARD_ROWS_PER_COLUMN, else kanban.cfg [dashboard]
+# rows_per_column (read above), else 21 — config_loader.sh's
+# config_dashboard_rows_per_column resolves it and holds the default.
 # Kanban-level (global) setting: controls how many items each column in the
 # unified visibility window renders.  Not a per-project setting.
 # Must be a positive integer.  Invalid values (non-integer, <=0) log a
-# warning and fall back to 13.
+# warning and fall back to the default.
 # ---------------------------------------------------------------------------
-_DEFAULT_ROWS=13
+_rows_default="$(config_dashboard_rows_per_column --default)"
 _raw_rows="${DASHBOARD_ROWS_PER_COLUMN:-}"
 if [[ -z "$_raw_rows" ]]; then
-  DASHBOARD_ROWS_PER_COLUMN=$_DEFAULT_ROWS
+  DASHBOARD_ROWS_PER_COLUMN=$_rows_default
 elif [[ "$_raw_rows" =~ ^[0-9]+$ ]] && [[ "$_raw_rows" -gt 0 ]]; then
   DASHBOARD_ROWS_PER_COLUMN=$_raw_rows
 else
-  echo "WARNING: DASHBOARD_ROWS_PER_COLUMN='${_raw_rows}' is invalid (must be a positive integer); defaulting to ${_DEFAULT_ROWS}." >&2
-  DASHBOARD_ROWS_PER_COLUMN=$_DEFAULT_ROWS
+  echo "WARNING: DASHBOARD_ROWS_PER_COLUMN / [dashboard] rows_per_column='${_raw_rows}' is invalid (must be a positive integer); defaulting to ${_rows_default}." >&2
+  DASHBOARD_ROWS_PER_COLUMN=$_rows_default
 fi
 export DASHBOARD_ROWS_PER_COLUMN
-unset _raw_rows _DEFAULT_ROWS
+unset _raw_rows _rows_default
 
 # ---------------------------------------------------------------------------
 # Right-column width percentage — sourced from the shared dashboard constant.
@@ -518,7 +622,7 @@ fi
 # band (status-band.sh) — see further below for both. Both are sized so the
 # FULL roster fits without a runtime "+N more" truncation marker (HEADER
 # tile) or a dropped agent row (list band) ever firing. Uses the same team/pm-agent/lib/cron_parser.py
-# next_firings() the renderers themselves call at watch-refresh time — never
+# next_firings() the renderers themselves call on every pane refresh — never
 # a hardcoded count, and never the pre-OVERWATCH literal five.
 # ---------------------------------------------------------------------------
 SCHEDULE_CRON_PARSER_LIB="${SCRIPT_DIR}/../../pm-agent/lib/cron_parser.py"
@@ -634,6 +738,23 @@ VIS_WRITER_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- 
 VIS_TESTER_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} ${_vis_queue_width} --label TESTER ${_all_proj_flags}"
 VIS_CM_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} ${_vis_queue_width} --label CM ${_all_proj_flags}"
 
+# Merged operator board (operator_board_agents = merged): the three input
+# columns, then one AGENTS column listing every task of the five role
+# backlogs (column-render.sh --column-type agents). The AGENTS render width
+# fits a project glyph, a space and a right-aligned CODER-YYYYMMDD-NNN key
+# with room to spare; at 220 columns beside the default 40% workbench the
+# builder makes the AGENTS pane 32 columns wide. The four commands declare
+# one width set that adds agents= to the input and queue widths, so
+# whichever of them builds a tick pre-renders the AGENTS column too, and the
+# other three print their slice without starting Python. The input commands
+# are the VIS_* ones above with only that --board-widths value changed.
+_op_agents_width=30
+_op_merged_proj_flags="--all-projects --kanban-root ${KANBAN_ROOT} --board-widths input=${_vis_input_width},queue=${_vis_queue_width},agents=${_op_agents_width}"
+OP_BUGS_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${_vis_render_script} input none none ${DASHBOARD_ROWS_PER_COLUMN} ${_vis_input_width} --label BUGS ${_op_merged_proj_flags}"
+OP_PRIORITY_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${_vis_render_script} input none none ${DASHBOARD_ROWS_PER_COLUMN} ${_vis_input_width} --label PRIORITIES ${_op_merged_proj_flags}"
+OP_REQUIREMENTS_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${_vis_render_script} input none none ${DASHBOARD_ROWS_PER_COLUMN} ${_vis_input_width} --label REQUIREMENTS ${_op_merged_proj_flags}"
+OP_AGENTS_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${_vis_render_script} queue none ${DASHBOARD_ROWS_PER_COLUMN} ${_op_agents_width} --label AGENTS --column-type agents ${_op_merged_proj_flags}"
+
 # Legend bar: persistent color legend beneath the board columns.
 # Runs under cadence-loop.sh (not watch) to preserve the 24-bit truecolor
 # sequences legend-render.sh emits for per-project color swatches.
@@ -686,7 +807,7 @@ HUMAN_REVIEW_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -
 # Beside Approvals; informs only, never approves or mutates state.
 AUTO_RESOLUTIONS_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/auto-resolutions.sh --kanban-root ${KANBAN_ROOT}"
 
-# Metrics window — right pane running watch against show-metrics.sh.
+# Metrics window — right pane running show-metrics.sh under cadence-loop.sh.
 # Shows historical RC metrics from history.csv (last 10 RCs): rc, wall time,
 # input/output/cache tokens, cache hit rate, task count.
 # Uses the same refresh interval as other dashboard panes.
@@ -744,7 +865,7 @@ tmux new-session -d -s "$SESSION_NAME" -n "main" -x "220" -y "50"
 # installation in lib/pane_readiness.sh's dashboard_pane_wrap_cmd is that
 # pane's literal first executed statement, ahead of env_bootstrap.sh
 # sourcing (which happens later, inside the invoked scripts) and ahead of
-# the watch/while-loop/shell command itself. See lib/pane_readiness.sh for
+# the cadence-loop.sh or shell command itself. See lib/pane_readiness.sh for
 # the full design and the empirical proof of the bug it closes.
 # ---------------------------------------------------------------------------
 PANE_ARMED_DIR="$(dashboard_pane_armed_dir "$KANBAN_ROOT" "$SESSION_NAME")"
@@ -759,14 +880,17 @@ find "$PANE_ARMED_DIR" -mindepth 1 -delete 2>/dev/null || true
 PANE_ARMED_LABELS=()
 
 # dashboard_send_armed_keys <pane-target-without-session> <inner-command> [--defer-marker]
-# Wraps <inner-command> via dashboard_pane_wrap_cmd and sends it to
+# Wraps <inner-command> via dashboard_pane_wrap_cmd (whose line already ends
+# with the typed-line source tag dashboard_typed_line appends) and sends it to
 # "${SESSION_NAME}:<pane-target>" as that pane's first command, recording
 # <pane-target> in PANE_ARMED_LABELS. This is the ONLY call site in this
 # file that types a pane's FIRST command — every window below routes its
 # initial per-pane command through this function so no pane can skip the
 # trap. A pane's SUBSEQUENT send-keys calls (e.g. the operator shell pane's
-# bashrc/shell-env re-source lines, typed into the shell after its first
-# command already installed the trap) use plain `tmux send-keys` directly —
+# bashrc/shell-env re-source lines in lib/operator_shell.sh, typed into
+# the shell after its first command already installed the trap) use
+# plain `tmux send-keys` directly, each line composed through
+# dashboard_typed_line so it carries the same source tag —
 # the ignored disposition this function's wrap installs survives fork(2)
 # and exec(2) (POSIX), so it is already in effect for anything that shell
 # goes on to run and does not need reinstalling.
@@ -793,23 +917,35 @@ dashboard_send_armed_keys() {
     PANE_ARMED_LABELS+=("$pane_target")
 }
 
-# dashboard_dispatch_board_panes <window>
+# dashboard_dispatch_board_panes <window> [<column_set>]
 # Sends the board's first commands to a window dashboard_build_board_window
-# (lib/board_window.sh) has just laid out: the eight column commands to
-# panes 0-7 and the legend command to the legend pane the builder
-# recorded in DASHBOARD_BOARD_LEGEND_PANE. The operator and visibility
-# windows both call this, so the two boards always run the same commands.
-# A shell row, when the window has one, is left for the caller to start.
+# (lib/board_window.sh) has just laid out with the same <column_set>, and
+# the legend command to the legend pane the builder recorded in
+# DASHBOARD_BOARD_LEGEND_PANE:
+#   split  (default) the eight column commands to panes 0-7 — BUGS,
+#          PRIORITIES, REQUIREMENTS, PM, CODER, WRITER, TESTER, CM
+#   merged the four column commands to panes 0-3 — BUGS, PRIORITIES,
+#          REQUIREMENTS, AGENTS
+# The operator and visibility windows both call this, so a board of either
+# column set always runs the same commands. A shell row or workbench, when
+# the window has one, is left for the caller to start.
 dashboard_dispatch_board_panes() {
-    local board_win="$1"
-    dashboard_send_armed_keys "${board_win}.0" "${VIS_BUGS_CMD}"
-    dashboard_send_armed_keys "${board_win}.1" "${VIS_PRIORITY_CMD}"
-    dashboard_send_armed_keys "${board_win}.2" "${VIS_REQUIREMENTS_CMD}"
-    dashboard_send_armed_keys "${board_win}.3" "${VIS_PM_CMD}"
-    dashboard_send_armed_keys "${board_win}.4" "${VIS_CODER_CMD}"
-    dashboard_send_armed_keys "${board_win}.5" "${VIS_WRITER_CMD}"
-    dashboard_send_armed_keys "${board_win}.6" "${VIS_TESTER_CMD}"
-    dashboard_send_armed_keys "${board_win}.7" "${VIS_CM_CMD}"
+    local board_win="$1" column_set="${2:-split}"
+    if [[ "$column_set" == "merged" ]]; then
+        dashboard_send_armed_keys "${board_win}.0" "${OP_BUGS_CMD}"
+        dashboard_send_armed_keys "${board_win}.1" "${OP_PRIORITY_CMD}"
+        dashboard_send_armed_keys "${board_win}.2" "${OP_REQUIREMENTS_CMD}"
+        dashboard_send_armed_keys "${board_win}.3" "${OP_AGENTS_CMD}"
+    else
+        dashboard_send_armed_keys "${board_win}.0" "${VIS_BUGS_CMD}"
+        dashboard_send_armed_keys "${board_win}.1" "${VIS_PRIORITY_CMD}"
+        dashboard_send_armed_keys "${board_win}.2" "${VIS_REQUIREMENTS_CMD}"
+        dashboard_send_armed_keys "${board_win}.3" "${VIS_PM_CMD}"
+        dashboard_send_armed_keys "${board_win}.4" "${VIS_CODER_CMD}"
+        dashboard_send_armed_keys "${board_win}.5" "${VIS_WRITER_CMD}"
+        dashboard_send_armed_keys "${board_win}.6" "${VIS_TESTER_CMD}"
+        dashboard_send_armed_keys "${board_win}.7" "${VIS_CM_CMD}"
+    fi
     dashboard_send_armed_keys "${board_win}.${DASHBOARD_BOARD_LEGEND_PANE}" "${VIS_LEGEND_CMD}"
 }
 
@@ -823,7 +959,7 @@ dashboard_dispatch_board_panes() {
 # their logs) or named here by its EXACT pane-target
 # string (the same literal text passed as dashboard_send_armed_keys's
 # first argument, unresolved variable references included, e.g.
-# "operator.${OP_SHELL_PANE}"). A pane in neither category is a bare
+# "terminal.1"). A pane in neither category is a bare
 # renderer invocation: create.sh types its command once, the render
 # prints and returns, and the pane's shell falls through to an
 # interactive prompt underneath — a shell prompt and the echoed command
@@ -835,10 +971,14 @@ dashboard_dispatch_board_panes() {
 # rule, and this list is the one place that grants the "meets rule 2"
 # exemption.
 #
-# Panes named below are genuinely one-shot by design: the operator and
-# terminal shell panes are interactive login shells meant to sit at a
-# prompt. (The log panes, which stream forever, run under
-# cadence-loop.sh --stream like every other rendering pane.)
+# Panes named below are genuinely one-shot by design: the operator
+# window's shell and workbench panes and the terminal shell pane are
+# interactive login shells meant to sit at a prompt. (The log panes, which
+# stream forever, run under cadence-loop.sh --stream like every other
+# rendering pane.) The two operator window shells' first commands are sent
+# from dashboard_init_operator_shell (lib/operator_shell.sh), which the
+# lint does not read; their entries, the pane targets create.sh passes to
+# that function, record each pane as an interactive shell by design.
 #
 # This is plain DATA, read by lint_pane_refresh_cadence.py as text between
 # the two markers below — never executed, so a pane-target expression
@@ -849,6 +989,7 @@ dashboard_dispatch_board_panes() {
 # whitespace on each line is not significant.
 # CENSUS-EXEMPT-PANES:BEGIN
 #   operator.${OP_SHELL_PANE}
+#   operator.${OP_WORKBENCH_PANE}
 #   terminal.1
 # CENSUS-EXEMPT-PANES:END
 
@@ -1096,126 +1237,91 @@ dashboard_send_armed_keys "main.2" "${PROGRESS_CMD}"
 dashboard_send_armed_keys "main.3" "${QUEUES_CMD}"
 
 # ---------------------------------------------------------------------------
-# Window: Operator — the visibility window plus a command line
+# Window: Operator — the board plus a command line and a workbench
 #
 # Rationale: inside a container attach there is no "just open another terminal"
 # — this window is the container operator's whole workspace: watch the board
 # and run commands, one screen.
 #
-# Layout, top to bottom (the visibility window exactly, with one full-width
-# interactive shell row inserted between its board and its legend bar):
-#   ┌──────────────────────────────┬──────────────────────────────────────────┐
-#   │ LEFT ~40% (Inputs)           │ RIGHT ~60% (Agent Queues)                │
-#   │ bugs (0) │ prio (1) │req (2) │ pm (3) │coder(4)│writ(5)│test(6)│cm (7) │
-#   ├──────────────────────────────┴──────────────────────────────────────────┤
-#   │ CMDLINE (pane 8) — interactive bash login shell, PGAI_OPERATOR_SHELL_PCT │
-#   │ of window height (floor), at least PGAI_OPERATOR_SHELL_MIN_ROWS rows      │
-#   ├──────────────────────────────────────────────────────────────────────────┤
-#   │ LEGEND (pane 9) — PROJECT: ■ name ... | STATUS: open  running ...      │
-#   └──────────────────────────────────────────────────────────────────────────┘
+# Layout (a board and the visibility window's legend, with an interactive
+# shell row inserted between them and, on a wide enough window, a tall
+# interactive workbench column on the far right spanning the board and the
+# shell row). The board is OPERATOR_BOARD_AGENTS's column set ([dashboard]
+# operator_board_agents). merged (the default) — the three input columns and
+# one AGENTS column:
+#   ┌────────────────────────────────────────────────────┬─────────────────┐
+#   │ LEFT ~75% (Inputs)                 │ RIGHT ~25%    │ WORKBENCH       │
+#   │ bugs(0) prio(1) req(2)             │ agents(3)     │ (pane 5)        │
+#   │                                    │               │ interactive     │
+#   ├────────────────────────────────────┴───────────────┤ bash login      │
+#   │ CMDLINE (pane 4) — interactive bash login shell,   │ shell, title    │
+#   │ PGAI_OPERATOR_SHELL_PCT of window height (floor),  │ "workbench"     │
+#   │ at least PGAI_OPERATOR_SHELL_MIN_ROWS rows         │                 │
+#   ├────────────────────────────────────────────────────┴─────────────────┤
+#   │ LEGEND (pane 6) — PROJECT: ■ name ... | STATUS: open  running ...    │
+#   └──────────────────────────────────────────────────────────────────────┘
+# split — the visibility window's eight columns, then the same rows:
+#   ┌────────────────────────────────────────────────────┬─────────────────┐
+#   │ LEFT ~40% (Inputs)    │ RIGHT ~60% (Agent Queues)  │ WORKBENCH       │
+#   │ bugs(0) prio(1) req(2)│ pm(3) coder(4) writ(5)     │ (pane 9)        │
+#   │                       │ test(6) cm(7)              │                 │
+#   ├───────────────────────┴────────────────────────────┤                 │
+#   │ CMDLINE (pane 8)                                   │                 │
+#   ├────────────────────────────────────────────────────┴─────────────────┤
+#   │ LEGEND (pane 10)                                                     │
+#   └──────────────────────────────────────────────────────────────────────┘
+#
+# The workbench is OPERATOR_WORKBENCH_PCT of the window width ([dashboard]
+# operator_workbench_pct). With it 0, the window narrower than
+# OPERATOR_WORKBENCH_MIN_COLS ([dashboard] operator_workbench_min_cols), or
+# a board column left fewer than 15 columns beside it, no workbench is
+# built: the board and shell row take the full width and the legend takes
+# the workbench's pane index (5 merged, 9 split). The window's reflow hook
+# (installed with the other hooks at the end of this script) re-applies the
+# builder's column widths whenever the window changes size and, when a
+# workbench was built, repeats that test.
 #
 # The splits, column widths and row heights all come from
 # dashboard_build_board_window (lib/board_window.sh) — the same builder the
-# Visibility window below uses — so panes 0-7 and the legend have exactly the
-# visibility window's widths. dashboard_dispatch_board_panes sends both
-# windows the same eight column commands and the same legend command.
+# Visibility window below uses. Under split, panes 0-7 and the legend have
+# exactly the visibility window's widths when there is no workbench, and the
+# same proportions of the narrower board region when there is.
+# dashboard_dispatch_board_panes sends the column commands of the same column
+# set and the legend command both windows share.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "operator"
 dashboard_build_board_window "${SESSION_NAME}" "operator" \
-    "${PGAI_OPERATOR_SHELL_PCT}" "${PGAI_OPERATOR_SHELL_MIN_ROWS}"
+    "${PGAI_OPERATOR_SHELL_PCT}" "${PGAI_OPERATOR_SHELL_MIN_ROWS}" \
+    "${OPERATOR_WORKBENCH_PCT}" "${OPERATOR_WORKBENCH_MIN_COLS}" \
+    "${OPERATOR_BOARD_AGENTS}"
 
-# Track the shell pane's index (recorded by the builder) in a variable rather
-# than hardcoding ".8" at every use site below.
+# Track the shell and workbench pane indices (recorded by the builder) in
+# variables rather than hardcoding pane numbers at every use site below; they
+# follow the column set (4 / 5 merged, 8 / 9 split). OP_WORKBENCH_PANE is
+# empty when the builder built no workbench.
 OP_SHELL_PANE="${DASHBOARD_BOARD_SHELL_PANE}"
+OP_WORKBENCH_PANE="${DASHBOARD_BOARD_WORKBENCH_PANE}"
 
-dashboard_dispatch_board_panes "operator"
+dashboard_dispatch_board_panes "operator" "${OPERATOR_BOARD_AGENTS}"
 
-# Shell row (between the board and the legend): interactive bash login shell
-# with kanban env sourced, cwd = KANBAN_ROOT.
-# Source shell-env the same way create.sh does at startup (lines ~170-176):
-# wrap in bash -l so /etc/profile.d/ and ~/.bash_profile run, giving the operator
-# a complete login environment with PATH, pyenv, etc.
-_OPERATOR_SHELL_INIT="cd ${KANBAN_ROOT}"
-if [[ -f "${KANBAN_ROOT}/shell-env" ]]; then
-    _OPERATOR_SHELL_INIT="source ${KANBAN_ROOT}/shell-env && ${_OPERATOR_SHELL_INIT}"
+# Shell row (between the board and the legend) and workbench column: each
+# an interactive bash login shell, cwd = KANBAN_ROOT, started by the one
+# start-up sequence every operator shell pane uses (lib/operator_shell.sh):
+# the armed first command, the trap re-arm with the armed-marker touch, the
+# guarded ~/.bashrc source, the shell-env re-source, the screen clear that
+# leaves only the prompt, and the title.
+dashboard_init_operator_shell "operator.${OP_SHELL_PANE}" "operator"
+if [[ -n "${OP_WORKBENCH_PANE}" ]]; then
+    dashboard_init_operator_shell "operator.${OP_WORKBENCH_PANE}" "workbench"
 fi
-# This is the pane's FIRST command, so it goes through
-# dashboard_send_armed_keys like every other pane's first command: the
-# trap installed ahead of it survives the `bash -l -c` fork below (a fork
-# alone -- no exec of a NEW bash -- always preserves an ignored
-# disposition, POSIX). The FINAL `exec bash -l` inside that `-c` string is
-# a different story, verified empirically (not just reasoned about)
-# against tmux 3.2a / bash 5.x: a freshly-started bash resets an inherited
-# SIG_IGN for a non-job-control signal (confirmed via
-# /proc/<pid>/status SigIgn straddling the exec) even though POSIX exec(2)
-# itself would have preserved it -- bash's own startup path re-establishes
-# its signal set rather than trusting what it inherited. The resident
-# shell that actually stays running in this pane is therefore UNPROTECTED
-# again immediately after the `exec bash -l` above returns, until the
-# follow-on send-keys immediately below re-installs the ignore trap
-# in-process (a `trap` builtin call, not another exec, so THIS one does
-# take hold and persists for the pane's remaining lifetime).
-#
-# --defer-marker: the armed-report touch this function would otherwise
-# fold into the SAME command as the trap install must NOT land yet -- it
-# would be true of the shell running THIS line (correctly armed), not the
-# `exec bash -l` shell that actually stays resident (unprotected until the
-# re-arm below runs). Touching it early let a session-window-changed hook
-# firing in that gap (a real, if usually brief, window -- exactly what a
-# rapid-switch storm with no settling time raises the odds of hitting)
-# treat this pane as safe to signal when it was not, killing it outright.
-# The re-arm send-keys below now touches the marker itself, once the
-# ignore trap is ACTUALLY back in the shell that is going to keep running.
-dashboard_send_armed_keys "operator.${OP_SHELL_PANE}" "bash -l -c '${_OPERATOR_SHELL_INIT}; exec bash -l'" --defer-marker
-
-# Re-arm: the `exec bash -l` above starts a brand new bash that does NOT
-# keep the ignore trap the wrapped first command installed (see the
-# comment above) -- re-install it now, as the very first thing typed into
-# the now-resident shell, before any of the follow-ups below run. This is
-# a `trap` builtin call in the SAME already-running process, not an exec,
-# so it takes effect immediately and is not itself at risk of being reset
-# again. The armed-report touch is folded into this SAME typed line (never
-# a separate send-keys call) so the marker's existence is inseparable from
-# -- and can never outrun -- this specific process's own trap install: by
-# the time create.sh's all-armed handshake (or any activation-hook firing)
-# observes the marker, the ignore trap it depends on is already in effect
-# in the exact process #{pane_pid} still names.
-tmux send-keys -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" "trap '' ${PGAI_DASHBOARD_PANE_SIGNAL}; : > $(printf '%q' "${PANE_ARMED_DIR}/operator.${OP_SHELL_PANE}")" Enter
-
-# Guarded ~/.bashrc source so the operator's aliases, prompt, and other
-# interactive conveniences are present. This is sent as a SEPARATE
-# send-keys call, typed into the shell AFTER it starts and after the
-# re-arm above, rather than folded into _OPERATOR_SHELL_INIT: the
-# "exec bash -l" on the dispatch line replaces the process, which would
-# discard any aliases a `source ~/.bashrc` had defined earlier in that
-# same process. Typing it here means it runs in the shell that actually
-# stays resident for the operator, so the aliases survive. Guarded so
-# hosts without a ~/.bashrc start silently and cleanly (no error output
-# in the pane). Not wrapped: this is a follow-up typed into the shell
-# AFTER the re-arm send-keys above already re-installed its trap.
-tmux send-keys -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" '[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"' Enter
-
-# Ordering: the operator's ~/.bashrc is arbitrary and may redefine PATH or
-# unset/override a PGAI_* value. Sourcing bashrc AFTER shell-env (naively
-# "kanban env wins because it ran first") is backwards -- whichever source
-# runs LAST wins, so if bashrc runs after shell-env it can clobber kanban
-# env. To guarantee PGAI_* / kanban-env values are correct once the pane
-# is ready, re-source shell-env LAST, after bashrc, so kanban's values are
-# always the ones left standing regardless of what bashrc does.
-if [[ -f "${KANBAN_ROOT}/shell-env" ]]; then
-    tmux send-keys -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" "source ${KANBAN_ROOT}/shell-env" Enter
-fi
-
-# Label the shell row so its border identifies it as the operator shell
-tmux select-pane -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}" -T "operator"
 
 # Make the shell pane the window's active pane: entering the operator
 # window should land the operator on the command line, not on a
-# read-only column pane. The last split performed above
-# (building the 8-column ladder) leaves an unrelated column pane as this
-# window's remembered "active" pane, and `select-pane -T` immediately
-# above sets only the pane's border title -- it does not change which
-# pane is active. An explicit selection, via the tracked OP_SHELL_PANE
+# read-only column pane or the workbench. The last split performed above
+# (building the column ladder) leaves an unrelated column pane as this
+# window's remembered "active" pane, and the `select-pane -T` inside
+# dashboard_init_operator_shell above sets only the pane's border title --
+# it does not change which pane is active. An explicit selection, via the tracked OP_SHELL_PANE
 # variable rather than a hardcoded literal, is required so this keeps
 # tracking the shell pane even if the column ladder changes later.
 tmux select-pane -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}"
@@ -1226,8 +1332,10 @@ tmux select-pane -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}"
 # Three discovery-pipeline columns on the LEFT (~40% width) and five
 # agent-queue columns on the RIGHT (~60% width), arranged side-by-side
 # (horizontal split), with a one-line persistent legend at the bottom.
-# Designed for 120-char-wide terminals; degrades gracefully at narrower widths
-# (tmux clips individual panes rather than scrolling horizontally).
+# Designed for 120-char-wide terminals; a board narrower than 127 columns
+# shares its width evenly between the eight columns (lib/board_window.sh,
+# SIZING), and the window's reflow hook re-applies the widths whenever the
+# window changes size.
 #
 # Final layout (pane indices):
 #   ┌──────────────────────────────┬──────────────────────────────────────────┐
@@ -1241,7 +1349,9 @@ tmux select-pane -t "${SESSION_NAME}:operator.${OP_SHELL_PANE}"
 # against the full window width, not a shrinking chained-percentage
 # remainder) live in dashboard_build_board_window (lib/board_window.sh),
 # shared with the Operator window above; shell_pct 0 builds the board and
-# legend only.
+# legend only. This window always gets the builder's and the dispatcher's
+# default column set, split (3 + 5): [dashboard] operator_board_agents
+# shapes the Operator window alone.
 # ---------------------------------------------------------------------------
 tmux new-window -t "${SESSION_NAME}" -n "visibility"
 dashboard_build_board_window "${SESSION_NAME}" "visibility" 0
@@ -1464,21 +1574,21 @@ tmux new-window -t "${SESSION_NAME}" -n "terminal"
 tmux split-window -t "${SESSION_NAME}:terminal.0" -h -l 40%
 
 dashboard_send_armed_keys "terminal.0" "${LOGS_WIN_CMD}"
-# --defer-marker: see the matching comment at the operator shell pane's
-# own dashboard_send_armed_keys call, above -- the armed-report touch must
+# --defer-marker: see "WHY THE RE-ARM" in lib/operator_shell.sh's header,
+# the operator shell's matching first command -- the armed-report touch must
 # wait for the re-arm below, not land here ahead of the `exec bash` that
 # drops the ignore trap this line installs.
 dashboard_send_armed_keys "terminal.1" "cd ${KANBAN_ROOT} && exec bash" --defer-marker
 # Re-arm after the exec: `exec bash` above starts a brand new bash that
 # does NOT keep the ignore trap the wrapped first command installed (see
-# the matching comment at the operator shell pane's own re-arm send-keys,
-# above, for the empirical proof). A `trap` builtin call typed into the
-# now-resident shell, not another exec, so it takes hold immediately. The
-# armed-report touch is folded into this SAME typed line (never a separate
-# send-keys call) so the marker can never exist ahead of this specific,
-# actually-resident process's own trap install -- see the operator shell
-# pane's matching comment for why that ordering is load-bearing.
-tmux send-keys -t "${SESSION_NAME}:terminal.1" "trap '' ${PGAI_DASHBOARD_PANE_SIGNAL}; : > $(printf '%q' "${PANE_ARMED_DIR}/terminal.1")" Enter
+# "WHY THE RE-ARM" in lib/operator_shell.sh's header for the empirical
+# proof). A `trap` builtin call typed into the now-resident shell, not
+# another exec, so it takes hold immediately. The armed-report touch is
+# folded into this SAME typed line (never a separate send-keys call) so the
+# marker can never exist ahead of this specific, actually-resident
+# process's own trap install -- the same header says why that ordering is
+# load-bearing.
+tmux send-keys -t "${SESSION_NAME}:terminal.1" "$(dashboard_typed_line "trap '' ${PGAI_DASHBOARD_PANE_SIGNAL}; : > $(printf '%q' "${PANE_ARMED_DIR}/terminal.1")")" Enter
 
 # ---------------------------------------------------------------------------
 # Window: human-review — Approvals (left) + Auto-Resolutions (right)
@@ -1601,7 +1711,7 @@ for _DRILL_PROJ in "${_DRILL_PROJECTS[@]}"; do
     # ---------------------------------------------------------------------------
     # Release/feature-workflow drill: 5-pane layout (original behavior, unchanged)
     #
-    # Per-project watch commands — scoped to project N where applicable.
+    # Per-project cadence-loop.sh pane commands — scoped to project N where applicable.
     # CRON FIRINGS is shared: cron entries are registered system-wide against the
     # host crontab and are not per-project; showing the same next-firing countdown
     # in every drill window gives operators consistent orientation regardless of
@@ -1641,7 +1751,7 @@ for _DRILL_PROJ in "${_DRILL_PROJECTS[@]}"; do
   tmux rename-window -t "${SESSION_NAME}:${_DRILL_WIN}" "${_DRILL_WIN}: ${_DRILL_PROJ}"
 
   # Pin the label so tmux's automatic-rename does not overwrite it as the
-  # long-lived 'watch' commands run in the panes.
+  # long-lived cadence-loop.sh commands run in the panes.
   # allow-rename off also blocks application-driven OSC title escapes.
   tmux set-window-option -t "${SESSION_NAME}:${_DRILL_WIN}" automatic-rename off
   tmux set-window-option -t "${SESSION_NAME}:${_DRILL_WIN}" allow-rename off
@@ -1689,14 +1799,16 @@ tmux bind-key -T prefix p if-shell -F '#{@pgai_dashboard}' \
 # restarts it — so a loaded host that arms panes slowly but steadily is
 # never refused; only a dashboard whose arming has stopped is.
 #
-# PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS overrides the default bound (seconds
+# PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS, else kanban.cfg [dashboard]
+# arm_timeout_seconds (config_export_tunables), sets the bound (seconds
 # allowed to pass without any further pane reporting armed); a
 # non-positive-integer value falls back to the default rather than
 # disabling the bound (an unbounded wait would hang create.sh forever on a
 # pane whose script never starts).
 # ---------------------------------------------------------------------------
 _ARM_TIMEOUT_DEFAULT=20
-_arm_timeout_raw="${PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS:-}"
+config_export_tunables "$KANBAN_ROOT/kanban.cfg"
+_arm_timeout_raw="$PGAI_DASHBOARD_ARM_TIMEOUT_SECONDS"
 if [[ "$_arm_timeout_raw" =~ ^[0-9]+$ ]] && [[ "$_arm_timeout_raw" -ge 1 ]]; then
   ARM_TIMEOUT_SECONDS="$_arm_timeout_raw"
 else
@@ -1751,6 +1863,20 @@ dashboard_install_activation_hook "$KANBAN_ROOT" "$SESSION_NAME" "$SCRIPT_DIR"
 # client-attached and session-window-changed hooks (clearing the array),
 # and these occupy index 1 of the same two. See lib/schedule_layout.sh.
 dashboard_install_schedule_layout_hook "$SESSION_NAME" "$SCHED_LIST_H"
+
+# Board window reflow hooks — the operator window (with or without a
+# workbench) and the visibility window re-apply the builder's column widths
+# whenever the window changes size: the session is created 220 columns
+# wide, so a client attaching from a narrower terminal, or a terminal
+# resized narrower, would otherwise take the whole difference from one
+# column while the others keep their 220-column widths. Where the operator
+# window has a workbench the workbench decision runs again too: too narrow,
+# the workbench moves to its own window and the board takes the full width;
+# wide enough again, it moves back. Window-scoped (`set-hook -w`), so they
+# share no hook array with the session hooks above. See
+# lib/board_window.sh, "RESIZE".
+dashboard_install_board_reflow_hook "${SESSION_NAME}:operator" "${SCRIPT_DIR}/board-reflow.sh"
+dashboard_install_board_reflow_hook "${SESSION_NAME}:visibility" "${SCRIPT_DIR}/board-reflow.sh"
 
 # ---------------------------------------------------------------------------
 # Return focus to main window and attach

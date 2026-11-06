@@ -138,10 +138,7 @@ def _require_golden_snapshots() -> None:
     reported distinctly from a real diff failure.
     """
     if not _GOLDEN_DIR.is_dir() or not any(_GOLDEN_DIR.iterdir()):
-        pytest.fail(
-            f"Golden snapshots missing at {_GOLDEN_DIR}. "
-            f"Run: bash {_HARNESS} --capture {_GOLDEN_DIR}"
-        )
+        pytest.fail(f"Golden snapshots missing at {_GOLDEN_DIR}. " f"Run: bash {_HARNESS} --capture {_GOLDEN_DIR}")
 
 
 def test_compare_against_goldens_is_clean_on_unmodified_tree(tmp_path: pathlib.Path) -> None:
@@ -162,9 +159,7 @@ def test_compare_against_goldens_is_clean_on_unmodified_tree(tmp_path: pathlib.P
         f"Expected a clean compare against {_GOLDEN_DIR} to exit 0.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "FAIL" not in result.stdout, (
-        f"Expected no diff output on an unmodified tree.\nstdout: {result.stdout}"
-    )
+    assert "FAIL" not in result.stdout, f"Expected no diff output on an unmodified tree.\nstdout: {result.stdout}"
 
 
 def test_compare_detects_a_seeded_one_character_change(tmp_path: pathlib.Path) -> None:
@@ -202,13 +197,11 @@ def test_compare_detects_a_seeded_one_character_change(tmp_path: pathlib.Path) -
         f"Expected --compare to fail after seeding a one-character change.\n"
         f"stdout: {compare_result.stdout}\nstderr: {compare_result.stderr}"
     )
-    assert "board-render.txt" in compare_result.stdout, (
-        f"Expected the differing file name in --compare output.\nstdout: {compare_result.stdout}"
-    )
+    assert (
+        "board-render.txt" in compare_result.stdout
+    ), f"Expected the differing file name in --compare output.\nstdout: {compare_result.stdout}"
     # A unified diff hunk (@@ ... @@) locates the differing line for the reader.
-    assert "@@" in compare_result.stdout, (
-        f"Expected a diff hunk locating the change.\nstdout: {compare_result.stdout}"
-    )
+    assert "@@" in compare_result.stdout, f"Expected a diff hunk locating the change.\nstdout: {compare_result.stdout}"
 
 
 def test_capture_is_stable_across_invoking_shell_budget_values(
@@ -304,6 +297,4 @@ def test_compare_is_stable_across_invoking_shell_budget_values(
             f"(the harness pins its own subprocess values regardless).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "FAIL" not in result.stdout, (
-            f"Expected no diff output on an unmodified tree.\nstdout: {result.stdout}"
-        )
+        assert "FAIL" not in result.stdout, f"Expected no diff output on an unmodified tree.\nstdout: {result.stdout}"

@@ -141,7 +141,18 @@ def test_item_ids_classify_to_their_category(item_id: str, category: str, canoni
 
 @pytest.mark.parametrize(
     "item_id",
-    ["", "   ", "queues", "README", "../tasks", "BUG-", "v2.1", "v2.1.0/../../x", "CODER-2026-001-x", "coder-20261007-004-add-widget"],
+    [
+        "",
+        "   ",
+        "queues",
+        "README",
+        "../tasks",
+        "BUG-",
+        "v2.1",
+        "v2.1.0/../../x",
+        "CODER-2026-001-x",
+        "coder-20261007-004-add-widget",
+    ],
 )
 def test_unrecognised_item_ids_classify_to_none(item_id: str) -> None:
     assert classify_item_id(item_id) is None

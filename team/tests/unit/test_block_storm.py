@@ -54,7 +54,7 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 _REPO_ROOT = _TEAM_DIR.parent
 _INI_PARSER = _TEAM_DIR / "scripts" / "lib" / "ini_parser.sh"
 _ID_PATTERN = r"^(CLAUDE-)?[A-Z]+-[0-9]{8}-[0-9]{3}-[a-z0-9-]+$"
-_T0 = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)
+_T0 = datetime.datetime(2026, 1, 1, 10, 0, tzinfo=datetime.UTC)
 
 _A = "CODER-20260101-001-first"
 _B = "WRITER-20260101-002-second"
@@ -83,14 +83,16 @@ class _Project:
         status = self.tasks / task_id / "status.md"
         status.parent.mkdir(parents=True, exist_ok=True)
         status.write_text(
-            f"# Status\n\n## State\n{state}\n\n## Blockers\nfixture blocker\n\n"
-            f"## Needs Human\n{needs_human}\n",
+            f"# Status\n\n## State\n{state}\n\n## Blockers\nfixture blocker\n\n" f"## Needs Human\n{needs_human}\n",
             encoding="utf-8",
         )
         self.queue_line(queue, marker, task_id)
         if reason_code is not None:
             write_block_record(
-                status, reason_code, "CODER", ["worktree=gone"],
+                status,
+                reason_code,
+                "CODER",
+                ["worktree=gone"],
                 now=_T0 + datetime.timedelta(minutes=minutes),
             )
         return status
@@ -223,9 +225,7 @@ def test_blocks_without_records_are_task_local_however_many():
 
 
 def test_two_same_code_blocks_inside_the_window_are_a_storm():
-    decision = decide(
-        [_block(_A, "per_task_timeout", 0), _block(_B, "per_task_timeout", 10)], 3600, now=_at(10)
-    )
+    decision = decide([_block(_A, "per_task_timeout", 0), _block(_B, "per_task_timeout", 10)], 3600, now=_at(10))
 
     assert decision.systemic
     assert decision.reason_code == "per_task_timeout"
@@ -235,9 +235,7 @@ def test_two_same_code_blocks_inside_the_window_are_a_storm():
 
 
 def test_the_same_two_blocks_outside_the_window_are_task_local():
-    decision = decide(
-        [_block(_A, "per_task_timeout", 0), _block(_B, "per_task_timeout", 120)], 3600, now=_at(120)
-    )
+    decision = decide([_block(_A, "per_task_timeout", 0), _block(_B, "per_task_timeout", 120)], 3600, now=_at(120))
 
     assert decision.verdict == "task_local"
 
@@ -255,9 +253,7 @@ def test_different_codes_inside_the_window_are_not_a_storm():
 
 
 def test_a_block_with_no_time_never_joins_a_storm():
-    decision = decide(
-        [_block(_A, "per_task_timeout", 0), _block(_B, "per_task_timeout", None)], 3600, now=_at(0)
-    )
+    decision = decide([_block(_A, "per_task_timeout", 0), _block(_B, "per_task_timeout", None)], 3600, now=_at(0))
 
     assert decision.verdict == "task_local"
 
@@ -314,18 +310,14 @@ def test_systemic_remedy_names_each_task_status_file():
 
 def test_two_agent_unclassified_blocks_a_minute_apart_do_not_hold():
     """The catch-all an agent sets on its own block says nothing shared."""
-    decision = decide(
-        [_block(_A, "agent_unclassified", 0), _block(_B, "agent_unclassified", 1)], 3600, now=_at(1)
-    )
+    decision = decide([_block(_A, "agent_unclassified", 0), _block(_B, "agent_unclassified", 1)], 3600, now=_at(1))
 
     assert decision.verdict == "task_local"
     assert decision.lifts_at is None
 
 
 def test_agent_unclassified_still_holds_when_the_operator_lists_it():
-    decision = decide(
-        [_block(_A, "agent_unclassified", 0)], systemic_codes=("agent_unclassified",), now=_at(0)
-    )
+    decision = decide([_block(_A, "agent_unclassified", 0)], systemic_codes=("agent_unclassified",), now=_at(0))
 
     assert decision.systemic
 
@@ -499,12 +491,27 @@ def test_cli_prints_the_six_fields_in_order(tmp_path):
     project.task(_A, reason_code="per_task_timeout", minutes=0)
     project.task(_B, queue="writer", reason_code="per_task_timeout", minutes=30)
 
-    result = _cli("decide", str(project.queues), str(project.tasks), "--id-pattern", _ID_PATTERN,
-                  "--window", "3600", "--now", _at(30).isoformat(), cwd=tmp_path)
+    result = _cli(
+        "decide",
+        str(project.queues),
+        str(project.tasks),
+        "--id-pattern",
+        _ID_PATTERN,
+        "--window",
+        "3600",
+        "--now",
+        _at(30).isoformat(),
+        cwd=tmp_path,
+    )
 
     assert result.returncode == 0, result.stderr
     assert [line.split("=", 1)[0] for line in result.stdout.splitlines()] == [
-        "verdict", "count", "reason_code", "why", "remedy", "lifts_at",
+        "verdict",
+        "count",
+        "reason_code",
+        "why",
+        "remedy",
+        "lifts_at",
     ]
     fields = _fields(result.stdout)
     assert fields["verdict"] == "systemic"
@@ -519,10 +526,30 @@ def test_cli_hold_cap_shortens_the_hold_and_a_task_local_decision_lifts_nothing(
     project.task(_A, reason_code="per_task_timeout", minutes=0)
     project.task(_B, queue="writer", reason_code="per_task_timeout", minutes=1)
 
-    capped = _fields(_cli("decide", str(project.queues), str(project.tasks), "--hold-cap", "300",
-                          "--now", _at(2).isoformat(), cwd=tmp_path).stdout)
-    lifted = _fields(_cli("decide", str(project.queues), str(project.tasks), "--hold-cap", "300",
-                          "--now", _at(7).isoformat(), cwd=tmp_path).stdout)
+    capped = _fields(
+        _cli(
+            "decide",
+            str(project.queues),
+            str(project.tasks),
+            "--hold-cap",
+            "300",
+            "--now",
+            _at(2).isoformat(),
+            cwd=tmp_path,
+        ).stdout
+    )
+    lifted = _fields(
+        _cli(
+            "decide",
+            str(project.queues),
+            str(project.tasks),
+            "--hold-cap",
+            "300",
+            "--now",
+            _at(7).isoformat(),
+            cwd=tmp_path,
+        ).stdout
+    )
 
     assert capped["verdict"] == "systemic" and capped["lifts_at"] == "2026-01-01T10:06:00+00:00"
     assert lifted["verdict"] == "task_local" and lifted["lifts_at"] == "none"
@@ -543,8 +570,9 @@ def test_cli_warns_on_a_rejected_hold_cap_or_now_and_still_decides(tmp_path):
     project = _Project(tmp_path)
     project.task(_A, reason_code="plugin_load_failed", minutes=0)
 
-    result = _cli("decide", str(project.queues), str(project.tasks), "--hold-cap", "1h",
-                  "--now", "yesterday", cwd=tmp_path)
+    result = _cli(
+        "decide", str(project.queues), str(project.tasks), "--hold-cap", "1h", "--now", "yesterday", cwd=tmp_path
+    )
 
     assert result.returncode == 0
     assert "error:   block_storm.invalid_hold_cap" in result.stderr
@@ -569,8 +597,7 @@ def test_cli_warns_dual_channel_on_unknown_code_and_still_decides(tmp_path):
     project = _Project(tmp_path)
     project.task(_A, reason_code="plugin_load_failed")
 
-    result = _cli("decide", str(project.queues), str(project.tasks),
-                  "--systemic-codes", "not_a_code", cwd=tmp_path)
+    result = _cli("decide", str(project.queues), str(project.tasks), "--systemic-codes", "not_a_code", cwd=tmp_path)
 
     assert result.returncode == 0
     assert "error:   block_storm.unknown_systemic_code" in result.stderr
@@ -578,7 +605,10 @@ def test_cli_warns_dual_channel_on_unknown_code_and_still_decides(tmp_path):
     remedy = next(line for line in result.stderr.splitlines() if line.startswith("remedy:"))
     listed = subprocess.run(
         ["bash", "-c", remedy.split(":", 1)[1].strip()],
-        capture_output=True, text=True, timeout=30, cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=tmp_path,
     )
     assert listed.returncode == 0 and "plugin_load_failed" in listed.stdout
     # The unknown member was dropped, leaving no systemic code at all.
@@ -590,8 +620,9 @@ def test_cli_warns_on_a_rejected_window_and_uses_the_default(tmp_path):
     project.task(_A, reason_code="zero_progress", minutes=0)
     project.task(_B, queue="writer", reason_code="zero_progress", minutes=50)
 
-    result = _cli("decide", str(project.queues), str(project.tasks), "--window", "1h",
-                  "--now", _at(50).isoformat(), cwd=tmp_path)
+    result = _cli(
+        "decide", str(project.queues), str(project.tasks), "--window", "1h", "--now", _at(50).isoformat(), cwd=tmp_path
+    )
 
     assert "error:   block_storm.invalid_window" in result.stderr
     fields = _fields(result.stdout)
@@ -618,9 +649,17 @@ def test_cli_help_exits_zero(tmp_path):
 
 
 def test_module_exposes_the_documented_names():
-    for name in ("HumanGatedBlock", "GateDecision", "scan_human_gated_blocks",
-                 "parse_systemic_codes", "parse_window", "decide", "main",
-                 "DEFAULT_HOLD_CAP_S", "STORM_EXEMPT_REASON_CODES"):
+    for name in (
+        "HumanGatedBlock",
+        "GateDecision",
+        "scan_human_gated_blocks",
+        "parse_systemic_codes",
+        "parse_window",
+        "decide",
+        "main",
+        "DEFAULT_HOLD_CAP_S",
+        "STORM_EXEMPT_REASON_CODES",
+    ):
         assert hasattr(block_storm, name), name
 
 

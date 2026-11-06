@@ -133,11 +133,12 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.project_cfg import resolve_tiered_cfg_value
+from pgai_agent_kanban.lib.wake_budget import MAX_RUNTIME_SECONDS_DEFAULT, MAX_TASK_SECONDS_DEFAULT
 from pgai_agent_kanban.ops.context import OpsContext
 from pgai_agent_kanban.ops.errors import IoError, OpsError, Refused
 from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
@@ -198,8 +199,6 @@ CHAIN_BUDGET_MARGIN_SECONDS = 120
 #: Wake periods used for the stale threshold: locks/ is root-wide, so no
 #: project's [locks] stale_lock_reap_after_wake_periods applies.
 DEFAULT_STALE_WAKE_PERIODS = 3
-DEFAULT_MAX_RUNTIME_SECONDS = 14400
-DEFAULT_MAX_TASK_SECONDS = 5400
 DEFAULT_KILL_GRACE_SECONDS = 30
 
 EXIT_USAGE = 1
@@ -270,7 +269,7 @@ class LockEntry:
     provenance: str
     verdict: str
     held_line: str
-    held_verdict: Optional[str]
+    held_verdict: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -383,7 +382,7 @@ def lock_field(record: str, key: str) -> str:
     prefix = key + "="
     for line in record.split("\n"):
         if line.startswith(prefix):
-            return line[len(prefix):]
+            return line[len(prefix) :]
     return ""
 
 
@@ -401,8 +400,7 @@ def describe_provenance(record: str) -> str:
     if not (holder or pid or op or task):
         return NO_PROVENANCE
     return (
-        f"holder={holder or '<unknown>'} pid={pid or '<unknown>'} "
-        f"op={op or '<unknown>'} task={task or '<unknown>'}"
+        f"holder={holder or '<unknown>'} pid={pid or '<unknown>'} " f"op={op or '<unknown>'} task={task or '<unknown>'}"
     )
 
 
@@ -470,7 +468,7 @@ def pid_liveness_verdict(record: str) -> str:
     return "held"
 
 
-def acquired_epoch(record: str) -> Optional[int]:
+def acquired_epoch(record: str) -> int | None:
     """Return the epoch second of *record*'s ``acquired_at``, or None when absent or torn.
 
     Liberal in what it reads: a ``T`` or a space between date and time, an
@@ -501,7 +499,7 @@ def acquired_epoch(record: str) -> Optional[int]:
     return epoch if epoch >= 0 else None
 
 
-def held_seconds(record: str, now: Optional[int] = None) -> Optional[int]:
+def held_seconds(record: str, now: int | None = None) -> int | None:
     """Seconds the lock has been held (now minus acquired_at, never the mtime), or None.
 
     None when acquired_at is not recorded; a clock earlier than acquired_at
@@ -524,7 +522,7 @@ def format_held_seconds(seconds: int) -> str:
     return f"{secs // 3600}h {(secs % 3600) // 60}m"
 
 
-def describe_held(record: str, now: Optional[int] = None) -> str:
+def describe_held(record: str, now: int | None = None) -> str:
     """The held line every lock listing shows.
 
     ``held: <duration> (since <acquired_at>) by <holder> pid <pid> — <task>``;
@@ -542,7 +540,7 @@ def describe_held(record: str, now: Optional[int] = None) -> str:
     return f"held: {format_held_seconds(secs)} (since {lock_field(record, 'acquired_at')}) {who}"
 
 
-def held_verdict(record: str, threshold_seconds: int, now: Optional[int] = None) -> Optional[str]:
+def held_verdict(record: str, threshold_seconds: int, now: int | None = None) -> str | None:
     """``live``, ``long (Nm past floor)`` or ``dead (pid N not running)``; None without acquired_at.
 
     ``long`` when held longer than *threshold_seconds*, N the overage in
@@ -591,8 +589,8 @@ def chain_budget_floor_seconds(ctx: OpsContext) -> int:
     fixed margin of one wake period.
     """
     return (
-        wake_cfg_seconds(ctx, "MAX_RUNTIME_SECONDS", "max_runtime_seconds", DEFAULT_MAX_RUNTIME_SECONDS)
-        + wake_cfg_seconds(ctx, "MAX_TASK_SECONDS", "max_task_seconds", DEFAULT_MAX_TASK_SECONDS)
+        wake_cfg_seconds(ctx, "MAX_RUNTIME_SECONDS", "max_runtime_seconds", MAX_RUNTIME_SECONDS_DEFAULT)
+        + wake_cfg_seconds(ctx, "MAX_TASK_SECONDS", "max_task_seconds", MAX_TASK_SECONDS_DEFAULT)
         + wake_cfg_seconds(ctx, "KILL_GRACE_SECONDS", "kill_grace_seconds", DEFAULT_KILL_GRACE_SECONDS)
         + CHAIN_BUDGET_MARGIN_SECONDS
     )
@@ -644,8 +642,8 @@ def project_stale_age_threshold(ctx: OpsContext, project: str) -> StaleThreshold
     periods times the period length, never below the chain-budget floor."""
     periods = stale_lock_reap_periods(ctx, project)
     period_based = periods * WAKE_PERIOD_SECONDS
-    max_runtime = wake_cfg_seconds(ctx, "MAX_RUNTIME_SECONDS", "max_runtime_seconds", DEFAULT_MAX_RUNTIME_SECONDS)
-    max_task = wake_cfg_seconds(ctx, "MAX_TASK_SECONDS", "max_task_seconds", DEFAULT_MAX_TASK_SECONDS)
+    max_runtime = wake_cfg_seconds(ctx, "MAX_RUNTIME_SECONDS", "max_runtime_seconds", MAX_RUNTIME_SECONDS_DEFAULT)
+    max_task = wake_cfg_seconds(ctx, "MAX_TASK_SECONDS", "max_task_seconds", MAX_TASK_SECONDS_DEFAULT)
     kill_grace = wake_cfg_seconds(ctx, "KILL_GRACE_SECONDS", "kill_grace_seconds", DEFAULT_KILL_GRACE_SECONDS)
     floor = max_runtime + max_task + kill_grace + CHAIN_BUDGET_MARGIN_SECONDS
     addends = (
@@ -874,7 +872,7 @@ class HeldLock:
             self.fd = -1
         return removed
 
-    def __enter__(self) -> "HeldLock":
+    def __enter__(self) -> HeldLock:
         return self
 
     def __exit__(self, *exc_info) -> None:
@@ -899,7 +897,7 @@ def _remove_staging_litter(path: pathlib.Path) -> None:
     except OSError:
         return
     for name in names:
-        pid = name[len(prefix):] if name.startswith(prefix) else ""
+        pid = name[len(prefix) :] if name.startswith(prefix) else ""
         if not _DIGITS_RE.fullmatch(pid) or int(pid) == os.getpid() or _pid_answers(pid):
             continue
         try:
@@ -964,7 +962,7 @@ def acquire_lock(
             missing,
         )
     record = "".join(f"{name}={str(values[name]).strip()}\n" for name in _PROVENANCE_FIELDS)
-    record += f"acquired_at={datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
+    record += f"acquired_at={datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}\n"
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1046,7 +1044,7 @@ def acquire_lock(
 _MAX_ANCESTRY_DEPTH = 1024
 
 
-def _parent_pid(pid: int) -> Optional[int]:
+def _parent_pid(pid: int) -> int | None:
     """Return the parent pid of the live process *pid*, or None when it cannot be read.
 
     Reads ``/proc/<pid>/stat`` (the fields after the parenthesised command
@@ -1070,7 +1068,7 @@ def _parent_pid(pid: int) -> Optional[int]:
     return int(fields[1])
 
 
-def _parent_pid_from_ps(pid: int) -> Optional[int]:
+def _parent_pid_from_ps(pid: int) -> int | None:
     """``ps -o ppid= -p <pid>``, for a host without ``/proc``; None when unreadable."""
     try:
         found = subprocess.run(
@@ -1106,7 +1104,7 @@ def pid_in_own_ancestry(pid: object) -> bool:
     wanted = int(text)
     if wanted <= 1:
         return False
-    current: Optional[int] = os.getpid()
+    current: int | None = os.getpid()
     for _depth in range(_MAX_ANCESTRY_DEPTH):
         if current is None or current <= 1:
             return False
@@ -1138,7 +1136,7 @@ def _lock_name(path: pathlib.Path) -> str:
     return path.name[: -len(_LOCK_SUFFIX)]
 
 
-def list_locks(ctx: OpsContext, *, now: Optional[int] = None) -> LockListing:
+def list_locks(ctx: OpsContext, *, now: int | None = None) -> LockListing:
     """List every lock under ``<kanban root>/locks`` with its provenance. Read-only.
 
     Args:
@@ -1212,7 +1210,7 @@ def resolve_lock_name(names: list[str], typed: str) -> list[str]:
     return [name for name in names if name.startswith(target + "-")]
 
 
-def _inode(path: pathlib.Path) -> Optional[int]:
+def _inode(path: pathlib.Path) -> int | None:
     try:
         return os.stat(path, follow_symlinks=False).st_ino
     except OSError:
@@ -1242,7 +1240,7 @@ def _inode_flock_held(fd: int) -> bool:
     return False
 
 
-def flock_held(path: Union[str, pathlib.Path]) -> bool:
+def flock_held(path: str | pathlib.Path) -> bool:
     """True when some process holds a flock on the lock file at *path*.
 
     Probes on a descriptor of this call's own (see :func:`_inode_flock_held`)
@@ -1312,9 +1310,7 @@ def _inode_holder_pids(fd: int) -> list[str]:
     return sorted(found, key=int)
 
 
-def _holder_let_go(
-    path: pathlib.Path, pid: str, inode: Optional[int], probe_fd: Optional[int] = None
-) -> bool:
+def _holder_let_go(path: pathlib.Path, pid: str, inode: int | None, probe_fd: int | None = None) -> bool:
     """True once the signalled holder no longer holds *path*.
 
     *probe_fd*, when given, is a descriptor this process opened on the lock
@@ -1341,7 +1337,7 @@ def _holder_let_go(
     return not _pid_answers(pid)
 
 
-def force_wait_seconds(ctx: OpsContext, grace_seconds: Optional[int] = None) -> int:
+def force_wait_seconds(ctx: OpsContext, grace_seconds: int | None = None) -> int:
     """How long a ``--force`` release waits for a signalled holder to let go.
 
     *grace_seconds* when given; otherwise twice ``kill_grace_seconds`` (the
@@ -1384,11 +1380,11 @@ def _swap_for_empty(locks_dir: pathlib.Path, name: str, target: pathlib.Path) ->
 
 def release_lock(
     ctx: OpsContext,
-    name: Optional[str],
+    name: str | None,
     *,
     force: bool = False,
-    say: Optional[Callable[[str], None]] = None,
-    grace_seconds: Optional[int] = None,
+    say: Callable[[str], None] | None = None,
+    grace_seconds: int | None = None,
 ) -> LockRelease:
     """Release the lock *name* selects (see "What release does" in the module docstring).
 
@@ -1433,9 +1429,7 @@ def release_lock(
     matches = resolve_lock_name(names, typed)
 
     if not matches:
-        candidates = (
-            f"known locks: {', '.join(names)}" if names else f"no lock files exist under {locks_dir}"
-        )
+        candidates = f"known locks: {', '.join(names)}" if names else f"no lock files exist under {locks_dir}"
         # BLOCK-WORTHY (docs/blocking-site-census.md): a name that resolves to
         # nothing has no target to act on -- an invariant-by-design stop.
         # CENSUS-ANCHOR: locks-release-not-found-01
@@ -1502,7 +1496,7 @@ def _release_dead_holder(
     holder: str,
     force: bool,
     emit: Callable[[str], None],
-    grace_seconds: Optional[int],
+    grace_seconds: int | None,
 ) -> LockRelease:
     """Clear the record of a holder whose recorded pid is dead.
 
@@ -1513,7 +1507,7 @@ def _release_dead_holder(
     with it (see "What release does" in the module docstring).
     """
     try:
-        probe_fd: Optional[int] = os.open(target, os.O_RDONLY | os.O_CLOEXEC)
+        probe_fd: int | None = os.open(target, os.O_RDONLY | os.O_CLOEXEC)
     except FileNotFoundError:
         emit(f"release-locks: lock {name} is already gone; nothing to release.")
         return LockRelease(name, target, "already_released", pid=pid)
@@ -1574,7 +1568,7 @@ def _signal_orphan_holders(
     holder: str,
     holders: list[str],
     emit: Callable[[str], None],
-    grace_seconds: Optional[int],
+    grace_seconds: int | None,
     probe_fd: int,
 ) -> int:
     """SIGTERM the processes holding a dead holder's flock and wait for it to come free.
@@ -1648,10 +1642,10 @@ def _signal_live_holder(
     pid: str,
     holder: str,
     emit: Callable[[str], None],
-    grace_seconds: Optional[int],
+    grace_seconds: int | None,
     *,
-    read_inode: Optional[int] = None,
-) -> Optional[LockRelease]:
+    read_inode: int | None = None,
+) -> LockRelease | None:
     """SIGTERM a live holder and wait for it to let go of *target*.
 
     Returns the :class:`LockRelease` once the holder let go, or None when it
@@ -1671,7 +1665,7 @@ def _signal_live_holder(
     # to ask whether anything still holds the old inode's flock is through a
     # descriptor that already names it (see _holder_let_go).
     try:
-        probe_fd: Optional[int] = os.open(target, os.O_RDONLY | os.O_CLOEXEC)
+        probe_fd: int | None = os.open(target, os.O_RDONLY | os.O_CLOEXEC)
     except OSError:
         probe_fd = None
     try:
@@ -1688,7 +1682,7 @@ def _signal_live_holder(
             os.close(probe_fd)
 
 
-def _holder_changed(probe_fd: int, pid: str, read_inode: Optional[int]) -> bool:
+def _holder_changed(probe_fd: int, pid: str, read_inode: int | None) -> bool:
     """True when the lock *probe_fd* names is no longer the one read for *pid*.
 
     The file's inode differs from *read_inode* (the holder released and a new
@@ -1711,8 +1705,8 @@ def _signal_and_wait(
     holder: str,
     emit: Callable[[str], None],
     grace: int,
-    probe_fd: Optional[int],
-) -> Optional[LockRelease]:
+    probe_fd: int | None,
+) -> LockRelease | None:
     """The body of :func:`_signal_live_holder`, run while *probe_fd* is open.
 
     *kanban_root* names the installed script in the refusal remedies.
@@ -1783,7 +1777,7 @@ def _not_released_wording(
     pid: str,
     holder: str,
     waited: int,
-    probe_fd: Optional[int],
+    probe_fd: int | None,
 ) -> tuple[str, str]:
     """The message and remedy of the exit-5 refusal after the grace ran out.
 
@@ -1851,7 +1845,7 @@ def _cli_parser(verb: str) -> argparse.ArgumentParser:
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run one lock verb from the command line (see the module docstring).
 
     ``list_locks`` prints the listing; ``release_lock`` prints its narration.

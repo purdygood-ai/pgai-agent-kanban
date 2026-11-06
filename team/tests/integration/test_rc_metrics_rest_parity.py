@@ -73,17 +73,13 @@ _HISTORY_ROW = (
 # The CLI's rendered data row is 8 whitespace-padded, non-embedded-space
 # tokens: RC, Wall, Blocked, Input, Output, Cache Read, Cache Write, Tasks
 # (team/scripts/dashboard/show-metrics.sh's PY_HISTORY renderer).
-_DATA_ROW_RE = re.compile(
-    r"^(v\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*$"
-)
+_DATA_ROW_RE = re.compile(r"^(v\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*$")
 
 
 def _seed_history_csv(project_dir: pathlib.Path) -> None:
     metrics_dir = project_dir / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    (metrics_dir / "history.csv").write_text(
-        _HISTORY_HEADER + "\n" + _HISTORY_ROW + "\n", encoding="utf-8"
-    )
+    (metrics_dir / "history.csv").write_text(_HISTORY_HEADER + "\n" + _HISTORY_ROW + "\n", encoding="utf-8")
 
 
 def _cli_env(kanban_root: pathlib.Path) -> dict[str, str]:
@@ -187,9 +183,7 @@ def test_rc_metrics_blocked_column_matches_between_cli_and_rest_with_a_blocked_t
         rest_row = _rest_rc_metrics_row(handle.port)
 
     assert cli_row == rest_row, (
-        "CLI and REST rc-metrics rows diverge over the SAME fixture.\n"
-        f"CLI:  {cli_row}\n"
-        f"REST: {rest_row}"
+        "CLI and REST rc-metrics rows diverge over the SAME fixture.\n" f"CLI:  {cli_row}\n" f"REST: {rest_row}"
     )
 
     # Sanity: Blocked is populated and non-zero on both surfaces -- a

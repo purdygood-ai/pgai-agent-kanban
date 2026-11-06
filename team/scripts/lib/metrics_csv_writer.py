@@ -214,9 +214,9 @@ def _rollup_to_row(rollup: dict[str, Any]) -> dict[str, Any]:
     tokens: dict[str, Any] = rollup.get("tokens") or {}
     total_tokens: dict[str, Any] = tokens.get("total") or {}
 
-    input_tokens:       int = int(total_tokens.get("input",       0) or 0)
-    output_tokens:      int = int(total_tokens.get("output",      0) or 0)
-    cache_read_tokens:  int = int(total_tokens.get("cache_read",  0) or 0)
+    input_tokens: int = int(total_tokens.get("input", 0) or 0)
+    output_tokens: int = int(total_tokens.get("output", 0) or 0)
+    cache_read_tokens: int = int(total_tokens.get("cache_read", 0) or 0)
     cache_write_tokens: int = int(total_tokens.get("cache_write", 0) or 0)
 
     cache_hit_rate = _cache_hit_rate(input_tokens, cache_read_tokens)
@@ -251,27 +251,27 @@ def _rollup_to_row(rollup: dict[str, Any]) -> dict[str, Any]:
         blocked_minutes = ""
 
     return {
-        "rc":                 rollup.get("rc", ""),
-        "project":            rollup.get("project", ""),
-        "workflow_type":      rollup.get("workflow_type", "release"),
-        "opened_at":          rollup.get("opened_at") or "",
-        "closed_at":          rollup.get("closed_at") or "",
-        "wall_time_minutes":  wall_time,
-        "outcome":            rollup.get("outcome", "UNKNOWN"),
-        "tasks_total":        int(tasks.get("total", 0) or 0),
-        "tasks_pm":           int(by_agent.get("pm", 0) or 0),
-        "tasks_coder":        int(by_agent.get("coder", 0) or 0),
-        "tasks_writer":       int(by_agent.get("writer", 0) or 0),
-        "tasks_tester":       int(by_agent.get("tester", 0) or 0),
-        "tasks_cm":           int(by_agent.get("cm", 0) or 0),
-        "input_tokens":       input_tokens,
-        "output_tokens":      output_tokens,
-        "cache_read_tokens":  cache_read_tokens,
+        "rc": rollup.get("rc", ""),
+        "project": rollup.get("project", ""),
+        "workflow_type": rollup.get("workflow_type", "release"),
+        "opened_at": rollup.get("opened_at") or "",
+        "closed_at": rollup.get("closed_at") or "",
+        "wall_time_minutes": wall_time,
+        "outcome": rollup.get("outcome", "UNKNOWN"),
+        "tasks_total": int(tasks.get("total", 0) or 0),
+        "tasks_pm": int(by_agent.get("pm", 0) or 0),
+        "tasks_coder": int(by_agent.get("coder", 0) or 0),
+        "tasks_writer": int(by_agent.get("writer", 0) or 0),
+        "tasks_tester": int(by_agent.get("tester", 0) or 0),
+        "tasks_cm": int(by_agent.get("cm", 0) or 0),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
         "cache_write_tokens": cache_write_tokens,
         "cache_hit_rate_pct": cache_hit_rate,
-        "bugs_filed_during":  bugs_filed_during,
-        "operator_waivers":   operator_waivers,
-        "blocked_minutes":    blocked_minutes,
+        "bugs_filed_during": bugs_filed_during,
+        "operator_waivers": operator_waivers,
+        "blocked_minutes": blocked_minutes,
     }
 
 
@@ -313,7 +313,7 @@ def _split_header(text: str) -> tuple[str, list[str], str]:
     """
     newline = text.find("\n")
     header_line = text if newline < 0 else text[: newline + 1]
-    body = "" if newline < 0 else text[newline + 1:]
+    body = "" if newline < 0 else text[newline + 1 :]
     names = next(csv.reader(io.StringIO(header_line)), [])
     return header_line, names, body
 
@@ -342,7 +342,7 @@ def _migrate_header_and_append(
         body += "\n"
     content = _render_line(HISTORY_COLUMNS) + body + _render_line(HISTORY_COLUMNS, row_dict)
     atomic_write(csv_path, content, prefix=_MIGRATION_TMP_PREFIX, preserve_mode=True)
-    added = HISTORY_COLUMNS[len(header_names):]
+    added = HISTORY_COLUMNS[len(header_names) :]
     print(
         f"[metrics_csv_writer] Header of {csv_path} predated {len(added)} "
         f"column(s); rewrote it with the full column list (added: "
@@ -424,7 +424,7 @@ def append_rc_row(
             header_names: list[str] = []
             body = ""
             if file_size > 0:
-                with open(csv_path, "r", newline="", encoding="utf-8") as rfh:
+                with open(csv_path, newline="", encoding="utf-8") as rfh:
                     existing_text = rfh.read()
                 _header_line, header_names, body = _split_header(existing_text)
 
@@ -518,9 +518,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        rollup: dict[str, Any] = json.loads(
-            rollup_path.read_text(encoding="utf-8")
-        )
+        rollup: dict[str, Any] = json.loads(rollup_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         print(f"ERROR: cannot read rollup JSON: {exc}", file=sys.stderr)
         sys.exit(1)

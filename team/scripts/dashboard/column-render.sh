@@ -25,7 +25,7 @@
 #   <dir>           Absolute path to bugs/, priority/, or requirements/
 #   <cache_file>    Absolute path to bug_backlog.md, priority_backlog.md, or pm_backlog.md
 #   <backlog_file>  Absolute path to coder_backlog.md (or pm_, writer_, etc.)
-#   rows            Max rows to display (default: $DASHBOARD_ROWS_PER_COLUMN or 7)
+#   rows            Max rows to display (default: $DASHBOARD_ROWS_PER_COLUMN, else kanban.cfg [dashboard] rows_per_column, else 21)
 #   width           Column width in characters (default: 38)
 #
 # Options:
@@ -33,20 +33,32 @@
 #                     Emits '=== NAME ===' as the first output line.
 #   --kanban-root     Override the kanban root path.
 #   --all-projects    Render mixed view from all registered projects (see above).
-#   --column-type T   "bugs"|"priorities"|"requirements"|"pm"|"coder"|"writer"|"tester"|"cm"
+#   --column-type T   "bugs"|"priorities"|"requirements"|"pm"|"coder"|"writer"|"tester"|"cm"|"agents"
 #                     Required when --all-projects is set; identifies which data to gather
-#                     per project.  Falls back to auto-detection from PANE_LABEL when absent.
+#                     per project.  Falls back to auto-detection from PANE_LABEL when absent
+#                     (case-insensitive: --label AGENTS selects "agents").
+#                     "agents" (--all-projects only, queue subcommand) merges the five role
+#                     backlogs (pm, coder, writer, tester, cm) into one column:
+#                       column-render.sh queue none [rows] [width] \
+#                         --label AGENTS --kanban-root <path> --all-projects --column-type agents
+#                     Each row is the project tag, then the task key with its role prefix
+#                     (e.g. "CODER-20261030-004"; the prefix in the label colour, right-
+#                     aligned so the numbers line up). Rows are grouped by project in
+#                     registry order and sorted newest number first within a project, so
+#                     the roles interleave. Status colour, markers and the "... and N more"
+#                     overflow row are the role columns' own.
 #   --board-widths S  (--all-projects board columns) The width every board column of
 #                     this pane set is drawn at, as comma-separated KEY=WIDTH entries;
 #                     KEY is a column type, or input / queue for every column of that
-#                     kind (a column type wins), e.g. "input=29,queue=26". The column
+#                     kind (a column type wins; "agents" is set only by its own key),
+#                     e.g. "input=29,queue=26,agents=30". The column
 #                     that builds a tick pre-renders all of them, so the other columns
 #                     of the tick print without starting Python. Optional: output is
 #                     identical with or without it; only the cost changes.
 #
-# Board columns (--all-projects with one of the eight column types): one
-# column per tick builds the shared board snapshot and pre-renders the
-# declared columns; the others print their pre-rendered slice (see
+# Board columns (--all-projects with one of the eight column types, or
+# agents): one column per tick builds the shared board snapshot and
+# pre-renders the declared columns; the others print their pre-rendered slice (see
 # lib/dashboard/column_render_board_serve.sh and column_render_board.sh).
 #
 # Output:
@@ -74,7 +86,7 @@
 
 set -euo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # This script's directory. Built without dirname (one process fewer on every
 # board column render -- see the fast path below).
@@ -165,7 +177,7 @@ source "${SCRIPT_DIR}/../lib/dashboard/column_render_config.sh"
 # Act on the parse outcome recorded above.
 if [[ "$COLUMN_RENDER_SHOW_HELP" == "true" ]]; then
     # shellcheck source=../lib/header_help.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+    source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
     header_help_print "${BASH_SOURCE[0]}"
     exit 0
 fi
@@ -180,20 +192,21 @@ source "${SCRIPT_DIR}/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT"
 # Source config (kanban.cfg; read_ini comes from project_paths.sh above).
 if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    DASHBOARD_ROWS_PER_COLUMN="${DASHBOARD_ROWS_PER_COLUMN:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard rows_per_column 21)}"
+    DASHBOARD_ROWS_PER_COLUMN="$(config_dashboard_rows_per_column "${KANBAN_ROOT}/kanban.cfg")"
     export DASHBOARD_ROWS_PER_COLUMN
     # [dashboard] max_rows → DASHBOARD_MAX_ROWS (column_render_config.sh).
     column_render_config_max_rows
 fi
 export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree)}"
 
-# DASHBOARD_ROWS_PER_COLUMN — validate and apply default.
-_DEFAULT_ROWS=13
+# DASHBOARD_ROWS_PER_COLUMN — validate and apply default
+# (config_loader.sh's config_dashboard_rows_per_column holds it).
+_rows_default="$(config_dashboard_rows_per_column --default)"
 if [[ -z "${DASHBOARD_ROWS_PER_COLUMN:-}" ]]; then
-    DASHBOARD_ROWS_PER_COLUMN="$_DEFAULT_ROWS"
+    DASHBOARD_ROWS_PER_COLUMN="$_rows_default"
 elif ! [[ "${DASHBOARD_ROWS_PER_COLUMN}" =~ ^[0-9]+$ ]] || (( DASHBOARD_ROWS_PER_COLUMN <= 0 )); then
-    echo "WARNING: DASHBOARD_ROWS_PER_COLUMN='${DASHBOARD_ROWS_PER_COLUMN}' is invalid; falling back to ${_DEFAULT_ROWS}" >&2
-    DASHBOARD_ROWS_PER_COLUMN="$_DEFAULT_ROWS"
+    echo "WARNING: DASHBOARD_ROWS_PER_COLUMN='${DASHBOARD_ROWS_PER_COLUMN}' is invalid; falling back to ${_rows_default}" >&2
+    DASHBOARD_ROWS_PER_COLUMN="$_rows_default"
 fi
 
 # Dashboard layout values (kanban.cfg [dashboard]): control the dynamic
@@ -231,14 +244,14 @@ fi
 
 # Multi-project mode dispatch — see column_render_data.sh / column_render_frame.sh.
 if [[ "$ALL_PROJECTS" == "true" ]]; then
-    # A board column (one of the eight types, with the subcommand that type
-    # takes) renders its slice of the shared per-tick board snapshot
+    # A board column (one of the eight types, or agents, with the subcommand
+    # that type takes) renders its slice of the shared per-tick board snapshot
     # (column_render_board.sh), which falls back to gathering this column
     # directly when the snapshot cannot be used. Narration is stderr-only,
     # so stdout is byte-identical either way. Anything else -- an unknown or
     # missing column type -- gathers and renders on its own, as before.
     case "${COLUMN_TYPE}:${SUBCOMMAND}" in
-        bugs:input|priorities:input|requirements:input|pm:queue|coder:queue|writer:queue|tester:queue|cm:queue)
+        bugs:input|priorities:input|requirements:input|pm:queue|coder:queue|writer:queue|tester:queue|cm:queue|agents:queue)
             _column_render_multi_rows_width
             column_render_board_render
             ;;

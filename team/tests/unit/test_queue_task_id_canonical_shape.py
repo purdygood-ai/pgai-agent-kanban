@@ -166,17 +166,17 @@ def test_pending_scan_refuses_malformed_ids_and_serves_first_well_formed_entry(t
     result = _run(script, tmp_path)
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
-    assert f"PENDING=[{good_id}]" in result.stdout, (
-        f"the first well-formed BACKLOG entry must still be served\nstdout={result.stdout}"
-    )
+    assert (
+        f"PENDING=[{good_id}]" in result.stdout
+    ), f"the first well-formed BACKLOG entry must still be served\nstdout={result.stdout}"
     for malformed in ("..", "../x", "a.b"):
         assert f"PENDING=[{malformed}]" not in result.stdout
     messages = _refusal_lines_naming(result.stderr, _QUEUE_REFUSAL_KEY)
     assert len(messages) == 3, f"expected one refusal per malformed line\nstderr={result.stderr}"
     for line_no, text in ((3, ".."), (4, "../x"), (5, "a.b")):
-        assert any(f"{backlog} line {line_no} " in m and text in m for m in messages), (
-            f"refusal must name the queue file and line {line_no} for {text!r}\nstderr={result.stderr}"
-        )
+        assert any(
+            f"{backlog} line {line_no} " in m and text in m for m in messages
+        ), f"refusal must name the queue file and line {line_no} for {text!r}\nstderr={result.stderr}"
     assert "remedy:  sed -n '3p' -- " in result.stderr
 
 
@@ -230,7 +230,9 @@ def test_prerequisite_parse_still_satisfies_well_formed_done_prerequisite(tmp_pa
     result = _run(script, tmp_path)
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert "RC=[0]" in result.stdout
-    assert "error:" not in result.stderr, f"a well-formed satisfied prerequisite must not be refused\nstderr={result.stderr}"
+    assert (
+        "error:" not in result.stderr
+    ), f"a well-formed satisfied prerequisite must not be refused\nstderr={result.stderr}"
 
 
 # ---------------------------------------------------------------------------
@@ -268,17 +270,17 @@ def test_waiting_scan_refuses_malformed_ids_and_promotes_well_formed_entry(tmp_p
     messages = _refusal_lines_naming(result.stderr, _QUEUE_REFUSAL_KEY)
     assert any(f"{backlog} line 3 " in m and ".." in m for m in messages), result.stderr
     assert any(f"{backlog} line 4 " in m and "../x" in m for m in messages), result.stderr
-    assert "## State\nWAITING" in decoy_status.read_text(encoding="utf-8"), (
-        "a malformed id must never resolve to a path: the decoy outside tasks_root was promoted"
-    )
-    assert "## State\nBACKLOG" in waiting_status.read_text(encoding="utf-8"), (
-        f"the well-formed WAITING entry with a DONE prerequisite must still be promoted\nstdout={result.stdout}"
-    )
+    assert "## State\nWAITING" in decoy_status.read_text(
+        encoding="utf-8"
+    ), "a malformed id must never resolve to a path: the decoy outside tasks_root was promoted"
+    assert "## State\nBACKLOG" in waiting_status.read_text(
+        encoding="utf-8"
+    ), f"the well-formed WAITING entry with a DONE prerequisite must still be promoted\nstdout={result.stdout}"
     queue_text = backlog.read_text(encoding="utf-8")
     assert f"- [ ] {waiting_id}" in queue_text
-    assert "- [W] .. — parent escape" in queue_text and "- [ ] ../x — sibling escape" in queue_text, (
-        "malformed lines are skipped, never rewritten or removed"
-    )
+    assert (
+        "- [W] .. — parent escape" in queue_text and "- [ ] ../x — sibling escape" in queue_text
+    ), "malformed lines are skipped, never rewritten or removed"
     assert "promoted 1 task(s)" in result.stdout
 
 
@@ -329,7 +331,7 @@ def test_live_shape_queue_parses_every_entry_without_refusal(tmp_path: pathlib.P
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert "error:" not in result.stderr, f"a live-shaped queue must produce no refusal\nstderr={result.stderr}"
-    served = [line[len("SERVED=["):-1] for line in result.stdout.splitlines() if line.startswith("SERVED=[")]
+    served = [line[len("SERVED=[") : -1] for line in result.stdout.splitlines() if line.startswith("SERVED=[")]
     assert served == backlog_ids, f"every BACKLOG entry must be served in order; got {served}"
 
 
@@ -393,9 +395,9 @@ def test_stale_active_scan_refuses_malformed_ids_and_reconciles_well_formed_entr
     messages = _refusal_lines_naming(result.stderr, _QUEUE_REFUSAL_KEY)
     assert len(messages) == 3, f"expected one refusal per malformed [A] line\nstderr={result.stderr}"
     for line_no, text in ((3, ".."), (4, "../x"), (5, "a.b")):
-        assert any(f"{backlog} line {line_no} " in m and text in m and "stale-active scan" in m for m in messages), (
-            f"refusal must name the queue file, line {line_no} and the scan for {text!r}\nstderr={result.stderr}"
-        )
+        assert any(
+            f"{backlog} line {line_no} " in m and text in m and "stale-active scan" in m for m in messages
+        ), f"refusal must name the queue file, line {line_no} and the scan for {text!r}\nstderr={result.stderr}"
     assert "remedy:  sed -n '3p' -- " in result.stderr
 
     calls = calls_log.read_text(encoding="utf-8").splitlines() if calls_log.exists() else []
@@ -408,7 +410,7 @@ def test_stale_active_scan_refuses_malformed_ids_and_reconciles_well_formed_entr
     assert f"teardown {good_id}" in calls, f"the well-formed orphan must still be torn down\ncalls={calls}"
     assert any(c.startswith("git ") and f"refs/heads/ai_feature/{good_id}" in c for c in calls), f"calls={calls}"
     assert any(c.startswith("git ") and f"branch -D ai_feature/{good_id}" in c for c in calls), f"calls={calls}"
-    assert f"state-writer {good_id} {good_status}" in calls, (
-        f"the well-formed orphan must still be reset through the state writer\ncalls={calls}"
-    )
+    assert (
+        f"state-writer {good_id} {good_status}" in calls
+    ), f"the well-formed orphan must still be reset through the state writer\ncalls={calls}"
     assert "reset 1 orphaned [A] task(s)" in result.stdout, f"stdout={result.stdout}"

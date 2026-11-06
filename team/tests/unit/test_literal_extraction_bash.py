@@ -49,8 +49,8 @@ def test_finds_bare_match_in_recorded_output_fixture(tmp_path: pathlib.Path) -> 
     result = run_bash(
         tmp_path,
         _source(
-            f'literal_grep_recorded_output '
-            f'\'"no fresh snapshot (missing, unreadable, or older than 5s) -- rendering directly"\' '
+            f"literal_grep_recorded_output "
+            f"'\"no fresh snapshot (missing, unreadable, or older than 5s) -- rendering directly\"' "
             f"{fixture_dir!s}"
         ),
     )
@@ -95,19 +95,12 @@ def test_aggregates_hits_across_multiple_recorded_output_dirs(
     engine_baseline.mkdir(parents=True)
     golden.mkdir(parents=True)
 
-    (engine_baseline / "board-render.txt").write_text(
-        "shared-marker-value\n", encoding="utf-8"
-    )
-    (golden / "summary.json").write_text(
-        '{"note": "shared-marker-value"}\n', encoding="utf-8"
-    )
+    (engine_baseline / "board-render.txt").write_text("shared-marker-value\n", encoding="utf-8")
+    (golden / "summary.json").write_text('{"note": "shared-marker-value"}\n', encoding="utf-8")
 
     result = run_bash(
         tmp_path,
-        _source(
-            f"literal_grep_recorded_output 'shared-marker-value' "
-            f"{engine_baseline!s} {golden!s}"
-        ),
+        _source(f"literal_grep_recorded_output 'shared-marker-value' " f"{engine_baseline!s} {golden!s}"),
     )
     assert result.returncode == 0
     lines = [line for line in result.stdout.splitlines() if line]
@@ -155,8 +148,8 @@ def test_grep_tests_still_cannot_see_a_bare_recorded_output_line(
     result = run_bash(
         tmp_path,
         _source(
-            'literal_grep_tests '
-            '\'"no fresh snapshot (missing, unreadable, or older than 5s) -- rendering directly"\' '
+            "literal_grep_tests "
+            "'\"no fresh snapshot (missing, unreadable, or older than 5s) -- rendering directly\"' "
             f"{fixture_dir!s}"
         ),
     )
@@ -176,7 +169,7 @@ def test_grep_recorded_output_finds_what_grep_tests_misses(
     literal_line = "no fresh snapshot (missing, unreadable, or older than 5s) -- rendering directly"
     (fixture_dir / "board-render.txt").write_text(literal_line + "\n", encoding="utf-8")
 
-    quoted_literal = f'\'"{literal_line}"\''
+    quoted_literal = f"'\"{literal_line}\"'"
 
     tests_result = run_bash(
         tmp_path,

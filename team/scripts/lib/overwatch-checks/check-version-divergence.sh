@@ -77,6 +77,12 @@
 # Exit codes:
 #   0 — always (REPORT-ONLY check)
 
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CVD_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CVD_SELF_DIR=""
+_CVD_LIB_DIR="${_CVD_SELF_DIR%/*}"
+
 # overwatch_registered_projects: the shared projects.cfg reader.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
@@ -88,29 +94,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _cvd_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-version-divergence: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-version-divergence: ERROR: OVERWATCH_PROJECT not set and multiple projects registered." >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-version-divergence: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-version-divergence || return 1
 
     # Resolve dev tree path from project.cfg.
     local _proj_root="${KANBAN_ROOT}/projects/${OVERWATCH_PROJECT}"
@@ -122,14 +106,9 @@ _cvd_resolve_env() {
     fi
 
     _CVD_DEV_TREE=""
-    if [[ -n "${_cfg_file}" ]]; then
-        _CVD_DEV_TREE="$(grep -E '^[[:space:]]*dev_tree_path[[:space:]]*=' "${_cfg_file}" \
-            | head -n1 \
-            | sed 's|^[^=]*=[[:space:]]*||; s|[[:space:]]*$||; s|^["'"'"']||; s|["'"'"']$||')"
-    fi
-    if [[ -z "${_CVD_DEV_TREE}" ]] && [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        _CVD_DEV_TREE="${PGAI_DEV_TREE_PATH}"
-    fi
+    # The documented dev_tree_path chain (overwatch_dev_tree, overwatch_config.sh):
+    # project.cfg, then PGAI_DEV_TREE_PATH, then kanban.cfg [paths].
+    _CVD_DEV_TREE="$(overwatch_dev_tree "${OVERWATCH_PROJECT}")" || _CVD_DEV_TREE=""
 
     return 0
 }
@@ -148,7 +127,7 @@ _cvd_resolve_branch_prefix() {
 
     if ! declare -f pp_branch_prefix >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)" || lib_dir=""
+        lib_dir="${_CVD_LIB_DIR}"
         if [[ -n "${lib_dir}" && -f "${lib_dir}/project_paths.sh" ]]; then
             # shellcheck source=../project_paths.sh
             source "${lib_dir}/project_paths.sh"
@@ -193,7 +172,8 @@ _cvd_strip_branch_prefix() {
 # ---------------------------------------------------------------------------
 _cvd_load_protocol() {
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+    lib_dir="${_CVD_SELF_DIR}"
+    [[ -n "${lib_dir}" ]] || {
         echo "check-version-divergence: cannot resolve lib dir" >&2
         return 1
     }

@@ -49,13 +49,13 @@ def make_hardcoded_literal_src() -> str:
     # file does not itself contain the raw literal.
     _literal = "/tmp/" + "pgai_kanban_tmp"
     return (
-        '#!/usr/bin/env python3\n'
+        "#!/usr/bin/env python3\n"
         '"""Synthetic bad-example: hardcoded temp-root literal (AP3)."""\n'
-        '\n'
-        '\n'
-        'def bad_temp_dir() -> str:\n'
+        "\n"
+        "\n"
+        "def bad_temp_dir() -> str:\n"
         '    """Return a hardcoded temp path — deliberate AP3 violation."""\n'
-        '    # The line below is the AP3 anti-pattern.\n'
+        "    # The line below is the AP3 anti-pattern.\n"
         f'    return "{_literal}"\n'
     )
 
@@ -68,14 +68,14 @@ def make_unrooted_mkdtemp_src() -> str:
     PGAI_AGENT_KANBAN_TEMP_DIR.
     """
     return (
-        '#!/usr/bin/env python3\n'
+        "#!/usr/bin/env python3\n"
         '"""Synthetic bad-example: un-rooted mkdtemp call (AP2)."""\n'
-        '\n'
-        'import tempfile\n'
-        '\n'
-        '\n'
-        'def bad_mkdtemp() -> str:\n'
+        "\n"
+        "import tempfile\n"
+        "\n"
+        "\n"
+        "def bad_mkdtemp() -> str:\n"
         '    """Create a temp dir without routing through the framework."""\n'
-        '    # The line below is the AP2 anti-pattern: no dir= argument.\n'
-        '    return tempfile.mkdtemp()\n'
+        "    # The line below is the AP2 anti-pattern: no dir= argument.\n"
+        "    return tempfile.mkdtemp()\n"
     )

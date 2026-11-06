@@ -107,7 +107,6 @@ import shutil
 import subprocess
 import time
 
-import pytest
 
 from tests.fixtures.claude_provider_stub import install_claude_provider_stub
 
@@ -121,20 +120,29 @@ _SUBPROCESS_TIMEOUT_SECONDS = 60
 # guidelines.md, Anti-pattern 2), mirroring test_provider_runtime_
 # integration.py's own _LEAK_PREFIXES.
 _LEAK_PREFIXES = (
-    "PGAI_", "PP_", "KANBAN_ROOT", "CLAUDE_", "AI_AGENT", "STOP_FILE",
-    "TMPDIR", "MAX_TASK_SECONDS", "MAX_RUNTIME_SECONDS", "MAX_TASKS_PER_WAKE",
-    "MAX_PROJECT_SECONDS", "KILL_GRACE_SECONDS", "PAUSE_BETWEEN_TASKS",
-    "STOP_ON_BLOCKED", "AI_AUTH_MODE", "BASH_MAX_TIMEOUT_MS", "DASHBOARD_",
+    "PGAI_",
+    "PP_",
+    "KANBAN_ROOT",
+    "CLAUDE_",
+    "AI_AGENT",
+    "STOP_FILE",
+    "TMPDIR",
+    "MAX_TASK_SECONDS",
+    "MAX_RUNTIME_SECONDS",
+    "MAX_TASKS_PER_WAKE",
+    "MAX_PROJECT_SECONDS",
+    "KILL_GRACE_SECONDS",
+    "PAUSE_BETWEEN_TASKS",
+    "STOP_ON_BLOCKED",
+    "AI_AUTH_MODE",
+    "BASH_MAX_TIMEOUT_MS",
+    "DASHBOARD_",
     "PM_MAX_TASKS",
 )
 
 
 def _clean_base_env() -> dict[str, str]:
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)
-    }
+    return {k: v for k, v in os.environ.items() if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)}
 
 
 # ---------------------------------------------------------------------------
@@ -180,16 +188,12 @@ def _build_kanban_root(
         "[wake]\nmax_tasks_per_wake = 5\n",
         encoding="utf-8",
     )
-    (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8")
 
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
     (proj / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {project_name}\n"
-        "workflow_type = document\n",
+        "[project]\n" f"project_name = {project_name}\n" "workflow_type = document\n",
         encoding="utf-8",
     )
     queues_dir = proj / "tasks" / "queues"
@@ -202,9 +206,7 @@ def _build_kanban_root(
     for task_id in task_ids:
         _write_stub_task(proj / "tasks", task_id)
     lines = "\n".join(f"- [ ] {task_id} — stub task" for task_id in task_ids)
-    (queues_dir / f"{_AGENT}_backlog.md").write_text(
-        f"# {_AGENT} backlog\n\n{lines}\n", encoding="utf-8"
-    )
+    (queues_dir / f"{_AGENT}_backlog.md").write_text(f"# {_AGENT} backlog\n\n{lines}\n", encoding="utf-8")
 
     (root / "logs").mkdir(parents=True, exist_ok=True)
     (root / "locks").mkdir(parents=True, exist_ok=True)
@@ -323,9 +325,7 @@ def _release_known_holder(lock_file: pathlib.Path, fd: int) -> None:
 
 
 def _task_status_text(kanban_root: pathlib.Path, project_name: str, task_id: str) -> str:
-    return (kanban_root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(
-        encoding="utf-8"
-    )
+    return (kanban_root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
 
 
 def _wake_env(
@@ -484,59 +484,54 @@ def test_reaped_chain_stops_before_dispatch_second_chain_reaches_the_task(
         chain_b_output = "(chain B never ran: chain A never narrated the lost lock)\n"
     both_outputs = f"chain A output:\n{chain_a_output}\nchain B output:\n{chain_b_output}"
 
-    assert phase["reaped"], (
-        f"never observed chain A finishing {task_a1}; the reap never ran.\n{both_outputs}"
-    )
+    assert phase["reaped"], f"never observed chain A finishing {task_a1}; the reap never ran.\n{both_outputs}"
     assert (pause_gate_dir / "entered").exists(), (
         f"chain A never paused through the gated `sleep {_PAUSE_GATE_SECONDS}` between "
         f"tasks, so nothing ordered the reap before its dispatch reverification; "
-        f"check that wake_driver.sh still pauses with `sleep \"$PAUSE_BETWEEN_TASKS\"` "
+        f'check that wake_driver.sh still pauses with `sleep "$PAUSE_BETWEEN_TASKS"` '
         f"and that PAUSE_BETWEEN_TASKS reached it.\n{both_outputs}"
     )
 
     # --- The safety property: chain A never dispatched task A2 after
     #     losing the lock, and stopped cleanly. Checked before anything
     #     about chain B, so a regression here is reported as itself. ---
-    assert f"task {task_a2}: transitioned to WORKING" not in chain_a_output, (
-        f"chain A must never have dispatched {task_a2} after losing the lock.\n{both_outputs}"
-    )
-    assert f"finished task {task_a2}" not in chain_a_output, (
-        f"chain A must never have finished/finalized {task_a2}.\n{both_outputs}"
-    )
-    assert chain_a_returncode == 0, (
-        f"chain A must exit 0 (a lost lock is a clean stop, not a crash).\n{both_outputs}"
-    )
+    assert (
+        f"task {task_a2}: transitioned to WORKING" not in chain_a_output
+    ), f"chain A must never have dispatched {task_a2} after losing the lock.\n{both_outputs}"
+    assert (
+        f"finished task {task_a2}" not in chain_a_output
+    ), f"chain A must never have finished/finalized {task_a2}.\n{both_outputs}"
+    assert chain_a_returncode == 0, f"chain A must exit 0 (a lost lock is a clean stop, not a crash).\n{both_outputs}"
 
     # --- The stop is narrated dual-channel, naming the current holder. ---
-    assert "error:   lock.provenance.reverify_lost" in chain_a_output, (
-        f"expected chain A's own narration of the lost lock.\n{both_outputs}"
-    )
+    assert (
+        "error:   lock.provenance.reverify_lost" in chain_a_output
+    ), f"expected chain A's own narration of the lost lock.\n{both_outputs}"
     expected_holder = " ".join(f"{key}={value}" for key, value in _KNOWN_HOLDER.items())
     assert f"it is now held by {expected_holder}" in chain_a_output, (
         f"expected the narration to name the known holder seated on the "
         f"reaped lock ({expected_holder}).\n{both_outputs}"
     )
-    assert "'agent dispatch'" in chain_a_output, (
-        f"expected the narration to name the dispatch phase boundary.\n{both_outputs}"
-    )
+    assert (
+        "'agent dispatch'" in chain_a_output
+    ), f"expected the narration to name the dispatch phase boundary.\n{both_outputs}"
     assert "(op=wake-chain:shared-project, task=none)" in chain_a_output, (
         f"expected the narration to name chain A's own op/task fields "
         f"(no task is selected yet at the dispatch boundary).\n{both_outputs}"
     )
     assert "chain lost repo lock ownership mid-run" in chain_a_output, (
-        f"expected chain A's own per-project summary line to name the "
-        f"stop reason.\n{both_outputs}"
+        f"expected chain A's own per-project summary line to name the " f"stop reason.\n{both_outputs}"
     )
 
     # --- Chain B reached task A2 once the lock was free. ---
     assert "proc" in chain_b_result, f"chain B was never started.\n{both_outputs}"
     assert chain_b_result["proc"].returncode == 0, f"chain B exited non-zero.\n{both_outputs}"
-    assert "## State\nDONE" in _task_status_text(kanban_root, project, task_a2), (
-        f"chain B must have completed {task_a2}.\n{both_outputs}"
-    )
-    assert f"finished task {task_a2}" in chain_b_output, (
-        f"expected chain B's own log to record finishing {task_a2}.\n{both_outputs}"
-    )
+    assert "## State\nDONE" in _task_status_text(
+        kanban_root, project, task_a2
+    ), f"chain B must have completed {task_a2}.\n{both_outputs}"
+    assert (
+        f"finished task {task_a2}" in chain_b_output
+    ), f"expected chain B's own log to record finishing {task_a2}.\n{both_outputs}"
 
     # --- task A1 (processed entirely under chain A's own unbroken
     #     ownership) passed every boundary with no extra narration tied to

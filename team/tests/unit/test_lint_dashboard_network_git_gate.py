@@ -68,9 +68,7 @@ _REAL_DASHBOARD_DIR = _SCRIPTS_DIR / "dashboard"
 
 
 def _import_lint_module():
-    spec = importlib.util.spec_from_file_location(
-        "lint_dashboard_network_git_gate", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_dashboard_network_git_gate", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -115,9 +113,8 @@ def test_real_dashboard_tree_has_zero_violations() -> None:
     # fixture): this is a live regression guard, not an isolated behavior a
     # fixture could stand in for.
     violations = _lint.scan_dashboard_dir(_REAL_DASHBOARD_DIR, verbose=False)
-    assert violations == [], (
-        "Unexpected violations on the real dashboard tree:\n"
-        + "\n".join(f"  {v.path}:{v.line} ({v.verb}) {v.snippet}" for v in violations)
+    assert violations == [], "Unexpected violations on the real dashboard tree:\n" + "\n".join(
+        f"  {v.path}:{v.line} ({v.verb}) {v.snippet}" for v in violations
     )
 
 
@@ -151,14 +148,10 @@ def test_planted_verb_is_flagged(tmp_path: Path, verb: str, invocation: str) -> 
 
     violations = _lint.scan_dashboard_dir(dashboard, verbose=False)
 
-    assert violations, (
-        f"Expected a violation for verb {verb!r} but none was reported."
-    )
+    assert violations, f"Expected a violation for verb {verb!r} but none was reported."
     matched = [v for v in violations if v.path == fixture_sh]
     assert matched, f"No violation reported for the fixture file {fixture_sh}"
-    assert matched[0].verb == verb, (
-        f"Expected matched verb {verb!r}, got {matched[0].verb!r}"
-    )
+    assert matched[0].verb == verb, f"Expected matched verb {verb!r}, got {matched[0].verb!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -223,9 +216,7 @@ def test_comment_only_mention_is_not_flagged(tmp_path: Path) -> None:
     violations = _lint.scan_dashboard_dir(dashboard, verbose=False)
 
     violation_paths = [v.path for v in violations]
-    assert fixture_sh not in violation_paths, (
-        "Comment-only mention of forbidden verbs was incorrectly flagged."
-    )
+    assert fixture_sh not in violation_paths, "Comment-only mention of forbidden verbs was incorrectly flagged."
 
 
 # ---------------------------------------------------------------------------
@@ -250,9 +241,7 @@ def test_lib_subdirectory_is_scanned(tmp_path: Path) -> None:
     violations = _lint.scan_dashboard_dir(dashboard, verbose=False)
 
     violation_paths = [v.path for v in violations]
-    assert fixture_sh in violation_paths, (
-        "Violation inside dashboard/lib/ was not detected — scan must be recursive."
-    )
+    assert fixture_sh in violation_paths, "Violation inside dashboard/lib/ was not detected — scan must be recursive."
 
 
 # ---------------------------------------------------------------------------
@@ -271,9 +260,7 @@ def test_main_returns_zero_on_clean_tree(tmp_path: Path) -> None:
         """,
     )
 
-    rc, findings = run_main(
-        _lint.main, ["--team-dir", str(tmp_path / "team")], tmp_path / "findings.json"
-    )
+    rc, findings = run_main(_lint.main, ["--team-dir", str(tmp_path / "team")], tmp_path / "findings.json")
     assert rc == 0, f"Expected main() to return 0 on a clean tree, got {rc}"
     assert findings == [], f"Expected no finding on a clean tree, got {findings}"
 
@@ -293,9 +280,7 @@ def test_main_records_violation_as_finding_and_returns_zero(tmp_path: Path) -> N
         """,
     )
 
-    rc, findings = run_main(
-        _lint.main, ["--team-dir", str(tmp_path / "team")], tmp_path / "findings.json"
-    )
+    rc, findings = run_main(_lint.main, ["--team-dir", str(tmp_path / "team")], tmp_path / "findings.json")
     assert rc == 0, f"Expected main() to return 0 on a violation (quality class), got {rc}"
     assert len(findings) == 1, findings
     finding = findings[0]
@@ -320,9 +305,7 @@ def test_direct_run_prints_writes_and_exits_zero_and_the_remedy_clears_it(
     findings_path = tmp_path / "out" / "findings.json"
     argv = [sys.executable, str(_LINT_SCRIPT), "--team-dir", str(tmp_path / "team")]
 
-    proc = subprocess.run(
-        [*argv, "--findings-file", str(findings_path)], capture_output=True, text=True
-    )
+    proc = subprocess.run([*argv, "--findings-file", str(findings_path)], capture_output=True, text=True)
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert f"{violator}:2: network-capable git verb 'fetch'" in proc.stdout, proc.stdout
@@ -356,9 +339,7 @@ def test_main_returns_two_when_dashboard_subdir_missing(tmp_path: Path) -> None:
     team_dir = tmp_path / "team"
     (team_dir / "scripts").mkdir(parents=True, exist_ok=True)
     rc = _lint.main(["--team-dir", str(team_dir)])
-    assert rc == 2, (
-        f"Expected main() to return 2 when scripts/dashboard/ is absent, got {rc}"
-    )
+    assert rc == 2, f"Expected main() to return 2 when scripts/dashboard/ is absent, got {rc}"
 
 
 # ---------------------------------------------------------------------------
@@ -444,9 +425,7 @@ class TestDashboardNetworkGitGateRemedyBlock:
         team_dir = tmp_path / "team"
         return team_dir, fixture_sh
 
-    def test_remedy_block_contains_all_required_parts(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_remedy_block_contains_all_required_parts(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Forcing a network-git violation prints the full three-part remedy
         block.
 
@@ -460,25 +439,19 @@ class TestDashboardNetworkGitGateRemedyBlock:
         """
         team_dir, fixture_sh = self._write_violation_fixture(tmp_path)
 
-        result, findings = run_main(
-            _lint.main, ["--team-dir", str(team_dir)], tmp_path / "findings.json"
-        )
-        assert result == 0 and len(findings) == 1, (
-            f"Forced network-git violation was not recorded as one finding: {findings}"
-        )
+        result, findings = run_main(_lint.main, ["--team-dir", str(team_dir)], tmp_path / "findings.json")
+        assert (
+            result == 0 and len(findings) == 1
+        ), f"Forced network-git violation was not recorded as one finding: {findings}"
 
         out = capsys.readouterr().out
 
-        assert "Cause(s):" in out, (
-            f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
-        )
-        assert str(fixture_sh) in out and "ls-remote" in out, (
-            f"Remedy block does not name the offending file and verb.\nstdout: {out!r}"
-        )
+        assert "Cause(s):" in out, f"Remedy block missing the 'Cause(s):' section.\nstdout: {out!r}"
+        assert (
+            str(fixture_sh) in out and "ls-remote" in out
+        ), f"Remedy block does not name the offending file and verb.\nstdout: {out!r}"
 
-        assert "To fix:" in out, (
-            f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
-        )
+        assert "To fix:" in out, f"Remedy block missing the 'To fix:' numbered fix block.\nstdout: {out!r}"
         commands = _NUMBERED_COMMAND_RE.findall(out)
         assert len(commands) >= 2, (
             "Remedy block's numbered fix block has fewer than 2 commands "
@@ -491,9 +464,7 @@ class TestDashboardNetworkGitGateRemedyBlock:
             f"Last command: {last_command_text!r}\nstdout: {out!r}"
         )
 
-        assert "is local-only" in out, (
-            f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
-        )
+        assert "is local-only" in out, f"Remedy block missing the one-line enforced rule.\nstdout: {out!r}"
 
         placeholder_hits = _ANGLE_BRACKET_PLACEHOLDER_RE.findall(out)
         assert placeholder_hits == [], (
@@ -502,9 +473,7 @@ class TestDashboardNetworkGitGateRemedyBlock:
             f"Placeholders found: {placeholder_hits!r}\nstdout: {out!r}"
         )
 
-    def test_remedy_block_commands_clear_the_gate(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_remedy_block_commands_clear_the_gate(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Executing the remedy block's printed commands verbatim clears the
         gate — the motivating end-to-end proof: a stranger reading only the
         gate's failure output, with no other guidance, can clear it.
@@ -516,18 +485,14 @@ class TestDashboardNetworkGitGateRemedyBlock:
         """
         team_dir, fixture_sh = self._write_violation_fixture(tmp_path)
 
-        result, findings = run_main(
-            _lint.main, ["--team-dir", str(team_dir)], tmp_path / "findings.json"
-        )
-        assert result == 0 and len(findings) == 1, (
-            f"Forced network-git violation was not recorded as one finding: {findings}"
-        )
+        result, findings = run_main(_lint.main, ["--team-dir", str(team_dir)], tmp_path / "findings.json")
+        assert (
+            result == 0 and len(findings) == 1
+        ), f"Forced network-git violation was not recorded as one finding: {findings}"
 
         out = capsys.readouterr().out
         commands = _NUMBERED_COMMAND_RE.findall(out)
-        assert len(commands) >= 2, (
-            f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
-        )
+        assert len(commands) >= 2, f"Expected at least 2 numbered commands in the remedy block.\nstdout: {out!r}"
 
         for _, command_text in commands:
             proc = subprocess.run(
@@ -544,9 +509,7 @@ class TestDashboardNetworkGitGateRemedyBlock:
         # The last command IS the re-lint verification command; it exits 0
         # whatever it finds, so confirm via a direct main() call that the
         # fixture tree now carries no finding.
-        recheck, after = run_main(
-            _lint.main, ["--team-dir", str(team_dir)], tmp_path / "after.json"
-        )
+        recheck, after = run_main(_lint.main, ["--team-dir", str(team_dir)], tmp_path / "after.json")
         assert recheck == 0 and after == [], (
             "lint_dashboard_network_git_gate still reports a finding against the "
             f"fixture tree after running every printed remedy command verbatim: {after}"
@@ -556,14 +519,11 @@ class TestDashboardNetworkGitGateRemedyBlock:
         # neutralized the network call, not merely a string that satisfies
         # the lint's own textual check by coincidence.
         patched_text = fixture_sh.read_text(encoding="utf-8")
-        offending_line = [
-            line for line in patched_text.splitlines() if "ls-remote" in line
-        ]
+        offending_line = [line for line in patched_text.splitlines() if "ls-remote" in line]
         assert offending_line, (
             f"Expected the ls-remote line to still be present (commented) "
             f"in the patched file.\nContents: {patched_text!r}"
         )
         assert offending_line[0].lstrip().startswith("#"), (
-            "The offending ls-remote line was not commented out by the "
-            f"remedy command.\nLine: {offending_line[0]!r}"
+            "The offending ls-remote line was not commented out by the " f"remedy command.\nLine: {offending_line[0]!r}"
         )

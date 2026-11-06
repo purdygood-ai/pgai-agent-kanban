@@ -50,7 +50,7 @@ import dataclasses
 import pathlib
 import re
 import sys
-from typing import Callable, Sequence, TypeVar
+from collections.abc import Callable, Sequence
 
 # Run by file path (``python3 .../cells.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -81,6 +81,7 @@ __all__ = [
     "CEILING_UNREADABLE_SUFFIX",
     "CeilingCards",
     "DeferCards",
+    "FRAME_LABEL_PALETTE_KEY",
     "NEEDS_OPERATOR_PALETTE_KEY",
     "NEEDS_OPERATOR_TEXT_MARKER",
     "Palette",
@@ -94,8 +95,6 @@ __all__ = [
     "truncate_ansi",
     "visible_len",
 ]
-
-T = TypeVar("T")
 
 #: One SGR escape sequence (colour / reset).  Never counted toward width.
 ANSI_ESC_RE = re.compile(r"\033\[[0-9;]*m")
@@ -123,6 +122,8 @@ _SETTLED_STATUSES = ("done", WONT_DO_STATUS, DUPLICATE_STATUS)
 
 #: The semantic palette key (config/default_palette.txt) needs-operator draws in.
 NEEDS_OPERATOR_PALETTE_KEY = "status_needs_operator"
+#: The semantic palette key (config/default_palette.txt) label text draws in.
+FRAME_LABEL_PALETTE_KEY = "frame_label"
 
 #: The marker a carried row carries after its ID with colour on.
 CARRIED_GLYPH_MARKER = " ↻"
@@ -138,8 +139,10 @@ class Palette:
 
     ``use_color`` is False under ``NO_COLOR`` / ``TERM=dumb``; the escapes
     are then empty strings and no row is coloured.  ``needs_operator`` is
-    the semantic palette's ``NEEDS_OPERATOR_PALETTE_KEY`` escape
-    (``pgai_agent_kanban.lib.palette.resolve_semantic_color``).
+    the semantic palette's ``NEEDS_OPERATOR_PALETTE_KEY`` escape and
+    ``label`` its ``FRAME_LABEL_PALETTE_KEY`` escape
+    (``pgai_agent_kanban.lib.palette.resolve_semantic_color``); the AGENTS
+    column draws each task key's role prefix in ``label``.
     """
 
     use_color: bool
@@ -150,6 +153,7 @@ class Palette:
     dim: str = ""
     reset: str = ""
     needs_operator: str = ""
+    label: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,8 +173,13 @@ class DeferCards:
     def suffix(self, cid: str, raw_status: str, use_color: bool) -> str:
         """Return the glyph suffix (" <glyph>" or "") for one bug card."""
         return defer_card_glyph_suffix(
-            self.mode, cid, raw_status, self.ids,
-            self.glyph_deferred_bug, self.glyph_defer_warning, use_color,
+            self.mode,
+            cid,
+            raw_status,
+            self.ids,
+            self.glyph_deferred_bug,
+            self.glyph_defer_warning,
+            use_color,
         )
 
 
@@ -315,7 +324,7 @@ def queue_window_bucket(state: str) -> str:
     return "open"
 
 
-def middle_position_window(items: Sequence[T], state_of: Callable[[T], str], n_rows: int) -> list:
+def middle_position_window[T](items: Sequence[T], state_of: Callable[[T], str], n_rows: int) -> list:
     """Select a queue pane's rows with the active block in the middle.
 
     *items* are newest first.  The active bucket takes up to *n_rows*

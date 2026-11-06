@@ -62,10 +62,7 @@ import os
 import pathlib
 import subprocess
 import sys
-import tempfile
-import time
 
-import pytest
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/tests/unit/ -> team/
@@ -86,7 +83,6 @@ from tests.fixtures.dashboard_render_fixture import (  # noqa: E402
     clean_subprocess_env,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixture helpers
 # ---------------------------------------------------------------------------
@@ -105,9 +101,7 @@ def _fixture_env(tmp_path: pathlib.Path, ttl_seconds: str | None = None) -> tupl
 
 
 def _run(cmd: list[str], env: dict) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd, capture_output=True, text=True, env=env, cwd=str(_REPO_ROOT), timeout=60
-    )
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=str(_REPO_ROOT), timeout=60)
 
 
 # ===========================================================================
@@ -132,9 +126,7 @@ def test_ttl_defaults_to_five_seconds_when_unset(tmp_path: pathlib.Path) -> None
         env=env,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "5", (
-        f"expected default staleness bound of 5s, got {result.stdout.strip()!r}"
-    )
+    assert result.stdout.strip() == "5", f"expected default staleness bound of 5s, got {result.stdout.strip()!r}"
 
 
 def test_ttl_env_override_wins_over_default(tmp_path: pathlib.Path) -> None:
@@ -153,9 +145,7 @@ def test_ttl_env_override_wins_over_default(tmp_path: pathlib.Path) -> None:
 def test_ttl_reads_kanban_cfg_when_env_unset(tmp_path: pathlib.Path) -> None:
     root = tmp_path / "cfg_root"
     root.mkdir()
-    (root / "kanban.cfg").write_text(
-        "[dashboard]\nsnapshot_ttl_seconds = 42\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text("[dashboard]\nsnapshot_ttl_seconds = 42\n", encoding="utf-8")
     env = dict(os.environ)
     env.pop("PGAI_DASHBOARD_SNAPSHOT_TTL_SECONDS", None)
     env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(root)
@@ -225,7 +215,7 @@ def test_concurrent_write_read_never_observes_a_partial_snapshot(tmp_path: pathl
     env = dict(os.environ)
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(temp_root)
 
-    script = r'''
+    script = r"""
 set -uo pipefail
 source "$SNAPSHOT_SH"
 
@@ -261,12 +251,11 @@ wait "$WPID"
 
 echo "checks=$CHECKS bad=$BAD"
 [[ "$BAD" -eq 0 ]]
-'''
+"""
     env["SNAPSHOT_SH"] = str(_SNAPSHOT_SH)
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
     assert result.returncode == 0, (
-        f"a partially-written snapshot was observed by a reader; "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"a partially-written snapshot was observed by a reader; " f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert "bad=0" in result.stdout, result.stdout
 
@@ -316,8 +305,7 @@ def test_operator_and_visibility_column_invocations_render_byte_identical_output
         f"stdout.\nfirst:\n{visibility_run.stdout}\nsecond:\n{operator_run.stdout}"
     )
     assert "no fresh snapshot" not in operator_run.stderr, (
-        "second twin invocation should be a cache HIT (no miss narration); "
-        f"stderr={operator_run.stderr!r}"
+        "second twin invocation should be a cache HIT (no miss narration); " f"stderr={operator_run.stderr!r}"
     )
 
 
@@ -423,9 +411,9 @@ def test_drill_and_overview_progress_panes_share_one_data_sh_scan_per_project(
     # show-progress.sh invocation, so every rendered data line of the drill
     # pane must appear in the overview output.
     for line in drill_run.stdout.splitlines():
-        assert line in overview_run.stdout, (
-            f"drill pane line {line!r} missing from overview output:\n{overview_run.stdout}"
-        )
+        assert (
+            line in overview_run.stdout
+        ), f"drill pane line {line!r} missing from overview output:\n{overview_run.stdout}"
 
 
 # ===========================================================================
@@ -452,16 +440,14 @@ def test_deleting_snapshot_between_ticks_still_renders_and_narrates_fallback(
     second_run = _run(cmd, env)
     assert second_run.returncode == 0, second_run.stderr
     assert second_run.stdout.strip(), (
-        "pane must not blank when its snapshot is deleted mid-run; "
-        f"stdout={second_run.stdout!r}"
+        "pane must not blank when its snapshot is deleted mid-run; " f"stdout={second_run.stdout!r}"
     )
     assert second_run.stdout == first_run.stdout, (
-        "content must still be correct (matching the pre-deletion render) "
-        "after falling back to a direct render"
+        "content must still be correct (matching the pre-deletion render) " "after falling back to a direct render"
     )
-    assert "no fresh snapshot" in second_run.stderr, (
-        f"the fallback must be narrated to stderr; stderr={second_run.stderr!r}"
-    )
+    assert (
+        "no fresh snapshot" in second_run.stderr
+    ), f"the fallback must be narrated to stderr; stderr={second_run.stderr!r}"
 
 
 def test_unreadable_snapshot_degrades_to_direct_render(tmp_path: pathlib.Path) -> None:
@@ -512,10 +498,7 @@ def test_kill_sh_scoped_cleanup_call_removes_the_snapshot_directory(tmp_path: pa
     env = dict(os.environ)
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(temp_root)
 
-    write_script = (
-        f'source "{_SNAPSHOT_SH}"; '
-        'printf "leftover" | dashboard_snapshot_write leftover-key'
-    )
+    write_script = f'source "{_SNAPSHOT_SH}"; ' 'printf "leftover" | dashboard_snapshot_write leftover-key'
     write_result = subprocess.run(["bash", "-c", write_script], capture_output=True, text=True, env=env)
     assert write_result.returncode == 0, write_result.stderr
 
@@ -527,6 +510,5 @@ def test_kill_sh_scoped_cleanup_call_removes_the_snapshot_directory(tmp_path: pa
     assert cleanup_result.returncode == 0, cleanup_result.stderr
 
     assert not (temp_root / "dashboard").exists(), (
-        "kill.sh's scoped cleanup call did not remove the dashboard snapshot "
-        f"directory ({temp_root / 'dashboard'})"
+        "kill.sh's scoped cleanup call did not remove the dashboard snapshot " f"directory ({temp_root / 'dashboard'})"
     )

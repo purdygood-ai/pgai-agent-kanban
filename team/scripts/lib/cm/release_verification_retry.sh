@@ -75,19 +75,26 @@
 #   cm_verification_retry_after_ship
 #       Called by cm_release_append_auto_ship_events (release_ship_posture.sh)
 #       after the release has shipped: writes the unverified ship's operator
-#       inbox entry. Never fails the release.
+#       inbox entry; when that write fails, files one bug through intake
+#       naming the inbox file and the command that writes the entry by hand.
+#       Never fails the release.
 #
 # Globals read: PROJECT_NAME, ACTIVE_RC, KANBAN_ROOT, _CM_PROJECT_ROOT,
 # _CM_DECIDE_ONLY, PGAI_TASK_ID, and the _TESTER_* values Step 4d sets.
 # Dependencies (sourced before these run): pp_run_ops (pp_run_ops.sh),
 # pgai_emit_error_contract and pgai_format_error_contract (error_contract.sh),
 # _cm_ship_policy_file_input_bug
-# (release_ship_policy.sh). No inline Python: every Python call is a module.
+# (release_ship_policy.sh). Sourced here: overwatch_deposit_bug
+# (overwatch_config.sh, the bash path that files a bug through
+# scripts/intake.sh). No inline Python: every Python call is a module.
 
 # Guard against double-sourcing.
 if declare -F cm_verification_retry_apply_decision >/dev/null 2>&1; then
     return 0
 fi
+
+# shellcheck source=../overwatch_config.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 
 _VERIFICATION_RETRY="available"
 _VERIFICATION_RETRY_TASK=""
@@ -315,8 +322,10 @@ cm_verification_retry_resolve_known_issues() {
 }
 
 # After the release has shipped (cm_release_append_auto_ship_events): the
-# unverified ship's one operator inbox entry. A write that fails is a
-# WARNING naming the command that writes it by hand, never an exit.
+# unverified ship's one operator inbox entry. A write that fails files one
+# bug through intake naming the inbox file and the command that writes the
+# entry by hand (the inbox being the channel that failed), then prints a
+# WARNING naming the same command; never an exit.
 cm_verification_retry_after_ship() {
   [[ "$_VERIFICATION_UNVERIFIED" == "yes" ]] || return 0
   local -a args=(inbox --kanban-root "$KANBAN_ROOT" --project "$PROJECT_NAME" --version "$ACTIVE_RC"
@@ -325,8 +334,57 @@ cm_verification_retry_after_ship() {
   local out
   if out="$(pp_run_ops pgai_agent_kanban.cm.verification_retry "${args[@]}" 2>&1)"; then
     echo "[cm-release] Operator inbox: ${out#entry_id=} records that verification of ${ACTIVE_RC} did not run (${_TESTER_TASK_ID})."
-  else
-    echo "[cm-release] WARNING: the operator inbox entry for the unverified ship could not be written (${out}); the release has shipped. Write it by hand: $(printf '%q' "${KANBAN_ROOT}/scripts/lib/pp_run_ops.sh") pgai_agent_kanban.cm.verification_retry $(printf '%q ' "${args[@]}")" >&2
+    return 0
   fi
+  local by_hand
+  by_hand="$(printf '%q' "${KANBAN_ROOT}/scripts/lib/pp_run_ops.sh") pgai_agent_kanban.cm.verification_retry $(printf '%q ' "${args[@]}")"
+  _cm_verification_inbox_failure_bug "${out//$'\n'/ }" "${by_hand% }"
+  echo "[cm-release] WARNING: the operator inbox entry for the unverified ship could not be written (${out}); the release has shipped. Write it by hand: ${by_hand}" >&2
+  return 0
+}
+
+# Helper: the bug an unverified ship files when its operator inbox entry
+# could not be written, deposited through intake (overwatch_deposit_bug).
+# Usage: _cm_verification_inbox_failure_bug <reason> <by_hand_command>
+# The slug names the version, so each release's unverified ship is its own
+# report; a re-run while that bug is live is refused by intake as the same
+# defect and files nothing new. Narrates the outcome; always returns 0.
+_cm_verification_inbox_failure_bug() {
+  local reason="$1" by_hand="$2"
+  local inbox_file="${KANBAN_ROOT}/projects/${PROJECT_NAME}/operator-inbox.md"
+  local slug="unverified-ship-${ACTIVE_RC//[^A-Za-z0-9]/-}-has-no-inbox-entry"
+  slug="${slug,,}"
+  while [[ "$slug" == *--* ]]; do slug="${slug//--/-}"; done
+  local bug_file="" deposit_rc=0
+  bug_file="$(printf '%s\n' \
+      "**Severity:** medium" \
+      "" \
+      "## Status" \
+      "open" \
+      "" \
+      "## Category" \
+      "release" \
+      "" \
+      "## Symptom" \
+      "${ACTIVE_RC} shipped NON-FUNCTIONAL because its verification did not run (TESTER task ${_TESTER_TASK_ID}: ${_VERIFICATION_CASE:-tester-blocked}, cause: ${_VERIFICATION_CAUSE:-unknown}), and the operator inbox entry that records it could not be written to ${inbox_file}: ${reason}" \
+      "" \
+      "## Expected" \
+      "An unverified ship leaves one open entry in ${inbox_file} naming the TESTER task and its block cause." \
+      "" \
+      "## Remedy" \
+      "Write the entry by hand: \`${by_hand}\`" \
+      "" \
+      "## Detected At" \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      "" \
+      "## Detected By" \
+      "cm-release (scripts/cm/release.sh, after the ship)" \
+    | overwatch_deposit_bug cm-release "$PROJECT_NAME" "$slug" \
+        "Unverified ship of ${ACTIVE_RC} has no operator inbox entry")" || deposit_rc=$?
+  case "$deposit_rc" in
+    0) echo "[cm-release] Bug filed: ${bug_file} records that the unverified ship's inbox entry could not be written." ;;
+    2) echo "[cm-release] Bug already open: ${bug_file} records that the unverified ship's inbox entry could not be written." ;;
+    *) echo "[cm-release] WARNING: no bug filed for the unverified ship's missing inbox entry (see the intake message above)." >&2 ;;
+  esac
   return 0
 }

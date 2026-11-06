@@ -29,7 +29,6 @@ import pathlib
 import re
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants (resolve from this file's own location)
@@ -85,10 +84,7 @@ def _add_bug_file(
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"**Severity:** {severity}\n\n"
-        "## Status\nopen\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"**Severity:** {severity}\n\n" "## Status\nopen\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -135,11 +131,7 @@ def _run_column_render(
 
 def _card_lines(stdout: str) -> list[str]:
     """Non-header, non-blank output lines with ANSI codes stripped."""
-    return [
-        _strip_ansi(ln)
-        for ln in stdout.splitlines()
-        if ln.strip() and not ln.startswith("===")
-    ]
+    return [_strip_ansi(ln) for ln in stdout.splitlines() if ln.strip() and not ln.startswith("===")]
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +144,7 @@ class TestDeferredCardGlyphIsATrailingSuffix:
         self, two_project_root: pathlib.Path
     ) -> None:
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low"
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
         # Low severity at level "low" is held back (deferred); high severity
         # is kept -- the same severity/level comparison discovery itself
         # applies (team/scripts/lib/discovery_defer.sh).
@@ -174,9 +164,7 @@ class TestDeferredCardGlyphIsATrailingSuffix:
         # Suffix position: id first, exactly one space, then the glyph --
         # never the glyph before the id.
         assert deferred_line == f"BUG-0001 {_GLYPH_DEFERRED}", deferred_line
-        assert "  " not in deferred_line, (
-            f"expected no double spaces between id and glyph: {deferred_line!r}"
-        )
+        assert "  " not in deferred_line, f"expected no double spaces between id and glyph: {deferred_line!r}"
 
         # An undeferred (kept) card carries no glyph and no trailing space.
         assert kept_line == "BUG-0002", kept_line
@@ -185,13 +173,9 @@ class TestDeferredCardGlyphIsATrailingSuffix:
         # follows: both cards' ids start at the same offset (0).
         assert deferred_line.index("BUG-0001") == kept_line.index("BUG-0002") == 0
 
-    def test_no_color_mode_renders_the_id_alone_with_no_glyph_at_all(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_no_color_mode_renders_the_id_alone_with_no_glyph_at_all(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
-        _set_defer_posture(
-            root, "project-a", deferred_bugs=True, deferred_bug_level="low"
-        )
+        _set_defer_posture(root, "project-a", deferred_bugs=True, deferred_bug_level="low")
         _add_bug_file(root, "project-a", "BUG-0001", "low-a", "low")
 
         bugs_dir = root / "projects" / "project-a" / "bugs"

@@ -30,7 +30,7 @@ Usage (import)::
 from __future__ import annotations
 
 import re
-from typing import Callable
+from collections.abc import Callable
 
 __all__ = [
     "RELEASE_VERSION_HELP",

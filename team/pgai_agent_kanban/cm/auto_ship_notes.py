@@ -53,7 +53,7 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 # Run by file path (``python3 .../auto_ship_notes.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -79,10 +79,7 @@ _EMPTY_BODY_RE = re.compile(r"none\.?", re.IGNORECASE)
 
 def auto_ship_line(trigger: str, error_key: str) -> str:
     """The one Known Issues line for a stop the ship posture shipped through."""
-    return (
-        f"Auto-shipped under ship_posture=always "
-        f"(would have halted: trigger {trigger} — {error_key})"
-    )
+    return f"Auto-shipped under ship_posture=always " f"(would have halted: trigger {trigger} — {error_key})"
 
 
 def _body_says_nothing(body: str) -> bool:
@@ -117,7 +114,7 @@ def place_auto_ship_lines(text: str, lines: Iterable[str]) -> str:
 
     stripped = body.strip()
     lead = body[: len(body) - len(body.lstrip())] or "\n"
-    trail = body[len(body.rstrip()):] if stripped else ""
+    trail = body[len(body.rstrip()) :] if stripped else ""
     if not trail:
         trail = "\n\n" if following else "\n"
     if "\n" not in lead:
@@ -171,7 +168,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the auto-ship notes CLI: stamp one Known Issues line per ``--stop``.
 
     ``python3 -m pgai_agent_kanban.cm.auto_ship_notes NOTES_FILE --stop TRIGGER
@@ -193,7 +190,9 @@ def main(argv: Optional[list] = None) -> int:
     if changed:
         print(f"  Stamped auto-ship line(s) under ## Known Issues in release-notes/{notes_file.name}", flush=True)
     else:
-        print(f"  release-notes/{notes_file.name} already carries the auto-ship line(s) under ## Known Issues", flush=True)
+        print(
+            f"  release-notes/{notes_file.name} already carries the auto-ship line(s) under ## Known Issues", flush=True
+        )
     return 0
 
 

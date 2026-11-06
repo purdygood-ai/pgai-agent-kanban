@@ -158,6 +158,6 @@ def test_daily_overwatch_wake_skips_the_disabled_project(tmp_path: pathlib.Path)
     assert out.count(_SKIP_LINE) == 1, f"expected exactly one skip line for alpha\n{out}"
     assert "project alpha: beginning chain" not in out, out
     assert "project beta: beginning chain" in out, out
-    assert not (root / "projects" / "alpha" / "overwatch").exists(), (
-        "the OVERWATCH wake must create no state for a disabled project"
-    )
+    assert not (
+        root / "projects" / "alpha" / "overwatch"
+    ).exists(), "the OVERWATCH wake must create no state for a disabled project"

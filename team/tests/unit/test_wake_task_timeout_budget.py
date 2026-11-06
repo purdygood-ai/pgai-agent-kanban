@@ -33,6 +33,19 @@ The mechanism under test, across three files:
 Acceptance criteria exercised:
   - all three ceilings at 120 and a dispatch 60s into the batch arm a 60s
     timeout, so a 100s task is preempted at the batch cap.
+  - with MAX_TASK_SECONDS unset, the armed timeout is the config
+    registry default for [wake] max_task_seconds, never 0 (no bound),
+    in both the budget stage and the invoke stage's watchdog; with
+    MAX_RUNTIME_SECONDS unset, the batch bound is the registry default
+    for [wake] max_runtime_seconds; an explicit 0 still disables either.
+  - every batch-budget check reads that one rule (wd_batch_budget_left /
+    wd_batch_budget_reached): with MAX_RUNTIME_SECONDS=0 the dispatch loop
+    in run_project_chain dispatches with no batch stop, the contended-
+    project retry pass in wake_common_run retries every project, and the
+    lock wait is uncapped by the batch; unset or blank holds them to the
+    registry default; a positive value stops them at it. The dispatch-loop
+    check and the retry pass are run verbatim from the shipped files on a
+    fake clock.
   - the warning fires on max_task >= project and max_task >= batch, not
     only on strict excess, and its text states task < project <= batch.
   - under a mocked clock that jumps 12s per poll (a starved host), a 30s
@@ -65,6 +78,9 @@ _LIB_DIR = _TEAM_DIR / "scripts" / "lib"
 _TASK_BUDGET_SH = _LIB_DIR / "wake_task_budget.sh"
 _DRIVER_INVOKE = _LIB_DIR / "wake_driver_invoke.sh"
 _DRIVER_SH = _LIB_DIR / "wake_driver.sh"
+_DRIVER_FINALIZE = _LIB_DIR / "wake_driver_finalize.sh"
+_BOOTSTRAP_SH = _LIB_DIR / "wake_bootstrap.sh"
+_LOCK_PROVENANCE_SH = _LIB_DIR / "lock_provenance.sh"
 _TEMP_SH = _LIB_DIR / "temp.sh"
 
 _WATCHDOG_BEGIN = "# WATCHDOG-INVOKE-BEGIN"
@@ -166,6 +182,339 @@ echo "UNSET_CLOCKS=${{_task_timeout_budget_seconds}}"
 
 
 # ---------------------------------------------------------------------------
+# (1b) An unset runtime budget arms the config registry default, never 0.
+# ---------------------------------------------------------------------------
+
+
+def _registry_default(key: str) -> str:
+    """The [wake] *key* default as the config loader's Key Registry block
+    documents it (``<key>  OPTIONAL  <n>``)."""
+    text = (_LIB_DIR / "config_loader.sh").read_text(encoding="utf-8")
+    match = re.search(rf"^#\s+{key}\s+OPTIONAL\s+(\d+)\s*$", text, re.M)
+    assert match, f"config_loader.sh Key Registry no longer lists [wake] {key} with a default"
+    return match.group(1)
+
+
+def test_unset_max_task_seconds_arms_the_registry_default(tmp_path: pathlib.Path) -> None:
+    """With MAX_TASK_SECONDS unset and the project and batch budgets off,
+    the watchdog is armed at the config loader's default for [wake]
+    max_task_seconds -- the value config_wake_max_task_seconds_default
+    prints and the Key Registry documents -- not at 0 (no bound). The
+    driver's seed (wd_configured_max_task_seconds) and the chain's own
+    unset-_eff_task fallback both resolve there; an explicit value,
+    0 included, keeps its meaning."""
+    script = f"""
+set -uo pipefail
+unset MAX_TASK_SECONDS _eff_task
+source {str(_TASK_BUDGET_SH)!r}
+_wd_epoch_now() {{ echo 1000; }}
+echo "LOADER_DEFAULT=$(config_wake_max_task_seconds_default)"
+_eff_project=0; MAX_RUNTIME_SECONDS=0; _project_start_epoch=1000; WAKE_START_EPOCH=1000
+wd_chain_task_timeout_budget
+echo "UNSET_EFF_TASK_ARMED=${{_task_timeout_budget_seconds}}"
+_eff_task="$(wd_configured_max_task_seconds)"
+echo "UNSET_SEED=${{_eff_task}}"
+wd_chain_task_timeout_budget
+echo "UNSET_SEED_ARMED=${{_task_timeout_budget_seconds}}"
+MAX_TASK_SECONDS=""
+echo "BLANK_SEED=$(wd_configured_max_task_seconds)"
+MAX_TASK_SECONDS=0
+echo "EXPLICIT_ZERO_SEED=$(wd_configured_max_task_seconds)"
+_eff_task="$(wd_configured_max_task_seconds)"
+wd_chain_task_timeout_budget
+echo "EXPLICIT_ZERO_ARMED=${{_task_timeout_budget_seconds}}"
+MAX_TASK_SECONDS=600
+echo "EXPLICIT_SEED=$(wd_configured_max_task_seconds)"
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    values = dict(re.findall(r"^(\w+)=(.*)$", result.stdout, re.M))
+    registry_default = _registry_default("max_task_seconds")
+    assert values["LOADER_DEFAULT"] == registry_default, _diagnostic(result)
+    assert values["UNSET_EFF_TASK_ARMED"] == registry_default, _diagnostic(result)
+    assert values["UNSET_SEED"] == registry_default, _diagnostic(result)
+    assert values["UNSET_SEED_ARMED"] == registry_default, _diagnostic(result)
+    assert values["BLANK_SEED"] == registry_default, _diagnostic(result)
+    assert values["EXPLICIT_ZERO_SEED"] == "0", _diagnostic(result)
+    assert values["EXPLICIT_ZERO_ARMED"] == "0", _diagnostic(result)
+    assert values["EXPLICIT_SEED"] == "600", _diagnostic(result)
+
+
+def test_unset_max_runtime_seconds_bounds_the_batch_at_the_registry_default(tmp_path: pathlib.Path) -> None:
+    """With MAX_RUNTIME_SECONDS unset and the task and project bounds off, a
+    dispatch 100s into the batch is armed with the remaining registry-default
+    batch budget -- the value config_wake_max_runtime_seconds_default prints
+    and the Key Registry documents -- not 0 (no bound). Blank reads the same
+    way; an explicit 0 still disables the batch bound."""
+    script = f"""
+set -uo pipefail
+unset MAX_RUNTIME_SECONDS
+source {str(_TASK_BUDGET_SH)!r}
+_wd_epoch_now() {{ echo 1100; }}
+echo "LOADER_DEFAULT=$(config_wake_max_runtime_seconds_default)"
+echo "UNSET_SEED=$(wd_configured_max_runtime_seconds)"
+_eff_task=0; _eff_project=0; _project_start_epoch=1000; WAKE_START_EPOCH=1000
+wd_chain_task_timeout_budget
+echo "UNSET_ARMED=${{_task_timeout_budget_seconds}}"
+MAX_RUNTIME_SECONDS=""
+wd_chain_task_timeout_budget
+echo "BLANK_ARMED=${{_task_timeout_budget_seconds}}"
+MAX_RUNTIME_SECONDS=0
+echo "EXPLICIT_ZERO_SEED=$(wd_configured_max_runtime_seconds)"
+wd_chain_task_timeout_budget
+echo "EXPLICIT_ZERO_ARMED=${{_task_timeout_budget_seconds}}"
+MAX_RUNTIME_SECONDS=600
+wd_chain_task_timeout_budget
+echo "EXPLICIT_ARMED=${{_task_timeout_budget_seconds}}"
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    values = dict(re.findall(r"^(\w+)=(.*)$", result.stdout, re.M))
+    registry_default = _registry_default("max_runtime_seconds")
+    assert values["LOADER_DEFAULT"] == registry_default, _diagnostic(result)
+    assert values["UNSET_SEED"] == registry_default, _diagnostic(result)
+    assert values["UNSET_ARMED"] == str(int(registry_default) - 100), _diagnostic(result)
+    assert values["BLANK_ARMED"] == str(int(registry_default) - 100), _diagnostic(result)
+    assert values["EXPLICIT_ZERO_SEED"] == "0", _diagnostic(result)
+    assert values["EXPLICIT_ZERO_ARMED"] == "0", _diagnostic(result)
+    assert values["EXPLICIT_ARMED"] == "500", _diagnostic(result)
+
+
+def test_sourcing_the_budget_stage_keeps_a_loaded_config_path(tmp_path: pathlib.Path) -> None:
+    """wake_task_budget.sh sources config_loader.sh only when the caller has
+    not: a second source would reset the cfg path load_config recorded."""
+    script = f"""
+set -uo pipefail
+source {str(_LIB_DIR / "config_loader.sh")!r}
+_CONFIG_LOADER_CFG_PATH=/sentinel/kanban.cfg
+source {str(_TASK_BUDGET_SH)!r}
+echo "CFG_PATH=${{_CONFIG_LOADER_CFG_PATH}}"
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    assert "CFG_PATH=/sentinel/kanban.cfg" in result.stdout, _diagnostic(result)
+
+
+@pytest.mark.parametrize(
+    "key, env_name",
+    [("max_task_seconds", "MAX_TASK_SECONDS"), ("max_runtime_seconds", "MAX_RUNTIME_SECONDS")],
+)
+def test_runtime_budget_default_is_written_once(key: str, env_name: str) -> None:
+    """Each runtime-budget default lives in the config loader alone: load_config
+    exports it through its config_wake_<key>_default accessor (named as the
+    default accessor, run only when the default is needed), and no wake
+    stage that reads the variable falls back to 0 (no bound) or restates the
+    default in code. Comments that state the default may stay."""
+    loader = (_LIB_DIR / "config_loader.sh").read_text(encoding="utf-8")
+    assert re.search(
+        rf"_config_loader_export_wake_integer\s+\"\$cfg\"\s+{key}\s+{env_name}\s+"
+        rf"\"\"\s+config_wake_{key}_default\b",
+        loader,
+    ), f"load_config must export {env_name} with config_wake_{key}_default as its default"
+    registry_default = _registry_default(key)
+    for path in (_DRIVER_SH, _TASK_BUDGET_SH, _DRIVER_INVOKE, _DRIVER_FINALIZE, _BOOTSTRAP_SH, _LOCK_PROVENANCE_SH):
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(rf"{env_name}:-0|_eff_task:-0", text), f"{path.name} falls back to 0 (no bound)"
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        assert not re.search(rf"\b{registry_default}\b", code), f"{path.name} restates the {key} default in code"
+
+
+# ---------------------------------------------------------------------------
+# (1c) Every batch-budget check reads the one rule: 0 = no batch bound,
+#      unset or blank = the registry default, a positive value stops there.
+# ---------------------------------------------------------------------------
+
+_COMMON_SH = _LIB_DIR / "wake_common.sh"
+_LOCK_WAIT_SH = _LIB_DIR / "wake_lock_wait.sh"
+
+# MAX_RUNTIME_SECONDS as the wake sees it: None = unset, "" = blank.
+_BUDGET_SETTINGS = [None, "", "0", "600"]
+
+
+def _budget_assignment(budget: str | None) -> str:
+    return "unset MAX_RUNTIME_SECONDS" if budget is None else f"MAX_RUNTIME_SECONDS={budget!r}"
+
+
+def _expected_cap(budget: str | None) -> int:
+    """The batch cap the rule gives *budget*; 0 means no batch bound."""
+    return int(_registry_default("max_runtime_seconds")) if not budget else int(budget)
+
+
+@pytest.mark.parametrize("budget", _BUDGET_SETTINGS)
+@pytest.mark.parametrize("elapsed", [0, 599, 600, 20000])
+def test_batch_budget_left_and_reached_follow_the_configured_budget(
+    tmp_path: pathlib.Path, budget: str | None, elapsed: int
+) -> None:
+    script = f"""
+set -uo pipefail
+source {str(_TASK_BUDGET_SH)!r}
+{_budget_assignment(budget)}
+echo "LEFT=[$(wd_batch_budget_left {elapsed})]"
+if wd_batch_budget_reached {elapsed}; then echo "REACHED=yes"; else echo "REACHED=no"; fi
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    values = dict(re.findall(r"^(\w+)=(.*)$", result.stdout, re.M))
+    cap = _expected_cap(budget)
+    if cap == 0:
+        assert values["LEFT"] == "[]", f"0 is no batch bound\n{_diagnostic(result)}"
+        assert values["REACHED"] == "no", f"0 is never reached\n{_diagnostic(result)}"
+    else:
+        assert values["LEFT"] == f"[{max(cap - elapsed, 0)}]", _diagnostic(result)
+        assert values["REACHED"] == ("yes" if elapsed >= cap else "no"), _diagnostic(result)
+
+
+def _dispatch_loop_batch_check() -> str:
+    """run_project_chain's between-tasks batch check, verbatim: from the
+    ELAPSED reading through the end of the if that stops the loop."""
+    text = _DRIVER_SH.read_text(encoding="utf-8")
+    chain = text[text.index("run_project_chain() {") :]
+    begin = chain.index("    ELAPSED=$(( $(date +%s) - WAKE_START_EPOCH ))")
+    end = chain.index("\n    fi\n", begin) + len("\n    fi\n")
+    return chain[begin:end]
+
+
+@pytest.mark.parametrize("budget", _BUDGET_SETTINGS)
+def test_dispatch_loop_batch_stop_follows_the_configured_budget(tmp_path: pathlib.Path, budget: str | None) -> None:
+    """The shipped dispatch-loop check, driven on a fake clock that advances
+    500s per dispatched task for up to 40 tasks (20000s): 0 dispatches all
+    40 with no batch stop; unset or blank stops at the registry default;
+    600 stops after two tasks (1000s), exactly as before."""
+    script = f"""
+set -uo pipefail
+source {str(_TASK_BUDGET_SH)!r}
+{_budget_assignment(budget)}
+FAKE_NOW=1000; WAKE_START_EPOCH=1000; STOP_REASON=""; DISPATCHED=0
+date() {{ echo "$FAKE_NOW"; }}
+while (( DISPATCHED < 40 )); do
+{_dispatch_loop_batch_check()}
+  DISPATCHED=$(( DISPATCHED + 1 )); FAKE_NOW=$(( FAKE_NOW + 500 ))
+done
+echo "DISPATCHED=$DISPATCHED"
+echo "STOP_REASON=$STOP_REASON"
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    values = dict(re.findall(r"^(\w+)=(.*)$", result.stdout, re.M))
+    cap = _expected_cap(budget)
+    if cap == 0:
+        assert values["DISPATCHED"] == "40", _diagnostic(result)
+        assert values["STOP_REASON"] == "", _diagnostic(result)
+    else:
+        tasks = -(-cap // 500)  # the first boundary at or past the cap
+        assert values["DISPATCHED"] == str(tasks), _diagnostic(result)
+        assert values["STOP_REASON"] == (
+            f"reached MAX_RUNTIME_SECONDS (batch) ({cap}s, batch_elapsed={tasks * 500}s)"
+        ), _diagnostic(result)
+
+
+def _retry_pass_block() -> str:
+    """wake_common_run's end-of-iteration contention retry pass, verbatim."""
+    text = _COMMON_SH.read_text(encoding="utf-8")
+    begin = text.index("  if (( ${#_CONTENDED_PROJECTS[@]} > 0 )); then")
+    end = text.index("  # --- Lock-starvation guard", begin)
+    return text[begin:end]
+
+
+@pytest.mark.parametrize("budget", _BUDGET_SETTINGS)
+@pytest.mark.parametrize("pass_elapsed", [100, 20000])
+def test_retry_pass_follows_the_configured_budget(
+    tmp_path: pathlib.Path, budget: str | None, pass_elapsed: int
+) -> None:
+    """The shipped retry pass for two contended projects, with the first
+    pass ending *pass_elapsed* seconds into the batch and each retry taking
+    550s on a fake clock. 0 retries both projects however late; unset or
+    blank holds the registry default; 600 retries one project at 100s (the
+    second starts past the cap) and none at 20000s."""
+    script = f"""
+set -uo pipefail
+source {str(_TASK_BUDGET_SH)!r}
+{_budget_assignment(budget)}
+FAKE_NOW=$(( 1000 + {pass_elapsed} )); WAKE_START_EPOCH=1000
+date() {{ echo "$FAKE_NOW"; }}
+log() {{ echo "LOG: $*"; }}
+wake_stop_file_present() {{ return 1; }}
+pp_project_halted() {{ return 1; }}
+pp_project_root() {{ echo "/nonexistent/$1"; }}
+pp_tasks_dir() {{ echo "/nonexistent/$1/tasks"; }}
+run_project_chain() {{ echo "RETRIED=$1"; FAKE_NOW=$(( FAKE_NOW + 550 )); return 0; }}
+_check_halt_after_for_project() {{ return 1; }}
+AGENT=coder
+_CONTENDED_PROJECTS=(alpha beta)
+_LOCK_DEFERRED_PROJECTS=()
+{_retry_pass_block()}
+echo "DEFERRED=${{_LOCK_DEFERRED_PROJECTS[*]:-}}"
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    retried = re.findall(r"^RETRIED=(\S+)$", result.stdout, re.M)
+    deferred = re.search(r"^DEFERRED=(.*)$", result.stdout, re.M).group(1).split()
+    cap = _expected_cap(budget)
+    if cap == 0 or cap > pass_elapsed + 550:
+        expected_retried = ["alpha", "beta"]
+    elif cap > pass_elapsed:
+        expected_retried = ["alpha"]
+    else:
+        expected_retried = []
+    assert retried == expected_retried, _diagnostic(result)
+    assert deferred == [p for p in ("alpha", "beta") if p not in expected_retried], _diagnostic(result)
+    if not expected_retried:
+        assert f"cap={cap}s) -- performing no retry" in result.stdout, _diagnostic(result)
+    elif len(expected_retried) == 1:
+        assert f"cap={cap}s) -- skipping remaining retries" in result.stdout, _diagnostic(result)
+    else:
+        assert "batch runtime budget" not in result.stdout, _diagnostic(result)
+
+
+@pytest.mark.parametrize("budget", _BUDGET_SETTINGS)
+@pytest.mark.parametrize("elapsed", [100, 590, 20000])
+def test_lock_wait_budget_follows_the_configured_budget(
+    tmp_path: pathlib.Path, budget: str | None, elapsed: int
+) -> None:
+    """wlw_lock_wait_budget caps lock_wait_seconds (120) at what is left of
+    the batch: 0 leaves it uncapped and the batch reads "unbounded"; unset
+    or blank caps at the registry default; 600 caps at what remains of it.
+    The stage is sourced alone, so it loads the budget rule itself."""
+    script = f"""
+set -uo pipefail
+source {str(_LOCK_WAIT_SH)!r}
+{_budget_assignment(budget)}
+LOCK_WAIT_SECONDS=120; WAKE_START_EPOCH=1000
+pgai_lock_wait_now() {{ echo $(( 1000 + {elapsed} )); }}
+wlw_lock_wait_budget demo-project
+echo "WAIT_BUDGET=$WLW_WAIT_BUDGET"
+echo "BATCH_LEFT=$(_wlw_batch_left_text)"
+"""
+    result = _run_bash(script, cwd=tmp_path)
+    assert result.returncode == 0, _diagnostic(result)
+    values = dict(re.findall(r"^(\w+)=(.*)$", result.stdout, re.M))
+    cap = _expected_cap(budget)
+    if cap == 0:
+        assert values["WAIT_BUDGET"] == "120", _diagnostic(result)
+        assert values["BATCH_LEFT"] == "unbounded", _diagnostic(result)
+    else:
+        left = max(cap - elapsed, 0)
+        assert values["WAIT_BUDGET"] == str(min(120, left)), _diagnostic(result)
+        assert values["BATCH_LEFT"] == f"{left}s", _diagnostic(result)
+
+
+@pytest.mark.parametrize("path", [_DRIVER_SH, _COMMON_SH, _LOCK_WAIT_SH, _DRIVER_FINALIZE, _TASK_BUDGET_SH])
+def test_no_batch_check_compares_the_raw_budget(path: pathlib.Path) -> None:
+    """No wake stage that checks the batch budget compares elapsed time with
+    MAX_RUNTIME_SECONDS or subtracts from it directly; each goes through
+    wake_task_budget.sh."""
+    code = "\n".join(
+        line for line in path.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("#")
+    )
+    assert not re.search(
+        r"\(\(\s*[A-Z_]*ELAPSED\s*>=\s*\$?MAX_RUNTIME_SECONDS", code
+    ), f"{path.name} compares elapsed time with the raw batch budget"
+    assert not re.search(
+        r"\$\(\(\s*\$?MAX_RUNTIME_SECONDS\s*-", code
+    ), f"{path.name} computes the remaining batch budget from the raw value"
+
+
+# ---------------------------------------------------------------------------
 # (2) wd_warn_runtime_bound_nesting: >= fires, and names the invariant.
 # ---------------------------------------------------------------------------
 
@@ -220,9 +569,7 @@ def test_project_above_batch_warns_with_invariant(tmp_path: pathlib.Path) -> Non
         ("0", "0", "14400"),
     ],
 )
-def test_properly_nested_ceilings_do_not_warn(
-    tmp_path: pathlib.Path, max_task: str, project: str, batch: str
-) -> None:
+def test_properly_nested_ceilings_do_not_warn(tmp_path: pathlib.Path, max_task: str, project: str, batch: str) -> None:
     out = _warnings_for(tmp_path, max_task, project, batch)
     assert "WARNING" not in out, out
 
@@ -235,7 +582,7 @@ def test_properly_nested_ceilings_do_not_warn(
 def _watchdog_harness(
     tmp_path: pathlib.Path,
     *,
-    max_task_seconds: int,
+    max_task_seconds: int | None,
     kill_grace_seconds: int,
     seconds_per_sleep: int,
     refresh_interval: int | None = None,
@@ -245,7 +592,8 @@ def _watchdog_harness(
     """Build a harness that runs the REAL watchdog block against a mocked
     clock. `sleep` never blocks; each call advances the clock by
     *seconds_per_sleep*, which is how a starved host is simulated -- one
-    poll iteration costing many seconds of wall-clock time."""
+    poll iteration costing many seconds of wall-clock time. A
+    *max_task_seconds* of None leaves MAX_TASK_SECONDS unset."""
     log_file = tmp_path / "wake.log"
     log_file.write_text("", encoding="utf-8")
     temp_root = tmp_path / "kanban_tmp"
@@ -261,6 +609,7 @@ def _watchdog_harness(
         f"_PGAI_LOCK_HELD_REFRESH_INTERVAL_SECONDS={refresh_interval}" if refresh_interval is not None else ""
     )
     budget_line = f"_task_timeout_budget_seconds={budget_override!r}" if budget_override is not None else ""
+    max_task_line = f"MAX_TASK_SECONDS={max_task_seconds}" if max_task_seconds is not None else "unset MAX_TASK_SECONDS"
     harness = f"""
 set -uo pipefail
 export PGAI_AGENT_KANBAN_TEMP_DIR={str(temp_root)!r}
@@ -271,7 +620,7 @@ log() {{ echo "[$(date -Iseconds)] wake(${{AGENT}}): $*" | tee -a "$LOG_FILE"; }
 LOG_FILE={str(log_file)!r}
 AGENT="coder"
 task_id="TASK-DEADLINE-CLOCK"
-MAX_TASK_SECONDS={max_task_seconds}
+{max_task_line}
 KILL_GRACE_SECONDS={kill_grace_seconds}
 {refresh_line}
 {budget_line}
@@ -323,7 +672,9 @@ def _kill_recorded_group(pgid_file: pathlib.Path) -> None:
             pass
 
 
-def _run_harness(harness: str, cwd: pathlib.Path, pgid_file: pathlib.Path, timeout: float = 40) -> subprocess.CompletedProcess:
+def _run_harness(
+    harness: str, cwd: pathlib.Path, pgid_file: pathlib.Path, timeout: float = 40
+) -> subprocess.CompletedProcess:
     try:
         return _run_bash(harness, cwd=cwd, timeout=timeout)
     finally:
@@ -418,6 +769,24 @@ def test_watchdog_arms_the_chain_budget_over_max_task_seconds(tmp_path: pathlib.
     assert "timeout fired after 60s (limit 60s)" in log_text, log_text
 
 
+def test_watchdog_arms_the_registry_default_when_max_task_seconds_is_unset(tmp_path: pathlib.Path) -> None:
+    """With MAX_TASK_SECONDS unset and no per-dispatch budget from a chain,
+    the invoke stage arms the registry default for [wake] max_task_seconds,
+    not 0 (watchdog off), and does not report it as a budget cap."""
+    harness, log_file, pgid_file, _, _ = _watchdog_harness(
+        tmp_path, max_task_seconds=None, kill_grace_seconds=1, seconds_per_sleep=1, provider_body=":"
+    )
+    result = _run_harness(harness, tmp_path, pgid_file)
+    assert result.returncode == 0, _diagnostic(result)
+    values = _values(result)
+    registry_default = _registry_default("max_task_seconds")
+    assert values["ARMED_LIMIT"] == registry_default, _diagnostic(result)
+    assert values["TASK_KILLED"] == "false", _diagnostic(result)
+    log_text = log_file.read_text(encoding="utf-8")
+    assert f"per-task timeout active: {registry_default}s" in log_text, log_text
+    assert "capped from max_task_seconds" not in log_text, log_text
+
+
 def test_watchdog_disabled_when_every_ceiling_is_off(tmp_path: pathlib.Path) -> None:
     harness, log_file, pgid_file, _, _ = _watchdog_harness(
         tmp_path, max_task_seconds=0, kill_grace_seconds=1, seconds_per_sleep=1, provider_body=":"
@@ -474,7 +843,9 @@ echo "TASK_KILLED=${{_task_killed}}"
     values = _values(result)
     assert values["TASK_KILLED"] == "true", _diagnostic(result)
     fired_after = int(values["FIRED_AFTER"])
-    assert 3 <= fired_after <= 5, f"deadline must fire within limit + 2s; fired after {fired_after}s\n{_diagnostic(result)}"
+    assert (
+        3 <= fired_after <= 5
+    ), f"deadline must fire within limit + 2s; fired after {fired_after}s\n{_diagnostic(result)}"
     log_text = log_file.read_text(encoding="utf-8")
     match = re.search(r"timeout fired after (\d+)s \(limit 3s\)", log_text)
     assert match, log_text
@@ -498,15 +869,15 @@ def test_run_project_chain_derives_the_budget_before_every_dispatch() -> None:
     """Every process_one_task dispatch inside run_project_chain is preceded
     by wd_chain_task_timeout_budget, and the nesting warning is called."""
     text = _DRIVER_SH.read_text(encoding="utf-8")
-    chain = text[text.index("run_project_chain() {"):]
+    chain = text[text.index("run_project_chain() {") :]
     assert "wd_warn_runtime_bound_nesting" in chain
     dispatches = [m.start() for m in re.finditer(r"^\s*process_one_task\s*$", chain, re.M)]
     assert dispatches, "run_project_chain must dispatch through process_one_task"
     for pos in dispatches:
-        preceding = chain[max(0, pos - 400):pos]
-        assert "wd_chain_task_timeout_budget" in preceding, (
-            f"dispatch without a fresh budget at offset {pos}:\n{preceding}"
-        )
+        preceding = chain[max(0, pos - 400) : pos]
+        assert (
+            "wd_chain_task_timeout_budget" in preceding
+        ), f"dispatch without a fresh budget at offset {pos}:\n{preceding}"
     assert 'source "${SCRIPT_DIR}/../lib/wake_task_budget.sh"' in text
 
 

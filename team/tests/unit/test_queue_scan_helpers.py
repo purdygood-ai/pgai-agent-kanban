@@ -138,7 +138,9 @@ def test_parse_scan_rule(rule: str, parsed: tuple) -> None:
     assert parse_scan_rule(rule) == parsed
 
 
-@pytest.mark.parametrize("rule", ["W", "=BACKLOG", "Q=*", "W?=*"], ids=["no-equals", "no-marker", "bad-marker", "mixed"])
+@pytest.mark.parametrize(
+    "rule", ["W", "=BACKLOG", "Q=*", "W?=*"], ids=["no-equals", "no-marker", "bad-marker", "mixed"]
+)
 def test_parse_scan_rule_refuses_malformed_rules(rule: str) -> None:
     with pytest.raises(OpsError) as excinfo:
         parse_scan_rule(rule)

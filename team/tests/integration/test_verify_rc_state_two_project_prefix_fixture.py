@@ -69,6 +69,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="verify-rc-state-two-project-prefix-fixture")
 
+
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
 # ---------------------------------------------------------------------------
@@ -82,7 +83,8 @@ def _init_local_repo(repo_path: pathlib.Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=repo_path, check=True,
+        cwd=repo_path,
+        check=True,
     )
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo_path, check=True)
     (repo_path / "README.md").write_text("fixture\n", encoding="utf-8")
@@ -174,16 +176,17 @@ def _write_release_state(
     )
 
 
-def _run_verify_rc_state(
-    kanban_root: pathlib.Path, project_name: str
-) -> subprocess.CompletedProcess:
+def _run_verify_rc_state(kanban_root: pathlib.Path, project_name: str) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
     base_env["KANBAN_ROOT"] = str(kanban_root)
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     return subprocess.run(
         ["bash", str(_VERIFY_SCRIPT), project_name, "--verbose"],
-        capture_output=True, text=True, env=base_env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        timeout=60,
     )
 
 
@@ -207,15 +210,13 @@ def test_dual_fixture_malformed_active_rc_same_finding_text_on_both_projects(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest-prefixed-malformed", prefixed_repo,
-        "dualtest-bare-malformed", bare_repo,
+        "dualtest-prefixed-malformed",
+        prefixed_repo,
+        "dualtest-bare-malformed",
+        bare_repo,
     )
-    _write_release_state(
-        kanban_root / "projects" / "dualtest-prefixed-malformed", "NONE"
-    )
-    _write_release_state(
-        kanban_root / "projects" / "dualtest-bare-malformed", "NONE"
-    )
+    _write_release_state(kanban_root / "projects" / "dualtest-prefixed-malformed", "NONE")
+    _write_release_state(kanban_root / "projects" / "dualtest-bare-malformed", "NONE")
 
     prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-malformed")
     bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-malformed")
@@ -225,20 +226,17 @@ def test_dual_fixture_malformed_active_rc_same_finding_text_on_both_projects(
     for result in (prefixed_result, bare_result):
         assert result.returncode == 1, result.stdout + result.stderr
         error_lines = [
-            line for line in result.stdout.splitlines()
-            if line.startswith("[ERROR]") and "Active RC" in line
+            line for line in result.stdout.splitlines() if line.startswith("[ERROR]") and "Active RC" in line
         ]
         assert error_lines, result.stdout
         assert accepted_forms in error_lines[0], error_lines[0]
         assert "'NONE'" in error_lines[0], error_lines[0]
 
     prefixed_error = next(
-        line for line in prefixed_result.stdout.splitlines()
-        if line.startswith("[ERROR]") and "Active RC" in line
+        line for line in prefixed_result.stdout.splitlines() if line.startswith("[ERROR]") and "Active RC" in line
     )
     bare_error = next(
-        line for line in bare_result.stdout.splitlines()
-        if line.startswith("[ERROR]") and "Active RC" in line
+        line for line in bare_result.stdout.splitlines() if line.startswith("[ERROR]") and "Active RC" in line
     )
     # Compare everything up to the trailing "— file: <path>" segment, since
     # the two release-state.md paths differ by project name/tmp_path even
@@ -283,30 +281,24 @@ def test_dual_fixture_same_branch_name_warns_only_on_prefixed_project(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest-prefixed-stray", prefixed_repo,
-        "dualtest-bare-stray", bare_repo,
+        "dualtest-prefixed-stray",
+        prefixed_repo,
+        "dualtest-bare-stray",
+        bare_repo,
     )
-    _write_release_state(
-        kanban_root / "projects" / "dualtest-prefixed-stray", "v2.11.1"
-    )
-    _write_release_state(
-        kanban_root / "projects" / "dualtest-bare-stray", "v0.0.9"
-    )
+    _write_release_state(kanban_root / "projects" / "dualtest-prefixed-stray", "v2.11.1")
+    _write_release_state(kanban_root / "projects" / "dualtest-bare-stray", "v0.0.9")
 
     prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-stray")
     bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-stray")
 
     # Prefixed project: [OK] for the active branch, [WARN] naming the stray.
-    assert prefixed_result.returncode == 0, (
-        prefixed_result.stdout + prefixed_result.stderr
-    )
+    assert prefixed_result.returncode == 0, prefixed_result.stdout + prefixed_result.stderr
     assert (
-        "[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1"
-        in prefixed_result.stdout
+        "[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1" in prefixed_result.stdout
     ), prefixed_result.stdout
     prefixed_warn_lines = [
-        line for line in prefixed_result.stdout.splitlines()
-        if line.startswith("[WARN]") and "rc/v0.0.9" in line
+        line for line in prefixed_result.stdout.splitlines() if line.startswith("[WARN]") and "rc/v0.0.9" in line
     ]
     assert prefixed_warn_lines, prefixed_result.stdout
     assert "ai_rc/v0.0.9" not in prefixed_warn_lines[0], prefixed_warn_lines[0]
@@ -314,17 +306,12 @@ def test_dual_fixture_same_branch_name_warns_only_on_prefixed_project(
     # Bare project: rc/v0.0.9 matches Active RC cleanly -- [OK], no WARN
     # naming rc/v0.0.9 at all (it is not a stray on this topology).
     assert bare_result.returncode == 0, bare_result.stdout + bare_result.stderr
-    assert (
-        "[OK]    Active RC v0.0.9 has matching local branch: rc/v0.0.9"
-        in bare_result.stdout
-    ), bare_result.stdout
+    assert "[OK]    Active RC v0.0.9 has matching local branch: rc/v0.0.9" in bare_result.stdout, bare_result.stdout
     bare_warn_lines = [
-        line for line in bare_result.stdout.splitlines()
-        if line.startswith("[WARN]") and "rc/v0.0.9" in line
+        line for line in bare_result.stdout.splitlines() if line.startswith("[WARN]") and "rc/v0.0.9" in line
     ]
     assert not bare_warn_lines, (
-        f"bare-prefix project must not warn about its own correctly-named "
-        f"Active RC branch:\n{bare_result.stdout}"
+        f"bare-prefix project must not warn about its own correctly-named " f"Active RC branch:\n{bare_result.stdout}"
     )
 
 
@@ -349,8 +336,10 @@ def test_dual_fixture_exit_code_zero_with_warnings_only(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest-prefixed-exit0", prefixed_repo,
-        "dualtest-bare-exit0", bare_repo,
+        "dualtest-prefixed-exit0",
+        prefixed_repo,
+        "dualtest-bare-exit0",
+        bare_repo,
     )
     _write_release_state(kanban_root / "projects" / "dualtest-prefixed-exit0", "none")
     _write_release_state(kanban_root / "projects" / "dualtest-bare-exit0", "none")
@@ -358,9 +347,7 @@ def test_dual_fixture_exit_code_zero_with_warnings_only(
     prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-exit0")
     bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-exit0")
 
-    assert prefixed_result.returncode == 0, (
-        prefixed_result.stdout + prefixed_result.stderr
-    )
+    assert prefixed_result.returncode == 0, prefixed_result.stdout + prefixed_result.stderr
     assert "[WARN]" in prefixed_result.stdout, prefixed_result.stdout
     assert bare_result.returncode == 0, bare_result.stdout + bare_result.stderr
     assert "[WARN]" in bare_result.stdout, bare_result.stdout
@@ -379,8 +366,10 @@ def test_dual_fixture_exit_code_one_with_any_error(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest-prefixed-exit1", prefixed_repo,
-        "dualtest-bare-exit1", bare_repo,
+        "dualtest-prefixed-exit1",
+        prefixed_repo,
+        "dualtest-bare-exit1",
+        bare_repo,
     )
     _write_release_state(kanban_root / "projects" / "dualtest-prefixed-exit1", "v9.9.9")
     _write_release_state(kanban_root / "projects" / "dualtest-bare-exit1", "v9.9.9")
@@ -388,9 +377,7 @@ def test_dual_fixture_exit_code_one_with_any_error(
     prefixed_result = _run_verify_rc_state(kanban_root, "dualtest-prefixed-exit1")
     bare_result = _run_verify_rc_state(kanban_root, "dualtest-bare-exit1")
 
-    assert prefixed_result.returncode == 1, (
-        prefixed_result.stdout + prefixed_result.stderr
-    )
+    assert prefixed_result.returncode == 1, prefixed_result.stdout + prefixed_result.stderr
     assert "[ERROR]" in prefixed_result.stdout, prefixed_result.stdout
     assert bare_result.returncode == 1, bare_result.stdout + bare_result.stderr
     assert "[ERROR]" in bare_result.stdout, bare_result.stdout
@@ -409,8 +396,10 @@ def test_dual_fixture_exit_code_two_on_preflight_failure(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        "dualtest-prefixed-exit2", prefixed_repo,
-        "dualtest-bare-exit2", bare_repo,
+        "dualtest-prefixed-exit2",
+        prefixed_repo,
+        "dualtest-bare-exit2",
+        bare_repo,
     )
     _write_release_state(kanban_root / "projects" / "dualtest-prefixed-exit2", "none")
     _write_release_state(kanban_root / "projects" / "dualtest-bare-exit2", "none")
@@ -445,8 +434,10 @@ def test_exact_project_name_and_unambiguous_prefix_produce_identical_reports(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        _NAME_PREFIX_PROJ, repo,
-        _NAME_PREFIX_SIBLING, sibling_repo,
+        _NAME_PREFIX_PROJ,
+        repo,
+        _NAME_PREFIX_SIBLING,
+        sibling_repo,
         branch_prefix="",
     )
     _write_release_state(kanban_root / "projects" / _NAME_PREFIX_PROJ, "none")
@@ -456,8 +447,7 @@ def test_exact_project_name_and_unambiguous_prefix_produce_identical_reports(
     prefix_result = _run_verify_rc_state(kanban_root, "nameprefix")
 
     assert exact_result.returncode == prefix_result.returncode, (
-        f"exact:\n{exact_result.stdout}{exact_result.stderr}\n"
-        f"prefix:\n{prefix_result.stdout}{prefix_result.stderr}"
+        f"exact:\n{exact_result.stdout}{exact_result.stderr}\n" f"prefix:\n{prefix_result.stdout}{prefix_result.stderr}"
     )
     assert exact_result.stdout == prefix_result.stdout, (
         "an unambiguous prefix must produce the identical report as the "
@@ -482,8 +472,10 @@ def test_unregistered_project_name_refuses_dual_channel_with_no_report(
 
     kanban_root = _build_dual_project_kanban_root(
         tmp_path,
-        _NAME_PREFIX_PROJ, repo,
-        _NAME_PREFIX_SIBLING, sibling_repo,
+        _NAME_PREFIX_PROJ,
+        repo,
+        _NAME_PREFIX_SIBLING,
+        sibling_repo,
         branch_prefix="",
     )
     _write_release_state(kanban_root / "projects" / _NAME_PREFIX_PROJ, "none")

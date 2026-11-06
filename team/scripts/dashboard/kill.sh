@@ -14,16 +14,23 @@
 #   kill.sh [--kanban-root <path>] [--session <name>] [-h|--help]
 #
 # Flags:
-#   --kanban-root     Override the kanban root path (used to source config.cfg)
-#   --session         Override the tmux session name (default: pgai-kanban-dashboard)
+#   --kanban-root     Override the kanban root path (used to read kanban.cfg)
+#   --session         Override the tmux session name. Resolved as --session,
+#                     then PGAI_DASHBOARD_SESSION_NAME, then kanban.cfg
+#                     [dashboard] session_name, then pgai-kanban-dashboard
 #   -h, --help        Show this help and exit
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # Source project_paths lib for pp_* helpers
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/project_paths.sh
 source "${_SCRIPT_DIR}/../lib/project_paths.sh"
 # Source temp.sh for pgai_temp_cleanup / pgai_temp_subdir.
@@ -37,13 +44,18 @@ source "${_SCRIPT_DIR}/lib/activation_hook.sh"
 # And the schedule window's layout hooks (lib/schedule_layout.sh).
 # shellcheck source=lib/schedule_layout.sh
 source "${_SCRIPT_DIR}/lib/schedule_layout.sh"
+# The one session-name resolution create, attach, detach and kill share.
+# shellcheck source=lib/session_name.sh
+source "${_SCRIPT_DIR}/lib/session_name.sh"
 unset _SCRIPT_DIR
 
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
-SESSION_NAME="pgai-kanban-dashboard"
+# The --session value; the session name is resolved after argument parsing
+# (dashboard_resolve_session_name, below).
+SESSION_FLAG=""
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -55,14 +67,8 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --session)
-      SESSION_NAME="${2:-$SESSION_NAME}"
+      SESSION_FLAG="${2:-$SESSION_FLAG}"
       shift 2
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2
@@ -74,18 +80,13 @@ done
 
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT"
-# ---------------------------------------------------------------------------
-# Source config — INI format (kanban.cfg) replaces legacy config.cfg
-# read_ini available via project_paths.sh (sourced above).
-# ---------------------------------------------------------------------------
-if [[ -f "${KANBAN_ROOT}/kanban.cfg" ]]; then
-    export PGAI_DASHBOARD_SESSION_NAME="${PGAI_DASHBOARD_SESSION_NAME:-$(read_ini "${KANBAN_ROOT}/kanban.cfg" dashboard session_name pgai-kanban-dashboard)}"
-fi
 
-# Allow session name override from kanban.cfg
-SESSION_NAME="${PGAI_DASHBOARD_SESSION_NAME:-$SESSION_NAME}"
+# Session name: --session, then PGAI_DASHBOARD_SESSION_NAME, then kanban.cfg
+# [dashboard] session_name, then the default (lib/session_name.sh).
+SESSION_NAME="$(dashboard_resolve_session_name "$SESSION_FLAG" "$KANBAN_ROOT")"
+unset SESSION_FLAG
 
 # ---------------------------------------------------------------------------
 # Verify tmux is available

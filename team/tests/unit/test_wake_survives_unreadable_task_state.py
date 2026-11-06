@@ -189,10 +189,13 @@ def _chain_body() -> str:
     wd_prepare_task run; the worktree stage is stubbed to record which task
     reached it -- the task the chain prepared for dispatch -- and stop there.
     """
-    return textwrap.dedent(f"""\
+    return (
+        textwrap.dedent(f"""\
         source '{_LIB}/wake_readme_meta.sh'
         source '{_LIB}/wake_driver_prep.sh'
-        """) + _extract("process_one_task", _LIB / "wake_driver.sh") + textwrap.dedent(f"""\
+        """)
+        + _extract("process_one_task", _LIB / "wake_driver.sh")
+        + textwrap.dedent(f"""\
         AGENT=coder; ACTIVE_PROVIDER=claude; _CURRENT_PROJECT=demo
         _resolve_debug_gate() {{ echo false; }}
         setup_project_directories() {{ :; }}
@@ -210,14 +213,16 @@ def _chain_body() -> str:
         echo "chain blocked a task: ${{_chain_blocked_a_task}}"
         echo WAKE_CONTINUED
         """)
+    )
 
 
 def test_prep_blocks_task_without_state_heading_and_prepares_next_task(tmp_path: pathlib.Path) -> None:
     root = _sandbox(tmp_path)
     bad = _make_task(root, _BAD_TASK, _NO_STATE_STATUS)
     _make_task(root, _GOOD_TASK, _BACKLOG_STATUS)
-    _queue_path(root).write_text(f"- [B] {_BAD_TASK} — lost its state\n- [ ] {_GOOD_TASK} — eligible\n",
-                                 encoding="utf-8")
+    _queue_path(root).write_text(
+        f"- [B] {_BAD_TASK} — lost its state\n- [ ] {_GOOD_TASK} — eligible\n", encoding="utf-8"
+    )
     prepared = root / "prepared.log"
 
     proc = _run(root, _chain_body().replace("{prepared}", str(prepared)))
@@ -277,8 +282,9 @@ def test_prep_block_site_writes_missing_state_heading_and_prepares_next_task(
     root = _sandbox(tmp_path)
     bad = _make_task(root, _BAD_TASK, _NO_STATE_STATUS)
     _make_task(root, _GOOD_TASK, _BACKLOG_STATUS)
-    _queue_path(root).write_text(f"- [B] {_BAD_TASK} — lost its state\n- [ ] {_GOOD_TASK} — eligible\n",
-                                 encoding="utf-8")
+    _queue_path(root).write_text(
+        f"- [B] {_BAD_TASK} — lost its state\n- [ ] {_GOOD_TASK} — eligible\n", encoding="utf-8"
+    )
     if readme_edit is not None:
         readme = bad.parent / "README.md"
         readme.write_text(readme.read_text(encoding="utf-8").replace(*readme_edit), encoding="utf-8")
@@ -384,9 +390,9 @@ def test_finalize_per_task_timeout_writes_missing_state_heading(tmp_path: pathli
     text = status.read_text(encoding="utf-8")
     assert _section(text, "State") == "BLOCKED", text
     record = load_block_record(status)
-    assert record is not None and record.reason_code == "per_task_timeout", (
-        f"the timeout block, not the unreadable-state fallback, must write the record:\n{text}"
-    )
+    assert (
+        record is not None and record.reason_code == "per_task_timeout"
+    ), f"the timeout block, not the unreadable-state fallback, must write the record:\n{text}"
     assert "exceeded max_task_seconds" in (_section(text, "Blockers") or ""), text
     assert markers.read_text(encoding="utf-8").split("\n")[0] == f"{_BAD_TASK} [B]"
 

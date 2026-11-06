@@ -55,7 +55,6 @@ import pathlib
 import stat
 import textwrap
 
-import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -212,21 +211,16 @@ def test_draft_mode_writes_one_file_to_output_dir(tmp_path: pathlib.Path) -> Non
     )
 
     assert result.returncode == 0, (
-        f"Expected exit 0 in draft mode; got {result.returncode}\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"Expected exit 0 in draft mode; got {result.returncode}\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
     # Exactly one .md file under output_dir
     produced = list(output_dir.glob("*.md"))
-    assert len(produced) == 1, (
-        f"Expected exactly one .md file in {output_dir}; found {produced}"
-    )
+    assert len(produced) == 1, f"Expected exactly one .md file in {output_dir}; found {produced}"
 
     # Filename matches <version>-<slug>.md pattern
     fname = produced[0].name
-    assert fname.startswith("v1.9.0-"), (
-        f"Output filename should start with 'v1.9.0-'; got {fname!r}"
-    )
+    assert fname.startswith("v1.9.0-"), f"Output filename should start with 'v1.9.0-'; got {fname!r}"
     assert fname.endswith(".md"), f"Output filename should end with '.md'; got {fname!r}"
 
 
@@ -244,9 +238,7 @@ def test_draft_mode_creates_output_dir_if_missing(tmp_path: pathlib.Path) -> Non
         extra_env=_env_with_stub_claude(tmp_path),
     )
 
-    assert result.returncode == 0, (
-        f"Expected exit 0; got {result.returncode}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Expected exit 0; got {result.returncode}\nstderr: {result.stderr}"
     assert output_dir.is_dir(), "Output directory should have been created"
 
 
@@ -265,14 +257,10 @@ def test_draft_mode_final_stdout_line_is_draft_path(tmp_path: pathlib.Path) -> N
     lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     assert lines, "Expected non-empty stdout"
     last_line = lines[-1]
-    assert last_line.startswith("DRAFT: "), (
-        f"Expected last stdout line to start with 'DRAFT: '; got {last_line!r}"
-    )
+    assert last_line.startswith("DRAFT: "), f"Expected last stdout line to start with 'DRAFT: '; got {last_line!r}"
     # The path on the DRAFT line must exist as a file
     draft_path_str = last_line.removeprefix("DRAFT: ").strip()
-    assert pathlib.Path(draft_path_str).is_file(), (
-        f"DRAFT path {draft_path_str!r} is not a file"
-    )
+    assert pathlib.Path(draft_path_str).is_file(), f"DRAFT path {draft_path_str!r} is not a file"
 
 
 def test_draft_mode_writes_nothing_under_projects(tmp_path: pathlib.Path) -> None:
@@ -295,9 +283,7 @@ def test_draft_mode_writes_nothing_under_projects(tmp_path: pathlib.Path) -> Non
         },
     )
 
-    assert result.returncode == 0, (
-        f"Expected exit 0; got {result.returncode}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Expected exit 0; got {result.returncode}\nstderr: {result.stderr}"
 
     # Assert: nothing written under projects/
     # anti-pattern-allowlist: 1 (justification: structural invariant — zero
@@ -306,9 +292,7 @@ def test_draft_mode_writes_nothing_under_projects(tmp_path: pathlib.Path) -> Non
     # under projects/ unconditionally; any write is a violation by definition.)
     all_under_projects = list(projects_dir.rglob("*"))
     written_files = [p for p in all_under_projects if p.is_file()]
-    assert not written_files, (
-        f"Draft mode MUST NOT write files under projects/; found: {written_files}"
-    )
+    assert not written_files, f"Draft mode MUST NOT write files under projects/; found: {written_files}"
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +318,8 @@ def test_draft_output_filename_matches_intake_routing_prefix(tmp_path: pathlib.P
     fname = produced[0].name
     # intake.sh routes v[0-9]*.md to requirements/; assert the prefix matches.
     import re
-    assert re.match(r'^v[0-9]', fname), (
+
+    assert re.match(r"^v[0-9]", fname), (
         f"Draft filename {fname!r} does not start with 'v<digit>' — "
         "intake.sh will refuse it as an unrecognised prefix."
     )
@@ -357,8 +342,7 @@ def test_output_combined_with_dry_run_exits_nonzero(tmp_path: pathlib.Path) -> N
     )
 
     assert result.returncode != 0, (
-        "--output + --dry-run must exit non-zero (contradiction refusal); "
-        f"got exit code {result.returncode}"
+        "--output + --dry-run must exit non-zero (contradiction refusal); " f"got exit code {result.returncode}"
     )
 
 
@@ -393,9 +377,7 @@ def test_output_combined_with_dry_run_writes_no_file(tmp_path: pathlib.Path) -> 
     )
 
     produced = list(output_dir.glob("*.md"))
-    assert not produced, (
-        f"--output + --dry-run must write no files; found: {produced}"
-    )
+    assert not produced, f"--output + --dry-run must write no files; found: {produced}"
 
 
 # ---------------------------------------------------------------------------
@@ -416,9 +398,7 @@ def test_second_run_uses_suffix_2(tmp_path: pathlib.Path) -> None:
         f"bash {_SCRIPT} {brief} --output {output_dir}",
         extra_env=env,
     )
-    assert result1.returncode == 0, (
-        f"First run failed: {result1.stderr}"
-    )
+    assert result1.returncode == 0, f"First run failed: {result1.stderr}"
 
     # Second run — slug collision: should produce v1.9.0-my-feature-2.md
     result2 = run_bash(
@@ -426,18 +406,14 @@ def test_second_run_uses_suffix_2(tmp_path: pathlib.Path) -> None:
         f"bash {_SCRIPT} {brief} --output {output_dir}",
         extra_env=env,
     )
-    assert result2.returncode == 0, (
-        f"Second run failed: {result2.stderr}"
-    )
+    assert result2.returncode == 0, f"Second run failed: {result2.stderr}"
 
     produced = sorted(output_dir.glob("*.md"))
     names = [p.name for p in produced]
-    assert "v1.9.0-my-feature.md" in names, (
-        f"Expected 'v1.9.0-my-feature.md' after first run; got {names}"
-    )
-    assert "v1.9.0-my-feature-2.md" in names, (
-        f"Expected 'v1.9.0-my-feature-2.md' after second run (collision suffix); got {names}"
-    )
+    assert "v1.9.0-my-feature.md" in names, f"Expected 'v1.9.0-my-feature.md' after first run; got {names}"
+    assert (
+        "v1.9.0-my-feature-2.md" in names
+    ), f"Expected 'v1.9.0-my-feature-2.md' after second run (collision suffix); got {names}"
 
 
 def test_collision_notice_appears_on_stdout(tmp_path: pathlib.Path) -> None:
@@ -457,8 +433,7 @@ def test_collision_notice_appears_on_stdout(tmp_path: pathlib.Path) -> None:
     )
     assert result2.returncode == 0
     assert "2" in result2.stdout and ("collision" in result2.stdout.lower() or "notice" in result2.stdout.lower()), (
-        f"Expected a collision notice on stdout mentioning '-2'; "
-        f"got: {result2.stdout!r}"
+        f"Expected a collision notice on stdout mentioning '-2'; " f"got: {result2.stdout!r}"
     )
 
 
@@ -478,9 +453,7 @@ def test_garbage_brief_with_output_exits_nonzero(tmp_path: pathlib.Path) -> None
         extra_env=_env_with_stub_claude(tmp_path),
     )
 
-    assert result.returncode != 0, (
-        f"Expected non-zero exit for garbage brief; got {result.returncode}"
-    )
+    assert result.returncode != 0, f"Expected non-zero exit for garbage brief; got {result.returncode}"
 
 
 def test_garbage_brief_with_output_writes_no_file(tmp_path: pathlib.Path) -> None:
@@ -496,9 +469,7 @@ def test_garbage_brief_with_output_writes_no_file(tmp_path: pathlib.Path) -> Non
     )
 
     produced = list(output_dir.glob("*.md"))
-    assert not produced, (
-        f"Garbage brief with --output must write no files; found: {produced}"
-    )
+    assert not produced, f"Garbage brief with --output must write no files; found: {produced}"
 
 
 def test_garbage_brief_with_output_prints_error(tmp_path: pathlib.Path) -> None:
@@ -514,8 +485,7 @@ def test_garbage_brief_with_output_prints_error(tmp_path: pathlib.Path) -> None:
 
     combined = result.stderr + result.stdout
     assert "ERROR" in combined or "invalid" in combined.lower(), (
-        f"Expected an error message for garbage brief; "
-        f"got stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"Expected an error message for garbage brief; " f"got stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 
 
@@ -545,9 +515,7 @@ def test_absent_output_flag_requires_project_as_before(tmp_path: pathlib.Path) -
         f"(same as pre-draft-mode); got exit code {result.returncode}"
     )
     combined = result.stderr + result.stdout
-    assert "project" in combined.lower(), (
-        f"Expected an error mentioning 'project'; got {combined!r}"
-    )
+    assert "project" in combined.lower(), f"Expected an error mentioning 'project'; got {combined!r}"
 
 
 def test_absent_output_flag_dry_run_still_works(tmp_path: pathlib.Path) -> None:
@@ -580,12 +548,11 @@ def test_absent_output_flag_dry_run_still_works(tmp_path: pathlib.Path) -> None:
     )
 
     assert result.returncode == 0, (
-        f"--dry-run (no --output) must exit 0; got {result.returncode}\n"
-        f"stderr: {result.stderr}"
+        f"--dry-run (no --output) must exit 0; got {result.returncode}\n" f"stderr: {result.stderr}"
     )
-    assert "DRY" in result.stdout.upper() or "dry" in result.stdout.lower(), (
-        f"Expected dry-run output; got: {result.stdout!r}"
-    )
+    assert (
+        "DRY" in result.stdout.upper() or "dry" in result.stdout.lower()
+    ), f"Expected dry-run output; got: {result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------

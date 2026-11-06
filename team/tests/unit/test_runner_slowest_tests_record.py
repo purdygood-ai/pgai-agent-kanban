@@ -59,8 +59,11 @@ _DURATION_OPTS = ("--durations=25", "--durations-min=1.0")
 @pytest.mark.parametrize("workers", [1, 3])
 def test_every_certification_lane_records_durations(workers: int) -> None:
     plan = lanes.plan_lanes(
-        ["-m", "not quarantine", "tests"], suite="unit", workers=workers,
-        xdist_available=True, durations_dir="/scratch/durations",
+        ["-m", "not quarantine", "tests"],
+        suite="unit",
+        workers=workers,
+        xdist_available=True,
+        durations_dir="/scratch/durations",
     )
     assert plan.durations_dir == "/scratch/durations"
     for lane in plan.lanes:
@@ -72,8 +75,12 @@ def test_every_certification_lane_records_durations(workers: int) -> None:
 @pytest.mark.parametrize("shape", ["targeted", "quarantined"])
 def test_targeted_and_quarantined_runs_record_nothing(shape: str) -> None:
     plan = lanes.plan_lanes(
-        ["tests/unit/test_a.py"], suite="unit", workers=3, xdist_available=True,
-        targeted=shape == "targeted", quarantined=shape == "quarantined",
+        ["tests/unit/test_a.py"],
+        suite="unit",
+        workers=3,
+        xdist_available=True,
+        targeted=shape == "targeted",
+        quarantined=shape == "quarantined",
         durations_dir="/scratch/durations",
     )
     assert plan.durations_dir is None
@@ -93,9 +100,7 @@ def test_no_durations_dir_leaves_the_argv_unchanged() -> None:
 
 
 def _junit(path: pathlib.Path, suite_time: float, cases: list[tuple[str, str, float]]) -> None:
-    body = "".join(
-        f'<testcase classname="{cls}" name="{name}" time="{secs}" />' for cls, name, secs in cases
-    )
+    body = "".join(f'<testcase classname="{cls}" name="{name}" time="{secs}" />' for cls, name, secs in cases)
     path.write_text(
         f'<?xml version="1.0"?><testsuites><testsuite name="pytest" tests="{len(cases)}" '
         f'time="{suite_time}">{body}</testsuite></testsuites>',
@@ -194,7 +199,8 @@ def test_targeted_run_writes_no_durations_file(runner_name: str, tmp_path: pathl
 
 def test_a_failing_run_keeps_its_exit_code_and_still_records(tmp_path: pathlib.Path) -> None:
     team = _lane_fixture(
-        tmp_path, "run-unit-tests.sh",
+        tmp_path,
+        "run-unit-tests.sh",
         _SLOW_TEST + "\ndef test_fails():\n    assert False, 'fixture failure'\n",
     )
     sandbox = _LaneSandbox(tmp_path, "workers = 1\n")

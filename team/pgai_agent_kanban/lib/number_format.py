@@ -66,7 +66,7 @@ def format_int(value: object) -> str:
     if not s:
         return "--"
     try:
-        return "{:,}".format(int(float(s)))
+        return f"{int(float(s)):,}"
     except (ValueError, TypeError):
         return s
 
@@ -93,7 +93,7 @@ def format_one_decimal(value: object) -> str:
     if not s:
         return "--"
     try:
-        return "{:,.1f}".format(float(s))
+        return f"{float(s):,.1f}"
     except (ValueError, TypeError):
         return s
 

@@ -46,10 +46,7 @@ _TEAM_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _SCRIPT = _TEAM_ROOT / "verification" / "verify_script_exec_bits.sh"
 
 _OK_LINE = "verify_script_exec_bits: OK — all .sh files have mode 100755."
-_FAIL_LINE = (
-    "verify_script_exec_bits: FAIL — the following .sh files are missing "
-    "the exec bit (mode != 100755):"
-)
+_FAIL_LINE = "verify_script_exec_bits: FAIL — the following .sh files are missing " "the exec bit (mode != 100755):"
 _SPACED = "team/scripts/has space.sh"
 _PLAIN = "team/scripts/a.sh"
 _LINK = "team/scripts/link.sh"
@@ -64,9 +61,7 @@ def _git(repo: pathlib.Path, *args: str) -> str:
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"git {' '.join(args)} failed in {repo}:\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"git {' '.join(args)} failed in {repo}:\n{result.stdout}\n{result.stderr}"
     return result.stdout
 
 
@@ -328,10 +323,7 @@ def _verification_copy(tmp_path: pathlib.Path, with_scripts_lib: bool) -> pathli
 def _run_outside_checkout(tmp_path: pathlib.Path, script: pathlib.Path, env: str = "") -> BashResult:
     outside = tmp_path / "outside"
     outside.mkdir(exist_ok=True)
-    command = (
-        f"export GIT_CEILING_DIRECTORIES={shlex.quote(str(tmp_path))}; {env} "
-        f"bash {shlex.quote(str(script))}"
-    )
+    command = f"export GIT_CEILING_DIRECTORIES={shlex.quote(str(tmp_path))}; {env} " f"bash {shlex.quote(str(script))}"
     return _sandboxed(tmp_path, command, cwd=outside)
 
 
@@ -354,9 +346,7 @@ def test_not_in_checkout_remedy_names_an_example_path_when_no_dev_tree_is_known(
 def test_not_in_checkout_remedy_names_pgai_dev_tree_path(tmp_path):
     repo = _make_repo(tmp_path, {"team/scripts/ok.sh": "100755"})
     script = _verification_copy(tmp_path, with_scripts_lib=False)
-    result = _run_outside_checkout(
-        tmp_path, script, env=f"export PGAI_DEV_TREE_PATH={shlex.quote(str(repo))};"
-    )
+    result = _run_outside_checkout(tmp_path, script, env=f"export PGAI_DEV_TREE_PATH={shlex.quote(str(repo))};")
 
     assert result.returncode == 1
     remedy = _remedy(result.stderr)

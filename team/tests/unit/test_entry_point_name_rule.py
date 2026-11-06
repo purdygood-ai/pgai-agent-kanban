@@ -99,8 +99,14 @@ def _run(cmd: list[str], tmp_path: pathlib.Path, root: pathlib.Path, **extra: st
     cwd = tmp_path / "cwd"
     cwd.mkdir(exist_ok=True)
     return subprocess.run(
-        cmd, capture_output=True, text=True, env=_env(tmp_path, root, **extra),
-        cwd=str(cwd), timeout=120, stdin=subprocess.DEVNULL, check=False,
+        cmd,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root, **extra),
+        cwd=str(cwd),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
+        check=False,
     )
 
 
@@ -169,12 +175,16 @@ def test_wake_batch_wakes_only_the_names_the_registry_readers_list(tmp_path, wak
     assert result.returncode == 0, _say(result)
     assert _woken(root) == readers_answer, _say(result)
     for name in set(_NAMES) - readers_answer:
-        logged = [line for line in result.stdout.splitlines() if f"'{name}'" in line and "not a plain project name" in line]
+        logged = [
+            line for line in result.stdout.splitlines() if f"'{name}'" in line and "not a plain project name" in line
+        ]
         assert len(logged) == 1, f"{name!r} was not refused by name\n{_say(result)}"
 
 
 @pytest.mark.parametrize("name", _NAMES)
-def test_wake_batch_inbox_goes_only_to_a_project_the_registry_readers_list(tmp_path, wake_install, readers_answer, name):
+def test_wake_batch_inbox_goes_only_to_a_project_the_registry_readers_list(
+    tmp_path, wake_install, readers_answer, name
+):
     root = tmp_path / "kanban"
     (root / "projects" / name).mkdir(parents=True)
     # One section the registry refuses, so the firing has a question to park.
@@ -251,7 +261,9 @@ def test_import_accepts_only_the_names_the_registry_readers_list(tmp_path, reade
         assert (root / "projects" / name / "project.cfg").is_file(), _say(result)
     else:
         assert result.returncode == 1, _say(result)
-        assert re.search(r"^error:\s+import\.invalid_(archive_)?project_name\s*$", result.stderr, re.MULTILINE), _say(result)
+        assert re.search(r"^error:\s+import\.invalid_(archive_)?project_name\s*$", result.stderr, re.MULTILINE), _say(
+            result
+        )
         assert ini.project_name_rule().pattern in result.stderr, "the refusal does not quote the rule\n" + _say(result)
         assert sorted(p.name for p in (root / "projects").iterdir()) == [], _say(result)
 
@@ -269,9 +281,7 @@ def _push_site_root(tmp_path: pathlib.Path) -> pathlib.Path:
     for name in _NAMES:
         project_dir = root / "projects" / name
         project_dir.mkdir(parents=True)
-        (project_dir / "project.cfg").write_text(
-            f"[project]\ndev_tree_path = {tmp_path / 'dev'}\n", encoding="utf-8"
-        )
+        (project_dir / "project.cfg").write_text(f"[project]\ndev_tree_path = {tmp_path / 'dev'}\n", encoding="utf-8")
         (project_dir / "HALT").write_text("", encoding="utf-8")
     _registry(root, _NAMES)
     return root

@@ -93,9 +93,7 @@ _GREP_PATTERN = r'workflow_type"? *[!=]='
 # Directories containing plugin files that are legitimately allowed to name
 # workflow types.  Paths are relative to the repo root and are matched as
 # prefixes of the file's repo-relative path.
-_EXCLUDED_PREFIXES = (
-    "team/workflows/",
-)
+_EXCLUDED_PREFIXES = ("team/workflows/",)
 
 
 def _find_violations() -> list[str]:
@@ -114,8 +112,7 @@ def _find_violations() -> list[str]:
 
     if not scripts_dir.is_dir():
         raise FileNotFoundError(
-            f"team/scripts/ directory not found at {scripts_dir}; "
-            "repo root resolution may be wrong."
+            f"team/scripts/ directory not found at {scripts_dir}; " "repo root resolution may be wrong."
         )
 
     pattern = re.compile(_GREP_PATTERN)
@@ -192,22 +189,19 @@ def test_grep_pattern_detects_synthetic_violation(tmp_path: pathlib.Path) -> Non
     # Write a synthetic shell script containing a clear violation.
     bad_script = tmp_path / "bad_engine.sh"
     bad_script.write_text(
-        '#!/usr/bin/env bash\n'
-        '# Synthetic violation for negative-proof test.\n'
+        "#!/usr/bin/env bash\n"
+        "# Synthetic violation for negative-proof test.\n"
         'if [[ "$workflow_type" == "document" ]]; then\n'
         '    echo "document path"\n'
-        'fi\n'
+        "fi\n"
         'if [[ "$workflow_type" != "release" ]]; then\n'
         '    echo "non-release path"\n'
-        'fi\n',
+        "fi\n",
         encoding="utf-8",
     )
 
     pattern = re.compile(_GREP_PATTERN)
-    matching_lines = [
-        line for line in bad_script.read_text(encoding="utf-8").splitlines()
-        if pattern.search(line)
-    ]
+    matching_lines = [line for line in bad_script.read_text(encoding="utf-8").splitlines() if pattern.search(line)]
 
     assert len(matching_lines) >= 2, (
         f"Expected at least 2 matching lines in the synthetic bad script; "
@@ -225,8 +219,8 @@ def test_grep_pattern_does_not_match_assignment(tmp_path: pathlib.Path) -> None:
     """
     assignment_script = tmp_path / "assignment_ok.sh"
     assignment_script.write_text(
-        '#!/usr/bin/env bash\n'
-        '# Legitimate config read — assignment, not comparison.\n'
+        "#!/usr/bin/env bash\n"
+        "# Legitimate config read — assignment, not comparison.\n"
         'workflow_type="release"\n'
         'workflow_type = "document"\n'
         '_wf_type="$(read_cfg workflow_type)"\n',
@@ -235,8 +229,7 @@ def test_grep_pattern_does_not_match_assignment(tmp_path: pathlib.Path) -> None:
 
     pattern = re.compile(_GREP_PATTERN)
     matching_lines = [
-        line for line in assignment_script.read_text(encoding="utf-8").splitlines()
-        if pattern.search(line)
+        line for line in assignment_script.read_text(encoding="utf-8").splitlines() if pattern.search(line)
     ]
 
     assert not matching_lines, (
@@ -264,10 +257,7 @@ def test_grep_pattern_does_not_match_plugin_file_comparisons(
     placing a synthetic file in the real tree.
     """
     # Verify the exclusion prefix is present and the pattern covers workflows/.
-    assert any(
-        prefix.startswith("team/workflows/") or "team/workflows/" in prefix
-        for prefix in _EXCLUDED_PREFIXES
-    ), (
+    assert any(prefix.startswith("team/workflows/") or "team/workflows/" in prefix for prefix in _EXCLUDED_PREFIXES), (
         "Expected _EXCLUDED_PREFIXES to contain 'team/workflows/' but it does not.  "
         "Plugin files in the workflows/ tree would be incorrectly scanned."
     )
@@ -318,8 +308,7 @@ def _find_import_form_violations() -> list[str]:
 
     if not package_dir.is_dir():
         raise FileNotFoundError(
-            f"team/pgai_agent_kanban/ directory not found at {package_dir}; "
-            "repo root resolution may be wrong."
+            f"team/pgai_agent_kanban/ directory not found at {package_dir}; " "repo root resolution may be wrong."
         )
 
     pattern = _IMPORT_FORM_PATTERN
@@ -380,15 +369,12 @@ def test_import_form_pattern_detects_synthetic_violation(
     """
     bad_file = tmp_path / "bad_module.py"
     bad_file.write_text(
-        '"""\nUsage::\n'
-        '    from team.pgai_agent_kanban.cm.read_state_field import read_state_field\n'
-        '"""\n',
+        '"""\nUsage::\n' "    from team.pgai_agent_kanban.cm.read_state_field import read_state_field\n" '"""\n',
         encoding="utf-8",
     )
 
     matching_lines = [
-        line for line in bad_file.read_text(encoding="utf-8").splitlines()
-        if _IMPORT_FORM_PATTERN.search(line)
+        line for line in bad_file.read_text(encoding="utf-8").splitlines() if _IMPORT_FORM_PATTERN.search(line)
     ]
 
     assert len(matching_lines) >= 1, (
@@ -407,15 +393,12 @@ def test_import_form_pattern_does_not_match_live_install_form(
     """
     clean_file = tmp_path / "clean_module.py"
     clean_file.write_text(
-        '"""\nUsage::\n'
-        '    from pgai_agent_kanban.cm.read_state_field import read_state_field\n'
-        '"""\n',
+        '"""\nUsage::\n' "    from pgai_agent_kanban.cm.read_state_field import read_state_field\n" '"""\n',
         encoding="utf-8",
     )
 
     matching_lines = [
-        line for line in clean_file.read_text(encoding="utf-8").splitlines()
-        if _IMPORT_FORM_PATTERN.search(line)
+        line for line in clean_file.read_text(encoding="utf-8").splitlines() if _IMPORT_FORM_PATTERN.search(line)
     ]
 
     assert not matching_lines, (
@@ -463,9 +446,7 @@ def test_import_form_pattern_does_not_match_live_install_form(
 # these names, moves with it), never a quiet local rename that could slip
 # past a name-keyed gate the way a renamed internal helper could.
 
-_LEDGER_WRITER_PATTERN = re.compile(
-    r"\bappend_block_start\b|\bappend_block_end\b|\bblocked_ledger\b"
-)
+_LEDGER_WRITER_PATTERN = re.compile(r"\bappend_block_start\b|\bappend_block_end\b|\bblocked_ledger\b")
 
 _RELEASE_SCRIPT_RELATIVE_PATH = "team/scripts/cm/release.sh"
 
@@ -479,15 +460,12 @@ def _find_ledger_writer_references_in_release_script() -> list[str]:
 
     if not release_script.is_file():
         raise FileNotFoundError(
-            f"{_RELEASE_SCRIPT_RELATIVE_PATH} not found at {release_script}; "
-            "repo root resolution may be wrong."
+            f"{_RELEASE_SCRIPT_RELATIVE_PATH} not found at {release_script}; " "repo root resolution may be wrong."
         )
 
     lines = release_script.read_text(encoding="utf-8", errors="replace").splitlines()
     return [
-        f"{lineno}:{line.rstrip()}"
-        for lineno, line in enumerate(lines, start=1)
-        if _LEDGER_WRITER_PATTERN.search(line)
+        f"{lineno}:{line.rstrip()}" for lineno, line in enumerate(lines, start=1) if _LEDGER_WRITER_PATTERN.search(line)
     ]
 
 
@@ -524,19 +502,17 @@ def test_ledger_writer_pattern_detects_synthetic_violation(
     """
     bad_script = tmp_path / "bad_release.sh"
     bad_script.write_text(
-        '#!/usr/bin/env bash\n'
-        '# Synthetic violation for negative-proof test.\n'
-        'if should_ship; then\n'
+        "#!/usr/bin/env bash\n"
+        "# Synthetic violation for negative-proof test.\n"
+        "if should_ship; then\n"
         '    python3 -c "from pgai_agent_kanban.metrics.blocked_ledger import append_block_end"\n'
         '    append_block_start "$ledger_path" "$version" "release:decision" "$(date -Iseconds)"\n'
-        'fi\n',
+        "fi\n",
         encoding="utf-8",
     )
 
     matching_lines = [
-        line
-        for line in bad_script.read_text(encoding="utf-8").splitlines()
-        if _LEDGER_WRITER_PATTERN.search(line)
+        line for line in bad_script.read_text(encoding="utf-8").splitlines() if _LEDGER_WRITER_PATTERN.search(line)
     ]
 
     assert len(matching_lines) >= 2, (
@@ -554,19 +530,17 @@ def test_ledger_writer_pattern_does_not_match_unrelated_blocked_mentions(
     carry -- only the three ledger-specific identifiers trigger it."""
     clean_script = tmp_path / "clean_release.sh"
     clean_script.write_text(
-        '#!/usr/bin/env bash\n'
+        "#!/usr/bin/env bash\n"
         '# Legitimate, unrelated uses of "blocked" -- must not match.\n'
         'echo "task state: BLOCKED"\n'
         'if [[ "$state" == "BLOCKED" ]]; then\n'
         '    echo "a task is blocked; this is not the blocked-interval ledger"\n'
-        'fi\n',
+        "fi\n",
         encoding="utf-8",
     )
 
     matching_lines = [
-        line
-        for line in clean_script.read_text(encoding="utf-8").splitlines()
-        if _LEDGER_WRITER_PATTERN.search(line)
+        line for line in clean_script.read_text(encoding="utf-8").splitlines() if _LEDGER_WRITER_PATTERN.search(line)
     ]
 
     assert not matching_lines, (

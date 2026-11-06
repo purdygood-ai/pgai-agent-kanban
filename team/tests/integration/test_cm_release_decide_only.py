@@ -59,7 +59,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pytest
 
@@ -104,7 +104,7 @@ _PROCEEDING_RE = re.compile(r"Proceeding with release: (\S+) \(release notes Sta
 _POSTURES = {"matrix": "matrix", "absent": None, "always": "always"}
 
 
-def _resolved_posture(posture: Optional[str]) -> str:
+def _resolved_posture(posture: str | None) -> str:
     """The posture a fixture lane resolves to: every lane here has
     push_to_remote = false, so an absent key takes the default, always."""
     return "matrix" if posture == "matrix" else "always"
@@ -115,14 +115,14 @@ def _resolved_posture(posture: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _clean_pass(lane: Lane) -> Optional[dict]:
+def _clean_pass(lane: Lane) -> dict | None:
     lane.open_rc()
     lane.rc_work()
     lane.tester_task()
     return None
 
 
-def _unmatched_row(lane: Lane) -> Optional[dict]:
+def _unmatched_row(lane: Lane) -> dict | None:
     """A DONE report with high systemic risk handed to the matrix as "HIGH"."""
     lane.open_rc()
     lane.rc_work()
@@ -133,7 +133,7 @@ def _unmatched_row(lane: Lane) -> Optional[dict]:
         "# token, which no named HALT row matches.\n"
         f"source {_TEAM_DIR / 'scripts' / 'lib' / 'cm' / 'release_ship_policy_report.sh'}\n"
         "read_ship_policy_report_values() {\n"
-        "  pp_run_ops pgai_agent_kanban.cm.ship_policy_report_inputs values \"$1\" "
+        '  pp_run_ops pgai_agent_kanban.cm.ship_policy_report_inputs values "$1" '
         "| sed 's/^systemic_risk=high$/systemic_risk=HIGH/'\n"
         "}\n",
         encoding="utf-8",
@@ -141,16 +141,18 @@ def _unmatched_row(lane: Lane) -> Optional[dict]:
     return {"BASH_ENV": str(bash_env)}
 
 
-def _lane_builder(build: Callable[[Lane], Optional[dict]]) -> Callable:
-    def make(tmp_path: pathlib.Path, posture: Optional[str]):
+def _lane_builder(build: Callable[[Lane], dict | None]) -> Callable:
+    def make(tmp_path: pathlib.Path, posture: str | None):
         lane = Lane(tmp_path, posture, "v0.7.0")
         return lane, build(lane)
+
     return make
 
 
 def _posture_builder(build: Callable[[pathlib.Path, str], Lane]) -> Callable:
-    def make(tmp_path: pathlib.Path, posture: Optional[str]):
+    def make(tmp_path: pathlib.Path, posture: str | None):
         return build(tmp_path, posture), None
+
     return make
 
 
@@ -221,9 +223,14 @@ def _diag(result: subprocess.CompletedProcess) -> str:
     return f"--- exit {result.returncode} ---\n--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
 
 
-def _decide(lane: Lane, extra_env: Optional[dict] = None, args: tuple = ()) -> subprocess.CompletedProcess:
+def _decide(lane: Lane, extra_env: dict | None = None, args: tuple = ()) -> subprocess.CompletedProcess:
     return _run_cm_script(
-        _RELEASE_SCRIPT, ["--decide-only", *args], lane.root, _PROJECT, repo_root=lane.repo, extra_env=extra_env,
+        _RELEASE_SCRIPT,
+        ["--decide-only", *args],
+        lane.root,
+        _PROJECT,
+        repo_root=lane.repo,
+        extra_env=extra_env,
     )
 
 
@@ -305,10 +312,10 @@ class _Copy:
             encoding="utf-8",
         )
 
-    def release(self, extra_env: Optional[dict]) -> subprocess.CompletedProcess:
+    def release(self, extra_env: dict | None) -> subprocess.CompletedProcess:
         return _run_cm_script(_RELEASE_SCRIPT, [], self.root, _PROJECT, repo_root=self.repo, extra_env=extra_env)
 
-    def halt_key(self) -> Optional[str]:
+    def halt_key(self) -> str | None:
         halt = self.proj / "HALT"
         if not halt.is_file():
             return None
@@ -316,8 +323,9 @@ class _Copy:
         return match.group(1) if match else ""
 
 
-def _assert_full_run_agrees(decided: subprocess.CompletedProcess, full: subprocess.CompletedProcess,
-                            copy: _Copy) -> None:
+def _assert_full_run_agrees(
+    decided: subprocess.CompletedProcess, full: subprocess.CompletedProcess, copy: _Copy
+) -> None:
     fields, rest = _parse(decided)
     if decided.returncode == 4:
         assert full.returncode == 4, f"decider requeued verification, full run did not\n{_diag(full)}"
@@ -361,7 +369,8 @@ def test_decide_only_writes_nothing_and_agrees_with_the_full_run(tmp_path, scena
     full = copy.release(extra_env)
     _assert_full_run_agrees(decided, full, copy)
     if (scenario_id == "trigger_8_last_three_non_functional" and resolved == "always") or scenario_id in (
-        "unrecognized_tester_state", "unmatched_row",
+        "unrecognized_tester_state",
+        "unmatched_row",
     ):
         # The full run files the bug the decider only narrated.
         assert len(list((copy.proj / "bugs").glob("BUG-*.md"))) == 1, _diag(full)
@@ -375,7 +384,8 @@ def _pattern_on_rc_branch_only(tmp_path: pathlib.Path) -> Lane:
     _git_local(lane.repo, "checkout", lane.rc_branch)
     for version in ("v0.1.0", "v0.2.0", "v0.3.0"):
         (lane.repo / "release-notes" / f"{version}.md").write_text(
-            f"# Release Notes: {_PROJECT} {version}\n\n## Status\nNON-FUNCTIONAL\n", encoding="utf-8",
+            f"# Release Notes: {_PROJECT} {version}\n\n## Status\nNON-FUNCTIONAL\n",
+            encoding="utf-8",
         )
     _git_local(lane.repo, "add", "release-notes")
     _git_local(lane.repo, "commit", "-m", "docs: three earlier release notes")
@@ -421,8 +431,9 @@ def test_decide_only_refuses_override_flags_and_writes_nothing(tmp_path, flags, 
     _assert_unchanged(before, _snapshot(lane), decided)
     assert decided.returncode == 1, _diag(decided)
     assert decided.stdout == "", _diag(decided)
-    assert re.search(r"^error:\s+cm-release\.decide-only\.override-flag-refused$", decided.stderr, re.MULTILINE), \
-        _diag(decided)
+    assert re.search(r"^error:\s+cm-release\.decide-only\.override-flag-refused$", decided.stderr, re.MULTILINE), _diag(
+        decided
+    )
     assert re.search(r"^remedy:\s+\S", decided.stderr, re.MULTILINE), _diag(decided)
 
 
@@ -436,7 +447,10 @@ def test_decide_only_refuses_override_flags_and_writes_nothing(tmp_path, flags, 
     ids=["project_flag_wins", "env_project_name", "neither_set_placeholder"],
 )
 def test_decide_only_override_refusal_remedy_names_the_requested_project(
-    tmp_path, project_args, env_project, expected_project,
+    tmp_path,
+    project_args,
+    env_project,
+    expected_project,
 ):
     """The refusal's remedy runs the decider for the project the operator asked about.
 
@@ -456,8 +470,9 @@ def test_decide_only_override_refusal_remedy_names_the_requested_project(
     )
     _assert_unchanged(before, _snapshot(lane), decided)
     assert decided.returncode == 1, _diag(decided)
-    assert re.search(r"^error:\s+cm-release\.decide-only\.override-flag-refused$", decided.stderr, re.MULTILINE), \
-        _diag(decided)
+    assert re.search(r"^error:\s+cm-release\.decide-only\.override-flag-refused$", decided.stderr, re.MULTILINE), _diag(
+        decided
+    )
     remedy = re.search(r"^remedy:\s+(.*)$", decided.stderr, re.MULTILINE)
     assert remedy, _diag(decided)
     assert re.search(rf"--project\s+{re.escape(expected_project)}\s+--decide-only", remedy.group(1)), _diag(decided)
@@ -474,9 +489,9 @@ def test_help_documents_decide_only_and_the_help_lint_passes(tmp_path):
     # The help lint exits 0 whatever it finds; its verdict is the findings file.
     findings_path = tmp_path / "help_presence.json"
     lint = subprocess.run(
-        ["python3", str(_TEAM_DIR / "scripts" / "lint_help_presence.py"),
-         "--findings-file", str(findings_path)],
-        capture_output=True, text=True,
+        ["python3", str(_TEAM_DIR / "scripts" / "lint_help_presence.py"), "--findings-file", str(findings_path)],
+        capture_output=True,
+        text=True,
     )
     assert lint.returncode == 0, f"{lint.stdout}\n{lint.stderr}"
     findings = json.loads(findings_path.read_text(encoding="utf-8"))

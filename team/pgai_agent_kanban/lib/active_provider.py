@@ -29,7 +29,7 @@ VALID_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini")
 DEFAULT_PROVIDER = "claude"
 
 
-def read_active_provider(kanban_root: "pathlib.Path | str") -> tuple[str, str]:
+def read_active_provider(kanban_root: pathlib.Path | str) -> tuple[str, str]:
     """Return ``(provider, warning)`` from ``<kanban_root>/kanban.cfg``.
 
     The value of ``[providers] active`` has all whitespace removed and is
@@ -54,8 +54,7 @@ def read_active_provider(kanban_root: "pathlib.Path | str") -> tuple[str, str]:
         return value, ""
     if not value:
         return DEFAULT_PROVIDER, (
-            "active_provider: kanban.cfg [providers] active is unset or empty; "
-            f"defaulting to '{DEFAULT_PROVIDER}'"
+            "active_provider: kanban.cfg [providers] active is unset or empty; " f"defaulting to '{DEFAULT_PROVIDER}'"
         )
     return DEFAULT_PROVIDER, (
         f"active_provider: unrecognized provider '{value}' in kanban.cfg [providers] active; "

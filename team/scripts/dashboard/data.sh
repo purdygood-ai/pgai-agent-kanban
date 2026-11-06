@@ -17,7 +17,8 @@
 #   ACTIVE_RC             — Active RC version from release-state.md, or "none"
 #   RC_OPENED_AT          — RC Opened At from release-state.md as written, or
 #                           empty when the file, heading or value is missing
-#   LAST_RELEASED         — Last Released from release-state.md
+#   LAST_RELEASED         — pp_last_released_version's answer: release tag first,
+#                           then release-state.md, then v0.0.0 ("none" if it fails)
 #   HALT_FLAG             — "yes" if HALT sentinel present (project or global scope), "no" otherwise
 #   HALT_OVERWATCH_FLAG    — "yes" if HALT_OVERWATCH file exists, "no" otherwise
 #   HALT_TEXT             — per-project halt display string: "" (normal),
@@ -59,22 +60,14 @@
 #   PGAI_AGENT_KANBAN_ROOT_PATH — kanban root override
 #   PGAI_PROJECT_NAME           — project name (alternative to --project)
 
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Argument parsing ---
 KANBAN_ROOT_ARG=""
@@ -98,16 +91,8 @@ done
 # --- Resolve kanban root ---
 KANBAN_ROOT="${KANBAN_ROOT_ARG:-${PGAI_AGENT_KANBAN_ROOT_PATH}}"
 
-# --- Resolve script dir / repo root ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$SCRIPT_DIR"
-while [[ "$REPO_ROOT" != "/" ]] && [[ ! -d "$REPO_ROOT/.git" ]]; do
-  REPO_ROOT="$(dirname "$REPO_ROOT")"
-done
-if [[ "$REPO_ROOT" == "/" ]]; then
-  # Fallback to relative path if .git not found (e.g. shallow export or unusual layout)
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-fi
+# --- Resolve script dir (the repo root follows lib/dev_tree.sh below) ---
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source project_paths lib for pp_* helpers
 # shellcheck source=lib/project_paths.sh
@@ -128,9 +113,12 @@ source "${SCRIPT_DIR}/lib/helper_resolver.sh"
 # Source shared version helper (single tier-order decision point for framework version)
 # shellcheck source=lib/version.sh
 source "${SCRIPT_DIR}/lib/version.sh"
-# Source dev_tree helper (resolve_global_dev_tree / require_dev_tree)
+# Source dev_tree helper (resolve_global_dev_tree / require_dev_tree /
+# resolve_script_repo_root)
 # shellcheck source=lib/dev_tree.sh
 source "${SCRIPT_DIR}/../lib/dev_tree.sh"
+# The checkout this script runs from.
+REPO_ROOT="$(resolve_script_repo_root "$SCRIPT_DIR" "$SCRIPT_DIR/../../..")"
 # Source pp_run_ops for the task-count scan (pgai_agent_kanban.dashboard.task_counts)
 # shellcheck source=lib/pp_run_ops.sh
 source "${SCRIPT_DIR}/../lib/pp_run_ops.sh"
@@ -235,10 +223,11 @@ if [[ "$_rs_arc" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 else
   ACTIVE_RC="none"
 fi
-# Last Released is derived from git tags via pp_last_released_version rather
-# than read from release-state.md, so it stays accurate when the live install
-# is not a git repo or when deterministic patches advance tags without touching
-# the file.
+# Last Released comes from pp_last_released_version, not a direct read of
+# release-state.md: a matching branch-prefixed release tag in the project's dev
+# tree first, then release-state.md's ## Last Released when no tag matches or
+# there is no git dev tree, then v0.0.0. The full order is in the helper's
+# header comment in team/scripts/lib/project_paths.sh.
 LAST_RELEASED="$(pp_last_released_version "$_resolved_project" 2>/dev/null || echo "none")"
 [[ -z "$LAST_RELEASED" ]] && LAST_RELEASED="none"
 emit ACTIVE_RC "$ACTIVE_RC"

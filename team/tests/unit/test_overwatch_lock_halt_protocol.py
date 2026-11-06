@@ -48,6 +48,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="overwatch-lock-halt-protocol")
 
+
 # ---------------------------------------------------------------------------
 # Paths to the libraries under test.
 # When pytest is run from team/ (the standard invocation via
@@ -217,16 +218,15 @@ def test_pre_existing_halt_defers_an_overwatch_repair_and_survives_it(tmp_path: 
         f"pre-existing HALT.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "repair ran" not in result.stdout, (
-        f"The wrapped repair ran under a pre-existing HALT.\nstdout: {result.stdout}"
-    )
+    assert (
+        "repair ran" not in result.stdout
+    ), f"The wrapped repair ran under a pre-existing HALT.\nstdout: {result.stdout}"
     assert halt_flag.exists(), (
-        "Pre-existing HALT was removed by overwatch_halt_first_fix — an "
-        "operator-placed HALT must be inviolate."
+        "Pre-existing HALT was removed by overwatch_halt_first_fix — an " "operator-placed HALT must be inviolate."
     )
-    assert halt_flag.read_text(encoding="utf-8") == sentinel_content, (
-        "Pre-existing HALT content was modified by overwatch_halt_first_fix."
-    )
+    assert (
+        halt_flag.read_text(encoding="utf-8") == sentinel_content
+    ), "Pre-existing HALT content was modified by overwatch_halt_first_fix."
 
 
 def test_halt_created_by_this_invocation_is_removed_after_repair(
@@ -270,9 +270,7 @@ def test_halt_created_by_this_invocation_is_removed_after_repair(
         f"Expected HALT to be present while the wrapped function ran.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert not halt_flag.exists(), (
-        "OVERWATCH-created HALT was not removed after the repair completed."
-    )
+    assert not halt_flag.exists(), "OVERWATCH-created HALT was not removed after the repair completed."
 
 
 # ---------------------------------------------------------------------------
@@ -340,12 +338,9 @@ def test_mutation_runs_while_project_lock_is_held_and_lock_releases_after(
     result = run_bash(tmp_path, script)
 
     assert "EXIT_CODE=0" in result.stdout, (
-        f"Expected the wrapped mutation to succeed.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"Expected the wrapped mutation to succeed.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert contention_probe.exists(), (
-        f"Contention probe never ran.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert contention_probe.exists(), f"Contention probe never ran.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert contention_probe.read_text(encoding="utf-8").strip() == "CONTENDED", (
         "The lock was NOT held while the wrapped mutation function ran — "
         "this is the TOCTOU a wake could hit: starting to "
@@ -441,10 +436,7 @@ def test_grep_zero_pattern_detects_synthetic_violation(tmp_path: pathlib.Path) -
         encoding="utf-8",
     )
     lines = bad_script.read_text(encoding="utf-8").splitlines()
-    executable_hits = [
-        line for line in lines
-        if _HARDCODED_LOCK_LITERAL in line and not line.strip().startswith("#")
-    ]
+    executable_hits = [line for line in lines if _HARDCODED_LOCK_LITERAL in line and not line.strip().startswith("#")]
     assert len(executable_hits) == 1, (
         f"Expected exactly 1 executable hit in the synthetic bad script; "
         f"got {len(executable_hits)}: {executable_hits!r}."

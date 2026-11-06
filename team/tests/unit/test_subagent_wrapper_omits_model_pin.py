@@ -92,7 +92,7 @@ def test_scan_fails_naming_the_file_when_a_wrapper_pins_a_model(
     clean_wrapper.write_text(
         "---\n"
         "name: clean\n"
-        "description: \"A wrapper with no model pin.\"\n"
+        'description: "A wrapper with no model pin."\n'
         "tools: Read, Write\n"
         "---\n"
         "\n"
@@ -104,7 +104,7 @@ def test_scan_fails_naming_the_file_when_a_wrapper_pins_a_model(
     pinned_wrapper.write_text(
         "---\n"
         "name: pinned\n"
-        "description: \"A wrapper that pins a model.\"\n"
+        'description: "A wrapper that pins a model."\n'
         "tools: Read, Write\n"
         "model: sonnet\n"
         "---\n"
@@ -115,6 +115,4 @@ def test_scan_fails_naming_the_file_when_a_wrapper_pins_a_model(
 
     offenders = _wrappers_with_frontmatter_model_key(fixture_dir)
 
-    assert offenders == [pinned_wrapper], (
-        f"expected only {pinned_wrapper} to be named as an offender, got {offenders}"
-    )
+    assert offenders == [pinned_wrapper], f"expected only {pinned_wrapper} to be named as an offender, got {offenders}"

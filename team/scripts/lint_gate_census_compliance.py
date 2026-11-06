@@ -195,7 +195,7 @@ a terminal can never halt the autonomous loop, because the loop always
 invokes these scripts with well-formed arguments -- so it is not a
 candidate site at all, in any file. Two textual shapes are recognized and
 pre-filtered before the classification/emitter check runs (see
-``_is_operator_cli_bash_site`` / ``_bash_positional_case_ranges`` /
+``_is_operator_cli_bash_site`` / ``_bash_operator_cli_ranges`` /
 ``_window_has_usage_guard``):
 
   1. The exit is lexically inside a ``case`` block whose dispatch
@@ -209,6 +209,13 @@ pre-filtered before the classification/emitter check runs (see
      a ``*_usage`` helper, or a printed "Usage:" banner / "run with --help"
      pointer -- covering the required-flag validations that sit just after
      the parsing loop rather than inside its ``case`` body.
+
+Separately, an ``exit N`` inside the body of a printed heredoc -- ``cat
+<<DELIM`` whose output goes to the terminal or into a variable, never to a
+file -- is help or usage prose ("make the run exit 1"), not code, and is
+never a candidate site (``_bash_printed_heredoc_ranges``). A heredoc
+written to a file (``cat > path <<'EOF'``, an embedded script) is still
+scanned.
 
 A false negative here (an excluded site that was in fact loop-reachable)
 costs nothing more than a missed advisory finding on a quality-class lint
@@ -301,7 +308,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -356,15 +363,11 @@ _PYTHON_EMITTER_NAMES = ("format_error_contract", "emit_error_contract")
 _BASH_FATAL_EXIT_RE = re.compile(r"\bexit\s+[1-9]\d*\b")
 _PYTHON_FATAL_EXIT_RE = re.compile(r"\b(?:sys\.exit|raise\s+SystemExit)\(\s*[1-9]\d*\b")
 
-_CLASSIFICATION_RE = re.compile(
-    r"#.*\b(?:" + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS) + r")\b"
-)
+_CLASSIFICATION_RE = re.compile(r"#.*\b(?:" + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS) + r")\b")
 # Same shape as _CLASSIFICATION_RE, but capturing -- used where the specific
 # token matters (the anchor reconciliation direction needs to know WHICH
 # class a site declares, not just whether it declares one).
-_CLASSIFICATION_TOKEN_RE = re.compile(
-    r"#.*\b(" + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS) + r")\b"
-)
+_CLASSIFICATION_TOKEN_RE = re.compile(r"#.*\b(" + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS) + r")\b")
 _BASH_EMITTER_RE = re.compile(r"\b(?:" + "|".join(_BASH_EMITTER_NAMES) + r")\b")
 _PYTHON_EMITTER_RE = re.compile(r"\b(?:" + "|".join(_PYTHON_EMITTER_NAMES) + r")\b")
 
@@ -460,6 +463,7 @@ _CENSUS_BASH_FILES = (
     "lib/dev_tree.sh",  # row 27
     "lib/dashboard_palette.sh",  # rows 57-58
     "lib/gated_runner_lint.sh",  # row 60
+    "lib/gated_runner_args.sh",  # row 71; the runners' --workers and --pre-merge flag refusals
     "lib/config_loader.sh",  # config-loader-{deferred-bugs,deferred-bug-level,defer-piggyback,deep-verify}-01 (Locator Index inventory; no rollup row)
     "lib/defer_posture.sh",  # defer-posture-{invalid-boolean,invalid-level,campaign-unparseable,campaign-malformed-until}-01 (Locator Index inventory; no rollup row)
     "cm/release.sh",  # rows 8-24
@@ -470,9 +474,7 @@ _CENSUS_BASH_FILES = (
 # Bash files the default scan takes by glob, relative to team/scripts/: the
 # verification scripts under team/verification/ carry census anchors of
 # their own, so every one of them is on the default scan surface.
-_CENSUS_BASH_GLOBS = (
-    "../verification/*.sh",
-)
+_CENSUS_BASH_GLOBS = ("../verification/*.sh",)
 
 _CENSUS_PYTHON_FILES = (
     "check_breakage_class.py",  # row 25
@@ -511,9 +513,7 @@ _CENSUS_LOCATOR_END_MARKER = "<!-- CENSUS-LOCATOR-INDEX-END -->"
 # starting with a letter or digit -- disjoint from "all digits", so which
 # form an entry uses is unambiguous from its <key> alone.
 _CENSUS_LOCATOR_LINE_RE = re.compile(
-    r"^(?P<path>\S+):(?P<line>\d+)\s+(?P<cls>"
-    + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS)
-    + r")\s*$"
+    r"^(?P<path>\S+):(?P<line>\d+)\s+(?P<cls>" + "|".join(re.escape(t) for t in CLASSIFICATION_TOKENS) + r")\s*$"
 )
 _CENSUS_LOCATOR_TOKEN_RE = re.compile(
     r"^(?P<path>\S+):(?P<token>[A-Za-z0-9][A-Za-z0-9._-]*)\s+(?P<cls>"
@@ -525,9 +525,7 @@ _CENSUS_LOCATOR_TOKEN_RE = re.compile(
 # own line (team/SOP-core.md "Gates and Refusals", "Writing a compliant
 # anchor"). The refusal the marker names must sit within the marker's own
 # line plus the five lines below it -- see _CENSUS_ANCHOR_FORWARD_WINDOW.
-_CENSUS_ANCHOR_MARKER_RE = re.compile(
-    r"^\s*#\s*CENSUS-ANCHOR:\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*$"
-)
+_CENSUS_ANCHOR_MARKER_RE = re.compile(r"^\s*#\s*CENSUS-ANCHOR:\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*$")
 _CENSUS_ANCHOR_FORWARD_WINDOW = 5
 
 
@@ -555,9 +553,7 @@ class _CensusLocators:
     line_class: dict[Path, dict[int, str]] = field(default_factory=dict)
 
     def total_entries(self) -> int:
-        return sum(len(v) for v in self.by_line.values()) + sum(
-            len(v) for v in self.by_token.values()
-        )
+        return sum(len(v) for v in self.by_line.values()) + sum(len(v) for v in self.by_token.values())
 
 
 def _load_census_locators(repo_root: Path) -> _CensusLocators:
@@ -620,9 +616,7 @@ def _resolve_anchor_marker_lines(lines: list[str], tokens: set[str]) -> set[int]
         if not match or match.group(1) not in tokens:
             continue
         marker_line = idx + 1
-        exempted.update(
-            range(marker_line, marker_line + _CENSUS_ANCHOR_FORWARD_WINDOW + 1)
-        )
+        exempted.update(range(marker_line, marker_line + _CENSUS_ANCHOR_FORWARD_WINDOW + 1))
     return exempted
 
 
@@ -643,9 +637,7 @@ _LITERAL_STRING_ARG_RE = re.compile(r"""["']([A-Za-z0-9][A-Za-z0-9._-]*)["']""")
 _KEY_FORWARD_WINDOW = 20
 
 
-def _resolve_error_key_lines(
-    lines: list[str], keys: set[str], emitter_re: re.Pattern, is_python: bool
-) -> set[int]:
+def _resolve_error_key_lines(lines: list[str], keys: set[str], emitter_re: re.Pattern, is_python: bool) -> set[int]:
     """Return the 1-indexed lines exempted by a dual-channel emitter call
     (``pgai_emit_error_contract`` / ``pgai_format_error_contract`` in bash;
     ``emit_error_contract`` / ``format_error_contract`` in Python) whose
@@ -677,7 +669,7 @@ def _resolve_error_key_lines(
     return exempted
 
 
-def _window_classification_token(window_lines: list[str]) -> Optional[str]:
+def _window_classification_token(window_lines: list[str]) -> str | None:
     """Return the first census classification token found in a comment
     across *window_lines*, or ``None`` if none of the three tokens appear.
     Unlike ``_window_has_classification`` (a bool), this names WHICH token
@@ -690,9 +682,7 @@ def _window_classification_token(window_lines: list[str]) -> Optional[str]:
     return None
 
 
-def _scan_anchor_reconciliation(
-    path: Path, lines: list[str], census_locators: _CensusLocators
-) -> list[_Finding]:
+def _scan_anchor_reconciliation(path: Path, lines: list[str], census_locators: _CensusLocators) -> list[_Finding]:
     """The marker-to-index reconciliation direction (team/roles/CODER.md,
     "Writing a compliant anchor" -- "Authored together"; team/SOP-core.md,
     "Gates and Refusals"): every `# CENSUS-ANCHOR: <token>` marker in a
@@ -797,16 +787,16 @@ class _Finding:
     snippet: str
     missing_signals: list[str] = field(default_factory=list)
     kind: str = _FINDING_KIND_MISSING_SIGNAL
-    token: Optional[str] = None
-    index_class: Optional[str] = None
-    site_class: Optional[str] = None
-    table_summary: Optional[str] = None
-    rollup_summary: Optional[str] = None
-    row_number: Optional[int] = None
-    decision: Optional[str] = None
-    decision_problem: Optional[str] = None
-    converted: Optional[str] = None
-    converted_problem: Optional[str] = None
+    token: str | None = None
+    index_class: str | None = None
+    site_class: str | None = None
+    table_summary: str | None = None
+    rollup_summary: str | None = None
+    row_number: int | None = None
+    decision: str | None = None
+    decision_problem: str | None = None
+    converted: str | None = None
+    converted_problem: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -891,6 +881,46 @@ def _bash_positional_case_ranges(lines: list[str]) -> list[tuple[int, int]]:
     return ranges
 
 
+# A heredoc opener whose `cat` prints the body rather than writing it to a
+# file: no redirect other than `>&N` between `cat` and `<<`, and none after
+# the delimiter word.
+_BASH_PRINTED_HEREDOC_RE = re.compile(
+    r"\bcat\b(?:[^<>|;]|>&\d)*<<(?P<dash>-?)\s*"
+    r"(?P<quote>['\"]?)(?P<delim>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)(?P<after>.*)$"
+)
+_BASH_FILE_REDIRECT_RE = re.compile(r">(?!&)")
+
+
+def _bash_printed_heredoc_ranges(lines: list[str]) -> list[tuple[int, int]]:
+    """Return 0-indexed ``(start, end)`` inclusive ranges of the body lines
+    of every printed heredoc in *lines* (see "SITE-TYPE SCOPE" in the module
+    docstring): help or usage text, whose words are never code. A heredoc
+    whose terminator never appears yields no range."""
+    ranges: list[tuple[int, int]] = []
+    i = 0
+    while i < len(lines):
+        match = _BASH_PRINTED_HEREDOC_RE.search(_strip_bash_comment(lines[i]))
+        if not match or _BASH_FILE_REDIRECT_RE.search(match.group("after")):
+            i += 1
+            continue
+        delim = match.group("delim")
+        for j in range(i + 1, len(lines)):
+            body_line = lines[j].lstrip("\t") if match.group("dash") else lines[j]
+            if body_line.rstrip() == delim:
+                if j > i + 1:
+                    ranges.append((i + 1, j - 1))
+                i = j
+                break
+        i += 1
+    return ranges
+
+
+def _bash_operator_cli_ranges(lines: list[str]) -> list[tuple[int, int]]:
+    """Ranges whose exits are never candidate sites: positional ``case``
+    dispatch blocks and printed heredoc bodies."""
+    return _bash_positional_case_ranges(lines) + _bash_printed_heredoc_ranges(lines)
+
+
 def _line_in_ranges(index: int, ranges: list[tuple[int, int]]) -> bool:
     return any(start <= index <= end for start, end in ranges)
 
@@ -912,9 +942,7 @@ def _window_has_usage_guard(
     return False
 
 
-def _is_operator_cli_bash_site(
-    index: int, case_ranges: list[tuple[int, int]], window_lines: list[str]
-) -> bool:
+def _is_operator_cli_bash_site(index: int, case_ranges: list[tuple[int, int]], window_lines: list[str]) -> bool:
     """True when the candidate exit at 0-indexed *index* is the census's
     documented operator-CLI argument/usage-refusal SITE TYPE (see
     "SITE-TYPE SCOPE" in the module docstring) -- excluded from candidacy
@@ -924,12 +952,10 @@ def _is_operator_cli_bash_site(
     return _window_has_usage_guard(window_lines, _strip_bash_comment, _BASH_USAGE_DEFINITION_RE)
 
 
-def _scan_bash_file(
-    path: Path, census_locators: Optional[_CensusLocators] = None
-) -> list[_Finding]:
+def _scan_bash_file(path: Path, census_locators: _CensusLocators | None = None) -> list[_Finding]:
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
-    case_dispatch_ranges = _bash_positional_case_ranges(lines)
+    case_dispatch_ranges = _bash_operator_cli_ranges(lines)
     resolved_path = path.resolve()
     _locator_keys = (census_locators.by_token if census_locators else {}).get(resolved_path, set())
     anchored_lines = set((census_locators.by_line if census_locators else {}).get(resolved_path, set()))
@@ -955,9 +981,7 @@ def _scan_bash_file(
         if not _window_has_bash_emitter_call(window_lines):
             missing.append(_SIGNAL_DUAL_CHANNEL)
         if missing:
-            findings.append(
-                _Finding(path=path, line=i + 1, snippet=raw_line.strip(), missing_signals=missing)
-            )
+            findings.append(_Finding(path=path, line=i + 1, snippet=raw_line.strip(), missing_signals=missing))
     findings.extend(_scan_anchor_reconciliation(path, lines, census_locators or _CensusLocators()))
     return findings
 
@@ -978,9 +1002,7 @@ def _iter_bash_files(dirs: Iterable[Path]) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
-def _scan_python_file(
-    path: Path, census_locators: Optional[_CensusLocators] = None
-) -> list[_Finding]:
+def _scan_python_file(path: Path, census_locators: _CensusLocators | None = None) -> list[_Finding]:
     try:
         text = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
@@ -1005,9 +1027,7 @@ def _scan_python_file(
             continue
         window_start = max(0, i - _WINDOW_LINES + 1)
         window_lines = lines[window_start : i + 1]
-        if _window_has_usage_guard(
-            window_lines, lambda l: l.split("#", 1)[0], _PYTHON_USAGE_DEFINITION_RE
-        ):
+        if _window_has_usage_guard(window_lines, lambda l: l.split("#", 1)[0], _PYTHON_USAGE_DEFINITION_RE):
             continue
         missing = []
         if not _window_has_classification(window_lines):
@@ -1015,9 +1035,7 @@ def _scan_python_file(
         if not _window_has_python_emitter_call(window_lines):
             missing.append(_SIGNAL_DUAL_CHANNEL)
         if missing:
-            findings.append(
-                _Finding(path=path, line=i + 1, snippet=raw_line.strip(), missing_signals=missing)
-            )
+            findings.append(_Finding(path=path, line=i + 1, snippet=raw_line.strip(), missing_signals=missing))
     findings.extend(_scan_anchor_reconciliation(path, lines, census_locators or _CensusLocators()))
     return findings
 
@@ -1047,11 +1065,11 @@ def _iter_python_files(root: Path) -> list[Path]:
 
 
 def _locator_entry_resolves(
-    lines: Optional[list[str]],
+    lines: list[str] | None,
     is_python: bool,
     *,
-    line: Optional[int] = None,
-    key: Optional[str] = None,
+    line: int | None = None,
+    key: str | None = None,
 ) -> bool:
     """True when a single Locator Index entry -- either a numeric *line* or
     a non-numeric *key* -- resolves against *lines* (``None`` when the
@@ -1090,9 +1108,7 @@ def _scan_locator_resolution(census_locators: _CensusLocators, repo_root: Path) 
     for resolved_path in all_paths:
         is_python = resolved_path.suffix == ".py"
         try:
-            lines: Optional[list[str]] = resolved_path.read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines()
+            lines: list[str] | None = resolved_path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             lines = None
         rel = _relative(resolved_path, repo_root)
@@ -1165,7 +1181,7 @@ _CENSUS_TABLE_TAIL_RE = re.compile(
 )
 
 
-def _census_row_tail(raw_line: str) -> Optional[tuple[str, list[str]]]:
+def _census_row_tail(raw_line: str) -> tuple[str, list[str]] | None:
     """``(class, cells after the Class cell)`` for one numbered table row,
     each cell unstripped, or ``None`` when no Class cell parses (the rollup
     check reports that row as unclassified)."""
@@ -1173,6 +1189,7 @@ def _census_row_tail(raw_line: str) -> Optional[tuple[str, list[str]]]:
     if not match:
         return None
     return match.group("cls"), match.group("tail").split("|")[:-1]
+
 
 # A numbered row's number and its trailing cell -- the Decision cell, or the
 # Class cell on a row that has none. The Decision vocabulary never contains
@@ -1200,8 +1217,7 @@ _CENSUS_ROLLUP_SITES_RE = re.compile(
     r"^\*\*Rollup:\s*(?P<sites>\d+)\s*sites?,\s*(?P<unclassified>\d+)\s*unclassified\.\*\*$"
 )
 _CENSUS_ROLLUP_CLASSES_RE = re.compile(
-    r"^(?P<block>\d+)\s*BLOCK-WORTHY,\s*(?P<convert>\d+)\s*CONVERT,\s*"
-    r"(?P<agent>\d+)\s*AGENT-RESOLVABLE\.$"
+    r"^(?P<block>\d+)\s*BLOCK-WORTHY,\s*(?P<convert>\d+)\s*CONVERT,\s*" r"(?P<agent>\d+)\s*AGENT-RESOLVABLE\.$"
 )
 
 # How many lines below the "**Rollup: ...**" line to look for its
@@ -1261,12 +1277,12 @@ def _scan_census_rollup(repo_root: Path) -> list[_Finding]:
     if total_rows == 0:
         return []
 
-    rollup_line_no: Optional[int] = None
-    rollup_sites: Optional[int] = None
-    rollup_unclassified: Optional[int] = None
-    rollup_block: Optional[int] = None
-    rollup_convert: Optional[int] = None
-    rollup_agent: Optional[int] = None
+    rollup_line_no: int | None = None
+    rollup_sites: int | None = None
+    rollup_unclassified: int | None = None
+    rollup_block: int | None = None
+    rollup_convert: int | None = None
+    rollup_agent: int | None = None
     for idx, raw_line in enumerate(lines):
         sites_match = _CENSUS_ROLLUP_SITES_RE.match(raw_line.strip())
         if not sites_match:
@@ -1329,7 +1345,7 @@ def _scan_census_rollup(repo_root: Path) -> list[_Finding]:
     ]
 
 
-def _decision_wake_verbs() -> Optional[frozenset[str]]:
+def _decision_wake_verbs() -> frozenset[str] | None:
     """The decision wake's verb names (``decide.VERBS``), imported from the
     package that sits beside this script's own directory -- ``team/`` in
     the dev tree, the kanban root in an install. Returns ``None`` when that
@@ -1347,7 +1363,7 @@ def _decision_wake_verbs() -> Optional[frozenset[str]]:
     return frozenset(VERBS)
 
 
-def _decision_problem(cell: str, known_verbs: Optional[frozenset[str]]) -> Optional[str]:
+def _decision_problem(cell: str, known_verbs: frozenset[str] | None) -> str | None:
     """What is wrong with one Decision cell, as a phrase completing "the
     row ...", or ``None`` when it holds a value from the closed set."""
     value = cell.strip().strip("`").strip()
@@ -1369,9 +1385,7 @@ def _decision_problem(cell: str, known_verbs: Optional[frozenset[str]]) -> Optio
     return None
 
 
-def _scan_census_decisions(
-    repo_root: Path, known_verbs: Optional[Iterable[str]] = None
-) -> list[_Finding]:
+def _scan_census_decisions(repo_root: Path, known_verbs: Iterable[str] | None = None) -> list[_Finding]:
     """The Decision-column check (see "DECISION COLUMN" in the module
     docstring): every numbered row of the census's "At-a-glance rollup"
     table must carry a Decision cell, the first cell after its Class cell,
@@ -1397,8 +1411,8 @@ def _scan_census_decisions(
         number_match = _CENSUS_TABLE_ROW_NUMBER_RE.match(raw_line)
         if not number_match:
             continue
-        decision: Optional[str]
-        problem: Optional[str]
+        decision: str | None
+        problem: str | None
         tail = _census_row_tail(raw_line)
         if tail is not None:
             # The Decision cell is the first cell after Class; a Converted
@@ -1484,7 +1498,7 @@ def _census_row_source_cell(raw_line: str) -> str:
 
 def _census_row_call_sites(
     source_cell: str, repo_root: Path, census_locators: _CensusLocators
-) -> list[tuple[Path, Optional[str]]]:
+) -> list[tuple[Path, str | None]]:
     """The call sites one CONVERT row's Source cell names, as
     ``(resolved file, locator key or None)``.
 
@@ -1493,7 +1507,7 @@ def _census_row_call_sites(
     row's call sites. Otherwise every backticked ``*.sh``/``*.py`` path that
     resolves to a file is a call site, read whole (``None`` key)."""
     tokens = [token.strip() for token in _CENSUS_SOURCE_TOKEN_RE.findall(source_cell)]
-    keyed: list[tuple[Path, Optional[str]]] = []
+    keyed: list[tuple[Path, str | None]] = []
     for token in tokens:
         for entry_path in sorted(census_locators.by_token, key=str):
             if token in census_locators.by_token[entry_path] and (entry_path, token) not in keyed:
@@ -1501,7 +1515,7 @@ def _census_row_call_sites(
     if keyed:
         return keyed
 
-    files: list[tuple[Path, Optional[str]]] = []
+    files: list[tuple[Path, str | None]] = []
     for token in tokens:
         if not token.endswith(_CENSUS_SOURCE_FILE_SUFFIXES) or re.search(r"[\s{}*<>]", token):
             continue
@@ -1524,7 +1538,7 @@ def _python_call_name(func: ast.expr) -> str:
     return ""
 
 
-def _python_nonzero_statuses(expr: Optional[ast.expr]) -> set[int]:
+def _python_nonzero_statuses(expr: ast.expr | None) -> set[int]:
     """The literal non-zero integer statuses *expr* can evaluate to: the
     literal itself, or one inside a conditional or boolean expression
     (``0 if ok else 1``). Arguments of nested calls are not statuses."""
@@ -1628,14 +1642,10 @@ def _key_window_lines(lines: list[str], key: str, is_python: bool) -> set[int]:
     """The lines one Locator Index key resolves to in *lines*: a marker's
     forward window, or an emitter call's (the exemption windows)."""
     emitter_re = _PYTHON_EMITTER_RE if is_python else _BASH_EMITTER_RE
-    return _resolve_anchor_marker_lines(lines, {key}) | _resolve_error_key_lines(
-        lines, {key}, emitter_re, is_python
-    )
+    return _resolve_anchor_marker_lines(lines, {key}) | _resolve_error_key_lines(lines, {key}, emitter_re, is_python)
 
 
-def _site_fatal_lines_whole_file(
-    path: Path, lines: list[str], census_locators: _CensusLocators
-) -> list[int]:
+def _site_fatal_lines_whole_file(path: Path, lines: list[str], census_locators: _CensusLocators) -> list[int]:
     """Fatal exit lines of a whole-file call site that belong to no other
     site. Not this row's: an exit some other class claims -- a non-CONVERT
     Locator Index entry resolves to it, or an inline ``BLOCK-WORTHY`` /
@@ -1656,24 +1666,20 @@ def _site_fatal_lines_whole_file(
     for line_no, cls in census_locators.line_class.get(resolved, {}).items():
         (convert_named if cls == "CONVERT" else claimed).add(line_no)
 
-    case_ranges = [] if is_python else _bash_positional_case_ranges(lines)
+    case_ranges = [] if is_python else _bash_operator_cli_ranges(lines)
     own: list[int] = []
     for line_no, statuses in sorted(_fatal_exits(path, lines).items()):
         if line_no in claimed:
             continue
         idx = line_no - 1
         window = lines[max(0, idx - _WINDOW_LINES + 1) : idx + 1]
-        declared = {
-            match.group(1) for line in window for match in _CLASSIFICATION_TOKEN_RE.finditer(line)
-        }
+        declared = {match.group(1) for line in window for match in _CLASSIFICATION_TOKEN_RE.finditer(line)}
         if declared and "CONVERT" not in declared:
             continue
         if is_python:
             if statuses == {_PYTHON_USAGE_ERROR_STATUS} and line_no not in convert_named:
                 continue
-            if _window_has_usage_guard(
-                window, lambda l: l.split("#", 1)[0], _PYTHON_USAGE_DEFINITION_RE
-            ):
+            if _window_has_usage_guard(window, lambda l: l.split("#", 1)[0], _PYTHON_USAGE_DEFINITION_RE):
                 continue
         elif _is_operator_cli_bash_site(idx, case_ranges, window):
             continue
@@ -1681,7 +1687,7 @@ def _site_fatal_lines_whole_file(
     return own
 
 
-def _converted_problem(cell: Optional[str], cls: str) -> Optional[str]:
+def _converted_problem(cell: str | None, cls: str) -> str | None:
     """What is wrong with one Converted cell, as a phrase completing "the
     row ...", or ``None`` when it holds the closed-set value its class
     takes. *cell* is ``None`` when the row has no Converted cell."""
@@ -1702,9 +1708,7 @@ def _converted_problem(cell: Optional[str], cls: str) -> Optional[str]:
     return None
 
 
-def _scan_census_converted(
-    repo_root: Path, census_locators: Optional[_CensusLocators] = None
-) -> list[_Finding]:
+def _scan_census_converted(repo_root: Path, census_locators: _CensusLocators | None = None) -> list[_Finding]:
     """The Converted-column check (see "CONVERTED COLUMN" in the module
     docstring), two finding kinds:
 
@@ -1759,10 +1763,8 @@ def _scan_census_converted(
         if cls != "CONVERT":
             continue
 
-        fatal_by_file: dict[Path, tuple[int, Optional[str], list[str]]] = {}
-        for site_path, key in _census_row_call_sites(
-            _census_row_source_cell(raw_line), repo_root, locators
-        ):
+        fatal_by_file: dict[Path, tuple[int, str | None, list[str]]] = {}
+        for site_path, key in _census_row_call_sites(_census_row_source_cell(raw_line), repo_root, locators):
             try:
                 site_lines = site_path.read_text(encoding="utf-8", errors="replace").splitlines()
             except OSError:
@@ -1772,9 +1774,7 @@ def _scan_census_converted(
             else:
                 window = _key_window_lines(site_lines, key, site_path.suffix == ".py")
                 fatal_lines = sorted(n for n in _fatal_exits(site_path, site_lines) if n in window)
-            if fatal_lines and (
-                site_path not in fatal_by_file or fatal_lines[0] < fatal_by_file[site_path][0]
-            ):
+            if fatal_lines and (site_path not in fatal_by_file or fatal_lines[0] < fatal_by_file[site_path][0]):
                 fatal_by_file[site_path] = (fatal_lines[0], key, site_lines)
         for site_path, (line_no, key, site_lines) in fatal_by_file.items():
             findings.append(
@@ -1790,6 +1790,7 @@ def _scan_census_converted(
             )
     return findings
 
+
 # ---------------------------------------------------------------------------
 # Remedy block (docs/coding-standards.md "Gates prescribe, not just diagnose")
 # ---------------------------------------------------------------------------
@@ -1804,10 +1805,7 @@ def _relative(path: Path, repo_root: Path) -> str:
 
 def _signal_description(signal: str) -> str:
     if signal == _SIGNAL_CENSUS:
-        return (
-            "a census classification comment (one of BLOCK-WORTHY, CONVERT, "
-            "AGENT-RESOLVABLE)"
-        )
+        return "a census classification comment (one of BLOCK-WORTHY, CONVERT, " "AGENT-RESOLVABLE)"
     return "a call to the dual-channel error-contract emitter"
 
 
@@ -1845,20 +1843,14 @@ def _finding_cause(finding: _Finding, rel: str) -> str:
         )
     if finding.kind == _FINDING_KIND_ROLLUP_MISMATCH:
         return (
-            f"{rel}:{finding.line} -- the \"**Rollup: ...**\" summary line reads "
+            f'{rel}:{finding.line} -- the "**Rollup: ...**" summary line reads '
             f"'{finding.rollup_summary}' but the inventory table above it actually "
             f"contains {finding.table_summary}"
         )
     if finding.kind == _FINDING_KIND_DECISION_INVALID:
-        return (
-            f"{rel}:{finding.line} -- At-a-glance rollup row {finding.row_number} "
-            f"{finding.decision_problem}"
-        )
+        return f"{rel}:{finding.line} -- At-a-glance rollup row {finding.row_number} " f"{finding.decision_problem}"
     if finding.kind == _FINDING_KIND_CONVERTED_INVALID:
-        return (
-            f"{rel}:{finding.line} -- At-a-glance rollup row {finding.row_number} "
-            f"{finding.converted_problem}"
-        )
+        return f"{rel}:{finding.line} -- At-a-glance rollup row {finding.row_number} " f"{finding.converted_problem}"
     if finding.kind == _FINDING_KIND_CONVERT_SITE_FATAL:
         via = f" (through Locator Index key '{finding.token}')" if finding.token else ""
         marked = (
@@ -1898,7 +1890,7 @@ def _finding_remedy(finding: _Finding, rel: str) -> str:
         )
     if finding.kind == _FINDING_KIND_ROLLUP_MISMATCH:
         return (
-            f"Edit the \"**Rollup: ...**\" line and its per-class line in {rel} "
+            f'Edit the "**Rollup: ...**" line and its per-class line in {rel} '
             f"to read '{finding.table_summary}' -- derived directly from the "
             "table's own numbered rows, so it cannot drift from them again "
             "(the document itself is a WRITER-owned edit; this lint only "
@@ -1958,8 +1950,7 @@ def _format_summary_line(findings: list[_Finding]) -> str:
         )
     if counts[_FINDING_KIND_UNINDEXED_ANCHOR]:
         parts.append(
-            f"{counts[_FINDING_KIND_UNINDEXED_ANCHOR]} CENSUS-ANCHOR marker(s) "
-            "with no matching Locator Index entry"
+            f"{counts[_FINDING_KIND_UNINDEXED_ANCHOR]} CENSUS-ANCHOR marker(s) " "with no matching Locator Index entry"
         )
     if counts[_FINDING_KIND_ANCHOR_CLASS_MISMATCH]:
         parts.append(
@@ -1968,18 +1959,15 @@ def _format_summary_line(findings: list[_Finding]) -> str:
         )
     if counts[_FINDING_KIND_UNRESOLVED_LOCATOR]:
         parts.append(
-            f"{counts[_FINDING_KIND_UNRESOLVED_LOCATOR]} Locator Index entry/entries "
-            "that do not resolve to any site"
+            f"{counts[_FINDING_KIND_UNRESOLVED_LOCATOR]} Locator Index entry/entries " "that do not resolve to any site"
         )
     if counts[_FINDING_KIND_ROLLUP_MISMATCH]:
         parts.append(
-            f"{counts[_FINDING_KIND_ROLLUP_MISMATCH]} rollup summary line(s) that "
-            "disagree with the inventory table"
+            f"{counts[_FINDING_KIND_ROLLUP_MISMATCH]} rollup summary line(s) that " "disagree with the inventory table"
         )
     if counts[_FINDING_KIND_DECISION_INVALID]:
         parts.append(
-            f"{counts[_FINDING_KIND_DECISION_INVALID]} inventory table row(s) with a "
-            "missing or unknown Decision"
+            f"{counts[_FINDING_KIND_DECISION_INVALID]} inventory table row(s) with a " "missing or unknown Decision"
         )
     if counts[_FINDING_KIND_CONVERTED_INVALID]:
         parts.append(
@@ -1987,10 +1975,7 @@ def _format_summary_line(findings: list[_Finding]) -> str:
             "missing or out-of-set Converted cell"
         )
     if counts[_FINDING_KIND_CONVERT_SITE_FATAL]:
-        parts.append(
-            f"{counts[_FINDING_KIND_CONVERT_SITE_FATAL]} CONVERT call site(s) that still "
-            "exit non-zero"
-        )
+        parts.append(f"{counts[_FINDING_KIND_CONVERT_SITE_FATAL]} CONVERT call site(s) that still " "exit non-zero")
     return f"lint_gate_census_compliance: {len(findings)} finding(s) -- " + "; ".join(parts) + " (non-blocking finding)"
 
 
@@ -2020,8 +2005,8 @@ def _format_remedy_block(findings: list[_Finding], repo_root: Path, lint_script:
         "classification in a code comment at the refusal site and emit "
         "through the dual-channel error contract; every CENSUS-ANCHOR marker "
         "must be named by a Locator Index entry that agrees with the site's "
-        "declared class (team/roles/CODER.md, \"Authoring a new gate\" / "
-        "\"Writing a compliant anchor\")."
+        'declared class (team/roles/CODER.md, "Authoring a new gate" / '
+        '"Writing a compliant anchor").'
     )
     return "\n".join(lines)
 
@@ -2075,7 +2060,7 @@ def _default_python_files(script_dir: Path) -> list[Path]:
     return sorted(f for f in files if f.is_file())
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_gate_census_compliance.py",
         description=(
@@ -2131,7 +2116,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the gate census compliance lint over the candidate refusal sites.
 
     Prints each finding and a count. Exit codes: 0 always, whatever was found (quality class); 2 usage error (argparse).

@@ -128,6 +128,11 @@ if declare -F cm_stamp_known_issue_marker >/dev/null 2>&1; then
     return 0
 fi
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_CM_RELEASE_KNOWN_ISSUE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _CM_RELEASE_KNOWN_ISSUE_LIB_DIR=""
+
 # The "## Status" section helpers run pgai_agent_kanban.cm.notes_status_section,
 # read_ship_policy_skipped_bug_pairs runs
 # pgai_agent_kanban.cm.skipped_bug_pairs, and
@@ -226,7 +231,7 @@ read_ship_policy_skipped_bug_pairs() {
 build_known_issue_notes_block() {
   [[ $# -eq 0 ]] && return 0
   local _cm_lib_dir
-  _cm_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _cm_lib_dir="${_CM_RELEASE_KNOWN_ISSUE_LIB_DIR}"
   PGAI_CM_INTERNAL_ID_SCRUB_DIR="$_cm_lib_dir" \
     pp_run_ops pgai_agent_kanban.cm.release_notes_blocks known-issues "$@"
 }
@@ -271,7 +276,7 @@ build_bugs_skipped_notes_block() {
     return 1
   fi
   local _cm_lib_dir
-  _cm_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _cm_lib_dir="${_CM_RELEASE_KNOWN_ISSUE_LIB_DIR}"
   PGAI_CM_INTERNAL_ID_SCRUB_DIR="$_cm_lib_dir" \
     pp_run_ops pgai_agent_kanban.cm.release_notes_blocks bugs-skipped "$@"
 }

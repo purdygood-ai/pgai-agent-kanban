@@ -48,11 +48,17 @@
 #   0   The session ended (the normal way out), or --help.
 #   2   A usage error: a missing or malformed flag, or no renderer.
 
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/temp.sh
 source "${SCRIPT_DIR}/../lib/temp.sh"
 # shellcheck source=lib/cadence.sh
@@ -88,17 +94,6 @@ while [[ $# -gt 0 ]]; do
         --)
             shift
             break
-            ;;
-        -h|--help)
-            # Read the whole file via mapfile (nothing downstream can stop
-            # early), then print the leading comment block after the shebang.
-            mapfile -t __help_lines < "$0"
-            for __line in "${__help_lines[@]:1}"; do
-                [[ "$__line" == \#* ]] || break
-                __line="${__line#\#}"
-                printf '%s\n' "${__line# }"
-            done
-            exit 0
             ;;
         *)
             _usage_error "unknown argument: $1"

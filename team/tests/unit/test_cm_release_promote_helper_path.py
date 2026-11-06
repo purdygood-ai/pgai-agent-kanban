@@ -6,15 +6,18 @@ Regression coverage for the Step 13c bundle-promotion helper lookup in
 `promote_bundled_items.py` from that stage file's own location must keep
 landing on a real file whether the tree is laid out as the dev tree nests it
 (`team/scripts/lib/cm/` and `team/scripts/cm/`) or as an install flattens it
-(`scripts/lib/cm/` and `scripts/cm/`).
+(`scripts/lib/cm/` and `scripts/cm/`). The scripts root is captured when the
+file is sourced, so a stage file sourced by a relative path still resolves
+the helper after the caller changes directory.
 
 WHY EXTRACTION, NOT REPLICATION
 --------------------------------
 Rather than hand-retype the resolution expression into the test (risking
 silent drift from the real script if it is ever edited), this file extracts
 the two assignment lines verbatim from the live `release_finalize.sh` text at
-test time and runs the extracted expression under bash with `BASH_SOURCE[0]`
-pointing at a stage file placed at each layout under test. The test therefore
+test time (the file-scope scripts-root capture and the in-function helper
+path) and runs them under bash with `BASH_SOURCE[0]` pointing at a stage file
+placed at each layout under test. The test therefore
 exercises the production resolution logic, not a copy of it — a future
 edit that reintroduces a caller-relative or sibling-only lookup (the shape
 that broke when this stage was split out of `cm/release.sh` without moving
@@ -31,37 +34,31 @@ from tests.unit.shell_harness import run_bash
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent
 _RELEASE_FINALIZE_SH = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_finalize.sh"
 
-_SCRIPTS_ROOT_MARKER = "_cm_scripts_root="
+_SCRIPTS_ROOT_MARKER = "_CM_RELEASE_FINALIZE_SCRIPTS_ROOT="
 _PROMOTE_SCRIPT_MARKER = "_cm_promote_script="
 
 
 def _extract_resolution_snippet(source_path: pathlib.Path) -> str:
-    """Extract the two-line promote-script path resolution, verbatim.
+    """Extract the promote-script path resolution, verbatim, as two parts.
 
-    Finds the line assigning `_cm_scripts_root` and the very next line
-    assigning `_cm_promote_script`, and returns both joined with a newline.
-    Raises AssertionError if either line is missing, so a rename or
-    reshape of the resolution logic fails this test loudly instead of
-    silently testing nothing.
+    Returns ``(capture, lookup)``: the file-scope line assigning the scripts
+    root (column 0, so it runs when the file is sourced) and the line
+    assigning `_cm_promote_script` from it. Raises AssertionError if either
+    is missing, so a rename or reshape of the resolution logic fails this
+    test loudly instead of silently testing nothing.
     """
     lines = source_path.read_text(encoding="utf-8").splitlines()
-    root_idx = next(
-        (i for i, l in enumerate(lines) if l.strip().startswith(_SCRIPTS_ROOT_MARKER)),
-        None,
-    )
-    assert root_idx is not None, (
-        f"Could not find a '{_SCRIPTS_ROOT_MARKER}' assignment in {source_path}. "
+    capture = next((l for l in lines if l.startswith(_SCRIPTS_ROOT_MARKER)), None)
+    assert capture is not None, (
+        f"Could not find a file-scope '{_SCRIPTS_ROOT_MARKER}' assignment in {source_path}. "
         "The promote-script path resolution may have been renamed or reshaped."
     )
-    promote_idx = root_idx + 1
-    assert promote_idx < len(lines) and lines[promote_idx].strip().startswith(
-        _PROMOTE_SCRIPT_MARKER
-    ), (
-        f"Expected a '{_PROMOTE_SCRIPT_MARKER}' assignment immediately after "
-        f"the '{_SCRIPTS_ROOT_MARKER}' line in {source_path}, but did not find one. "
+    lookup = next((l.strip() for l in lines if l.strip().startswith(_PROMOTE_SCRIPT_MARKER)), None)
+    assert lookup is not None, (
+        f"Could not find a '{_PROMOTE_SCRIPT_MARKER}' assignment in {source_path}. "
         "The promote-script path resolution may have been renamed or reshaped."
     )
-    return "\n".join([lines[root_idx].strip(), lines[promote_idx].strip()])
+    return capture, lookup
 
 
 def _resolve_promote_script(tmp_path: pathlib.Path, stage_file: pathlib.Path) -> object:
@@ -73,12 +70,12 @@ def _resolve_promote_script(tmp_path: pathlib.Path, stage_file: pathlib.Path) ->
     path so the test can assert on both the printed value and whether it
     names a file that actually exists.
     """
-    snippet = _extract_resolution_snippet(_RELEASE_FINALIZE_SH)
+    capture, lookup = _extract_resolution_snippet(_RELEASE_FINALIZE_SH)
     stage_file.parent.mkdir(parents=True, exist_ok=True)
     stage_file.write_text(
         "#!/usr/bin/env bash\n"
         "set -uo pipefail\n"
-        f"{snippet}\n"
+        f"{capture}\n{lookup}\n"
         'echo "$_cm_promote_script"\n'
         'if [[ -f "$_cm_promote_script" ]]; then echo RESOLVED; else echo MISSING; fi\n',
         encoding="utf-8",
@@ -145,3 +142,31 @@ def test_resolution_reports_missing_when_helper_absent(tmp_path: pathlib.Path) -
 
     assert result.returncode == 0, result.stderr
     assert "MISSING" in result.stdout, result.stdout
+
+
+def test_resolution_survives_a_relative_source_and_a_later_cd(tmp_path: pathlib.Path) -> None:
+    """The scripts root is captured when the stage is sourced: a stage sourced
+    by a relative path still resolves the helper after the caller changes
+    into an unrelated directory, where that relative path no longer exists."""
+    root = tmp_path / "installed_root"
+    stage_file, real_helper = _build_layout(root, scripts_prefix="scripts")
+    capture, lookup = _extract_resolution_snippet(_RELEASE_FINALIZE_SH)
+    stage_file.parent.mkdir(parents=True, exist_ok=True)
+    stage_file.write_text(f"{capture}\n", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    result = run_bash(
+        tmp_path,
+        "set -uo pipefail\n"
+        f"cd {str(root)!r}\n"
+        "source scripts/lib/cm/release_finalize.sh\n"
+        f"cd {str(elsewhere)!r}\n"
+        f"{lookup}\n"
+        'echo "$_cm_promote_script"\n'
+        'if [[ -f "$_cm_promote_script" ]]; then echo RESOLVED; else echo MISSING; fi\n',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "RESOLVED" in result.stdout, result.stdout
+    assert str(real_helper) in result.stdout

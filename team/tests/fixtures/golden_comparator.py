@@ -39,7 +39,8 @@ WHAT THIS MODULE DOES NOT DO
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 __all__ = ["diff_json", "assert_json_parity", "strip_envelope"]
 
@@ -81,17 +82,13 @@ def _diff_json(cli_value: Any, rest_value: Any, path: str, ignore_keys: frozense
             diffs.append(f"{path}: keys only in REST: {only_in_rest}")
 
         for key in sorted(cli_keys & rest_keys):
-            diffs.extend(
-                _diff_json(cli_value[key], rest_value[key], f"{path}.{key}", ignore_keys)
-            )
+            diffs.extend(_diff_json(cli_value[key], rest_value[key], f"{path}.{key}", ignore_keys))
         return diffs
 
     if isinstance(cli_value, list) and isinstance(rest_value, list):
         diffs = []
         if len(cli_value) != len(rest_value):
-            diffs.append(
-                f"{path}: length mismatch: CLI has {len(cli_value)}, REST has {len(rest_value)}"
-            )
+            diffs.append(f"{path}: length mismatch: CLI has {len(cli_value)}, REST has {len(rest_value)}")
         for idx, (cli_item, rest_item) in enumerate(zip(cli_value, rest_value)):
             diffs.extend(_diff_json(cli_item, rest_item, f"{path}[{idx}]", ignore_keys))
         return diffs

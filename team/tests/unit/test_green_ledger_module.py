@@ -34,7 +34,7 @@ import json
 import pathlib
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import pytest
 
@@ -64,15 +64,12 @@ def _record(**overrides: object) -> dict:
 
 
 def _write_ledger(path: pathlib.Path, *lines: object) -> pathlib.Path:
-    text = "".join(
-        (line if isinstance(line, str) else json.dumps(line)) + "\n" for line in lines
-    )
+    text = "".join((line if isinstance(line, str) else json.dumps(line)) + "\n" for line in lines)
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def _verdict(path: pathlib.Path, *, suite: str = "unit", selection: str = _SELECTION,
-             sha: str = _SHA) -> tuple:
+def _verdict(path: pathlib.Path, *, suite: str = "unit", selection: str = _SELECTION, sha: str = _SHA) -> tuple:
     return green_ledger.reuse_verdict(str(path), _COMMIT, suite, selection, sha)
 
 
@@ -80,7 +77,12 @@ def _run_module(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProce
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -98,7 +100,7 @@ def test_no_matching_record_is_norecord(tmp_path: pathlib.Path) -> None:
     )
     assert _verdict(ledger) == (
         "norecord",
-        f"no recorded unit run at commit {_COMMIT[:12]} with marker selection \"{_SELECTION}\"",
+        f'no recorded unit run at commit {_COMMIT[:12]} with marker selection "{_SELECTION}"',
     )
 
 
@@ -125,7 +127,8 @@ def test_record_without_selection_matches_an_empty_selection(tmp_path: pathlib.P
 def test_matching_failed_run_is_a_mismatch(tmp_path: pathlib.Path) -> None:
     ledger = _write_ledger(tmp_path / "ledger.jsonl", _record(), _record(exit=2))
     assert _verdict(ledger) == (
-        "mismatch", f"the most recent unit run at commit {_COMMIT[:12]} exited 2",
+        "mismatch",
+        f"the most recent unit run at commit {_COMMIT[:12]} exited 2",
     )
 
 
@@ -180,12 +183,14 @@ def test_unreadable_ledger_is_corrupt_naming_the_error(tmp_path: pathlib.Path) -
     undecodable = tmp_path / "ledger.jsonl"
     undecodable.write_bytes(b"\xff\xfe not utf-8\n")
     assert _verdict(undecodable) == (
-        "corrupt", f"ledger {undecodable} is unreadable (UnicodeDecodeError)",
+        "corrupt",
+        f"ledger {undecodable} is unreadable (UnicodeDecodeError)",
     )
     as_directory = tmp_path / "dir.jsonl"
     as_directory.mkdir()
     assert _verdict(as_directory) == (
-        "corrupt", f"ledger {as_directory} is unreadable (IsADirectoryError)",
+        "corrupt",
+        f"ledger {as_directory} is unreadable (IsADirectoryError)",
     )
 
 
@@ -196,10 +201,17 @@ def test_unreadable_ledger_is_corrupt_naming_the_error(tmp_path: pathlib.Path) -
 
 def test_append_creates_the_ledger_and_records_every_field(tmp_path: pathlib.Path) -> None:
     ledger = tmp_path / "projects" / "demo" / "green-ledger" / "v1.2.3" / "ledger.jsonl"
-    now = datetime(2026, 3, 4, 5, 6, 7, 890, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 4, 5, 6, 7, 890, tzinfo=UTC)
 
     note = green_ledger.append_record(
-        str(ledger), _COMMIT, "integration", _SELECTION, "3", _SHA, True, now=now,
+        str(ledger),
+        _COMMIT,
+        "integration",
+        _SELECTION,
+        "3",
+        _SHA,
+        True,
+        now=now,
     )
 
     assert note == ""
@@ -268,13 +280,31 @@ def test_verdict_command_prints_one_tab_separated_line(tmp_path: pathlib.Path) -
 def test_record_command_prints_ok_and_failed_lines(tmp_path: pathlib.Path) -> None:
     ledger = tmp_path / "sub" / "ledger.jsonl"
     ok = _run_module(
-        tmp_path, "record", "--", str(ledger), _COMMIT, "unit", _SELECTION, "0", _SHA, "true",
+        tmp_path,
+        "record",
+        "--",
+        str(ledger),
+        _COMMIT,
+        "unit",
+        _SELECTION,
+        "0",
+        _SHA,
+        "true",
     )
     assert (ok.returncode, ok.stdout, ok.stderr) == (0, "ok\t\n", "")
     assert json.loads(ledger.read_text(encoding="utf-8"))["tree_clean"] is True
 
     failed = _run_module(
-        tmp_path, "record", "--", str(ledger), _COMMIT, "unit", _SELECTION, "x", _SHA, "true",
+        tmp_path,
+        "record",
+        "--",
+        str(ledger),
+        _COMMIT,
+        "unit",
+        _SELECTION,
+        "x",
+        _SHA,
+        "true",
     )
     assert failed.returncode == 0, failed.stderr
     assert failed.stdout == "failed\tValueError: invalid literal for int() with base 10: 'x'\n"

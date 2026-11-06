@@ -86,7 +86,7 @@
 # Argument parsing
 # Done before strict mode so error messages print cleanly on bad flags.
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Source operator_args.sh (canonical flag parsing and --help rendering).
 # shellcheck source=lib/operator_args.sh
@@ -152,7 +152,7 @@ fi
 # script runs from a fresh shell without manual pre-sourcing.  Explicit
 # operator exports win via env_bootstrap.sh's idempotency guard.
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
@@ -168,10 +168,13 @@ config_startup_prelude "$KANBAN_ROOT"
 # shellcheck source=lib/ini_parser.sh
 [[ -f "${SCRIPT_DIR}/lib/ini_parser.sh" ]] && source "${SCRIPT_DIR}/lib/ini_parser.sh"
 
-# kanban.cfg [paths] dev_tree_path backs PGAI_DEV_TREE_PATH when it is unset;
-# unwind_rc uses it for a project whose config names no dev tree.
+# kanban.cfg [paths] dev_tree_path backs PGAI_DEV_TREE_PATH when it is unset
+# (resolve_global_dev_tree); unwind_rc uses it for a project whose config
+# names no dev tree.
+# shellcheck source=lib/dev_tree.sh
+declare -F resolve_global_dev_tree >/dev/null || source "${SCRIPT_DIR}/lib/dev_tree.sh"
 if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$KANBAN_ROOT/kanban.cfg" paths dev_tree_path "")}"
+    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree "$KANBAN_ROOT/kanban.cfg")}"
 fi
 
 # shellcheck source=lib/temp.sh

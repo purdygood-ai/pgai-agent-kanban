@@ -141,9 +141,7 @@ def _build_kanban_root_with_project(
     for name, template in all_projects.items():
         proj_dir = root / "projects" / name
         proj_dir.mkdir(parents=True, exist_ok=True)
-        (proj_dir / "project.cfg").write_text(
-            template.format(name=name), encoding="utf-8"
-        )
+        (proj_dir / "project.cfg").write_text(template.format(name=name), encoding="utf-8")
 
     return root
 
@@ -189,9 +187,7 @@ def _run_migration(
 
 def _count_key_occurrences(cfg_text: str) -> int:
     """Count lines that set/mention overwatch_resolve= (commented or not)."""
-    return len(
-        re.findall(r"^\s*#?\s*overwatch_resolve\s*=", cfg_text, re.MULTILINE)
-    )
+    return len(re.findall(r"^\s*#?\s*overwatch_resolve\s*=", cfg_text, re.MULTILINE))
 
 
 # ---------------------------------------------------------------------------
@@ -202,72 +198,50 @@ def _count_key_occurrences(cfg_text: str) -> int:
 class TestMigrationSeedsMissingKey:
     """The migration adds the commented key exactly once to a cfg that lacks it."""
 
-    def test_adds_exactly_one_occurrence_of_the_key_to_a_cfg_missing_it(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "legacy-proj", _LEGACY_CFG_WITH_RELEASE_SECTION
-        )
+    def test_adds_exactly_one_occurrence_of_the_key_to_a_cfg_missing_it(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "legacy-proj", _LEGACY_CFG_WITH_RELEASE_SECTION)
         cfg_path = _cfg_path(root, "legacy-proj")
         before_text = cfg_path.read_text(encoding="utf-8")
-        assert _count_key_occurrences(before_text) == 0, (
-            "Fixture must not already carry overwatch_resolve."
-        )
+        assert _count_key_occurrences(before_text) == 0, "Fixture must not already carry overwatch_resolve."
 
         result = _run_migration(root, project="legacy-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after_text = cfg_path.read_text(encoding="utf-8")
-        assert _count_key_occurrences(after_text) == 1, (
-            f"Expected exactly one overwatch_resolve occurrence after migration.\n{after_text}"
-        )
-        assert "\noverwatch_resolve = " not in after_text, (
-            f"The seeded key must be commented out, never live.\n{after_text}"
-        )
+        assert (
+            _count_key_occurrences(after_text) == 1
+        ), f"Expected exactly one overwatch_resolve occurrence after migration.\n{after_text}"
+        assert (
+            "\noverwatch_resolve = " not in after_text
+        ), f"The seeded key must be commented out, never live.\n{after_text}"
 
-    def test_running_twice_adds_no_additional_occurrence(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "legacy-proj-2", _LEGACY_CFG_WITH_RELEASE_SECTION
-        )
+    def test_running_twice_adds_no_additional_occurrence(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "legacy-proj-2", _LEGACY_CFG_WITH_RELEASE_SECTION)
         cfg_path = _cfg_path(root, "legacy-proj-2")
 
         first = _run_migration(root, project="legacy-proj-2")
-        assert first.returncode == 0, (
-            f"first migration run failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
-        )
+        assert first.returncode == 0, f"first migration run failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
         after_first = cfg_path.read_text(encoding="utf-8")
 
         second = _run_migration(root, project="legacy-proj-2")
-        assert second.returncode == 0, (
-            f"second migration run failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
-        )
+        assert second.returncode == 0, f"second migration run failed.\nstdout: {second.stdout}\nstderr: {second.stderr}"
         after_second = cfg_path.read_text(encoding="utf-8")
 
-        assert _count_key_occurrences(after_second) == 1, (
-            f"A second run must not add a duplicate occurrence.\n{after_second}"
-        )
+        assert (
+            _count_key_occurrences(after_second) == 1
+        ), f"A second run must not add a duplicate occurrence.\n{after_second}"
         assert after_first == after_second, (
             "Running the migration a second time must be a byte-identical no-op.\n"
             f"after first run:\n{after_first}\nafter second run:\n{after_second}"
         )
 
-    def test_diff_against_original_shows_only_the_added_commented_block(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "legacy-proj-3", _LEGACY_CFG_WITH_RELEASE_SECTION
-        )
+    def test_diff_against_original_shows_only_the_added_commented_block(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "legacy-proj-3", _LEGACY_CFG_WITH_RELEASE_SECTION)
         cfg_path = _cfg_path(root, "legacy-proj-3")
         original_text = cfg_path.read_text(encoding="utf-8")
 
         result = _run_migration(root, project="legacy-proj-3")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         migrated_text = cfg_path.read_text(encoding="utf-8")
 
         diff_lines = list(
@@ -277,82 +251,52 @@ class TestMigrationSeedsMissingKey:
                 lineterm="",
             )
         )
-        removed = [
-            line for line in diff_lines
-            if line.startswith("-") and not line.startswith("---")
-        ]
-        added = [
-            line for line in diff_lines
-            if line.startswith("+") and not line.startswith("+++")
-        ]
-        assert removed == [], (
-            f"Migration must never remove or alter an existing line.\ndiff:\n"
-            + "\n".join(diff_lines)
-        )
-        assert any("overwatch_resolve" in line for line in added), (
-            f"Expected the diff's added lines to include the overwatch_resolve block.\n"
-            + "\n".join(diff_lines)
-        )
+        removed = [line for line in diff_lines if line.startswith("-") and not line.startswith("---")]
+        added = [line for line in diff_lines if line.startswith("+") and not line.startswith("+++")]
+        assert removed == [], f"Migration must never remove or alter an existing line.\ndiff:\n" + "\n".join(diff_lines)
+        assert any(
+            "overwatch_resolve" in line for line in added
+        ), f"Expected the diff's added lines to include the overwatch_resolve block.\n" + "\n".join(diff_lines)
 
-    def test_seeds_a_cfg_with_no_release_section_at_all(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_seeds_a_cfg_with_no_release_section_at_all(self, tmp_path: pathlib.Path) -> None:
         """A pre-v2.18.0-shaped cfg with no [release] section still gets seeded."""
-        root = _build_kanban_root_with_project(
-            tmp_path, "no-release-proj", _LEGACY_CFG_NO_RELEASE_SECTION
-        )
+        root = _build_kanban_root_with_project(tmp_path, "no-release-proj", _LEGACY_CFG_NO_RELEASE_SECTION)
         result = _run_migration(root, project="no-release-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after_text = _cfg_path(root, "no-release-proj").read_text(encoding="utf-8")
-        assert re.search(r"^\[release\]\s*$", after_text, re.MULTILINE), (
-            f"Expected a [release] section to be created.\n{after_text}"
-        )
-        assert _count_key_occurrences(after_text) == 1, (
-            f"Expected exactly one overwatch_resolve occurrence.\n{after_text}"
-        )
+        assert re.search(
+            r"^\[release\]\s*$", after_text, re.MULTILINE
+        ), f"Expected a [release] section to be created.\n{after_text}"
+        assert (
+            _count_key_occurrences(after_text) == 1
+        ), f"Expected exactly one overwatch_resolve occurrence.\n{after_text}"
 
-    def test_seeds_a_cfg_where_release_is_the_last_section_in_the_file(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "release-last-proj", _LEGACY_CFG_RELEASE_IS_LAST_SECTION
-        )
+    def test_seeds_a_cfg_where_release_is_the_last_section_in_the_file(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "release-last-proj", _LEGACY_CFG_RELEASE_IS_LAST_SECTION)
         result = _run_migration(root, project="release-last-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after_text = _cfg_path(root, "release-last-proj").read_text(encoding="utf-8")
-        assert _count_key_occurrences(after_text) == 1, (
-            f"Expected exactly one overwatch_resolve occurrence.\n{after_text}"
-        )
+        assert (
+            _count_key_occurrences(after_text) == 1
+        ), f"Expected exactly one overwatch_resolve occurrence.\n{after_text}"
         # The pre-existing deep_verify comment line must still be present and
         # precede the newly-appended block -- proving insertion, not replacement.
         assert "# deep_verify = weekly" in after_text
-        assert after_text.index("# deep_verify = weekly") < after_text.index(
-            "overwatch_resolve"
-        )
+        assert after_text.index("# deep_verify = weekly") < after_text.index("overwatch_resolve")
 
 
 class TestMigrationPreservesOperatorValue:
     """An operator-set overwatch_resolve value is never touched."""
 
-    def test_existing_true_value_is_left_byte_for_byte_unchanged(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "operator-set-proj", _CFG_WITH_OPERATOR_SET_TRUE
-        )
+    def test_existing_true_value_is_left_byte_for_byte_unchanged(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "operator-set-proj", _CFG_WITH_OPERATOR_SET_TRUE)
         cfg_path = _cfg_path(root, "operator-set-proj")
         original_text = cfg_path.read_text(encoding="utf-8")
 
         result = _run_migration(root, project="operator-set-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after_text = cfg_path.read_text(encoding="utf-8")
         assert after_text == original_text, (
@@ -360,8 +304,7 @@ class TestMigrationPreservesOperatorValue:
             f"unchanged.\nbefore:\n{original_text}\nafter:\n{after_text}"
         )
         assert "overwatch_resolve = true" in after_text, (
-            "The migration must never flip an operator's true value to false "
-            f"or comment it out.\n{after_text}"
+            "The migration must never flip an operator's true value to false " f"or comment it out.\n{after_text}"
         )
 
 
@@ -369,29 +312,21 @@ class TestMigrationDryRun:
     """--dry-run previews without writing."""
 
     def test_dry_run_makes_no_change_to_the_cfg(self, tmp_path: pathlib.Path) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "dry-run-proj", _LEGACY_CFG_WITH_RELEASE_SECTION
-        )
+        root = _build_kanban_root_with_project(tmp_path, "dry-run-proj", _LEGACY_CFG_WITH_RELEASE_SECTION)
         cfg_path = _cfg_path(root, "dry-run-proj")
         original_text = cfg_path.read_text(encoding="utf-8")
 
         result = _run_migration(root, project="dry-run-proj", dry_run=True)
-        assert result.returncode == 0, (
-            f"dry-run failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"dry-run failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         after_text = cfg_path.read_text(encoding="utf-8")
-        assert after_text == original_text, (
-            f"--dry-run must not write to project.cfg.\nstdout: {result.stdout}"
-        )
+        assert after_text == original_text, f"--dry-run must not write to project.cfg.\nstdout: {result.stdout}"
 
 
 class TestMigrationFanOutOverAllProjects:
     """With no --project, the migration seeds every registered project."""
 
-    def test_seeds_every_registered_project_when_no_project_given(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_seeds_every_registered_project_when_no_project_given(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(
             tmp_path,
             "fanout-proj-a",
@@ -400,19 +335,15 @@ class TestMigrationFanOutOverAllProjects:
         )
 
         result = _run_migration(root)
-        assert result.returncode == 0, (
-            f"fan-out migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"fan-out migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         for name in ("fanout-proj-a", "fanout-proj-b"):
             after_text = _cfg_path(root, name).read_text(encoding="utf-8")
-            assert _count_key_occurrences(after_text) == 1, (
-                f"Expected {name}'s project.cfg to be seeded by the fan-out run.\n{after_text}"
-            )
+            assert (
+                _count_key_occurrences(after_text) == 1
+            ), f"Expected {name}'s project.cfg to be seeded by the fan-out run.\n{after_text}"
 
-    def test_fan_out_is_idempotent_across_the_whole_registry(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fan_out_is_idempotent_across_the_whole_registry(self, tmp_path: pathlib.Path) -> None:
         root = _build_kanban_root_with_project(
             tmp_path,
             "fanout-idem-a",
@@ -423,17 +354,16 @@ class TestMigrationFanOutOverAllProjects:
         first = _run_migration(root)
         assert first.returncode == 0
         snapshot = {
-            name: _cfg_path(root, name).read_text(encoding="utf-8")
-            for name in ("fanout-idem-a", "fanout-idem-b")
+            name: _cfg_path(root, name).read_text(encoding="utf-8") for name in ("fanout-idem-a", "fanout-idem-b")
         }
 
         second = _run_migration(root)
         assert second.returncode == 0
 
         for name in ("fanout-idem-a", "fanout-idem-b"):
-            assert _cfg_path(root, name).read_text(encoding="utf-8") == snapshot[name], (
-                f"Second fan-out run must be a byte-identical no-op for {name}."
-            )
+            assert (
+                _cfg_path(root, name).read_text(encoding="utf-8") == snapshot[name]
+            ), f"Second fan-out run must be a byte-identical no-op for {name}."
 
 
 class TestMigratedKeyResolvesThroughTheSharedAccessor:
@@ -441,16 +371,10 @@ class TestMigratedKeyResolvesThroughTheSharedAccessor:
     like a freshly create-project.sh-generated project.cfg does.
     """
 
-    def test_pp_overwatch_resolve_returns_false_after_migration(
-        self, tmp_path: pathlib.Path
-    ) -> None:
-        root = _build_kanban_root_with_project(
-            tmp_path, "resolve-after-migrate-proj", _LEGACY_CFG_WITH_RELEASE_SECTION
-        )
+    def test_pp_overwatch_resolve_returns_false_after_migration(self, tmp_path: pathlib.Path) -> None:
+        root = _build_kanban_root_with_project(tmp_path, "resolve-after-migrate-proj", _LEGACY_CFG_WITH_RELEASE_SECTION)
         result = _run_migration(root, project="resolve-after-migrate-proj")
-        assert result.returncode == 0, (
-            f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"migration failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
@@ -464,10 +388,9 @@ class TestMigratedKeyResolvesThroughTheSharedAccessor:
             cwd=str(_TEAM_DIR),
             timeout=30,
         )
-        assert resolve_result.returncode == 0, (
-            f"pp_overwatch_resolve failed.\nstdout: {resolve_result.stdout}\nstderr: {resolve_result.stderr}"
-        )
+        assert (
+            resolve_result.returncode == 0
+        ), f"pp_overwatch_resolve failed.\nstdout: {resolve_result.stdout}\nstderr: {resolve_result.stderr}"
         assert resolve_result.stdout.strip() == "false", (
-            f"Expected pp_overwatch_resolve to resolve to 'false' after migration.\n"
-            f"stdout: {resolve_result.stdout}"
+            f"Expected pp_overwatch_resolve to resolve to 'false' after migration.\n" f"stdout: {resolve_result.stdout}"
         )

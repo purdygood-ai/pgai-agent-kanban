@@ -60,23 +60,19 @@ _spec.loader.exec_module(lint_inline_python)
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-ONE_HEREDOC = textwrap.dedent(
-    """\
+ONE_HEREDOC = textwrap.dedent("""\
     #!/usr/bin/env bash
     python3 - "$1" <<'PY'
     import sys
     print(sys.argv[1])
     PY
-    """
-)
+    """)
 
-TWO_HEREDOCS = ONE_HEREDOC + textwrap.dedent(
-    """\
+TWO_HEREDOCS = ONE_HEREDOC + textwrap.dedent("""\
     python3 - <<'PY'
     print("second")
     PY
-    """
-)
+    """)
 
 
 def _make_tree(tmp_path: Path, scripts: dict[str, str], allowlist: str = "") -> Path:
@@ -181,11 +177,7 @@ def test_unquoted_delimiter_is_reported_even_within_counts(tmp_path):
 
 
 def test_quoted_and_escaped_delimiters_are_not_reported(tmp_path):
-    body = (
-        "python3 - <<'PY'\nx = 1\nPY\n"
-        'python3 - <<"PY"\nx = 2\nPY\n'
-        "python3 - <<\\PY\nx = 3\nPY\n"
-    )
+    body = "python3 - <<'PY'\nx = 1\nPY\n" 'python3 - <<"PY"\nx = 2\nPY\n' "python3 - <<\\PY\nx = 3\nPY\n"
     root = _make_tree(tmp_path, {"q.sh": body}, allowlist="team/scripts/q.sh\t3\t3\n")
     rc, _out, findings = _run(root, tmp_path)
     assert rc == 0
@@ -218,8 +210,7 @@ def test_malformed_allowlist_line_is_reported_and_ignored(tmp_path):
 
 
 def test_backslash_continued_python_heredoc_is_counted():
-    text = textwrap.dedent(
-        """\
+    text = textwrap.dedent("""\
         python3 - \\
             "$ARG_ONE" \\
             "$ARG_TWO" \\
@@ -228,8 +219,7 @@ def test_backslash_continued_python_heredoc_is_counted():
         print(sys.argv)
         PY_EOF
         echo after
-        """
-    )
+        """)
     blocks = lint_inline_python.scan_text(text)
     assert [(b.kind, b.line, b.python_lines) for b in blocks] == [("heredoc", 4, 2)]
 
@@ -241,8 +231,7 @@ def test_dev_stdin_heredoc_is_counted():
 
 
 def test_python_dash_c_one_liners_and_multi_line_programs_are_counted():
-    text = textwrap.dedent(
-        """\
+    text = textwrap.dedent("""\
         a="$(python3 -c 'import sys; print(1)')"
         if python3 -c "import pytest_cov" 2>/dev/null; then :; fi
         b="$(python3 -c '
@@ -250,8 +239,7 @@ def test_python_dash_c_one_liners_and_multi_line_programs_are_counted():
         print(json.dumps({}))
         ' "$x")"
         PYTHONPATH=lib python3 -c "${PROGRAM}"
-        """
-    )
+        """)
     blocks = lint_inline_python.scan_text(text)
     assert [(b.kind, b.line, b.python_lines) for b in blocks] == [
         ("dash-c", 1, 1),
@@ -262,8 +250,7 @@ def test_python_dash_c_one_liners_and_multi_line_programs_are_counted():
 
 
 def test_non_python_heredocs_are_not_counted_and_their_bodies_are_skipped():
-    text = textwrap.dedent(
-        """\
+    text = textwrap.dedent("""\
         cat > hello.py <<'PY'
         print("hello")
         PY
@@ -277,8 +264,7 @@ def test_non_python_heredocs_are_not_counted_and_their_bodies_are_skipped():
         # python3 - <<'PY' in a comment
         x=$(( 1 << 3 ))
         cat <<<"python3 -"
-        """
-    )
+        """)
     assert lint_inline_python.scan_text(text) == []
 
 

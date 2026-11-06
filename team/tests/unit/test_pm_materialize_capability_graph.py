@@ -39,9 +39,7 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 
@@ -49,8 +47,8 @@ except ImportError:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _minimal_task(seq: int = 1, slug: str = "my-task",
-                  role: str = "PM") -> dict:
+
+def _minimal_task(seq: int = 1, slug: str = "my-task", role: str = "PM") -> dict:
     """Return a minimal task dict with a pre-assigned task_id."""
     return {
         "sequence": seq,
@@ -412,8 +410,11 @@ def test_inject_simple_tester_task_appends_tester(
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     initial_len = len(tasks)
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     assert len(tasks) == initial_len + 1
     tester = tasks[-1]
@@ -426,8 +427,11 @@ def test_inject_simple_tester_task_has_no_cm_tasks(
     """inject_simple_tester_task injects zero CM tasks."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     cm_tasks = [t for t in tasks if t.get("role") == "CM"]
     assert cm_tasks == []
@@ -439,14 +443,17 @@ def test_inject_simple_tester_task_goal_mentions_finalize_report(
     """inject_simple_tester_task TESTER task goal mentions finalize=report language."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     goal = tester.get("goal", "").lower()
-    assert "report" in goal or "finalize" in goal, (
-        f"TESTER task goal must mention report/finalize responsibility; got: {goal!r}"
-    )
+    assert (
+        "report" in goal or "finalize" in goal
+    ), f"TESTER task goal must mention report/finalize responsibility; got: {goal!r}"
 
 
 def test_inject_simple_tester_task_notes_mention_no_cm_release(
@@ -455,15 +462,18 @@ def test_inject_simple_tester_task_notes_mention_no_cm_release(
     """inject_simple_tester_task TESTER notes make explicit there is no CM release step."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     notes = tester.get("notes", "").lower()
     # The notes should indicate that no CM release follows.
-    assert "no cm" in notes or "final step" in notes or "finalize" in notes, (
-        f"TESTER task notes must communicate finalize-report responsibility; got: {notes!r}"
-    )
+    assert (
+        "no cm" in notes or "final step" in notes or "finalize" in notes
+    ), f"TESTER task notes must communicate finalize-report responsibility; got: {notes!r}"
 
 
 def test_inject_simple_tester_task_has_finalize_report_flag(
@@ -472,8 +482,11 @@ def test_inject_simple_tester_task_has_finalize_report_flag(
     """inject_simple_tester_task sets _finalize_report=True on the TESTER task."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     assert tester.get("_finalize_report") is True
@@ -485,8 +498,11 @@ def test_inject_simple_tester_task_is_marked_synthetic(
     """inject_simple_tester_task marks the injected task as _synthetic=True."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     assert tester.get("_synthetic") is True
@@ -502,14 +518,15 @@ def test_inject_simple_tester_task_prerequisite_ids_contain_work_tasks(
     ]
     work_ids = [t["task_id"] for t in tasks]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     for wid in work_ids:
-        assert wid in tester.get("prerequisite_ids", []), (
-            f"Expected work task {wid!r} in TESTER prerequisite_ids"
-        )
+        assert wid in tester.get("prerequisite_ids", []), f"Expected work task {wid!r} in TESTER prerequisite_ids"
 
 
 def test_inject_simple_tester_task_task_id_has_correct_format(
@@ -518,14 +535,16 @@ def test_inject_simple_tester_task_task_id_has_correct_format(
     """inject_simple_tester_task TESTER task_id follows the TESTER-YYYYMMDD-NNN-slug format."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     tid = tester.get("task_id", "")
     assert tid.startswith("TESTER-20260101-100-"), (
-        f"Expected task_id to start with the requested owner/date/sequence "
-        f"prefix; got {tid!r}"
+        f"Expected task_id to start with the requested owner/date/sequence " f"prefix; got {tid!r}"
     )
 
 
@@ -535,15 +554,16 @@ def test_inject_simple_tester_task_finalize_mode_appears_in_constraints(
     """inject_simple_tester_task includes finalize_mode in task constraints."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     tester = tasks[-1]
     constraints = tester.get("constraints", [])
     constraints_str = " ".join(constraints).lower()
-    assert "report" in constraints_str, (
-        f"Expected finalize_mode 'report' in constraints; got {constraints!r}"
-    )
+    assert "report" in constraints_str, f"Expected finalize_mode 'report' in constraints; got {constraints!r}"
 
 
 def test_inject_simple_tester_task_returns_list_with_injected_task(
@@ -552,8 +572,11 @@ def test_inject_simple_tester_task_returns_list_with_injected_task(
     """inject_simple_tester_task returns a list containing only the injected task."""
     tasks = [_minimal_task(seq=1, slug="run-tests", role="PM")]
     result = pm.inject_simple_tester_task(
-        tasks, date_str="20260101", base_seq=100,
-        owner="CLAUDE", finalize_mode="report",
+        tasks,
+        date_str="20260101",
+        base_seq=100,
+        owner="CLAUDE",
+        finalize_mode="report",
     )
     assert isinstance(result, list)
     assert len(result) == 1
@@ -584,9 +607,7 @@ def test_load_workflow_capabilities_absent_manifest_returns_empty_dict(
     The caller is responsible for detecting the empty dict and applying the
     conservative fallback via _workflow_requires_cm_bookends.
     """
-    caps = pm.load_workflow_capabilities(
-        "nonexistent-workflow-xyz", kanban_root=str(tmp_path)
-    )
+    caps = pm.load_workflow_capabilities("nonexistent-workflow-xyz", kanban_root=str(tmp_path))
     assert caps == {}
     # Conservative fallback: empty dict means emit bookends.
     assert pm._workflow_requires_cm_bookends(caps) is True
@@ -640,9 +661,7 @@ def test_testing_only_roster_excludes_cm(
     """
     caps = pm.load_workflow_capabilities("testing-only")
     roster = pm._parse_manifest_roster(caps)
-    assert "CM" not in roster, (
-        f"testing-only roster must not include CM; got {roster!r}"
-    )
+    assert "CM" not in roster, f"testing-only roster must not include CM; got {roster!r}"
     # Confirm the roster guard rejects a CM task.
     tasks = [_minimal_task(seq=1, slug="cm-fake", role="CM")]
     with pytest.raises(SystemExit) as exc_info:
@@ -659,9 +678,7 @@ def test_release_roster_includes_cm(
     """
     caps = pm.load_workflow_capabilities("release")
     roster = pm._parse_manifest_roster(caps)
-    assert "CM" in roster, (
-        f"release roster must include CM; got {roster!r}"
-    )
+    assert "CM" in roster, f"release roster must include CM; got {roster!r}"
     # CM task in release workflow must pass the guard.
     tasks = [_minimal_task(seq=1, slug="open-rc", role="CM")]
     # Should not exit.

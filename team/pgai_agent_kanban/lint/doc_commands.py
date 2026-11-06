@@ -50,7 +50,6 @@ from __future__ import annotations
 import pathlib
 import re
 import sys
-from typing import Optional
 
 # Run by file path (``python3 .../doc_commands.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -68,10 +67,10 @@ from pgai_agent_kanban.lib.markdown_fence import SHELL_FENCE_LANGS, find_fence_c
 
 __all__ = ["command_lines", "extract_blocks"]
 
-_SKIP_ANNOTATION_RE = re.compile(r'<!--\s*doc-lint:\s*skip', re.IGNORECASE)
-_DOCKER_ANNOTATION_RE = re.compile(r'<!--\s*doc-lint:\s*docker\s*-->', re.IGNORECASE)
-_INLINE_SKIP_RE = re.compile(r'#\s*doc-lint:\s*skip')
-_INLINE_SKIP_TAIL_RE = re.compile(r'\s*#\s*doc-lint:\s*skip.*$')
+_SKIP_ANNOTATION_RE = re.compile(r"<!--\s*doc-lint:\s*skip", re.IGNORECASE)
+_DOCKER_ANNOTATION_RE = re.compile(r"<!--\s*doc-lint:\s*docker\s*-->", re.IGNORECASE)
+_INLINE_SKIP_RE = re.compile(r"#\s*doc-lint:\s*skip")
+_INLINE_SKIP_TAIL_RE = re.compile(r"\s*#\s*doc-lint:\s*skip.*$")
 
 
 def _join_continuations(raw_lines: list[str]) -> list[str]:
@@ -136,7 +135,7 @@ def extract_blocks(text: str) -> list[dict]:
             stripped = raw.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-            cmd_text = _INLINE_SKIP_TAIL_RE.sub('', stripped).strip()
+            cmd_text = _INLINE_SKIP_TAIL_RE.sub("", stripped).strip()
             if cmd_text:
                 commands.append({"cmd": cmd_text, "inline_skip": bool(_INLINE_SKIP_RE.search(stripped))})
 
@@ -159,7 +158,7 @@ def command_lines(blocks: list[dict]) -> list[str]:
     ]
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] in ("-h", "--help"):

@@ -107,8 +107,15 @@ def fx(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> nd.NonDefault
     """The fixture root, with this process's environment pointed at it."""
     require_binary("git", label="nondefault-git-config-parity")
     built = nd.build_nondefault_git_config_root(tmp_path)
-    for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME", "PGAI_DEV_TREE_PATH",
-                 "PGAI_GIT_LOCAL_ONLY", "GIT_DIR", "OVERWATCH_PROJECT"):
+    for name in (
+        "PGAI_TASKS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_PROJECT_NAME",
+        "PGAI_DEV_TREE_PATH",
+        "PGAI_GIT_LOCAL_ONLY",
+        "GIT_DIR",
+        "OVERWATCH_PROJECT",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KANBAN_ROOT", str(built.root))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(built.root))
@@ -238,9 +245,7 @@ def test_version_sh_and_released_version_report_the_same_framework_version(fx) -
 
 def test_bash_and_python_last_released_version_agree(fx) -> None:
     # Local-only, as every render path and non-CM wake runs it: no fetch.
-    bash_version = _bash_value(
-        fx, 'pp_last_released_version "$1"', fx.project, extra_env={"PGAI_GIT_LOCAL_ONLY": "1"}
-    )
+    bash_version = _bash_value(fx, 'pp_last_released_version "$1"', fx.project, extra_env={"PGAI_GIT_LOCAL_ONLY": "1"})
     python_version = released_version.last_released_version(fx.root, fx.project)
     assert bash_version == python_version == nd.RELEASED_VERSION
 
@@ -275,7 +280,12 @@ def test_cancel_reads_the_bash_prefix_and_remote(fx) -> None:
 def test_cancel_removes_the_prefixed_rc_branch(fx) -> None:
     out, err = io.StringIO(), io.StringIO()
     outcome = cancel.cancel_rc(
-        OpsContext(kanban_root=fx.root), fx.project, nd.RC_VERSION, yes=True, out=out.write, err=err.write,
+        OpsContext(kanban_root=fx.root),
+        fx.project,
+        nd.RC_VERSION,
+        yes=True,
+        out=out.write,
+        err=err.write,
     )
     rc_branch = _bash_prefixed(fx, _RC_BRANCH)
     assert outcome.rc_branch == rc_branch, (out.getvalue(), err.getvalue())
@@ -286,9 +296,14 @@ def test_cancel_removes_the_prefixed_rc_branch(fx) -> None:
 def test_block_requeue_resolves_a_bare_source_branch_with_the_prefix(fx) -> None:
     feature = _bash_prefixed(fx, _FEATURE_BRANCH)
     record = BlockRecord(
-        reason_code="per_task_timeout", owner_role="CODER", attempts=1,
-        first_blocked_at="2026-01-01T00:00:00+00:00", last_blocked_at="2026-01-01T00:00:00+00:00",
-        cooldown_until="none", evidence=f"branch={feature}", resume="none",
+        reason_code="per_task_timeout",
+        owner_role="CODER",
+        attempts=1,
+        first_blocked_at="2026-01-01T00:00:00+00:00",
+        last_blocked_at="2026-01-01T00:00:00+00:00",
+        cooldown_until="none",
+        evidence=f"branch={feature}",
+        resume="none",
     )
     target = block_requeue.resolve_git_target(fx.task_dir, record)
     assert target.source_written == _RC_BRANCH
@@ -320,9 +335,11 @@ def test_materializer_names_the_branches_pp_prefix_branch_names(fx) -> None:
     rc_branch = _bash_prefixed(fx, _RC_BRANCH)
     assert pm_materialize.determine_source_branch({}, team_root, "release", nd.RC_VERSION) == rc_branch
     assert pm_materialize.determine_source_branch({}, team_root, "feature") == rc_branch  # from the Active RC
-    assert pm_materialize.determine_source_branch(
-        {"cm_operation": "open-rc"}, team_root, "release", nd.RC_VERSION
-    ) == _bash_prefixed(fx, "main") == f"{nd.BRANCH_PREFIX}main"
+    assert (
+        pm_materialize.determine_source_branch({"cm_operation": "open-rc"}, team_root, "release", nd.RC_VERSION)
+        == _bash_prefixed(fx, "main")
+        == f"{nd.BRANCH_PREFIX}main"
+    )
 
 
 def test_materializer_ticket_text_names_the_configured_remote_and_prefix(fx) -> None:
@@ -332,14 +349,18 @@ def test_materializer_ticket_text_names_the_configured_remote_and_prefix(fx) -> 
 
     feature_tasks = [{"task_id": "CODER-20260101-001-work", "depends_on": [], "prerequisite_ids": []}]
     synthetic = pm_materialize.inject_feature_workflow_tasks(
-        feature_tasks, source_branch="feature/shared", test_required=False,
-        parent_branch=f"{nd.BRANCH_PREFIX}main", date_str="20260101", base_seq=2, owner="CLAUDE",
-        git_remote=remote, branch_prefix=pm_materialize._resolve_branch_prefix(team_root),
+        feature_tasks,
+        source_branch="feature/shared",
+        test_required=False,
+        parent_branch=f"{nd.BRANCH_PREFIX}main",
+        date_str="20260101",
+        base_seq=2,
+        owner="CLAUDE",
+        git_remote=remote,
+        branch_prefix=pm_materialize._resolve_branch_prefix(team_root),
     )
     ticket = synthetic[0]
-    text = " ".join(
-        [ticket["goal"], ticket["required_output"], *ticket["constraints"], *ticket["acceptance_criteria"]]
-    )
+    text = " ".join([ticket["goal"], ticket["required_output"], *ticket["constraints"], *ticket["acceptance_criteria"]])
     assert "origin" not in text, text
     assert f"git ls-remote {nd.REMOTE_NAME} feature/shared returns a commit SHA." in ticket["acceptance_criteria"]
     assert f"Push 'feature/shared' to {nd.REMOTE_NAME} after creating it." in ticket["constraints"]
@@ -347,7 +368,13 @@ def test_materializer_ticket_text_names_the_configured_remote_and_prefix(fx) -> 
 
     release_tasks = [{"task_id": "CODER-20260101-001-work", "depends_on": [], "prerequisite_ids": []}]
     pm_materialize.inject_cm_bookends(
-        release_tasks, "v1.2.3", "20260101", 2, "CLAUDE", git_remote=remote, test_required=False,
+        release_tasks,
+        "v1.2.3",
+        "20260101",
+        2,
+        "CLAUDE",
+        git_remote=remote,
+        test_required=False,
     )
     release = next(t for t in release_tasks if t.get("cm_operation") == "release")
     assert f"pushed to {nd.REMOTE_NAME} when" in release["acceptance_criteria"][0]
@@ -381,7 +408,9 @@ def test_verify_rc_state_warnings_name_the_configured_remote_main_ref(fx, monkey
 def test_discovery_tag_lookup_asks_the_configured_remote(fx, tag: str, expected_rc: str) -> None:
     result = fx.bash(
         f'source "{_LIB / "discovery.sh"}"\n_disc_git_tag_exists "$1" "$2" "$3"\necho "RC=$?"',
-        tag, str(fx.dev_tree), fx.project,
+        tag,
+        str(fx.dev_tree),
+        fx.project,
     )
     assert result.stdout.endswith(f"{expected_rc}\n"), (result.stdout, result.stderr)
 
@@ -419,7 +448,7 @@ _RECENT_TAG_RE = re.compile(r"^\s+(\S+)\s+(?:\d{4}-\d{2}-\d{2}|unknown)$")
 _INVALID_PREFIXES = ("zz/", "'zz_'")
 
 
-def _set_branch_prefix(fx: nd.NonDefaultGitConfigRoot, value: "str | None") -> None:
+def _set_branch_prefix(fx: nd.NonDefaultGitConfigRoot, value: str | None) -> None:
     """Rewrite the fixture's ``branch_prefix`` line; ``None`` removes the key."""
     cfg = fx.project_root / "project.cfg"
     text = re.sub(r"(?m)^branch_prefix\s*=.*\n", "", cfg.read_text(encoding="utf-8"))
@@ -432,7 +461,11 @@ def _pane(fx: nd.NonDefaultGitConfigRoot, script: str) -> str:
     """stdout of one dashboard git pane for the fixture project, without colour."""
     result = subprocess.run(
         [str(_DASHBOARD / script), "--project", fx.project],
-        capture_output=True, text=True, env=fx.env({"NO_COLOR": "1"}), cwd=str(fx.root), timeout=60,
+        capture_output=True,
+        text=True,
+        env=fx.env({"NO_COLOR": "1"}),
+        cwd=str(fx.root),
+        timeout=60,
     )
     assert result.returncode == 0, (script, result.stdout, result.stderr)
     return result.stdout
@@ -517,7 +550,7 @@ def test_git_status_recent_commits_read_the_prefixed_main_branch(fx) -> None:
 
 
 @pytest.mark.parametrize("value", [None, ""], ids=["absent", "empty"])
-def test_git_status_recent_commits_read_main_when_no_prefix_is_set(fx, value: "str | None") -> None:
+def test_git_status_recent_commits_read_main_when_no_prefix_is_set(fx, value: str | None) -> None:
     _add_unprefixed_main(fx)
     _set_branch_prefix(fx, value)
     assert _bash_prefix(fx) == ""
@@ -568,7 +601,7 @@ _CALLER_CASES = [
 ]
 
 
-def _write_prefix_case(fx: nd.NonDefaultGitConfigRoot, value: "str | None", section: str = "project") -> None:
+def _write_prefix_case(fx: nd.NonDefaultGitConfigRoot, value: str | None, section: str = "project") -> None:
     """Write ``branch_prefix = value`` under *section* (``None`` writes no key at all)."""
     _set_branch_prefix(fx, value if section == "project" else None)
     if value is not None and section != "project":
@@ -580,9 +613,14 @@ def _caller_answers(fx: nd.NonDefaultGitConfigRoot, monkeypatch: pytest.MonkeyPa
     """What each read-only Python caller builds from the fixture's current project.cfg."""
     team_root = str(fx.project_root)
     record = BlockRecord(
-        reason_code="per_task_timeout", owner_role="CODER", attempts=1,
-        first_blocked_at="2026-01-01T00:00:00+00:00", last_blocked_at="2026-01-01T00:00:00+00:00",
-        cooldown_until="none", evidence=f"branch={nd.BRANCH_PREFIX}{_FEATURE_BRANCH}", resume="none",
+        reason_code="per_task_timeout",
+        owner_role="CODER",
+        attempts=1,
+        first_blocked_at="2026-01-01T00:00:00+00:00",
+        last_blocked_at="2026-01-01T00:00:00+00:00",
+        cooldown_until="none",
+        evidence=f"branch={nd.BRANCH_PREFIX}{_FEATURE_BRANCH}",
+        resume="none",
     )
     evidence = _resolution_stage_evidence(fx, monkeypatch)
     response = build_api_client(fx.root).get(f"/projects/{fx.project}")
@@ -593,12 +631,14 @@ def _caller_answers(fx: nd.NonDefaultGitConfigRoot, monkeypatch: pytest.MonkeyPa
         "pm_materialize prefix": pm_materialize._resolve_branch_prefix(team_root),
         "pm_materialize rc": pm_materialize.determine_source_branch({}, team_root, "release", nd.RC_VERSION),
         "pm_materialize main": pm_materialize.determine_source_branch(
-            {"cm_operation": "open-rc"}, team_root, "release", nd.RC_VERSION),
+            {"cm_operation": "open-rc"}, team_root, "release", nd.RC_VERSION
+        ),
     }
 
 
-@pytest.mark.parametrize(("value", "section", "answer"), [c[1:] for c in _CALLER_CASES],
-                         ids=[c[0] for c in _CALLER_CASES])
+@pytest.mark.parametrize(
+    ("value", "section", "answer"), [c[1:] for c in _CALLER_CASES], ids=[c[0] for c in _CALLER_CASES]
+)
 def test_python_callers_read_each_spelling_as_pp_branch_prefix(fx, monkeypatch, capsys, value, section, answer) -> None:
     # The reference: pp_branch_prefix's answer written plainly, or no key at all where it refuses.
     _write_prefix_case(fx, answer)

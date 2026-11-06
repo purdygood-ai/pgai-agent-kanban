@@ -163,18 +163,23 @@ leading comment block calls `header_help_print` from
 ```bash
     -h|--help)
       # shellcheck source=lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/lib/header_help.sh"
+      source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/header_help.sh"
       header_help_print "${BASH_SOURCE[0]}"
       exit 0
       ;;
 ```
+
+The script path goes through `readlink -f` before `dirname`, so the lookup
+lands in the real `scripts/` directory when the script is invoked through a
+symlink on an operator's PATH. Every entry script under `team/scripts` uses
+this form; `team/tests/unit/test_entry_scripts_symlink_safe.py` pins it.
 
 A script one directory deeper, such as one under `team/scripts/dashboard/`,
 reaches the same `team/scripts/lib/header_help.sh` one level up:
 
 ```bash
       # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+      source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
 ```
 
 Inside the helper, one `awk` reads the script file and writes straight to
@@ -220,14 +225,17 @@ its `file`, its line, and a runnable remedy. Four classes ship today:
 | `provenance` | A bug, priority, task or requirement ID, or a version cited as history (shapes such as `since vN.N`, `(vN.N.N)`, `added in vN` and `vN.N.N+`), in the code surface, the test tree or shipped prose; wording is not checked. |
 | `version-named-test` | A test module or test function named for the release that produced it rather than for the behavior it exercises. Test tree only. |
 | `comment-drift` | A comment or single-line docstring stating an argument count the adjacent single-line `def` signature contradicts. |
-| `operator-literal` | A literal that only resolves on one operator's machine: a `/home/` path naming a real account (label `home-path`), or an scp-style `git@<host>:` remote whose host is a private `~/.ssh/config` alias (label `ssh-host-alias`). Scanned across every git-tracked file — see below. |
+| `operator-literal` | A literal that only resolves on one operator's machine: a `/home/` path naming a real account (label `home-path`), an scp-style `git@<host>:` remote whose host is a private `~/.ssh/config` alias (label `ssh-host-alias`), or an operator's own forge login outside the organisation name the clone URL and licence carry (label `operator-handle`). Scanned across every git-tracked file — see below. |
 
 `operator-literal` reads its own surface, not the directory surfaces the
 other three read: every file `git ls-files` lists at `--repo-root`, of
-any type, except `release-notes/`, the root `CHANGELOG.md`, and
-`team/tests/` — whose `artifacts/` subtree stays in scope, because those
-archived snapshots ship as they are. A `--repo-root` that is not itself
-the top of a git work tree scans nothing. Neutral forms are never
+any type, except `release-notes/` and the root `CHANGELOG.md`. The test
+tree, `team/tests/`, is scanned for the `operator-handle` label only — the
+handle is a finding in a fixture or a test docstring as anywhere else —
+while `home-path` and `ssh-host-alias` skip it; its `artifacts/` subtree
+takes every label, because those archived snapshots ship as they are. A
+`--repo-root` that is not itself the top of a git work tree scans
+nothing. Neutral forms are never
 findings: `$HOME/...` and `~/...`; an angle-bracket or variable segment
 (`/home/<user>/`, `/home/$USER/`); the placeholder account names `you`,
 `user`, `youruser`, `username` and `op`, compared ignoring case and

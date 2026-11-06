@@ -29,7 +29,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import re
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 
@@ -98,9 +98,7 @@ def _runaway_accepts(kanban_root: pathlib.Path, name: str) -> bool:
 
 def _block_record_accepts(kanban_root: pathlib.Path, name: str) -> bool:
     try:
-        block_record.parse_action_args(
-            ["verb=restamp-fixed-in", f"project={name}", "version=v1.2.3", "bugs=BUG-0001"]
-        )
+        block_record.parse_action_args(["verb=restamp-fixed-in", f"project={name}", "version=v1.2.3", "bugs=BUG-0001"])
     except block_record.ActionArgsError as exc:
         assert all(problem.startswith("project") for problem in exc.problems), exc.problems
         return False
@@ -138,7 +136,12 @@ def _scan_inbox_accepts(monkeypatch, capsys, kanban_root, name) -> bool:
 
 def _scan_needs_operator_accepts(monkeypatch, capsys, kanban_root, name) -> bool:
     return _rendered_projects(
-        monkeypatch, capsys, kanban_root, name, scan_attention.scan_needs_operator_section, r"^  (.*): \d+ needs-operator$"
+        monkeypatch,
+        capsys,
+        kanban_root,
+        name,
+        scan_attention.scan_needs_operator_section,
+        r"^  (.*): \d+ needs-operator$",
     )
 
 

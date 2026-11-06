@@ -108,10 +108,12 @@ from typing import NamedTuple
 LINT_NAME = "block_record_sites"
 SCAN_TOP = "team"
 TEST_DIR_NAMES = frozenset({"tests", "test", "fixtures"})
-HELPER_RELS = frozenset({
-    "team/scripts/lib/block_record.sh",
-    "team/pgai_agent_kanban/overwatch/block_record.py",
-})
+HELPER_RELS = frozenset(
+    {
+        "team/scripts/lib/block_record.sh",
+        "team/pgai_agent_kanban/overwatch/block_record.py",
+    }
+)
 
 #: Lines from the site's own line onward searched for the helper call.
 FORWARD_WINDOW = 14
@@ -119,8 +121,8 @@ FORWARD_WINDOW = 14
 BACKWARD_WINDOW = 3
 
 FIX = (
-    "record the block beside it: block_record_write \"$status_file\" <reason_code> "
-    "\"$(block_record_owner_role \"$status_file\")\" ... || log \"WARNING: Block Record not written\" "
+    'record the block beside it: block_record_write "$status_file" <reason_code> '
+    '"$(block_record_owner_role "$status_file")" ... || log "WARNING: Block Record not written" '
     "(team/scripts/lib/block_record.sh; Python: write_block_record)"
 )
 REMEDY = "python3 team/scripts/lint_block_record_sites.py"
@@ -129,7 +131,7 @@ _BLOCKED = r"""["']?BLOCKED["']?(?![\w-])"""
 _ARG = r"""(?:"[^"]*"|'[^']*'|\S+)"""
 _CMD_START = r"""^\s*(?:(?:if|!|then|else|do)\s+)*"""
 
-_SHELL_SITE_RES: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+_SHELL_SITE_RES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("set_state", re.compile(_CMD_START + r"set_state\s+" + _ARG + r"\s+" + _BLOCKED)),
     (
         "transition_task_state",
@@ -175,7 +177,7 @@ class Finding(NamedTuple):
         }
 
 
-def _helper_nearby(lines: list[str], index: int, helper: "re.Pattern[str]") -> bool:
+def _helper_nearby(lines: list[str], index: int, helper: re.Pattern[str]) -> bool:
     start = max(0, index - BACKWARD_WINDOW)
     end = min(len(lines), index + FORWARD_WINDOW)
     return any(helper.search(line) for line in lines[start:end])
@@ -192,7 +194,9 @@ def scan_shell(text: str) -> list[tuple[int, str]]:
         for label, pattern in _SHELL_SITE_RES:
             if pattern.search(raw):
                 if not _helper_nearby(lines, index, _SHELL_HELPER_RE):
-                    hits.append((index + 1, f"{label} writes BLOCKED with no block_record_write call: {stripped[:120]}"))
+                    hits.append(
+                        (index + 1, f"{label} writes BLOCKED with no block_record_write call: {stripped[:120]}")
+                    )
                 break
     return hits
 
@@ -220,10 +224,7 @@ def _python_site_lines(text: str) -> list[int]:
                 compares.add(row)
     except (tokenize.TokenError, IndentationError, SyntaxError):
         return []
-    return sorted(
-        row for row, values in literals.items()
-        if _PY_SITE_LITERALS <= values and row not in compares
-    )
+    return sorted(row for row, values in literals.items() if _PY_SITE_LITERALS <= values and row not in compares)
 
 
 def scan_python(text: str) -> list[tuple[int, str]]:
@@ -269,7 +270,7 @@ def _display(path: Path, root: Path) -> str:
         return str(path)
 
 
-def run(root: Path, paths: "list[Path] | None" = None) -> tuple[int, list[Finding]]:
+def run(root: Path, paths: list[Path] | None = None) -> tuple[int, list[Finding]]:
     """Scan *paths* (default: the tree under *root*); return ``(files_scanned, findings)``."""
     files = paths if paths is not None else _scanned_files(root)
     findings: list[Finding] = []
@@ -279,7 +280,7 @@ def run(root: Path, paths: "list[Path] | None" = None) -> tuple[int, list[Findin
     return len(files), findings
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the Block Record sites lint, printing each finding and writing ``--findings-file``.
 
     Exit codes: 0 always, whatever was found (quality class); 2 usage error (argparse).
@@ -296,8 +297,9 @@ def main(argv: "list[str] | None" = None) -> int:
         default=str(Path(__file__).resolve().parent.parent.parent),
         help="repository root to scan (default: this checkout)",
     )
-    parser.add_argument("--paths", nargs="+", default=None, metavar="FILE",
-                        help="scan exactly these files instead of the tree")
+    parser.add_argument(
+        "--paths", nargs="+", default=None, metavar="FILE", help="scan exactly these files instead of the tree"
+    )
     parser.add_argument("--findings-file", default=None, help="write findings as a JSON array here")
     args = parser.parse_args(argv)
 
@@ -306,8 +308,10 @@ def main(argv: "list[str] | None" = None) -> int:
     scanned, findings = run(root, paths)
     for finding in findings:
         print(f"lint_{LINT_NAME}: {finding.file}:{finding.line}: {finding.summary} -- {FIX}")
-    print(f"lint_{LINT_NAME}: totals: {scanned} file(s) scanned; {len(findings)} finding(s)"
-          + (" (non-blocking finding)" if findings else ""))
+    print(
+        f"lint_{LINT_NAME}: totals: {scanned} file(s) scanned; {len(findings)} finding(s)"
+        + (" (non-blocking finding)" if findings else "")
+    )
 
     if args.findings_file:
         out = Path(args.findings_file)

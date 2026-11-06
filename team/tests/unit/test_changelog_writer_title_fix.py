@@ -33,10 +33,8 @@ import pytest
 from pgai_agent_kanban.cm.changelog_writer import (
     _sanitize_symptom_for_title,
     _extract_ki_id_from_line,
-    parse_bug_file,
     regenerate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture helpers (self-contained copies from test_changelog_writer.py)
@@ -200,9 +198,7 @@ class TestUglyBugFixedEntryRendering:
     must produce a Fixed entry that contains only the clean prose title and
     contains none of the diagnostic markers."""
 
-    def test_ugly_bug_fixed_entry_contains_prose_title(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_ugly_bug_fixed_entry_contains_prose_title(self, tmp_path: pathlib.Path) -> None:
         """The Fixed entry for an ugly-bug file contains the clean prose title."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -218,19 +214,14 @@ class TestUglyBugFixedEntryRendering:
 
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0072**: Fixed ugly bug."
-        )
+        _make_release_notes(repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0072**: Fixed ugly bug.")
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0"], bugs_dir)
 
         # Extract the v1.1.0 Fixed section.
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None, "v1.1.0 entry not found in output"
         entry_text = entry_match.group(0)
 
@@ -239,13 +230,9 @@ class TestUglyBugFixedEntryRendering:
         fixed_body = fixed_match.group(1)
 
         # The prose title must appear in the Fixed body.
-        assert _UGLY_BUG_TITLE_FRAGMENT in fixed_body, (
-            f"Prose title fragment not found in Fixed body: {fixed_body!r}"
-        )
+        assert _UGLY_BUG_TITLE_FRAGMENT in fixed_body, f"Prose title fragment not found in Fixed body: {fixed_body!r}"
 
-    def test_ugly_bug_fixed_entry_grep_zero_failed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_ugly_bug_fixed_entry_grep_zero_failed(self, tmp_path: pathlib.Path) -> None:
         """The Fixed entry for an ugly-bug file contains no 'FAILED' markers."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -261,18 +248,13 @@ class TestUglyBugFixedEntryRendering:
 
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0072**: Fixed ugly bug."
-        )
+        _make_release_notes(repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0072**: Fixed ugly bug.")
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0"], bugs_dir)
 
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None
         entry_text = entry_match.group(0)
         fixed_match = re.search(r"### Fixed\n(.+?)(?=###|\Z)", entry_text, re.DOTALL)
@@ -280,13 +262,9 @@ class TestUglyBugFixedEntryRendering:
         fixed_body = fixed_match.group(1)
 
         # No FAILED markers.
-        assert "FAILED" not in fixed_body, (
-            f"'FAILED' marker found in Fixed body: {fixed_body!r}"
-        )
+        assert "FAILED" not in fixed_body, f"'FAILED' marker found in Fixed body: {fixed_body!r}"
 
-    def test_ugly_bug_fixed_entry_grep_zero_triple_backtick(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_ugly_bug_fixed_entry_grep_zero_triple_backtick(self, tmp_path: pathlib.Path) -> None:
         """The Fixed entry for an ugly-bug file contains no triple-backtick markers."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -302,18 +280,13 @@ class TestUglyBugFixedEntryRendering:
 
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0072**: Fixed ugly bug."
-        )
+        _make_release_notes(repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0072**: Fixed ugly bug.")
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0"], bugs_dir)
 
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None
         entry_text = entry_match.group(0)
         fixed_match = re.search(r"### Fixed\n(.+?)(?=###|\Z)", entry_text, re.DOTALL)
@@ -321,13 +294,9 @@ class TestUglyBugFixedEntryRendering:
         fixed_body = fixed_match.group(1)
 
         # No triple-backtick markers.
-        assert "```" not in fixed_body, (
-            f"Triple-backtick found in Fixed body: {fixed_body!r}"
-        )
+        assert "```" not in fixed_body, f"Triple-backtick found in Fixed body: {fixed_body!r}"
 
-    def test_ugly_bug_fixed_entry_grep_zero_dollar_command_lines(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_ugly_bug_fixed_entry_grep_zero_dollar_command_lines(self, tmp_path: pathlib.Path) -> None:
         """The Fixed entry for an ugly-bug file contains no shell '$ ' command prompts."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -343,18 +312,13 @@ class TestUglyBugFixedEntryRendering:
 
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0072**: Fixed ugly bug."
-        )
+        _make_release_notes(repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0072**: Fixed ugly bug.")
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0"], bugs_dir)
 
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None
         entry_text = entry_match.group(0)
         fixed_match = re.search(r"### Fixed\n(.+?)(?=###|\Z)", entry_text, re.DOTALL)
@@ -363,13 +327,11 @@ class TestUglyBugFixedEntryRendering:
 
         # No shell command-prompt lines.
         # Match "$ " at the start of a line (the canonical prompt form in symptoms).
-        assert not re.search(r"^\$ ", fixed_body, re.MULTILINE), (
-            f"Shell command-prompt '$ ' found at start of line in Fixed body: {fixed_body!r}"
-        )
+        assert not re.search(
+            r"^\$ ", fixed_body, re.MULTILINE
+        ), f"Shell command-prompt '$ ' found at start of line in Fixed body: {fixed_body!r}"
 
-    def test_ugly_bug_single_fixed_line_from_prose_title(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_ugly_bug_single_fixed_line_from_prose_title(self, tmp_path: pathlib.Path) -> None:
         """The Fixed entry for an ugly-bug produces exactly one non-empty line."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -385,18 +347,13 @@ class TestUglyBugFixedEntryRendering:
 
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
-        _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0072**: Fixed ugly bug."
-        )
+        _make_release_notes(repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0072**: Fixed ugly bug.")
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0"], bugs_dir)
 
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None
         entry_text = entry_match.group(0)
         fixed_match = re.search(r"### Fixed\n(.+?)(?=###|\Z)", entry_text, re.DOTALL)
@@ -404,9 +361,9 @@ class TestUglyBugFixedEntryRendering:
         fixed_body = fixed_match.group(1).strip()
 
         fixed_lines = [ln for ln in fixed_body.splitlines() if ln.strip()]
-        assert len(fixed_lines) == 1, (
-            f"Expected exactly 1 Fixed line for ugly-bug; got {len(fixed_lines)}: {fixed_lines!r}"
-        )
+        assert (
+            len(fixed_lines) == 1
+        ), f"Expected exactly 1 Fixed line for ugly-bug; got {len(fixed_lines)}: {fixed_lines!r}"
 
 
 # ===========================================================================
@@ -419,9 +376,7 @@ class TestBareKiIdJoinInBugsResolved:
     must produce Fixed lines that carry the joined title from the bug ledger,
     not the bare placeholder."""
 
-    def test_bare_ki_id_joined_to_title_in_fixed_section(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bare_ki_id_joined_to_title_in_fixed_section(self, tmp_path: pathlib.Path) -> None:
         """A bare 'KI-1.0.0.1 — resolved' in Bugs Resolved produces ID + title in Fixed."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -439,7 +394,9 @@ class TestBareKiIdJoinInBugsResolved:
         repo_root.mkdir()
         # v1.1.0 uses "Bugs Resolved" with bare KI IDs (no titles)
         _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
+            repo_root,
+            "v1.1.0",
+            "2026-01-02",
             bugs_resolved="- KI-1.0.0.1 — resolved",
         )
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
@@ -447,9 +404,7 @@ class TestBareKiIdJoinInBugsResolved:
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0", "v1.1.0"], bugs_dir)
 
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None, "v1.1.0 entry not found"
         entry_text = entry_match.group(0)
 
@@ -458,14 +413,10 @@ class TestBareKiIdJoinInBugsResolved:
         fixed_body = fixed_match.group(1)
 
         # The joined line must contain the KI identifier.
-        assert "KI-1.0.0.1" in fixed_body, (
-            f"KI-1.0.0.1 not found in Fixed body: {fixed_body!r}"
-        )
+        assert "KI-1.0.0.1" in fixed_body, f"KI-1.0.0.1 not found in Fixed body: {fixed_body!r}"
 
         # The joined line must contain the bug title (symptom text), not just 'resolved'.
-        assert "Widget crashes on startup" in fixed_body, (
-            f"Bug title not joined into Fixed body: {fixed_body!r}"
-        )
+        assert "Widget crashes on startup" in fixed_body, f"Bug title not joined into Fixed body: {fixed_body!r}"
 
         # The bare placeholder 'resolved' must not appear alone without the title.
         # (We allow 'resolved' as part of the affects/fixed-in clause, but not as
@@ -475,21 +426,13 @@ class TestBareKiIdJoinInBugsResolved:
         # appearing after an optional leading list marker rather than
         # requiring it at column 0.
         fixed_lines = [ln.strip() for ln in fixed_body.splitlines() if ln.strip()]
-        ki_lines = [
-            ln for ln in fixed_lines if ln.lstrip("-* ").startswith("KI-1.0.0.1")
-        ]
+        ki_lines = [ln for ln in fixed_lines if ln.lstrip("-* ").startswith("KI-1.0.0.1")]
         assert len(ki_lines) >= 1, "KI-1.0.0.1 line not found in Fixed body"
         ki_line = ki_lines[0]
-        assert ki_line.startswith("- "), (
-            f"Joined KI line lost its list bullet marker: {ki_line!r}"
-        )
-        assert "Widget crashes on startup" in ki_line, (
-            f"Joined KI line does not carry title: {ki_line!r}"
-        )
+        assert ki_line.startswith("- "), f"Joined KI line lost its list bullet marker: {ki_line!r}"
+        assert "Widget crashes on startup" in ki_line, f"Joined KI line does not carry title: {ki_line!r}"
 
-    def test_bare_ki_id_not_in_ledger_passes_through_as_is(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bare_ki_id_not_in_ledger_passes_through_as_is(self, tmp_path: pathlib.Path) -> None:
         """A bare KI ID in Bugs Resolved that has no matching bug falls through as plain text."""
         bugs_dir = tmp_path / "bugs"
         # No bug file for KI-1.0.0.9
@@ -497,7 +440,9 @@ class TestBareKiIdJoinInBugsResolved:
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
+            repo_root,
+            "v1.1.0",
+            "2026-01-02",
             bugs_resolved="- KI-1.0.0.9 — resolved",
         )
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
@@ -508,9 +453,7 @@ class TestBareKiIdJoinInBugsResolved:
         # The content is generated without error
         assert content, "Expected non-empty CHANGELOG output"
 
-    def test_multiple_bare_ki_ids_all_joined(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_multiple_bare_ki_ids_all_joined(self, tmp_path: pathlib.Path) -> None:
         """Multiple bare KI IDs in Bugs Resolved are all joined from the ledger."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -537,7 +480,9 @@ class TestBareKiIdJoinInBugsResolved:
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
+            repo_root,
+            "v1.1.0",
+            "2026-01-02",
             bugs_resolved="- KI-1.0.0.1 — resolved\n- KI-1.0.0.2 — resolved",
         )
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
@@ -545,21 +490,15 @@ class TestBareKiIdJoinInBugsResolved:
 
         content = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0", "v1.1.0"], bugs_dir)
 
-        entry_match = re.search(
-            r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL
-        )
+        entry_match = re.search(r"## v1\.1\.0.*?(?=## v1\.0\.0|\Z)", content, re.DOTALL)
         assert entry_match is not None
         entry_text = entry_match.group(0)
         fixed_match = re.search(r"### Fixed\n(.+?)(?=###|\Z)", entry_text, re.DOTALL)
         assert fixed_match is not None
         fixed_body = fixed_match.group(1)
 
-        assert "First crash symptom" in fixed_body, (
-            "KI-1.0.0.1 title not joined"
-        )
-        assert "Second crash symptom" in fixed_body, (
-            "KI-1.0.0.2 title not joined"
-        )
+        assert "First crash symptom" in fixed_body, "KI-1.0.0.1 title not joined"
+        assert "Second crash symptom" in fixed_body, "KI-1.0.0.2 title not joined"
 
 
 # ===========================================================================
@@ -571,9 +510,7 @@ class TestByteStabilityRegressionCleanSymptoms:
     """Bugs with clean (no-fence, no-FAILED, no-$) symptoms are unchanged
     by sanitization — the Fixed entry content is byte-stable."""
 
-    def test_clean_symptom_produces_same_fixed_entry(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_clean_symptom_produces_same_fixed_entry(self, tmp_path: pathlib.Path) -> None:
         """A bug with a clean single-sentence symptom produces the same Fixed line
         before and after the sanitization fix (byte-stable regression)."""
         bugs_dir = tmp_path / "bugs"
@@ -591,8 +528,7 @@ class TestByteStabilityRegressionCleanSymptoms:
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0001**: Widget crashes on startup. Fixed."
+            repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0001**: Widget crashes on startup. Fixed."
         )
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
@@ -607,9 +543,7 @@ class TestByteStabilityRegressionCleanSymptoms:
         content2 = regenerate(repo_root, ["v1.1.0", "v1.0.0"], ["v1.0.0"], bugs_dir)
         assert content == content2
 
-    def test_internal_only_clean_bug_stable_in_fixed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_internal_only_clean_bug_stable_in_fixed(self, tmp_path: pathlib.Path) -> None:
         """An internal-only bug with a clean symptom renders stably in Fixed."""
         bugs_dir = tmp_path / "bugs"
         _make_bug_file(
@@ -625,8 +559,7 @@ class TestByteStabilityRegressionCleanSymptoms:
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         _make_release_notes(
-            repo_root, "v1.1.0", "2026-01-02",
-            bug_fixes="- **BUG-0002**: Internal scheduler race. Fixed."
+            repo_root, "v1.1.0", "2026-01-02", bug_fixes="- **BUG-0002**: Internal scheduler race. Fixed."
         )
         _make_release_notes(repo_root, "v1.0.0", "2026-01-01")
         _make_published(repo_root, ["v1.0.0"])
@@ -718,9 +651,7 @@ class TestSanitizeSymptomForTitle:
             ),
         ],
     )
-    def test_sanitize_symptom_for_title(
-        self, raw: str, must_contain: list[str], must_not_contain: list[str]
-    ) -> None:
+    def test_sanitize_symptom_for_title(self, raw: str, must_contain: list[str], must_not_contain: list[str]) -> None:
         result = _sanitize_symptom_for_title(raw)
         if raw == "":
             assert result == ""
@@ -751,9 +682,7 @@ class TestExtractKiIdFromLine:
                 "KI-1.0.0.1",
                 id="bullet_with_em_dash_separator_extracted",
             ),
-            pytest.param(
-                "* KI-1.0.0.2 — text", "KI-1.0.0.2", id="star_bullet_extracted"
-            ),
+            pytest.param("* KI-1.0.0.2 — text", "KI-1.0.0.2", id="star_bullet_extracted"),
             pytest.param(
                 "KI-1.0.0.3 — resolved",
                 "KI-1.0.0.3",
@@ -764,12 +693,8 @@ class TestExtractKiIdFromLine:
                 "",
                 id="ki_id_mid_sentence_not_extracted",
             ),
-            pytest.param(
-                "- BUG-0001 — symptom", "", id="bug_id_line_not_extracted_as_ki"
-            ),
-            pytest.param(
-                "All five known issues resolved.", "", id="plain_prose_not_extracted"
-            ),
+            pytest.param("- BUG-0001 — symptom", "", id="bug_id_line_not_extracted_as_ki"),
+            pytest.param("All five known issues resolved.", "", id="plain_prose_not_extracted"),
         ],
     )
     def test_extract_ki_id_from_line(self, line: str, expected: str) -> None:

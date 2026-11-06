@@ -18,8 +18,9 @@ Writers covered here:
 
 Every test runs shipped code on a fixture file. discovery_state.sh,
 wake_driver_finalize.sh and the OVERWATCH check are sourced whole (the
-check's collaborators overwatch_backup_file / overwatch_log_action are
-stubbed, as the OVERWATCH check tests do). Every fixture lives under
+check's collaborators overwatch_backup_file / overwatch_log_action /
+overwatch_deposit_bug are stubbed, as the OVERWATCH check tests do). Every
+fixture lives under
 pytest's tmp_path; no live task folder or kanban install is touched.
 
 Naming: function names describe behavior under test, never bug IDs or task
@@ -208,8 +209,11 @@ def _remediate(tmp_path: pathlib.Path, text: str) -> str:
     result = run_bash(
         tmp_path,
         f"set -euo pipefail\n{_OW_STUBS}source '{_CHECK_README_BUNDLED}'\n"
+        # Defined after the source, which brings in the real one: the bug
+        # deposit is a collaborator here, answered with a filed bug's path.
+        f"overwatch_deposit_bug() {{ cat >/dev/null; echo '{bugs_dir}/BUG-0001-example.md'; }}\n"
         f"_CRB_TASK_ID='{task_dir.name}' _CRB_TASK_DIR='{task_dir}' _CRB_BAD_INPUT='{_BAD_INPUT}' "
-        f"_CRB_BUGS_DIR='{bugs_dir}' _CRB_BUG_NUM=0001 _crb_do_remediate",
+        f"_CRB_PROJECT=example _crb_do_remediate",
     )
     assert result.returncode == 0, _explain(result)
     return (task_dir / "status.md").read_text(encoding="utf-8")
@@ -227,16 +231,16 @@ def _pm_status(empty: str, with_reason: bool = False) -> str:
     if with_reason:
         bodies.append(("Blocked Reason", "old reason"))
     bodies.append(("Next Recommended Step", "keep me too"))
-    return "# Status\n" + "".join(
-        f"\n## {h}\n" + ("" if h == empty else f"{b}\n") for h, b in bodies
-    )
+    return "# Status\n" + "".join(f"\n## {h}\n" + ("" if h == empty else f"{b}\n") for h, b in bodies)
 
 
 def _assert_remediated(after: str) -> None:
     assert _body(after, "## State") == "WONT-DO", after
     assert _body(after, "## Needs Human") == "no", after
     assert _body(after, "## Summary").startswith("PM task marked WONT-DO by OVERWATCH check-readme-bundled"), after
-    assert _body(after, "## Blocked Reason").startswith(f"Input path points at a README.md or templates/ file: {_BAD_INPUT}."), after
+    assert _body(after, "## Blocked Reason").startswith(
+        f"Input path points at a README.md or templates/ file: {_BAD_INPUT}."
+    ), after
 
 
 @pytest.mark.parametrize("empty", ["State", "Summary", "Needs Human"])

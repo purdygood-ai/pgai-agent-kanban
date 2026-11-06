@@ -122,7 +122,7 @@ def compute_halt_state(project_root: Path) -> "tuple[str, str | None]":
         except OSError:
             body = ""
         normalised = body.strip().lower()
-        event: "str | None" = normalised if normalised else None
+        event: str | None = normalised if normalised else None
         return ("halted", event)
 
     # --- HALT-AFTER: delegate token parsing to the existing helper ---

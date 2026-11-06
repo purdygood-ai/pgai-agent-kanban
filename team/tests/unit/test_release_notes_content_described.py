@@ -147,9 +147,7 @@ def _make_bundle(tmp_path: pathlib.Path, item_paths: list[pathlib.Path]) -> path
 
 
 class TestBugSubstanceExtraction:
-    def test_symptom_renders_as_bullet_and_fix_text_never_appears(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_symptom_renders_as_bullet_and_fix_text_never_appears(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0042-race-condition-retry-write.md"
         bug.write_text(
             "# BUG-0042-race-condition-retry-write\n\n"
@@ -167,16 +165,13 @@ class TestBugSubstanceExtraction:
         notes = _generate_notes(tmp_path, bundle_file=str(bundle))
 
         assert _bullet_lines(notes, "Bug Fixes") == [
-            "- Fixed: Two agents wrote the retry record file at the same "
-            "time and corrupted it."
+            "- Fixed: Two agents wrote the retry record file at the same " "time and corrupted it."
         ]
         assert "Serialize writes" not in notes
         assert "file lock" not in notes
         assert "BUG-0042" not in notes
 
-    def test_fix_only_bug_renders_generic_fallback_not_its_fix_text(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fix_only_bug_renders_generic_fallback_not_its_fix_text(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0045-fix-only-report.md"
         bug.write_text(
             "# BUG-0045-fix-only-report\n\n"
@@ -192,16 +187,13 @@ class TestBugSubstanceExtraction:
         notes = _generate_notes(tmp_path, bundle_file=str(bundle))
 
         assert _bullet_lines(notes, "Bug Fixes") == [
-            "- Fixed an internal defect (no Symptom/Fix text recorded in the "
-            "bug report)."
+            "- Fixed an internal defect (no Symptom/Fix text recorded in the " "bug report)."
         ]
         for fix_fragment in ("implementer to choose", "options", "archive step", "wake chain"):
             assert fix_fragment not in notes
         assert "BUG-0045" not in notes
 
-    def test_symptom_only_falls_back_to_fixed_prefix_with_no_bare_id(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_symptom_only_falls_back_to_fixed_prefix_with_no_bare_id(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0043-duplicate-pm-tickets.md"
         bug.write_text(
             "# BUG-0043-duplicate-pm-tickets\n\n"
@@ -215,15 +207,10 @@ class TestBugSubstanceExtraction:
 
         notes = _generate_notes(tmp_path, bundle_file=str(bundle))
 
-        assert (
-            "- Fixed: PM decomposed the same requirements document twice, "
-            "producing duplicate tickets." in notes
-        )
+        assert "- Fixed: PM decomposed the same requirements document twice, " "producing duplicate tickets." in notes
         assert "BUG-0043" not in notes
 
-    def test_no_symptom_or_fix_falls_back_to_generic_id_free_sentence(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_no_symptom_or_fix_falls_back_to_generic_id_free_sentence(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0044-empty-report.md"
         bug.write_text(
             "# BUG-0044-empty-report\n\n## Status\nopen\n",
@@ -244,9 +231,7 @@ class TestBugSubstanceExtraction:
 
 
 class TestPrioritySubstanceExtraction:
-    def test_title_section_renders_as_bullet_with_no_bare_id(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_title_section_renders_as_bullet_with_no_bare_id(self, tmp_path: pathlib.Path) -> None:
         priority = tmp_path / "PRIORITY-0007-add-dashboard-filter.md"
         priority.write_text(
             "# PRIORITY-0007-add-dashboard-filter\n\n"
@@ -264,9 +249,7 @@ class TestPrioritySubstanceExtraction:
         assert "- Add a status filter to the operator dashboard." in notes
         assert "PRIORITY-0007" not in notes
 
-    def test_description_only_falls_back_when_title_absent(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_description_only_falls_back_when_title_absent(self, tmp_path: pathlib.Path) -> None:
         priority = tmp_path / "PRIORITY-0008-improve-error-copy.md"
         priority.write_text(
             "# PRIORITY-0008-improve-error-copy\n\n"
@@ -279,10 +262,7 @@ class TestPrioritySubstanceExtraction:
 
         notes = _generate_notes(tmp_path, bundle_file=str(bundle))
 
-        assert (
-            "- Rewrite the gate refusal message so a stranger understands it."
-            in notes
-        )
+        assert "- Rewrite the gate refusal message so a stranger understands it." in notes
         assert "PRIORITY-0008" not in notes
 
 
@@ -293,9 +273,7 @@ class TestPrioritySubstanceExtraction:
 
 
 class TestInternalIdScrubbingAndPublicIdPassthrough:
-    def test_inline_mention_of_a_different_bug_id_is_scrubbed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_inline_mention_of_a_different_bug_id_is_scrubbed(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0050-regression-of-earlier-fix.md"
         bug.write_text(
             "# BUG-0050-regression-of-earlier-fix\n\n"
@@ -317,14 +295,9 @@ class TestInternalIdScrubbingAndPublicIdPassthrough:
         # than the identifier-as-noun-phrase cases elsewhere in this suite,
         # but it still visibly stands in for the removed token instead of
         # trailing off mid-clause.
-        assert (
-            "- Fixed: The queue guard went missing during the another item cleanup."
-            in notes
-        )
+        assert "- Fixed: The queue guard went missing during the another item cleanup." in notes
 
-    def test_inline_public_ki_id_passes_through_unchanged(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_inline_public_ki_id_passes_through_unchanged(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0051-followup-to-disclosed-issue.md"
         bug.write_text(
             "# BUG-0051-followup-to-disclosed-issue\n\n"
@@ -338,10 +311,7 @@ class TestInternalIdScrubbingAndPublicIdPassthrough:
         notes = _generate_notes(tmp_path, bundle_file=str(bundle))
 
         assert "BUG-0051" not in notes
-        assert (
-            "- Fixed: An edge case from public disclosure KI-1.2.3.4 still reproduced."
-            in notes
-        )
+        assert "- Fixed: An edge case from public disclosure KI-1.2.3.4 still reproduced." in notes
 
 
 # ---------------------------------------------------------------------------
@@ -358,12 +328,8 @@ class TestInternalIdScrubbingAndPublicIdPassthrough:
 
 
 class TestTaskIdSlugScrubbing:
-    @pytest.mark.parametrize(
-        "prefix", ["PM", "CODER", "WRITER", "CM", "TESTER", "PO"]
-    )
-    def test_task_id_and_its_kebab_slug_are_both_scrubbed(
-        self, tmp_path: pathlib.Path, prefix: str
-    ) -> None:
+    @pytest.mark.parametrize("prefix", ["PM", "CODER", "WRITER", "CM", "TESTER", "PO"])
+    def test_task_id_and_its_kebab_slug_are_both_scrubbed(self, tmp_path: pathlib.Path, prefix: str) -> None:
         task_id = f"{prefix}-20260909-045-verify-2-14-1"
         bug = tmp_path / "BUG-0070-task-id-in-symptom-text.md"
         bug.write_text(
@@ -387,10 +353,7 @@ class TestTaskIdSlugScrubbing:
         # ordinary English instead of trailing off after "Source Task: ".
         assert not _STRANDED_HYPHEN_FRAGMENT_RE.search(notes), notes
         assert "-verify-2-14-1" not in notes
-        assert (
-            "- Fixed: The guard went missing after the earlier attempt "
-            "(Source Task: another item)."
-        ) in notes
+        assert ("- Fixed: The guard went missing after the earlier attempt " "(Source Task: another item).") in notes
 
 
 # ---------------------------------------------------------------------------
@@ -410,9 +373,7 @@ def _pgai_temp_root() -> pathlib.Path:
     # anti-pattern-allowlist: 2 (justification: mirrors temp.sh's own documented
     # hard-coded fallback default; this test intentionally exercises that exact
     # resolver contract rather than routing through it)
-    root = pathlib.Path(
-        os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR") or "/tmp/pgai_kanban_tmp"
-    )
+    root = pathlib.Path(os.environ.get("PGAI_AGENT_KANBAN_TEMP_DIR") or "/tmp/pgai_kanban_tmp")
     scratch_root = root / _SCRATCH_SUBDIR
     scratch_root.mkdir(parents=True, exist_ok=True)
     return scratch_root
@@ -432,9 +393,7 @@ def lint_scan_dir():
 
 
 def _import_lint_module():
-    spec = importlib.util.spec_from_file_location(
-        "lint_hygiene", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_hygiene", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -477,9 +436,7 @@ def test_generated_notes_pass_provenance_lint_with_no_carve_out(
 
     lint = _import_lint_module()
     findings = lint._scan_file("provenance", scanned_file)
-    assert findings == [], (
-        f"lint_hygiene's provenance class found findings in generated release notes: {findings}"
-    )
+    assert findings == [], f"lint_hygiene's provenance class found findings in generated release notes: {findings}"
 
 
 # ---------------------------------------------------------------------------
@@ -503,9 +460,7 @@ def test_symptom_text_already_bulleted_renders_as_one_bullet(tmp_path: pathlib.P
     notes = _generate_notes(tmp_path, bundle_file=str(_make_bundle(tmp_path, [bug])))
 
     lines = _bullet_lines(notes, "Bug Fixes")
-    assert lines == [
-        "- Fixed: `team/scripts/lib/example.sh` kept its report parser inline past the size ceiling."
-    ]
+    assert lines == ["- Fixed: `team/scripts/lib/example.sh` kept its report parser inline past the size ceiling."]
     assert not any(line.startswith("- - ") for line in notes.splitlines())
 
 
@@ -519,9 +474,7 @@ def test_files_involved_suggestions_are_not_rendered_as_the_change(tmp_path: pat
     )
     notes = _generate_notes(tmp_path, bundle_file=str(_make_bundle(tmp_path, [bug])))
 
-    assert _bullet_lines(notes, "Bug Fixes") == [
-        "- Fixed: The ship-policy stage exceeded the engine-size ceiling."
-    ]
+    assert _bullet_lines(notes, "Bug Fixes") == ["- Fixed: The ship-policy stage exceeded the engine-size ceiling."]
     assert "split along its own seams" not in notes
 
 
@@ -536,8 +489,7 @@ def test_commit_subject_fallback_renders_one_bullet_per_subject(tmp_path: pathli
         subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", subject], check=True)
 
     rc = release_notes_main(
-        ["none", str(repo), "v9.9.9", "FUNCTIONAL",
-         "2026-08-08", "test-project", base, "main", "", ""]
+        ["none", str(repo), "v9.9.9", "FUNCTIONAL", "2026-08-08", "test-project", base, "main", "", ""]
     )
     assert rc == 0, f"release-notes generator returned {rc}"
     notes = (repo / "release-notes" / "v9.9.9.md").read_text(encoding="utf-8")
@@ -597,9 +549,7 @@ class TestLeadSentenceExtraction:
         assert "second sentence" not in notes
         assert "Reword" not in notes
 
-    def test_period_inside_a_code_span_does_not_end_the_sentence(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_period_inside_a_code_span_does_not_end_the_sentence(self, tmp_path: pathlib.Path) -> None:
         bug = tmp_path / "BUG-0081-dotted-code-span.md"
         bug.write_text(
             "# BUG-0081-dotted-code-span\n\n## Status\nopen\n\n"
@@ -611,10 +561,7 @@ class TestLeadSentenceExtraction:
         notes = _generate_notes(tmp_path, bundle_file=str(_make_bundle(tmp_path, [bug])))
 
         bullets = _bullet_lines(notes, "Bug Fixes")
-        assert bullets == [
-            "- Fixed: The parser split `Stop. Then resume` into two commands "
-            "and dropped the second."
-        ]
+        assert bullets == ["- Fixed: The parser split `Stop. Then resume` into two commands " "and dropped the second."]
         _assert_balanced(bullets[0])
 
 
@@ -669,8 +616,7 @@ _SHAPED_SYMPTOMS = [
         "branch (raised by CODER-20261001-012-gate-helper):\n"
         "* `test_transition_goes_through_the_writer` (`assert 'BLOCKED' == 'DONE'`)\n"
         "* `test_failed_writes_leave_the_state_alone`\n",
-        "- Fixed: Two unit tests fail on the release branch and pass on the "
-        "main branch (raised by another item).",
+        "- Fixed: Two unit tests fail on the release branch and pass on the " "main branch (raised by another item).",
         ["test_transition_goes_through_the_writer", "'BLOCKED' == 'DONE'"],
     ),
     (
@@ -707,9 +653,7 @@ class TestShapedSymptomSections:
         return _generate_notes(tmp_path, bundle_file=str(_make_bundle(tmp_path, paths)))
 
     def test_each_shape_renders_its_lead_sentence_as_one_bullet(self, shaped_notes: str) -> None:
-        assert _bullet_lines(shaped_notes, "Bug Fixes") == [
-            expected for _, _, expected, _ in _SHAPED_SYMPTOMS
-        ]
+        assert _bullet_lines(shaped_notes, "Bug Fixes") == [expected for _, _, expected, _ in _SHAPED_SYMPTOMS]
 
     def test_bullets_carry_no_fence_list_or_fix_text(self, shaped_notes: str) -> None:
         bullets = _bullet_lines(shaped_notes, "Bug Fixes")
@@ -725,7 +669,5 @@ class TestShapedSymptomSections:
 
     def test_bullets_carry_zero_internal_ids(self, shaped_notes: str) -> None:
         bullets = "\n".join(_bullet_lines(shaped_notes, "Bug Fixes"))
-        assert not re.search(
-            r"\b(?:BUG|PRIORITY)-\d|\b(?:CODER|WRITER|TESTER|CM|PM|PO)-\d", bullets
-        ), bullets
+        assert not re.search(r"\b(?:BUG|PRIORITY)-\d|\b(?:CODER|WRITER|TESTER|CM|PM|PO)-\d", bullets), bullets
         assert not _STRANDED_HYPHEN_FRAGMENT_RE.search(bullets), bullets

@@ -505,23 +505,13 @@ cm_release_preflight() {
   # --- Resolve REPO_ROOT from project.cfg dev_tree_path ---
   # REPO_ROOT may be overridden by the environment; otherwise derive from project.cfg.
   if [[ -z "${REPO_ROOT:-}" ]]; then
-    pp_load_config "$PROJECT_NAME" || {
-      echo "ERROR: could not load project.cfg for project '$PROJECT_NAME'" >&2
-      echo "  Expected: $(pp_project_root "$PROJECT_NAME" 2>/dev/null || echo "<unresolvable>")/project.cfg" >&2
-      # BLOCK-WORTHY: an unloadable project.cfg leaves REPO_ROOT unknown --
-      # release preflight cannot validate a dev tree it cannot locate.
-      # CENSUS-ANCHOR: release-preflight-config-unloadable-01
-      exit 1
-    }
-    REPO_ROOT="${PP_dev_tree_path:-}"
-    if [[ -z "$REPO_ROOT" ]]; then
-      echo "ERROR: dev_tree_path is not set in project.cfg for project '$PROJECT_NAME'" >&2
-      echo "  Add 'dev_tree_path=<path>' to $(pp_project_root "$PROJECT_NAME")/project.cfg" >&2
-      # BLOCK-WORTHY: same reasoning as release-preflight-config-unloadable-01
-      # -- a blank dev_tree_path is as unusable as a missing project.cfg.
-      # CENSUS-ANCHOR: release-preflight-dev-tree-path-unset-01
-      exit 1
-    fi
+    # BLOCK-WORTHY: an unloadable project.cfg, or one naming no
+    # dev_tree_path, leaves REPO_ROOT unknown -- release preflight cannot
+    # validate a dev tree it cannot locate. pp_load_project_repo_root has
+    # named which.
+    # CENSUS-ANCHOR: release-preflight-repo-root-01
+    pp_load_project_repo_root "$PROJECT_NAME" || exit 1
+    REPO_ROOT="$PP_REPO_ROOT"
   fi
 
   # --- Resolve project root and hooks directory ---

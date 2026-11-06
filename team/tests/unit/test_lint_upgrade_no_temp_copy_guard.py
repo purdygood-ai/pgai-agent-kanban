@@ -34,12 +34,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Load lint_upgrade_no_temp_copy_guard.py as a module.
@@ -47,7 +45,7 @@ import pytest
 # Going up three levels: unit/ → tests/ → team/
 # ---------------------------------------------------------------------------
 _THIS_FILE = Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent    # team/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_upgrade_no_temp_copy_guard.py"
 _REAL_UPGRADE_SH = _SCRIPTS_DIR / "upgrade.sh"
@@ -55,9 +53,7 @@ _REAL_UPGRADE_SH = _SCRIPTS_DIR / "upgrade.sh"
 
 def _import_lint_module():
     """Import lint_upgrade_no_temp_copy_guard as a module."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_upgrade_no_temp_copy_guard", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_upgrade_no_temp_copy_guard", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -73,8 +69,7 @@ _lint = _import_lint_module()
 # This is the canonical positive-detection fixture: all three identifiers
 # appear as executable code, not in comments.
 # ---------------------------------------------------------------------------
-_GUARD_BLOCK_FIXTURE = textwrap.dedent(
-    """\
+_GUARD_BLOCK_FIXTURE = textwrap.dedent("""\
     #!/usr/bin/env bash
     # upgrade.sh — synthetic fixture for test_lint_upgrade_no_temp_copy_guard.py
     # The lines below are executable, not comments, so they must trigger the lint.
@@ -86,8 +81,7 @@ _GUARD_BLOCK_FIXTURE = textwrap.dedent(
     export _PGAI_UPGRADE_REEXEC=1
     exec bash "$_PGAI_UPGRADE_SELF_COPY" "$@"
     echo "This line is never reached when the guard fires."
-    """
-)
+    """)
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +118,7 @@ def test_guard_fires_on_fixture_with_retired_block(tmp_path: Path) -> None:
         assert identifier in reported_lines, (
             f"Expected retired identifier '{identifier}' to appear in the hit lines "
             f"reported by find_executable_hits(), but it was not found.\n"
-            f"Reported hits:\n"
-            + "\n".join(f"  line {n}: {l}" for n, l in hits)
+            f"Reported hits:\n" + "\n".join(f"  line {n}: {l}" for n, l in hits)
         )
 
 
@@ -185,8 +178,7 @@ def test_clean_upgrade_sh_passes() -> None:
         f"{_REAL_UPGRADE_SH}.  The two-phase architecture retired these identifiers; "
         f"their reappearance indicates a squash-merge conflict or direct edit "
         f"restored the pre-retirement block.\n\n"
-        f"Executable hits ({len(hits)}):\n"
-        + "\n".join(f"  line {n}: {l}" for n, l in hits)
+        f"Executable hits ({len(hits)}):\n" + "\n".join(f"  line {n}: {l}" for n, l in hits)
     )
 
 
@@ -201,8 +193,7 @@ def test_clean_upgrade_sh_main_exits_zero() -> None:
     exit_code = _lint.main(["--upgrade-sh", str(_REAL_UPGRADE_SH)])
 
     assert exit_code == 0, (
-        f"Expected lint main() to return 0 for the clean real upgrade.sh, "
-        f"but got exit code {exit_code}."
+        f"Expected lint main() to return 0 for the clean real upgrade.sh, " f"but got exit code {exit_code}."
     )
 
 
@@ -215,8 +206,7 @@ def test_comment_lines_are_exempt(tmp_path: Path) -> None:
     """
     comment_only_fixture = tmp_path / "upgrade_with_comment_refs.sh"
     comment_only_fixture.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             # This script no longer uses _PGAI_UPGRADE_SELF_COPY, _PGAI_UPGRADE_REEXEC,
             # or _PGAI_UPGRADE_ORIG_DIR.  Those variables were part of the retired
@@ -226,8 +216,7 @@ def test_comment_lines_are_exempt(tmp_path: Path) -> None:
             # _PGAI_UPGRADE_REEXEC: set to 1 to signal re-exec'd children.
             # _PGAI_UPGRADE_ORIG_DIR: stored the original script directory.
             echo "Upgrade complete (no guard variables in executable code)"
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -249,8 +238,7 @@ def test_each_identifier_detected_independently(tmp_path: Path) -> None:
     for identifier in _lint.RETIRED_IDENTIFIERS:
         fixture = tmp_path / f"upgrade_single_{identifier}.sh"
         fixture.write_text(
-            f"#!/usr/bin/env bash\n"
-            f"{identifier}='synthetic_value'  # executable assignment\n",
+            f"#!/usr/bin/env bash\n" f"{identifier}='synthetic_value'  # executable assignment\n",
             encoding="utf-8",
         )
 
@@ -263,9 +251,10 @@ def test_each_identifier_detected_independently(tmp_path: Path) -> None:
         )
 
         found_identifiers = [line for _, line in hits if identifier in line]
-        assert found_identifiers, (
-            f"The lint reported hits for the fixture but none contained '{identifier}':\n"
-            + "\n".join(f"  line {n}: {l}" for n, l in hits)
+        assert (
+            found_identifiers
+        ), f"The lint reported hits for the fixture but none contained '{identifier}':\n" + "\n".join(
+            f"  line {n}: {l}" for n, l in hits
         )
 
 
@@ -283,7 +272,4 @@ def test_main_returns_two_for_missing_file(tmp_path: Path) -> None:
 
     exit_code = _lint.main(["--upgrade-sh", str(missing)])
 
-    assert exit_code == 2, (
-        f"Expected lint main() to return 2 for a missing path, "
-        f"but got {exit_code}."
-    )
+    assert exit_code == 2, f"Expected lint main() to return 2 for a missing path, " f"but got {exit_code}."

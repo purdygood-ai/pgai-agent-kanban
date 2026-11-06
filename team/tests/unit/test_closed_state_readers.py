@@ -68,7 +68,8 @@ def test_requirements_eligibility_skips_a_superseded_file_as_closed(tmp_path: pa
     req.mkdir()
     for version, status in (("v1.1.0", "open"), ("v1.2.0", "superseded"), ("v1.3.0", "wont-do")):
         (req / f"{version}-reader.md").write_text(
-            f"# {version}\n\n## Target Version\n{version}\n\n## Status\n{status}\n", encoding="utf-8",
+            f"# {version}\n\n## Target Version\n{version}\n\n## Status\n{status}\n",
+            encoding="utf-8",
         )
     err = io.StringIO()
 
@@ -81,7 +82,8 @@ def test_requirements_eligibility_skips_a_superseded_file_as_closed(tmp_path: pa
 
 @pytest.mark.parametrize("bundle_status", [*CLOSED_STATES, "superseded"])
 def test_a_running_item_listed_only_by_a_closed_bundle_is_carried(
-    tmp_path: pathlib.Path, bundle_status: str,
+    tmp_path: pathlib.Path,
+    bundle_status: str,
 ) -> None:
     req = tmp_path / "requirements"
     req.mkdir()

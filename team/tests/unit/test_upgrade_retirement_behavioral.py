@@ -63,6 +63,8 @@ import textwrap
 
 import pytest
 
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
+
 # ---------------------------------------------------------------------------
 # Paths to the real scripts (dev-tree layout, relative to this test file)
 # ---------------------------------------------------------------------------
@@ -81,6 +83,8 @@ _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 _REAL_CONFIG_LOADER_SH = _TEAM_SCRIPTS_DIR / "lib" / "config_loader.sh"
+_REAL_DEV_TREE_SH = _TEAM_SCRIPTS_DIR / "lib" / "dev_tree.sh"
+_REAL_PP_RUN_OPS_SH = _TEAM_SCRIPTS_DIR / "lib" / "pp_run_ops.sh"
 
 _TEAM_TEMPLATES_DIR = pathlib.Path(__file__).parent.parent.parent / "templates"
 _REAL_RETIRED_FILES_TXT = _TEAM_TEMPLATES_DIR / "retired-files.txt"
@@ -169,12 +173,17 @@ def _build_retirement_sandbox(
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
         _REAL_RETIRED_LINT_SH,
         _REAL_VERSION_STAMP_SH,
-        _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_SUBAGENT_DEPLOY_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
     ]
     for lib_src in _lib_sources:
         if lib_src.exists():
@@ -191,12 +200,10 @@ def _build_retirement_sandbox(
 
     # --- Kanban root: kanban.cfg pointing at the dev tree ---
     (kanban_root / "kanban.cfg").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             [paths]
             dev_tree_path = {dev_tree}
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -214,9 +221,7 @@ def _build_retirement_sandbox(
         # Fallback: write the known v1.3.0 manifest entries inline so the test
         # does not depend on the manifest file being present in the dev tree.
         (installed_templates / "retired-files.txt").write_text(
-            "# retired in v1.3.0 (pipeline-in-plugin)\n"
-            "workflows/release.yaml\n"
-            "workflows/document.yaml\n",
+            "# retired in v1.3.0 (pipeline-in-plugin)\n" "workflows/release.yaml\n" "workflows/document.yaml\n",
             encoding="utf-8",
         )
 
@@ -225,13 +230,11 @@ def _build_retirement_sandbox(
     workflows_dir.mkdir()
     for fossil_type in fossils:
         (workflows_dir / f"{fossil_type}.yaml").write_text(
-            textwrap.dedent(
-                f"""\
+            textwrap.dedent(f"""\
                 # Fossil pipeline file for {fossil_type} (pre-v1.3.0 layout).
                 # Retirement step must move this file to the graveyard.
                 type: {fossil_type}
-                """
-            ),
+                """),
             encoding="utf-8",
         )
 
@@ -241,10 +244,7 @@ def _build_retirement_sandbox(
         custom_path.parent.mkdir(parents=True, exist_ok=True)
         # Write binary-safe content so byte comparison is meaningful.
         custom_path.write_bytes(
-            b"# operator-authored workflow config\n"
-            b"[workflow]\n"
-            b"type = my-custom-type\n"
-            b"version = 1.0\n"
+            b"# operator-authored workflow config\n" b"[workflow]\n" b"type = my-custom-type\n" b"version = 1.0\n"
         )
 
     # --- Kanban root: optional stale files an earlier release deposited ---
@@ -265,9 +265,7 @@ def _build_retirement_sandbox(
     # team/ stubs for each item the deposit loop iterates over.
     (dev_tree / "team").mkdir(parents=True, exist_ok=True)
     for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
-        (dev_tree / "team" / doc_name).write_text(
-            f"# {doc_name} stub\n", encoding="utf-8"
-        )
+        (dev_tree / "team" / doc_name).write_text(f"# {doc_name} stub\n", encoding="utf-8")
     for sub_name in ["roles", "pm-agent", "workflows", "pgai_agent_kanban", "halt_after", "demos"]:
         sub_dir = dev_tree / "team" / sub_name
         sub_dir.mkdir(parents=True, exist_ok=True)
@@ -281,6 +279,7 @@ def _build_retirement_sandbox(
     for lib_src in _lib_sources:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_scripts_lib / lib_src.name)
+    seed_provider_home_rule(dev_tree / "team")
 
     # Dev tree templates/ — same manifest as installed root.
     dev_templates = dev_tree / "team" / "templates"
@@ -294,9 +293,7 @@ def _build_retirement_sandbox(
         shutil.copy2(_REAL_RETIRED_FILES_TXT, dev_templates / "retired-files.txt")
     else:
         (dev_templates / "retired-files.txt").write_text(
-            "# retired in v1.3.0 (pipeline-in-plugin)\n"
-            "workflows/release.yaml\n"
-            "workflows/document.yaml\n",
+            "# retired in v1.3.0 (pipeline-in-plugin)\n" "workflows/release.yaml\n" "workflows/document.yaml\n",
             encoding="utf-8",
         )
 
@@ -328,11 +325,13 @@ def _run_upgrade(
     fake_home.mkdir(exist_ok=True)
 
     env = dict(os.environ)
-    env.update({
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(pgai_temp),
-        "HOME": str(fake_home),
-    })
+    env.update(
+        {
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(pgai_temp),
+            "HOME": str(fake_home),
+        }
+    )
 
     return subprocess.run(
         [
@@ -340,8 +339,10 @@ def _run_upgrade(
             str(kanban_root / "scripts" / "upgrade.sh"),
             "--force",
             "--no-backup",
-            "--dev-tree", str(dev_tree),
-            "--stamp-version", "sandbox-test",
+            "--dev-tree",
+            str(dev_tree),
+            "--stamp-version",
+            "sandbox-test",
         ],
         capture_output=True,
         text=True,
@@ -430,21 +431,16 @@ def test_two_sided_fixture_fossil_retired_and_custom_plugin_bytes_unchanged(
 
     # Side A: the fossil must be in the graveyard, not at the live root.
     assert not (kanban_root / "workflows" / "release.yaml").exists(), (
-        "workflows/release.yaml still exists at the live root after upgrade; "
-        "the retirement step did not move it."
+        "workflows/release.yaml still exists at the live root after upgrade; " "the retirement step did not move it."
     )
     graveyard = _graveyard_dir(kanban_root)
-    assert graveyard is not None, (
-        "No retired/<ts>/ directory was created; retirement step did not fire."
-    )
-    assert (graveyard / "workflows" / "release.yaml").exists(), (
-        f"workflows/release.yaml not found in graveyard {graveyard}."
-    )
+    assert graveyard is not None, "No retired/<ts>/ directory was created; retirement step did not fire."
+    assert (
+        graveyard / "workflows" / "release.yaml"
+    ).exists(), f"workflows/release.yaml not found in graveyard {graveyard}."
 
     # Side B: the custom plugin must be byte-identical (not just same text).
-    assert custom_path.exists(), (
-        f"Operator custom plugin was removed or moved: {_CUSTOM_PLUGIN_REL}"
-    )
+    assert custom_path.exists(), f"Operator custom plugin was removed or moved: {_CUSTOM_PLUGIN_REL}"
     bytes_after = custom_path.read_bytes()
     assert bytes_after == bytes_before, (
         f"Operator custom plugin bytes changed after upgrade.\n"
@@ -454,14 +450,13 @@ def test_two_sided_fixture_fossil_retired_and_custom_plugin_bytes_unchanged(
 
     # Per-file retirement line must appear for the fossil.
     retire_lines = [
-        line for line in combined.splitlines()
+        line
+        for line in combined.splitlines()
         if _RETIRE_PREFIX in line and _RETIRE_MOVE_MARKER in line and "[upgrade]" in line
     ]
     assert any("release.yaml" in ln for ln in retire_lines), (
         f"No per-file retirement line mentioning release.yaml found.\n"
-        f"All retirement lines:\n"
-        + ("\n".join(retire_lines) or "  (none)")
-        + f"\n\nFull stdout:\n{result.stdout}"
+        f"All retirement lines:\n" + ("\n".join(retire_lines) or "  (none)") + f"\n\nFull stdout:\n{result.stdout}"
     )
 
 
@@ -492,17 +487,14 @@ def test_fresh_install_sandbox_has_no_retirement_artifacts(
     combined = result.stdout + result.stderr
 
     # No retired/ directory must exist.
-    assert not (kanban_root / "retired").exists(), (
-        "retired/ subtree was created even though no fossil files were present."
-    )
+    assert not (
+        kanban_root / "retired"
+    ).exists(), "retired/ subtree was created even though no fossil files were present."
 
     # Summary line must say "Retired: none" (the exact form upgrade.sh prints).
-    assert "Retired:" in combined, (
-        "The upgrade summary 'Retired:' line was not found in upgrade output."
-    )
+    assert "Retired:" in combined, "The upgrade summary 'Retired:' line was not found in upgrade output."
     retire_summary_lines = [
-        line for line in combined.splitlines()
-        if _RETIRE_PREFIX in line and _RETIRE_MOVE_MARKER not in line
+        line for line in combined.splitlines() if _RETIRE_PREFIX in line and _RETIRE_MOVE_MARKER not in line
     ]
     assert any("none" in ln for ln in retire_summary_lines), (
         f"Expected 'Retired: ... none' in summary, but found:\n"
@@ -512,14 +504,13 @@ def test_fresh_install_sandbox_has_no_retirement_artifacts(
 
     # No per-file retirement lines.
     per_file_lines = [
-        line for line in combined.splitlines()
-        if _RETIRE_PREFIX in line and _GRAVEYARD_PREFIX in line
-        and _RETIRE_MOVE_MARKER in line and "[upgrade]" in line
+        line
+        for line in combined.splitlines()
+        if _RETIRE_PREFIX in line and _GRAVEYARD_PREFIX in line and _RETIRE_MOVE_MARKER in line and "[upgrade]" in line
     ]
-    assert len(per_file_lines) == 0, (
-        f"Expected zero per-file retirement lines, found {len(per_file_lines)}:\n"
-        + "\n".join(per_file_lines)
-    )
+    assert (
+        len(per_file_lines) == 0
+    ), f"Expected zero per-file retirement lines, found {len(per_file_lines)}:\n" + "\n".join(per_file_lines)
 
 
 @pytest.mark.skipif(
@@ -596,9 +587,7 @@ def test_stale_shipped_files_are_retired_and_root_scan_flags_them_only_before(
 
     manifest_lines = [
         ln.strip()
-        for ln in (kanban_root / "templates" / "retired-files.txt").read_text(
-            encoding="utf-8"
-        ).splitlines()
+        for ln in (kanban_root / "templates" / "retired-files.txt").read_text(encoding="utf-8").splitlines()
         if ln.strip() and not ln.lstrip().startswith("#")
     ]
     missing_from_manifest = [p for p in _STALE_SHIPPED_FILES if p not in manifest_lines]
@@ -614,13 +603,9 @@ def test_stale_shipped_files_are_retired_and_root_scan_flags_them_only_before(
         f"present, got {scan_before.returncode}.\n"
         f"stdout:\n{scan_before.stdout}\nstderr:\n{scan_before.stderr}"
     )
-    not_flagged = [
-        p for p in _STALE_SHIPPED_FILES
-        if str(kanban_root / p) not in scan_before.stderr
-    ]
+    not_flagged = [p for p in _STALE_SHIPPED_FILES if str(kanban_root / p) not in scan_before.stderr]
     assert not not_flagged, (
-        f"Root scan did not flag these present stale files: {not_flagged}\n"
-        f"stderr:\n{scan_before.stderr}"
+        f"Root scan did not flag these present stale files: {not_flagged}\n" f"stderr:\n{scan_before.stderr}"
     )
 
     result = _run_upgrade(sandbox, tmp_path)
@@ -633,38 +618,32 @@ def test_stale_shipped_files_are_retired_and_root_scan_flags_them_only_before(
 
     combined = result.stdout + result.stderr
     graveyard = _graveyard_dir(kanban_root)
-    assert graveyard is not None, (
-        "No single retired/<ts>/ directory was created; retirement step did not fire."
-    )
+    assert graveyard is not None, "No single retired/<ts>/ directory was created; retirement step did not fire."
 
     retire_lines = [
-        line for line in combined.splitlines()
+        line
+        for line in combined.splitlines()
         if _RETIRE_PREFIX in line and _RETIRE_MOVE_MARKER in line and "[upgrade]" in line
     ]
 
     still_at_root = [p for p in _STALE_SHIPPED_FILES if (kanban_root / p).exists()]
     assert not still_at_root, (
-        f"Stale files still at the live root after upgrade: {still_at_root}\n"
-        f"stdout:\n{result.stdout}"
+        f"Stale files still at the live root after upgrade: {still_at_root}\n" f"stdout:\n{result.stdout}"
     )
-    not_in_graveyard = [
-        p for p in _STALE_SHIPPED_FILES if not (graveyard / p).is_file()
-    ]
+    not_in_graveyard = [p for p in _STALE_SHIPPED_FILES if not (graveyard / p).is_file()]
     assert not not_in_graveyard, (
-        f"Stale files not found under {graveyard} at their relative path: "
-        f"{not_in_graveyard}"
+        f"Stale files not found under {graveyard} at their relative path: " f"{not_in_graveyard}"
     )
     not_narrated = [
-        p for p in _STALE_SHIPPED_FILES
+        p
+        for p in _STALE_SHIPPED_FILES
         if not any(f"{p} -> " in ln and f"{_GRAVEYARD_PREFIX}" in ln for ln in retire_lines)
     ]
-    assert not not_narrated, (
-        f"No per-file retirement line for: {not_narrated}\n"
-        "All retirement lines:\n" + ("\n".join(retire_lines) or "  (none)")
+    assert not not_narrated, f"No per-file retirement line for: {not_narrated}\n" "All retirement lines:\n" + (
+        "\n".join(retire_lines) or "  (none)"
     )
     assert f"Retired:           {len(_STALE_SHIPPED_FILES)} file(s)" in combined, (
-        f"Summary line does not count all {len(_STALE_SHIPPED_FILES)} retirements.\n"
-        f"stdout:\n{result.stdout}"
+        f"Summary line does not count all {len(_STALE_SHIPPED_FILES)} retirements.\n" f"stdout:\n{result.stdout}"
     )
 
     # Root scan AFTER the upgrade: nothing listed remains, exit 0.

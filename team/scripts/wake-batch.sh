@@ -122,12 +122,12 @@ esac
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # Resolve kanban root: canonical var with default install path fallback.
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Resolve active provider from kanban.cfg [providers] active.
 # read_active_provider always returns a valid name (defaults to 'claude').

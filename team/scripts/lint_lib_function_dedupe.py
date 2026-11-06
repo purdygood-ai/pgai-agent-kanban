@@ -176,10 +176,12 @@ _LINT_NAME = "lib_function_dedupe"
 # define the same function names.  A duplicate is only reported when at least
 # one of the files defining the name is NOT in this set.
 # ---------------------------------------------------------------------------
-_DEFAULT_ALLOW_FILES: frozenset[str] = frozenset({
-    "provider_claude.sh",
-    "provider_codex.sh",
-})
+_DEFAULT_ALLOW_FILES: frozenset[str] = frozenset(
+    {
+        "provider_claude.sh",
+        "provider_codex.sh",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Function-definition pattern
@@ -194,9 +196,7 @@ _DEFAULT_ALLOW_FILES: frozenset[str] = frozenset({
 # lowercase.  Upper-case names (like RETIRED_IDENTIFIERS-style constants)
 # are not functions.
 # ---------------------------------------------------------------------------
-_FUNC_DEF_RE: re.Pattern[str] = re.compile(
-    r"^([a-z][a-z0-9_]*)\(\)"
-)
+_FUNC_DEF_RE: re.Pattern[str] = re.compile(r"^([a-z][a-z0-9_]*)\(\)")
 
 
 # ---------------------------------------------------------------------------
@@ -324,10 +324,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--lib-dir",
         metavar="PATH",
-        help=(
-            "Directory to scan (default: team/scripts/lib/ resolved from "
-            "this script's own location)."
-        ),
+        help=("Directory to scan (default: team/scripts/lib/ resolved from " "this script's own location)."),
     )
     parser.add_argument(
         "--allow-file",
@@ -371,8 +368,7 @@ def _findings(violations: dict[str, list[str]], *, lib_dir: Path) -> list[dict]:
         findings.append(
             quality_finding(
                 _LINT_NAME,
-                f"{func_name}() is defined in {len(filenames)} lib/*.sh files: "
-                f"{', '.join(paths)}",
+                f"{func_name}() is defined in {len(filenames)} lib/*.sh files: " f"{', '.join(paths)}",
                 f"keep one {func_name}() definition and remove or rename it in "
                 f"{', '.join(paths[1:])}, then re-check: {relint}",
                 file=paths[0],
@@ -400,8 +396,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not lib_dir.is_dir():
         print(
-            f"ERROR: lib directory not found: {lib_dir}\n"
-            "Use --lib-dir to specify an alternative path.",
+            f"ERROR: lib directory not found: {lib_dir}\n" "Use --lib-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
@@ -470,8 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     print(
-        f"lint_lib_function_dedupe: ok — "
-        f"{sh_count} lib/*.sh file(s) scanned, no duplicate function names.",
+        f"lint_lib_function_dedupe: ok — " f"{sh_count} lib/*.sh file(s) scanned, no duplicate function names.",
         flush=True,
     )
     return 0

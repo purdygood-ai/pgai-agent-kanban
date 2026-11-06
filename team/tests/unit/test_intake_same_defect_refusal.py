@@ -57,10 +57,7 @@ def _existing(status: str) -> str:
 
 
 def _draft(stem: str, symptom: str) -> str:
-    return (
-        f"# {stem}\n\n**Bug ID:** {stem}\n**Severity:** medium\n\n"
-        f"## Status\nopen\n\n## Symptom\n{symptom}\n"
-    )
+    return f"# {stem}\n\n**Bug ID:** {stem}\n**Severity:** medium\n\n" f"## Status\nopen\n\n## Symptom\n{symptom}\n"
 
 
 _CITING_SYMPTOM = "Same defect as BUG-9172: the lock file is still left behind after a crash."
@@ -125,9 +122,7 @@ def _run_intake(root: pathlib.Path, base: pathlib.Path, *args: str) -> subproces
 
 
 @pytest.mark.parametrize("status", ["open", "running", "needs-operator"])
-def test_intake_sh_refuses_a_draft_citing_a_live_bug_and_writes_nothing(
-    tmp_path: pathlib.Path, status: str
-) -> None:
+def test_intake_sh_refuses_a_draft_citing_a_live_bug_and_writes_nothing(tmp_path: pathlib.Path, status: str) -> None:
     project, ctx = _make_board(tmp_path, status)
     bugs = project / "bugs"
     before = _snapshot(bugs)

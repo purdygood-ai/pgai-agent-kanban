@@ -79,8 +79,14 @@ def _write(path: pathlib.Path, text: str = "", mtime: int | None = None) -> path
     return path
 
 
-def _task(project: pathlib.Path, task_id: str, state: str, role: str | None = "CODER",
-          report: str | None = None, mtime: int | None = None) -> pathlib.Path:
+def _task(
+    project: pathlib.Path,
+    task_id: str,
+    state: str,
+    role: str | None = "CODER",
+    report: str | None = None,
+    mtime: int | None = None,
+) -> pathlib.Path:
     task_dir = project / "tasks" / task_id
     _write(task_dir / "status.md", f"# Status\n\n## State\n{state}\n\n## Summary\nfixture\n", mtime=mtime)
     if role is not None:
@@ -97,9 +103,11 @@ def board(tmp_path: pathlib.Path) -> pathlib.Path:
     _write(root / "VERSION", "v9.1.0\n")
     _write(root / "projects.cfg", f"[project:{_PROJECT}]\npriority = 1\n[project:bare]\npriority = 2\n")
     project = root / "projects" / _PROJECT
-    _write(project / "release-state.md",
-           f"# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n{_RC_OPENED_AT}\n\n"
-           "## RC Opened By Task\nCM-1\n\n## Last Released\nv1.1.0\n")
+    _write(
+        project / "release-state.md",
+        f"# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n{_RC_OPENED_AT}\n\n"
+        "## RC Opened By Task\nCM-1\n\n## Last Released\nv1.1.0\n",
+    )
     _task(project, _WORKING, "WORKING", mtime=_WORKING_MTIME)
     _task(project, "CODER-20260101-002-blocked", "BLOCKED")
     _task(project, "WRITER-20260101-003-blocked", "BLOCKED", role="WRITER")
@@ -227,14 +235,22 @@ def test_render_status_colour_names_come_from_the_dashboard_environment(ctx: Ops
         (-30, -5, "0m", "-5s"),
     ],
 )
-def test_status_age_labels(rc_elapsed: int, working_elapsed: int, rc_label: str, working_label: str,
-                           tmp_path: pathlib.Path) -> None:
+def test_status_age_labels(
+    rc_elapsed: int, working_elapsed: int, rc_label: str, working_label: str, tmp_path: pathlib.Path
+) -> None:
     tasks = tmp_path / "tasks"
     _task(tmp_path, "CODER-20260101-001-w", "WORKING", mtime=_WORKING_MTIME)
-    opened = datetime.datetime.fromtimestamp(_NOW - rc_elapsed, tz=datetime.timezone.utc).isoformat()
+    opened = datetime.datetime.fromtimestamp(_NOW - rc_elapsed, tz=datetime.UTC).isoformat()
     snapshot = StatusSnapshot(
-        project="p", kanban_version="v1.0.0", active_rc="v1.0.0", rc_opened_at=opened,
-        last_released="none", halt_flag="no", counts=scan_task_counts(tasks), blocked_tasks=(), quarantined=0,
+        project="p",
+        kanban_version="v1.0.0",
+        active_rc="v1.0.0",
+        rc_opened_at=opened,
+        last_released="none",
+        halt_flag="no",
+        counts=scan_task_counts(tasks),
+        blocked_tasks=(),
+        quarantined=0,
         ship_posture="matrix",
     )
 
@@ -246,14 +262,23 @@ def test_status_age_labels(rc_elapsed: int, working_elapsed: int, rc_label: str,
 
 
 def test_rc_age_is_omitted_without_an_active_rc_or_a_parseable_timestamp(tmp_path: pathlib.Path) -> None:
-    base = dict(project="p", kanban_version="v1", last_released="v0.0.0", halt_flag="no",
-                counts=scan_task_counts(tmp_path / "none"), blocked_tasks=(), quarantined=0,
-                ship_posture="matrix")
+    base = dict(
+        project="p",
+        kanban_version="v1",
+        last_released="v0.0.0",
+        halt_flag="no",
+        counts=scan_task_counts(tmp_path / "none"),
+        blocked_tasks=(),
+        quarantined=0,
+        ship_posture="matrix",
+    )
 
-    no_rc = render_status_summary(StatusSnapshot(active_rc="none", rc_opened_at=_RC_OPENED_AT, **base),
-                                  use_color=False, now=_NOW)
-    bad_time = render_status_summary(StatusSnapshot(active_rc="v1.0.0", rc_opened_at="yesterday", **base),
-                                     use_color=False, now=_NOW)
+    no_rc = render_status_summary(
+        StatusSnapshot(active_rc="none", rc_opened_at=_RC_OPENED_AT, **base), use_color=False, now=_NOW
+    )
+    bad_time = render_status_summary(
+        StatusSnapshot(active_rc="v1.0.0", rc_opened_at="yesterday", **base), use_color=False, now=_NOW
+    )
 
     assert no_rc.splitlines()[0] == "pgai-kanban v1    RC: none    Last: v0.0.0"
     assert bad_time.splitlines()[0] == "pgai-kanban v1    RC: v1.0.0    Last: v0.0.0"
@@ -282,8 +307,12 @@ def _set_project_cfg(board: pathlib.Path, text: str) -> None:
         ("[project]\npush_to_remote = false\n\n[release]\nship_posture = always\n", None, "always"),
         ("[project]\npush_to_remote = false\n\n[release]\nship_posture = matrix\n", None, "matrix"),
         ("[project]\npush_to_remote = false\n", "[release]\nship_posture = always\n", "always"),
-        ("[project]\npush_to_remote = true\n\n[release]\nship_posture = always\n"
-         "ship_posture_confirm_remote = true\n", None, "always"),
+        (
+            "[project]\npush_to_remote = true\n\n[release]\nship_posture = always\n"
+            "ship_posture_confirm_remote = true\n",
+            None,
+            "always",
+        ),
     ],
     ids=["project-always", "project-matrix", "kanban-cfg-always", "remote-confirmed-always"],
 )
@@ -392,8 +421,13 @@ def test_last_released_version_without_a_dev_tree_reads_release_state(tmp_path: 
 
 
 def _git(repo: pathlib.Path, *args: str) -> None:
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    }
     subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
 
 
@@ -427,7 +461,7 @@ def test_project_cfg_locator_and_key_reader(tmp_path: pathlib.Path) -> None:
     assert project_cfg.read_cfg_key(legacy, "project", "branch_prefix") == "ai_"
     assert project_cfg.read_cfg_key(legacy, "project", "dev_tree_path") == "/x"
     assert project_cfg.read_cfg_key(legacy, "project", "absent") == ""
-    ini_cfg = _write(tmp_path / "project.cfg", "[project]\nbranch_prefix = \"ai_\"  # quoted\n")
+    ini_cfg = _write(tmp_path / "project.cfg", '[project]\nbranch_prefix = "ai_"  # quoted\n')
     assert project_cfg.project_cfg_file(tmp_path) == ini_cfg
     assert project_cfg.read_cfg_key(ini_cfg, "project", "branch_prefix") == '"ai_"'
     assert project_cfg.strip_one_quote_each_side('"ai_"', '"') == "ai_"
@@ -489,24 +523,46 @@ def test_test_report_refusals_keep_the_script_text_and_exit_codes(ctx: OpsContex
     missing_report = tasks / "TESTER-20260103-008-verify-1-3-0" / "artifacts" / "report.md"
 
     assert _refusal(ops_read.render_test_report(ctx, _PROJECT, "v9.9.9")) == (
-        3, "", "show-test-report.sh: no TESTER task found for RC version: v9.9.9\n")
+        3,
+        "",
+        "show-test-report.sh: no TESTER task found for RC version: v9.9.9\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, _PROJECT, "v1.3.0")) == (
-        3, "", f"show-test-report.sh: report not found for task TESTER-20260103-008-verify-1-3-0: {missing_report}\n")
+        3,
+        "",
+        f"show-test-report.sh: report not found for task TESTER-20260103-008-verify-1-3-0: {missing_report}\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, _PROJECT, "TESTER-20260103-008")) == (
-        3, "", f"show-test-report.sh: report not found for task TESTER-20260103-008-verify-1-3-0: {missing_report}\n")
+        3,
+        "",
+        f"show-test-report.sh: report not found for task TESTER-20260103-008-verify-1-3-0: {missing_report}\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, _PROJECT, "CODER-20260101-002")) == (
-        3, "", "show-test-report.sh: resolved task is not a TESTER task: CODER-20260101-002-blocked\n")
+        3,
+        "",
+        "show-test-report.sh: resolved task is not a TESTER task: CODER-20260101-002-blocked\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, _PROJECT, "BUG-0001")) == (
-        3, "", "show-test-report.sh: key does not resolve to a task: BUG-0001\n")
+        3,
+        "",
+        "show-test-report.sh: key does not resolve to a task: BUG-0001\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, _PROJECT, "TESTER-99999999-999")) == (
-        3, "",
+        3,
+        "",
         "resolve_item: item not found for key 'TESTER-99999999-999' (searched tasks/, bugs/, priority/, "
-        f"requirements/ under {project})\nshow-test-report.sh: key not found: TESTER-99999999-999\n")
+        f"requirements/ under {project})\nshow-test-report.sh: key not found: TESTER-99999999-999\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, "nosuch", "TESTER-20260101-006")) == (
-        1, "",
-        f"resolve_item: PROJECT_ROOT does not exist or is not a directory: {board / 'projects' / 'nosuch'}\n")
+        1,
+        "",
+        f"resolve_item: PROJECT_ROOT does not exist or is not a directory: {board / 'projects' / 'nosuch'}\n",
+    )
     assert _refusal(ops_read.render_test_report(ctx, "bare", "v1.2.0")) == (
-        3, "", f"show-test-report.sh: tasks directory not found: {board / 'projects' / 'bare' / 'tasks'}\n")
+        3,
+        "",
+        f"show-test-report.sh: tasks directory not found: {board / 'projects' / 'bare' / 'tasks'}\n",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -536,17 +592,23 @@ def test_task_readme_refusals_keep_the_script_text_and_exit_codes(ctx: OpsContex
     project = _project_dir(board)
 
     assert _refusal(ops_read.render_task_readme(ctx, _PROJECT, "BUG-0001")) == (
-        1, "",
+        1,
+        "",
         "show-readme.sh: BUG-0001 is a bug item, not a task — READMEs are task artifacts.\n"
-        "show.sh already prints BUG-0001's document: show.sh --project alpha --key BUG-0001\n")
+        "show.sh already prints BUG-0001's document: show.sh --project alpha --key BUG-0001\n",
+    )
     assert _refusal(ops_read.render_task_readme(ctx, _PROJECT, "CODER-20260101-009")) == (
-        1, "",
+        1,
+        "",
         "show-readme.sh: README.md not found for task CODER-20260101-009: "
-        f"{project / 'tasks' / 'CODER-20260101-009-noreadme' / 'README.md'}\n")
+        f"{project / 'tasks' / 'CODER-20260101-009-noreadme' / 'README.md'}\n",
+    )
     assert _refusal(ops_read.render_task_readme(ctx, _PROJECT, "CODER-99999999-999")) == (
-        3, "",
+        3,
+        "",
         "resolve_item: item not found for key 'CODER-99999999-999' (searched tasks/, bugs/, priority/, "
-        f"requirements/ under {project})\nshow-readme.sh: key not found: CODER-99999999-999\n")
+        f"requirements/ under {project})\nshow-readme.sh: key not found: CODER-99999999-999\n",
+    )
     assert ops_read.render_task_readme(ctx, "nosuch", _WORKING).exit_code == 1
 
 
@@ -561,15 +623,16 @@ def quarantine(board: pathlib.Path) -> pathlib.Path:
     project = _project_dir(board)
     _write(project / "rejected" / "one.md", "x", mtime=_WORKING_MTIME)
     _write(project / "rejected" / "PRIORITY-5-moved.md", "x", mtime=_WORKING_MTIME)
-    _write(project / "rejected" / "PRIORITY-5-moved.md.reason",
-           f"original_type=priority\noriginal_dir={project / 'priority'}\nreason=malformed filename\n")
+    _write(
+        project / "rejected" / "PRIORITY-5-moved.md.reason",
+        f"original_type=priority\noriginal_dir={project / 'priority'}\nreason=malformed filename\n",
+    )
     _write(project / "bugs" / ".rejected" / "BUG-12-bad.md", "x", mtime=_WORKING_MTIME)
     _write(project / "bugs" / ".rejected" / "BUG-0002-ok.md", "x", mtime=_WORKING_MTIME + 61)
     _write(project / "priority" / ".rejected" / "notes.txt", "x", mtime=_WORKING_MTIME)
     _write(project / "priority" / ".rejected" / ".hidden", "x", mtime=_WORKING_MTIME)
     (project / "priority" / ".rejected" / "link.md").symlink_to(project / "priority" / ".rejected" / "notes.txt")
-    _write(board / "projects" / "bare" / "priority" / ".rejected" / "PRIORITY-0003-fine.md", "x",
-           mtime=_WORKING_MTIME)
+    _write(board / "projects" / "bare" / "priority" / ".rejected" / "PRIORITY-0003-fine.md", "x", mtime=_WORKING_MTIME)
     _write(board / "projects" / ".hidden-project" / "bugs" / ".rejected" / "BUG-1.md", "x")
     return board
 
@@ -624,9 +687,11 @@ def test_render_rejected_one_project_and_colour_rule(ctx: OpsContext, quarantine
 def test_render_rejected_with_nothing_quarantined(ctx: OpsContext, board: pathlib.Path) -> None:
     (_project_dir(board) / "rejected" / "one.md").unlink()
     assert ops_read.render_rejected(ctx, environ=_PLAIN_ENV) == ops_read.ReadOutput(
-        0, "(no quarantined files found across all projects)\n", "")
+        0, "(no quarantined files found across all projects)\n", ""
+    )
     assert ops_read.render_rejected(ctx, "bare", environ=_COLOR_ENV).stdout == (
-        "\033[2m(no quarantined files found across all projects)\033[0m\n")
+        "\033[2m(no quarantined files found across all projects)\033[0m\n"
+    )
 
 
 def test_rejected_refusals(ctx: OpsContext, board: pathlib.Path, tmp_path: pathlib.Path) -> None:
@@ -634,21 +699,32 @@ def test_rejected_refusals(ctx: OpsContext, board: pathlib.Path, tmp_path: pathl
     empty_root.mkdir()
 
     assert _refusal(ops_read.render_rejected(ctx, "nosuch", environ=_PLAIN_ENV)) == (
-        1, "", f"list-rejected.sh: error: project 'nosuch' not found under {board / 'projects'}\n")
+        1,
+        "",
+        f"list-rejected.sh: error: project 'nosuch' not found under {board / 'projects'}\n",
+    )
     assert _refusal(ops_read.render_rejected(OpsContext(kanban_root=empty_root), environ=_PLAIN_ENV)) == (
-        1, "",
+        1,
+        "",
         "ERROR: no project specified and none resolvable from projects.cfg\n"
         f"       projects/ directory not found under {empty_root}.\n"
-        "       Create ${KANBAN_ROOT}/projects/<name>/ or migrate to the multi-project layout.\n")
+        "       Create ${KANBAN_ROOT}/projects/<name>/ or migrate to the multi-project layout.\n",
+    )
 
 
 @pytest.mark.parametrize(
     ("name", "reason"),
     [
         ("PRIORITY-0001-x.md", "pattern matches — unknown rejection reason (see logs)"),
-        ("PRIORITY-77.md", "filename does not match expected pattern (^PRIORITY-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\\.md$)"),
+        (
+            "PRIORITY-77.md",
+            "filename does not match expected pattern (^PRIORITY-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\\.md$)",
+        ),
         ("BUG-0042-y.md", "pattern matches — unknown rejection reason (see logs)"),
-        ("BUG-42-y.md", "filename does not match expected pattern (^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\\.md$)"),
+        (
+            "BUG-42-y.md",
+            "filename does not match expected pattern (^BUG-[0-9]{4}(?:-[0-9]{8})?-[a-z0-9][a-z0-9-]*\\.md$)",
+        ),
         ("notes.md", "unknown prefix — not a BUG- or PRIORITY- file"),
     ],
 )
@@ -664,8 +740,15 @@ def test_rejection_reason(name: str, reason: str) -> None:
 def _ops_cli(*args: str, env_extra: dict | None = None) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(_TEAM_DIR), "TERM": "dumb"}
     env.update(env_extra or {})
-    return subprocess.run([sys.executable, "-m", "pgai_agent_kanban.ops", *args], capture_output=True,
-                          text=True, env=env, cwd=str(_TEAM_DIR), timeout=60, stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        [sys.executable, "-m", "pgai_agent_kanban.ops", *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 def test_cli_verbs_print_the_render_result_and_exit_with_its_code(board: pathlib.Path) -> None:

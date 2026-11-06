@@ -462,6 +462,7 @@ def _copy_workflow_plugins(dest_root: pathlib.Path) -> None:
 # Bug 67/68 defense in depth: autouse fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _block_live_kanban_writes(monkeypatch, tmp_path):
     """
@@ -568,10 +569,7 @@ _LIVE_PROJECTS_GUARD_KEY = pytest.StashKey[dict]()
 
 def live_projects_guard_root() -> pathlib.Path | None:
     """The kanban root the invoking shell names, or None when it names none."""
-    raw = (
-        os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip()
-        or os.environ.get("KANBAN_ROOT", "").strip()
-    )
+    raw = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip() or os.environ.get("KANBAN_ROOT", "").strip()
     return pathlib.Path(raw) if raw else None
 
 
@@ -762,9 +760,9 @@ def _sandbox_crontab(monkeypatch, tmp_path):
     stub_bin = tmp_path / "_crontab_stub_bin"
     stub_bin.mkdir(parents=True, exist_ok=True)
     stub_path = stub_bin / "crontab"
-    stub_text = _CRONTAB_STUB.replace(
-        "__TEST_HOME__", shlex.quote(os.environ.get("HOME", ""))
-    ).replace("__TEST_CRONFILE__", shlex.quote(str(tmp_path / ".fake_crontab")))
+    stub_text = _CRONTAB_STUB.replace("__TEST_HOME__", shlex.quote(os.environ.get("HOME", ""))).replace(
+        "__TEST_CRONFILE__", shlex.quote(str(tmp_path / ".fake_crontab"))
+    )
     stub_path.write_text(stub_text, encoding="utf-8")
     stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 

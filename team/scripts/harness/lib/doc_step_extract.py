@@ -83,6 +83,7 @@ Exit codes
      after the matched heading before the next same-or-shallower heading
   2  usage error
 """
+
 import json
 import pathlib
 import re
@@ -238,9 +239,7 @@ def main(argv):
     # Re-walk raw_lines for continuation-joining, filtering comment/blank
     # lines up front (same as doc-lint.sh's extractor).
     filtered = [(rl.strip(), num) for rl, num in raw_lines if rl.strip() and not rl.strip().startswith("#")]
-    commands = [
-        {"cmd": text, "line": num} for text, num in join_continuations(filtered)
-    ]
+    commands = [{"cmd": text, "line": num} for text, num in join_continuations(filtered)]
 
     if tsv:
         print(f"HEADING\t{heading_text}")

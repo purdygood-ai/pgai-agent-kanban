@@ -67,7 +67,8 @@ import pathlib
 import shlex
 import subprocess
 import uuid
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Iterator
 
 import pytest
 
@@ -141,9 +142,7 @@ def private_tmux(tmp_path: pathlib.Path) -> Iterator[PrivateTmux]:
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         wrapper = bin_dir / "tmux"
-        wrapper.write_text(
-            f"#!/usr/bin/env bash\nexec {shlex.quote(real_tmux)} -L {shlex.quote(socket_name)} \"$@\"\n"
-        )
+        wrapper.write_text(f'#!/usr/bin/env bash\nexec {shlex.quote(real_tmux)} -L {shlex.quote(socket_name)} "$@"\n')
         wrapper.chmod(0o755)
 
         env = os.environ.copy()
@@ -218,13 +217,15 @@ def _run_sender(private_tmux: PrivateTmux, env: dict[str, str], *args: str) -> s
     """Run the sender to completion against the private server."""
     return run_until_exit(
         [
-            "bash", str(_SENDER_SH),
+            "bash",
+            str(_SENDER_SH),
             # Sample data, not a filesystem target: the sender resolves its
             # armed-marker directory via PGAI_AGENT_KANBAN_TEMP_DIR (set in
             # every caller's env), which wins ahead of --kanban-root in
             # temp.sh's resolution order, so this value is never read from
             # disk.
-            "--kanban-root", "/tmp/kanban-root-unused",
+            "--kanban-root",
+            "/tmp/kanban-root-unused",
             *args,
         ],
         env=env,
@@ -260,8 +261,7 @@ def test_hook_install_call_site_follows_the_all_armed_handshake_in_source_order(
 
     assert last_send_pos != -1, "expected at least one dashboard_send_armed_keys call site"
     assert last_send_pos < handshake_resolved_pos, (
-        "expected the last pane dispatch to precede the all-armed handshake's "
-        "success path in source order"
+        "expected the last pane dispatch to precede the all-armed handshake's " "success path in source order"
     )
     assert handshake_resolved_pos < install_pos, (
         "expected dashboard_install_activation_hook to be called strictly "
@@ -359,15 +359,11 @@ def test_remove_activation_hook_unsets_it_and_is_idempotent(
 
     # Idempotent against a session that never had the hook at all.
     never_installed = f"hook-never-{uuid.uuid4().hex[:6]}"
-    remove_missing = _source_and_call(
-        private_tmux, f"dashboard_remove_activation_hook {shlex.quote(never_installed)}"
-    )
+    remove_missing = _source_and_call(private_tmux, f"dashboard_remove_activation_hook {shlex.quote(never_installed)}")
     assert remove_missing.returncode == 0, remove_missing.stderr
 
 
-def test_switching_windows_actually_fires_the_installed_hook(
-    private_tmux: PrivateTmux, tmp_path: pathlib.Path
-) -> None:
+def test_switching_windows_actually_fires_the_installed_hook(private_tmux: PrivateTmux, tmp_path: pathlib.Path) -> None:
     """
     End-to-end proof that the installed hook is not merely present in
     show-hooks but genuinely fires on a real window switch -- the
@@ -383,7 +379,7 @@ def test_switching_windows_actually_fires_the_installed_hook(
     # changed would not fire for.
     assert private_tmux.run("new-window", "-d", "-t", session, "-n", "second").returncode == 0
 
-    hook_cmd = f"run-shell -b \"touch {marker}\""
+    hook_cmd = f'run-shell -b "touch {marker}"'
     set_hook = private_tmux.run("set-hook", "-t", session, "session-window-changed", hook_cmd)
     assert set_hook.returncode == 0, set_hook.stderr
 
@@ -458,17 +454,28 @@ def test_sender_skips_and_narrates_an_unarmed_pane_but_still_signals_the_armed_o
     # handling of USR2 is fatal, so a signal sent earlier would kill the
     # pane instead of proving delivery. A trapped signal interrupts the
     # idle `read`, so the trap runs as soon as the signal lands.
-    assert private_tmux.run(
-        "send-keys", "-t", f"{session}:main.0",
-        f"trap 'touch {marker_armed}' USR2; touch {ready_main0}; while true; do read -r _ || exit; done",
-        "Enter",
-    ).returncode == 0
+    assert (
+        private_tmux.run(
+            "send-keys",
+            "-t",
+            f"{session}:main.0",
+            f"trap 'touch {marker_armed}' USR2; touch {ready_main0}; while true; do read -r _ || exit; done",
+            "Enter",
+        ).returncode
+        == 0
+    )
     # Pane 1 ("streaming/excluded", census script logs.sh) and pane 2
     # ("unarmed cadence-loop"): both idle shells with no trap of their own,
     # so USR2 is fatal to them -- if the sender ever signalled either, it
     # would die; staying alive proves neither was.
-    assert private_tmux.run("send-keys", "-t", f"{session}:main.1", f"touch {ready_main1}; read -r _", "Enter").returncode == 0
-    assert private_tmux.run("send-keys", "-t", f"{session}:main.2", f"touch {ready_main2}; read -r _", "Enter").returncode == 0
+    assert (
+        private_tmux.run("send-keys", "-t", f"{session}:main.1", f"touch {ready_main1}; read -r _", "Enter").returncode
+        == 0
+    )
+    assert (
+        private_tmux.run("send-keys", "-t", f"{session}:main.2", f"touch {ready_main2}; read -r _", "Enter").returncode
+        == 0
+    )
     _wait_for_panes_ready(private_tmux, ready)
     panes = _pane_processes(private_tmux, f"{session}:main")
 
@@ -478,12 +485,10 @@ def test_sender_skips_and_narrates_an_unarmed_pane_but_still_signals_the_armed_o
 
     result = _run_sender(private_tmux, env, "--session", session)
     assert result.returncode == 0, (
-        f"the sender must never exit non-zero on an unarmed pane; "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"the sender must never exit non-zero on an unarmed pane; " f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert result.stdout == "", (
-        f"the sender must never write skip/signal narration to its own stdout "
-        f"-- got: {result.stdout!r}"
+        f"the sender must never write skip/signal narration to its own stdout " f"-- got: {result.stdout!r}"
     )
 
     # The sender has exited, so any signal it sent has already been
@@ -497,9 +502,7 @@ def test_sender_skips_and_narrates_an_unarmed_pane_but_still_signals_the_armed_o
     assert marker_armed.exists(), "expected the armed pane (main.0) to receive the signal"
 
     _assert_pane_processes_alive(panes, "the sender run")
-    dead_flags = private_tmux.run(
-        "list-panes", "-t", f"{session}:main", "-F", "#{pane_dead}"
-    ).stdout.split()
+    dead_flags = private_tmux.run("list-panes", "-t", f"{session}:main", "-F", "#{pane_dead}").stdout.split()
     assert dead_flags == ["0", "0", "0"], (
         f"expected all three panes to survive (main.1 and main.2 were never "
         f"armed, and neither was ever signalled); "
@@ -511,22 +514,21 @@ def test_sender_skips_and_narrates_an_unarmed_pane_but_still_signals_the_armed_o
     # it before exiting, so it is complete by now.
     debug_log_main2 = kanban_temp / "dashboard" / "logs" / "main.2.log"
     assert debug_log_main2.exists(), (
-        f"expected a skip narration for the unarmed cadence-loop pane main.2 "
-        f"at {debug_log_main2}"
+        f"expected a skip narration for the unarmed cadence-loop pane main.2 " f"at {debug_log_main2}"
     )
     narration = debug_log_main2.read_text()
-    assert "main.2" in narration and "not armed" in narration, (
-        f"expected the debug log to narrate the main.2 skip; got: {narration!r}"
-    )
+    assert (
+        "main.2" in narration and "not armed" in narration
+    ), f"expected the debug log to narrate the main.2 skip; got: {narration!r}"
 
     # main.1 (the logs.sh stream pane) runs under cadence-loop.sh --stream
     # like every rendering pane, so it is arm-checked like main.2: unarmed,
     # it is skipped, never signalled, and the skip is narrated to its own
     # debug log.
     debug_log_main1 = kanban_temp / "dashboard" / "logs" / "main.1.log"
-    assert debug_log_main1.exists(), (
-        f"expected a skip narration for the unarmed stream pane main.1 at {debug_log_main1}"
-    )
+    assert (
+        debug_log_main1.exists()
+    ), f"expected a skip narration for the unarmed stream pane main.1 at {debug_log_main1}"
     assert "not armed" in debug_log_main1.read_text()
 
 
@@ -553,18 +555,16 @@ def test_window_switch_storm_against_an_unarmed_pane_produces_zero_display_bytes
     env = dict(private_tmux.env)
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(kanban_temp)
 
-    assert private_tmux.run(
-        "new-session", "-d", "-s", session, "-n", "logs", "-x", "80", "-y", "24"
-    ).returncode == 0
+    assert private_tmux.run("new-session", "-d", "-s", session, "-n", "logs", "-x", "80", "-y", "24").returncode == 0
     # An idle shell with no trap of its own, so the pane signal is fatal to
     # it: if the sender ever signalled this pane (it must not -- it never
     # reported armed), it would die, which the survival checks below would
     # catch. The storm starts only once the pane's shell is idling in its
     # `read` builtin (its ready file exists).
     ready = tmp_path / "pane-ready"
-    assert private_tmux.run(
-        "send-keys", "-t", f"{session}:logs.0", f"touch {ready}; read -r _", "Enter"
-    ).returncode == 0
+    assert (
+        private_tmux.run("send-keys", "-t", f"{session}:logs.0", f"touch {ready}; read -r _", "Enter").returncode == 0
+    )
     _wait_for_panes_ready(private_tmux, {f"{session}:logs.0": ready})
     panes = _pane_processes(private_tmux, f"{session}:logs")
 
@@ -588,9 +588,7 @@ def test_window_switch_storm_against_an_unarmed_pane_produces_zero_display_bytes
     assert debug_log.read_text().count("not armed") == 30
 
     _assert_pane_processes_alive(panes, "all 30 simulated switches")
-    dead_flag = private_tmux.run(
-        "list-panes", "-t", f"{session}:logs", "-F", "#{pane_dead}"
-    ).stdout.strip()
+    dead_flag = private_tmux.run("list-panes", "-t", f"{session}:logs", "-F", "#{pane_dead}").stdout.strip()
     assert dead_flag == "0", (
         f"expected the unarmed pane to survive all 30 simulated switches "
         f"untouched (never signalled); pane_dead={dead_flag!r}"
@@ -612,6 +610,5 @@ def test_sender_exits_cleanly_when_the_session_no_longer_exists(
 
     result = _run_sender(private_tmux, env, "--session", f"never-existed-{uuid.uuid4().hex[:6]}")
     assert result.returncode == 0, (
-        f"expected a clean no-op exit for a nonexistent session; "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"expected a clean no-op exit for a nonexistent session; " f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )

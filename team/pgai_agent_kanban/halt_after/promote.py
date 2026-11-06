@@ -82,9 +82,7 @@ _RELEASE_STATE_FILENAME = "release-state.md"
 
 def _utc_now_iso() -> str:
     """Return the current UTC time as an ISO-8601 string with timezone offset."""
-    return datetime.datetime.now(tz=datetime.timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%S+00:00"
-    )
+    return datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def _event_drained_note(event: str) -> str:

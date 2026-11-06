@@ -116,15 +116,12 @@ def test_init_scratch_repo_refuses_an_existing_checkout(tmp_path: pathlib.Path) 
     """)
     result = run_bash(tmp_path, script)
     assert "RC=1" in result.stdout, (
-        f"Expected refusal (rc=1) against an existing checkout.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"Expected refusal (rc=1) against an existing checkout.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "refusing" in result.stderr
 
     head_after = _git_head(repo_path)
-    assert head_after == head_before, (
-        "harness_init_scratch_repo must not add a commit to an existing checkout."
-    )
+    assert head_after == head_before, "harness_init_scratch_repo must not add a commit to an existing checkout."
 
 
 def test_init_scratch_repo_refuses_a_directory_nested_inside_an_existing_repo(
@@ -162,6 +159,4 @@ def test_init_scratch_repo_refuses_a_directory_nested_inside_an_existing_repo(
     )
 
     head_after = _git_head(parent_repo)
-    assert head_after == head_before, (
-        "harness_init_scratch_repo must not add a commit to the enclosing checkout."
-    )
+    assert head_after == head_before, "harness_init_scratch_repo must not add a commit to the enclosing checkout."

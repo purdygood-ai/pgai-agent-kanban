@@ -43,7 +43,12 @@ def _run_cli(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -92,8 +97,13 @@ def test_write_plan_writes_indented_json_without_a_trailing_newline(tmp_path: pa
     assert text == json.dumps(helloworld_plan.build_plan(**_ARGS), indent=2)
     assert not text.endswith("\n")
     assert list(json.loads(text)) == [
-        "project_name", "workflow_type", "test_required", "target_version",
-        "human_approval_required", "requirements_path", "tasks",
+        "project_name",
+        "workflow_type",
+        "test_required",
+        "target_version",
+        "human_approval_required",
+        "requirements_path",
+        "tasks",
     ]
 
 
@@ -110,23 +120,29 @@ def test_command_line_writes_the_plan_silently(tmp_path: pathlib.Path) -> None:
     plan_path = tmp_path / "plan.json"
 
     result = _run_cli(
-        tmp_path, str(plan_path), _ARGS["project_name"], _ARGS["version"],
-        _ARGS["repo_path"], _ARGS["requirements_path"],
+        tmp_path,
+        str(plan_path),
+        _ARGS["project_name"],
+        _ARGS["version"],
+        _ARGS["repo_path"],
+        _ARGS["requirements_path"],
     )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
-    assert plan_path.read_text(encoding="utf-8") == json.dumps(
-        helloworld_plan.build_plan(**_ARGS), indent=2
-    )
+    assert plan_path.read_text(encoding="utf-8") == json.dumps(helloworld_plan.build_plan(**_ARGS), indent=2)
 
 
 def test_command_line_reports_an_unwritable_plan_path(tmp_path: pathlib.Path) -> None:
     plan_path = tmp_path / "no-such-dir" / "plan.json"
 
     result = _run_cli(
-        tmp_path, str(plan_path), _ARGS["project_name"], _ARGS["version"],
-        _ARGS["repo_path"], _ARGS["requirements_path"],
+        tmp_path,
+        str(plan_path),
+        _ARGS["project_name"],
+        _ARGS["version"],
+        _ARGS["repo_path"],
+        _ARGS["requirements_path"],
     )
 
     assert result.returncode == 1

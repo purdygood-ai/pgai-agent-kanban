@@ -106,6 +106,7 @@ column_render_parse_args() {
             writer)       COLUMN_TYPE="writer" ;;
             tester)       COLUMN_TYPE="tester" ;;
             cm)           COLUMN_TYPE="cm" ;;
+            agents)       COLUMN_TYPE="agents" ;;
             *)            COLUMN_TYPE="" ;;
         esac
     fi

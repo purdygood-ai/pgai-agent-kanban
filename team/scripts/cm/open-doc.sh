@@ -122,7 +122,7 @@ if [[ -z "$PROJECT_NAME" ]]; then
 fi
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # --- Resolve kanban root ---
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
@@ -132,11 +132,11 @@ KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT"
 
 # --- Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load) ---
-_OPEN_DOC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_OPEN_DOC_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/temp.sh
 source "${_OPEN_DOC_SCRIPT_DIR}/../lib/temp.sh"
 # PROJECTS_CFG_NAME_RE, the project-name rule the name check below applies,
@@ -152,13 +152,13 @@ set -euo pipefail
 
 # --- Clean exit handling ---
 # shellcheck source=../lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # release_state_section and pp_run_ops: release-state.md is read through the
 # one release-state reader and written through cm/write_rc_state.py.
 # shellcheck source=../lib/cm/common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/cm/common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/cm/common.sh"
 
 # --- Validate project name ---
 if [[ ! "$PROJECT_NAME" =~ $PROJECTS_CFG_NAME_RE ]]; then

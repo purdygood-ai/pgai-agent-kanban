@@ -82,7 +82,7 @@ import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 
@@ -98,7 +98,7 @@ _SIGTERM_WAIT_SECONDS = 8
 
 # Port-free assertion: retry interval and max wait after the process exits.
 _PORT_FREE_POLL_INTERVAL = 0.1  # seconds between connect attempts
-_PORT_FREE_TIMEOUT = 5          # seconds before giving up
+_PORT_FREE_TIMEOUT = 5  # seconds before giving up
 
 # The production default port — must never be used by this fixture.
 _PRODUCTION_DEFAULT_PORT = 8300
@@ -372,11 +372,7 @@ def api_server_fixture(
         current_pythonpath = env.get("PYTHONPATH", "")
         team_path = str(team_dir)
         if team_path not in current_pythonpath.split(os.pathsep):
-            env["PYTHONPATH"] = (
-                team_path + os.pathsep + current_pythonpath
-                if current_pythonpath
-                else team_path
-            )
+            env["PYTHONPATH"] = team_path + os.pathsep + current_pythonpath if current_pythonpath else team_path
 
     # Start the server subprocess.  stdout/stderr go to the log file.
     # stdin is redirected to devnull so the subprocess does not block reading.

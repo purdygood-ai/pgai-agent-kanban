@@ -71,7 +71,7 @@
 
 set -euo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve KANBAN_ROOT
@@ -143,7 +143,7 @@ done
 # Without these helpers, an ad-hoc 'awk -F:' parser silently extracted the
 # literal string '[project' from INI headers and created a ghost
 # projects/[project/ directory on every cron tick.
-_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+_LIB_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib" && pwd)"
 if [[ -f "${_LIB_DIR}/projects.sh" ]]; then
     # shellcheck source=lib/projects.sh
     source "${_LIB_DIR}/projects.sh"

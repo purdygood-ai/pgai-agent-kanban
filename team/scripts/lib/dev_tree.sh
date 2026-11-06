@@ -20,13 +20,21 @@
 #   # The repository a runner under scripts/ operates on (layout-aware).
 #   REPO_ROOT="$(resolve_runner_repo_root "$SCRIPT_DIR" "${KANBAN_ROOT}/kanban.cfg")"
 #
+#   # The checkout a script sits in: the nearest .git directory above it.
+#   REPO_ROOT="$(resolve_script_repo_root "$SCRIPT_DIR" "$SCRIPT_DIR/../../..")"
+#
 # Functions
 # ---------
-#   resolve_global_dev_tree        — env > kanban.cfg, no validation, prints value (possibly empty)
+#   resolve_global_dev_tree [cfg]  — env > kanban.cfg, no validation, prints value (possibly empty);
+#                                    the chain itself is pgai_agent_kanban.lib.dev_tree's, run
+#                                    through this tree's pp_run_ops
 #   require_dev_tree <path> <ctx>  — non-empty + is-directory check; exit 1 on failure
 #   resolve_runner_repo_root <script_dir> [<ctx>]
 #                                  — checkout layout: the runner's own checkout;
 #                                    install layout: PGAI_DEV_TREE_PATH
+#   resolve_script_repo_root <start_dir> <fallback_dir>
+#                                  — nearest directory at or above <start_dir>
+#                                    holding a .git directory, else <fallback_dir>
 #
 # Safety invariants
 # -----------------
@@ -37,42 +45,50 @@
 #       grep -rn 'does not exist (resolved from' team/scripts/ | grep -v lib/dev_tree.sh
 #     returns zero matches.
 #
-# Bootstrap: ensure read_ini is available (only needed by resolve_global_dev_tree).
+# Bootstrap: load read_ini when the caller has not. No function here reads
+# an INI file itself; callers that source only this lib still get read_ini.
 if ! command -v read_ini >/dev/null 2>&1; then
     # shellcheck source=ini_parser.sh
     source "$(dirname "${BASH_SOURCE[0]}")/ini_parser.sh"
 fi
 
+# This lib's own directory, recorded while BASH_SOURCE[0] still names this
+# file: resolve_global_dev_tree runs the pp_run_ops.sh beside it.
+_PGAI_DEV_TREE_LIB_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 # ---------------------------------------------------------------------------
-# resolve_global_dev_tree
+# resolve_global_dev_tree [kanban.cfg]
 #
-# Resolution order (first non-empty value wins):
-#   1. PGAI_DEV_TREE_PATH environment variable (already set by caller or env)
-#   2. [paths] dev_tree_path from kanban.cfg (located via PGAI_AGENT_KANBAN_ROOT_PATH
-#      or the default $HOME/pgai_agent_kanban)
+# The global tiers of the documented dev_tree_path chain (the project's own
+# value comes first: pp_resolve_dev_tree in project_paths.sh). Resolution
+# order (first non-empty value wins):
+#   1. PGAI_DEV_TREE_PATH (set by the caller or the environment)
+#   2. [paths] dev_tree_path from <kanban.cfg> when given, else from the
+#      kanban.cfg under PGAI_AGENT_KANBAN_ROOT_PATH (or the default
+#      $HOME/pgai_agent_kanban)
 #
-# Prints the resolved value; may be empty when neither source is configured.
-# Never exits non-zero; never validates the path.
+# The chain is implemented once, in Python: this runs
+#   pp_run_ops pgai_agent_kanban.lib.dev_tree global [--kanban-cfg <kanban.cfg>]
+# through the pp_run_ops.sh beside this file, in a subshell, so it resolves
+# with this tree's own package whatever pp_run_ops the caller defined. Both
+# variables are handed to it explicitly, so a value the caller set without
+# exporting still counts.
+#
+# Prints the resolved value with blanks and one pair of quotes removed; may
+# be empty when neither source is configured. Never exits non-zero; never
+# validates the path. When the resolver cannot run, its own error reaches
+# stderr and nothing is printed.
 # ---------------------------------------------------------------------------
 resolve_global_dev_tree() {
-    # Honor env var first — if already set, we are done.
-    if [[ -n "${PGAI_DEV_TREE_PATH:-}" ]]; then
-        printf '%s' "${PGAI_DEV_TREE_PATH}"
-        return 0
-    fi
-
-    # Fall back to kanban.cfg.
-    local _kanban_root="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}"
-    local _cfg="${_kanban_root}/kanban.cfg"
-    if [[ -f "$_cfg" ]] && command -v read_ini >/dev/null 2>&1; then
-        local _val
-        _val="$(read_ini "$_cfg" paths dev_tree_path "")"
-        printf '%s' "${_val}"
-        return 0
-    fi
-
-    # Neither source available; return empty.
-    printf ''
+    local -a _args=()
+    [[ -n "${1:-}" ]] && _args=(--kanban-cfg "$1")
+    (
+        # shellcheck source=pp_run_ops.sh
+        source "${_PGAI_DEV_TREE_LIB_DIR}/pp_run_ops.sh" || exit 0
+        PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-}" \
+            PGAI_AGENT_KANBAN_ROOT_PATH="${PGAI_AGENT_KANBAN_ROOT_PATH:-}" \
+            pp_run_ops pgai_agent_kanban.lib.dev_tree global ${_args[@]+"${_args[@]}"}
+    ) || true
     return 0
 }
 
@@ -175,4 +191,29 @@ resolve_runner_repo_root() {
 
     require_dev_tree "${PGAI_DEV_TREE_PATH:-}" "${_ctx}"
     (cd "${PGAI_DEV_TREE_PATH}" && pwd)
+}
+
+# ---------------------------------------------------------------------------
+# resolve_script_repo_root <start_dir> <fallback_dir>
+#
+# The checkout a script is running from: walk up from <start_dir> to the
+# nearest directory holding a .git directory, however deep the script sits.
+# When none does below / (an exported tree, or an install layout with no
+# repository above it), <fallback_dir> made absolute instead. Prints the
+# path; returns 1 only when <fallback_dir> is needed and cannot be entered.
+#
+# Example (a dashboard script, team/scripts/dashboard/<name>.sh):
+#   REPO_ROOT="$(resolve_script_repo_root "$SCRIPT_DIR" "$SCRIPT_DIR/../../..")"
+# ---------------------------------------------------------------------------
+resolve_script_repo_root() {
+    local _dir="${1:?resolve_script_repo_root: start directory required}"
+    local _fallback="${2:?resolve_script_repo_root: fallback directory required}"
+    while [[ "${_dir}" != "/" ]] && [[ ! -d "${_dir}/.git" ]]; do
+        _dir="$(dirname "${_dir}")"
+    done
+    if [[ "${_dir}" == "/" ]]; then
+        (cd "${_fallback}" && pwd)
+        return
+    fi
+    printf '%s\n' "${_dir}"
 }

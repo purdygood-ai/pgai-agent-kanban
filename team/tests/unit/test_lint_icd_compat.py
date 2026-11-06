@@ -82,8 +82,8 @@ import pytest
 # Three parent levels up: unit/ -> tests/ -> team/ -> project_root/
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent          # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                     # project_root/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_icd_compat.py"
 _ICD_ARTIFACT = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
@@ -157,9 +157,7 @@ def _scratch_baselines(
     baselines_dir = tmp_path / "baselines"
     baselines_dir.mkdir(parents=True, exist_ok=True)
     doc = baseline_doc if baseline_doc is not None else _load_icd()
-    (baselines_dir / "SUPPORTED").write_text(
-        "\n".join(versions) + "\n", encoding="utf-8"
-    )
+    (baselines_dir / "SUPPORTED").write_text("\n".join(versions) + "\n", encoding="utf-8")
     for version in versions:
         _write_icd(baselines_dir / f"icd-v{version}.json", doc)
     return baselines_dir
@@ -176,12 +174,12 @@ class TestIcdCompatPositive:
     def test_clean_tree_passes(self, capsys: pytest.CaptureFixture[str]) -> None:
         """check_compat() returns True for the committed docs/api/icd.json.
 
-        At the current contract version (ICD 1.21.3), icd.json was regenerated
-        and icd-v1.21.3.json was frozen as a byte-identical copy. SUPPORTED lists
-        1.0.0 through 1.21.3. The compat gate must pass because icd.json (1.21.3)
+        At the current contract version (ICD 1.23.0), icd.json was regenerated
+        and icd-v1.23.0.json was frozen as a byte-identical copy. SUPPORTED lists
+        1.0.0 through 1.23.0. The compat gate must pass because icd.json (1.23.0)
         is a superset of every older baseline (no paths or response fields
-        removed and no request field became required; the latest change edits
-        one route description).
+        removed and no request field became required; the latest change adds
+        one optional request field, discard_branch on POST /operations/reset).
 
         Args:
             capsys: pytest capture fixture for inspecting stdout/stderr.
@@ -197,13 +195,11 @@ class TestIcdCompatPositive:
         assert result is True, (
             "check_compat() returned False for the committed artifacts.\n"
             f"Captured stderr: {capsys.readouterr().err}\n"
-            "icd.json (1.21.3) must be a compatible superset of every older baseline — "
+            "icd.json (1.23.0) must be a compatible superset of every older baseline — "
             "no path, response field or optional request field was removed."
         )
 
-    def test_clean_tree_prints_ok_message(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_clean_tree_prints_ok_message(self, capsys: pytest.CaptureFixture[str]) -> None:
         """check_compat() prints a positive confirmation on a clean tree.
 
         Args:
@@ -221,11 +217,11 @@ class TestIcdCompatPositive:
         )
 
     def test_baseline_byte_equality(self) -> None:
-        """docs/api/baselines/icd-v1.21.3.json is byte-identical to docs/api/icd.json.
+        """docs/api/baselines/icd-v1.23.0.json is byte-identical to docs/api/icd.json.
 
-        At the current contract version (ICD 1.21.3), the freeze is
-        icd-v1.21.3.json.  The frozen baseline must be byte-identical to the
-        current artifact.  icd-v1.0.0.json through icd-v1.21.2.json intentionally
+        At the current contract version (ICD 1.23.0), the freeze is
+        icd-v1.23.0.json.  The frozen baseline must be byte-identical to the
+        current artifact.  icd-v1.0.0.json through icd-v1.22.0.json intentionally
         differ (they are older, published baselines, not the current version).
 
         This is a structural check, not a compat check; it verifies the freeze was
@@ -234,46 +230,81 @@ class TestIcdCompatPositive:
         Note: When the ICD version is bumped in a future RC, repoint this test at
         the new current version — the prior version's baseline stays frozen.
         """
-        baseline = _BASELINES_DIR / "icd-v1.21.3.json"
+        baseline = _BASELINES_DIR / "icd-v1.23.0.json"
         assert baseline.exists(), (
             f"Baseline file does not exist: {baseline}\n"
-            "Run the baseline freeze step to create docs/api/baselines/icd-v1.21.3.json "
+            "Run the baseline freeze step to create docs/api/baselines/icd-v1.23.0.json "
             "as a byte-identical copy of docs/api/icd.json after regeneration."
         )
         current_bytes = _ICD_ARTIFACT.read_bytes()
         baseline_bytes = baseline.read_bytes()
         assert current_bytes == baseline_bytes, (
-            "docs/api/baselines/icd-v1.21.3.json is NOT byte-identical to docs/api/icd.json.\n"
+            "docs/api/baselines/icd-v1.23.0.json is NOT byte-identical to docs/api/icd.json.\n"
             f"Current size: {len(current_bytes)} bytes\n"
             f"Baseline size: {len(baseline_bytes)} bytes\n"
             "The frozen baseline must be an exact copy of the current artifact at this RC."
         )
 
     def test_supported_manifest_contains_all_versions(self) -> None:
-        """docs/api/baselines/SUPPORTED contains '1.0.0' through '1.21.3'.
+        """docs/api/baselines/SUPPORTED contains '1.0.0' through '1.23.0'.
 
-        The ICD patch bump (1.21.2 → 1.21.3) removes nothing: 1.0.0 through 1.21.2
+        The ICD minor bump (1.22.0 → 1.23.0) removes nothing: 1.0.0 through 1.22.0
         are kept in SUPPORTED so the compat gate continues to prove backward
-        compatibility. The 1.21.3 entry reflects the new freeze.
+        compatibility. The 1.23.0 entry reflects the new freeze.
 
         Args: none — reads the committed manifest file.
         """
         supported = _BASELINES_DIR / "SUPPORTED"
-        assert supported.exists(), (
-            f"SUPPORTED manifest does not exist at {supported}"
-        )
+        assert supported.exists(), f"SUPPORTED manifest does not exist at {supported}"
         content = supported.read_text(encoding="utf-8")
         lines = [v.strip() for v in content.splitlines() if v.strip()]
-        for version in ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.13.1", "1.14.0", "1.15.0", "1.16.0", "1.16.1", "1.17.0", "1.17.1", "1.18.0", "1.18.1", "1.18.2", "1.18.3", "1.18.4", "1.18.5", "1.19.0", "1.19.1", "1.20.0", "1.20.1", "1.21.0", "1.21.1", "1.21.2"):
+        for version in (
+            "1.0.0",
+            "1.1.0",
+            "1.2.0",
+            "1.3.0",
+            "1.4.0",
+            "1.5.0",
+            "1.6.0",
+            "1.7.0",
+            "1.8.0",
+            "1.9.0",
+            "1.10.0",
+            "1.11.0",
+            "1.12.0",
+            "1.13.0",
+            "1.13.1",
+            "1.14.0",
+            "1.15.0",
+            "1.16.0",
+            "1.16.1",
+            "1.17.0",
+            "1.17.1",
+            "1.18.0",
+            "1.18.1",
+            "1.18.2",
+            "1.18.3",
+            "1.18.4",
+            "1.18.5",
+            "1.19.0",
+            "1.19.1",
+            "1.20.0",
+            "1.20.1",
+            "1.21.0",
+            "1.21.1",
+            "1.21.2",
+            "1.21.3",
+            "1.22.0",
+        ):
             assert version in lines, (
                 f"SUPPORTED manifest is missing '{version}'.\n"
                 f"Got: {lines!r}\n"
                 f"ICD {version} must remain in SUPPORTED — kept as a prior version."
             )
-        assert "1.21.3" in lines, (
-            f"SUPPORTED manifest is missing '1.21.3'.\n"
+        assert "1.23.0" in lines, (
+            f"SUPPORTED manifest is missing '1.23.0'.\n"
             f"Got: {lines!r}\n"
-            "ICD 1.21.3 must be added to SUPPORTED after the patch bump."
+            "ICD 1.23.0 must be added to SUPPORTED after the minor bump."
         )
 
 
@@ -285,9 +316,7 @@ class TestIcdCompatPositive:
 class TestIcdCompatBehavioralNegative:
     """Behavioral negatives: each break fires with a message naming the violation."""
 
-    def test_removed_path_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_removed_path_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Removing a baseline path from the current ICD triggers a compat failure.
 
         The scratch current-ICD has /approvals deleted.  The real baseline
@@ -300,8 +329,7 @@ class TestIcdCompatBehavioralNegative:
         """
         scratch = _load_icd()
         assert "/approvals" in scratch["paths"], (
-            "/approvals not found in icd.json — adjust this test to use a path "
-            "that exists in the current ICD."
+            "/approvals not found in icd.json — adjust this test to use a path " "that exists in the current ICD."
         )
         del scratch["paths"]["/approvals"]
         scratch_path = tmp_path / "scratch_removed_path.json"
@@ -316,9 +344,7 @@ class TestIcdCompatBehavioralNegative:
             "The path-removal detection is not firing."
         )
 
-    def test_removed_path_error_names_break(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_removed_path_error_names_break(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Removed-path error names the specific path and states the major-bump policy.
 
         Args:
@@ -336,10 +362,7 @@ class TestIcdCompatBehavioralNegative:
         )
         err = capsys.readouterr().err
 
-        assert "/approvals" in err, (
-            f"Error output does not name the removed path '/approvals'.\n"
-            f"stderr: {err!r}"
-        )
+        assert "/approvals" in err, f"Error output does not name the removed path '/approvals'.\n" f"stderr: {err!r}"
         assert "breaking changes require a major ICD version" in err, (
             f"Error output does not state the major-bump policy.\n"
             f"stderr: {err!r}\n"
@@ -347,9 +370,7 @@ class TestIcdCompatBehavioralNegative:
             "operator-approved RC'"
         )
 
-    def test_removed_response_field_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_removed_response_field_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Removing a response field from the current ICD triggers a compat failure.
 
         The test creates a scratch BASELINE that declares explicit properties on
@@ -364,9 +385,7 @@ class TestIcdCompatBehavioralNegative:
         """
         # Build a baseline that declares response fields on /health.
         baseline_with_fields = _load_icd()
-        baseline_with_fields["paths"]["/health"]["get"]["responses"]["200"][
-            "content"
-        ]["application/json"]["schema"] = {
+        baseline_with_fields["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] = {
             "type": "object",
             "properties": {
                 "status": {"type": "string"},
@@ -401,9 +420,7 @@ class TestIcdCompatBehavioralNegative:
             capsys:   pytest capture fixture.
         """
         baseline_with_fields = _load_icd()
-        baseline_with_fields["paths"]["/health"]["get"]["responses"]["200"][
-            "content"
-        ]["application/json"]["schema"] = {
+        baseline_with_fields["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]["schema"] = {
             "type": "object",
             "properties": {
                 "status": {"type": "string"},
@@ -421,18 +438,12 @@ class TestIcdCompatBehavioralNegative:
         )
         err = capsys.readouterr().err
 
-        assert "status" in err, (
-            f"Error output does not name the removed field 'status'.\n"
-            f"stderr: {err!r}"
-        )
+        assert "status" in err, f"Error output does not name the removed field 'status'.\n" f"stderr: {err!r}"
         assert "breaking changes require a major ICD version" in err, (
-            f"Error output does not state the major-bump policy.\n"
-            f"stderr: {err!r}"
+            f"Error output does not state the major-bump policy.\n" f"stderr: {err!r}"
         )
 
-    def test_new_required_request_field_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_new_required_request_field_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Adding a new required request field to a baseline endpoint fails compat.
 
         The scratch current-ICD adds 'new_required_field' as a required property to
@@ -496,13 +507,9 @@ class TestIcdCompatBehavioralNegative:
         )
         err = capsys.readouterr().err
 
-        assert "new_required_field" in err, (
-            f"Error output does not name the new required field.\n"
-            f"stderr: {err!r}"
-        )
+        assert "new_required_field" in err, f"Error output does not name the new required field.\n" f"stderr: {err!r}"
         assert "breaking changes require a major ICD version" in err, (
-            f"Error output does not state the major-bump policy.\n"
-            f"stderr: {err!r}"
+            f"Error output does not state the major-bump policy.\n" f"stderr: {err!r}"
         )
 
 
@@ -514,9 +521,7 @@ class TestIcdCompatBehavioralNegative:
 class TestIcdCompatBehavioralPositive:
     """Additive-only changes are legal and must pass without touching baselines."""
 
-    def test_added_path_passes(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_added_path_passes(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Adding a new path to the current ICD does not fail compat.
 
         The baseline (icd-v1.0.0.json) does not have /new-endpoint; the scratch
@@ -552,9 +557,7 @@ class TestIcdCompatBehavioralPositive:
             f"stderr: {capsys.readouterr().err!r}"
         )
 
-    def test_added_optional_field_passes(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_added_optional_field_passes(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """Adding a new optional field to a request body does not fail compat.
 
         The baseline (icd-v1.0.0.json) does not have 'extra_hint' on AddProjectBody;
@@ -633,9 +636,7 @@ class TestIcdCompatRetirementPath:
             f"stderr: {capsys.readouterr().err!r}"
         )
 
-    def test_break_still_fails_when_version_still_supported(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_break_still_fails_when_version_still_supported(self, tmp_path: pathlib.Path) -> None:
         """Same break fails when 1.0.0 is still in SUPPORTED.
 
         Controls the retirement test by confirming the identical break fails with the
@@ -667,9 +668,7 @@ class TestIcdCompatRetirementPath:
 class TestIcdCompatEmptyManifest:
     """An empty SUPPORTED manifest is a lint error (fail-loud)."""
 
-    def test_empty_manifest_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_empty_manifest_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """check_compat() returns False and emits an error for an empty SUPPORTED file.
 
         An empty manifest is not valid — support status must be explicit, never
@@ -718,9 +717,7 @@ class TestIcdCompatEmptyManifest:
             "Expected 'empty' in the error message."
         )
 
-    def test_whitespace_only_manifest_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_whitespace_only_manifest_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A SUPPORTED file containing only whitespace is treated as empty.
 
         Args:
@@ -749,9 +746,7 @@ class TestIcdCompatEmptyManifest:
 class TestIcdCompatMissingBaseline:
     """A version listed in SUPPORTED whose baseline file is absent is a lint error."""
 
-    def test_missing_baseline_file_fails(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_missing_baseline_file_fails(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """check_compat() returns False when a listed baseline file does not exist.
 
         The scratch SUPPORTED lists '9.9.9', but no icd-v9.9.9.json file is created.
@@ -794,10 +789,7 @@ class TestIcdCompatMissingBaseline:
         )
         err = capsys.readouterr().err
 
-        assert "9.9.9" in err, (
-            f"Error output does not name the missing version '9.9.9'.\n"
-            f"stderr: {err!r}"
-        )
+        assert "9.9.9" in err, f"Error output does not name the missing version '9.9.9'.\n" f"stderr: {err!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -821,14 +813,14 @@ class TestPublishedBaselineImmutability:
     def _git(repo: pathlib.Path, *args: str) -> None:
         """Run a git command in *repo* with a fixed identity, failing loudly."""
         subprocess.run(
-            ["git", "-c", "user.name=lint-test", "-c", "user.email=lint-test@example.invalid",
-             *args],
-            cwd=str(repo), check=True, capture_output=True, stdin=subprocess.DEVNULL,
+            ["git", "-c", "user.name=lint-test", "-c", "user.email=lint-test@example.invalid", *args],
+            cwd=str(repo),
+            check=True,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
         )
 
-    def _scratch_repo(
-        self, tmp_path: pathlib.Path, versions: list[str]
-    ) -> tuple[pathlib.Path, pathlib.Path]:
+    def _scratch_repo(self, tmp_path: pathlib.Path, versions: list[str]) -> tuple[pathlib.Path, pathlib.Path]:
         """Create a git repo whose main branch commits one baseline per version.
 
         Args:
@@ -862,38 +854,28 @@ class TestPublishedBaselineImmutability:
         doc.setdefault("info", {})["description"] = "rewritten after publication"
         _write_icd(path, doc)
 
-    def test_mutated_older_baseline_is_reported_naming_the_file(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_mutated_older_baseline_is_reported_naming_the_file(self, tmp_path: pathlib.Path) -> None:
         """A baseline below the current version that differs from main is one violation."""
         repo, baselines_dir = self._scratch_repo(tmp_path, ["1.0.0", "1.1.0"])
         self._mutate(baselines_dir / "icd-v1.0.0.json")
 
-        violations = _lint.check_published_baselines(
-            "1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN
-        )
+        violations = _lint.check_published_baselines("1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN)
 
         assert len(violations) == 1, f"expected exactly one violation, got {violations!r}"
         assert "icd-v1.0.0.json" in violations[0], violations[0]
         assert self._MAIN in violations[0], violations[0]
-        assert "checkout" in violations[0], (
-            f"violation does not prescribe the restoring command: {violations[0]}"
-        )
+        assert "checkout" in violations[0], f"violation does not prescribe the restoring command: {violations[0]}"
 
     def test_clean_tree_reports_nothing(self, tmp_path: pathlib.Path) -> None:
         """Baselines identical to the main-branch copies produce no violation."""
         _repo, baselines_dir = self._scratch_repo(tmp_path, ["1.0.0", "1.1.0"])
-        assert _lint.check_published_baselines(
-            "1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN
-        ) == []
+        assert _lint.check_published_baselines("1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN) == []
 
     def test_current_version_baseline_is_out_of_scope(self, tmp_path: pathlib.Path) -> None:
         """Only versions strictly below the current ICD version are this rule's business."""
         _repo, baselines_dir = self._scratch_repo(tmp_path, ["1.0.0", "1.1.0"])
         self._mutate(baselines_dir / "icd-v1.1.0.json")
-        assert _lint.check_published_baselines(
-            "1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN
-        ) == []
+        assert _lint.check_published_baselines("1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN) == []
 
     def test_baseline_absent_on_main_is_skipped(self, tmp_path: pathlib.Path) -> None:
         """A baseline the main branch does not carry (introduced by this release) is not compared."""
@@ -901,17 +883,13 @@ class TestPublishedBaselineImmutability:
         doc = _load_icd()
         doc["info"]["version"] = "1.1.0"
         _write_icd(baselines_dir / "icd-v1.1.0.json", doc)  # uncommitted, not on main
-        assert _lint.check_published_baselines(
-            "1.2.0", baselines_dir=baselines_dir, main_ref=self._MAIN
-        ) == []
+        assert _lint.check_published_baselines("1.2.0", baselines_dir=baselines_dir, main_ref=self._MAIN) == []
 
     def test_ordering_is_semver_not_string_order(self, tmp_path: pathlib.Path) -> None:
         """1.9.0 is below 1.10.0 under semver (string order would place it above and skip it)."""
         _repo, baselines_dir = self._scratch_repo(tmp_path, ["1.9.0", "1.10.0"])
         self._mutate(baselines_dir / "icd-v1.9.0.json")
-        violations = _lint.check_published_baselines(
-            "1.10.0", baselines_dir=baselines_dir, main_ref=self._MAIN
-        )
+        violations = _lint.check_published_baselines("1.10.0", baselines_dir=baselines_dir, main_ref=self._MAIN)
         assert len(violations) == 1 and "icd-v1.9.0.json" in violations[0], violations
 
     def test_non_git_directory_skips_with_a_note(
@@ -919,20 +897,14 @@ class TestPublishedBaselineImmutability:
     ) -> None:
         """A baselines directory outside any git work tree is skipped, never a violation."""
         baselines_dir = _scratch_baselines(tmp_path, ["1.0.0"])
-        assert _lint.check_published_baselines(
-            "1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN
-        ) == []
+        assert _lint.check_published_baselines("1.1.0", baselines_dir=baselines_dir, main_ref=self._MAIN) == []
         assert "skipped" in capsys.readouterr().out
 
-    def test_missing_ref_skips_with_a_note(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_missing_ref_skips_with_a_note(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A main ref that does not exist is skipped with a note naming it."""
         _repo, baselines_dir = self._scratch_repo(tmp_path, ["1.0.0", "1.1.0"])
         self._mutate(baselines_dir / "icd-v1.0.0.json")
-        assert _lint.check_published_baselines(
-            "1.1.0", baselines_dir=baselines_dir, main_ref="no_such_ref"
-        ) == []
+        assert _lint.check_published_baselines("1.1.0", baselines_dir=baselines_dir, main_ref="no_such_ref") == []
         assert "no_such_ref" in capsys.readouterr().out
 
     def test_check_compat_reports_rule_e_and_returns_false(
@@ -959,9 +931,7 @@ class TestPublishedBaselineImmutability:
         doc = _load_icd()
         doc["info"]["version"] = "1.1.0"
         _write_icd(icd, doc)
-        assert _lint.check_compat(
-            icd_path=icd, baselines_dir=baselines_dir, main_ref=self._MAIN
-        ) is True
+        assert _lint.check_compat(icd_path=icd, baselines_dir=baselines_dir, main_ref=self._MAIN) is True
 
 
 # ---------------------------------------------------------------------------
@@ -1030,14 +1000,10 @@ class TestSupportTableMirror:
     never read.
     """
 
-    def test_version_missing_from_table_is_reported_naming_both_files(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_version_missing_from_table_is_reported_naming_both_files(self, tmp_path: pathlib.Path) -> None:
         """A version SUPPORTED lists without a table row is one 'missing' finding."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.0.0", "1.1.0", "1.2.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "supported"), ("1.1.0", "supported")]
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "supported"), ("1.1.0", "supported")])
 
         findings = _lint.find_support_table_drift(doc_path=doc, supported_file=manifest)
 
@@ -1045,14 +1011,10 @@ class TestSupportTableMirror:
         cause = findings[0][2]
         assert "1.2.0" in cause and str(doc) in cause and str(manifest) in cause, cause
 
-    def test_version_extra_in_table_is_reported_as_extra(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_version_extra_in_table_is_reported_as_extra(self, tmp_path: pathlib.Path) -> None:
         """A supported table row whose version SUPPORTED lacks is one 'extra' finding."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.0.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "supported"), ("1.5.0", "supported")]
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "supported"), ("1.5.0", "supported")])
 
         findings = _lint.find_support_table_drift(doc_path=doc, supported_file=manifest)
 
@@ -1074,9 +1036,7 @@ class TestSupportTableMirror:
     def test_missing_and_extra_are_reported_together(self, tmp_path: pathlib.Path) -> None:
         """Every drifting version is named in one pass, missing ones first."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.0.0", "1.1.0", "1.2.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "supported"), ("2.0.0", "supported")]
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "supported"), ("2.0.0", "supported")])
         findings = _lint.find_support_table_drift(doc_path=doc, supported_file=manifest)
         assert [(kind, version) for kind, version, _ in findings] == [
             ("missing", "1.1.0"),
@@ -1084,53 +1044,39 @@ class TestSupportTableMirror:
             ("extra", "2.0.0"),
         ]
 
-    def test_retired_row_absent_from_manifest_is_not_drift(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_retired_row_absent_from_manifest_is_not_drift(self, tmp_path: pathlib.Path) -> None:
         """A retired row stays in the table after its line leaves SUPPORTED; that is no drift."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.1.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "retired"), ("1.1.0", "supported")]
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "retired"), ("1.1.0", "supported")])
         assert _lint.find_support_table_drift(doc_path=doc, supported_file=manifest) == []
 
     def test_retired_row_still_in_manifest_is_reported(self, tmp_path: pathlib.Path) -> None:
         """A row marked retired whose version SUPPORTED still lists is one 'retired' finding."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.0.0", "1.1.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "retired"), ("1.1.0", "supported")]
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "retired"), ("1.1.0", "supported")])
         findings = _lint.find_support_table_drift(doc_path=doc, supported_file=manifest)
         assert [(kind, version) for kind, version, _ in findings] == [("retired", "1.0.0")]
 
-    def test_manifest_comments_blanks_and_v_prefix_are_tolerated(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_manifest_comments_blanks_and_v_prefix_are_tolerated(self, tmp_path: pathlib.Path) -> None:
         """Comment lines, blank lines, padding and a leading v never read as drift."""
         manifest = _write_manifest(
             tmp_path / "SUPPORTED",
             ["# supported contract versions", "", "  1.0.0  ", "v1.1.0", "   ", "# end"],
         )
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("`1.0.0`", "supported"), ("1.1.0", "Supported")]
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("`1.0.0`", "supported"), ("1.1.0", "Supported")])
         assert _lint.read_manifest_versions(manifest) == ["1.0.0", "1.1.0"]
         assert _lint.find_support_table_drift(doc_path=doc, supported_file=manifest) == []
 
     def test_heading_level_and_case_are_tolerated(self, tmp_path: pathlib.Path) -> None:
         """The table is found under any heading level spelling 'Support table' in any case."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.0.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "supported")], heading="## SUPPORT TABLE  "
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "supported")], heading="## SUPPORT TABLE  ")
         assert _lint.find_support_table_drift(doc_path=doc, supported_file=manifest) == []
 
     def test_document_without_support_table_is_reported(self, tmp_path: pathlib.Path) -> None:
         """No 'Support table' heading is a finding naming the document, not silence."""
         manifest = _write_manifest(tmp_path / "SUPPORTED", ["1.0.0"])
-        doc = _write_support_doc(
-            tmp_path / "guide.md", [("1.0.0", "supported")], heading="### Version list"
-        )
+        doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "supported")], heading="### Version list")
         findings = _lint.find_support_table_drift(doc_path=doc, supported_file=manifest)
         assert [kind for kind, _, _ in findings] == ["no-table"]
         assert str(doc) in findings[0][2], findings
@@ -1146,9 +1092,7 @@ class TestSupportTableMirror:
     def test_absent_manifest_is_left_to_check_compat(self, tmp_path: pathlib.Path) -> None:
         """With no SUPPORTED file the mirror check stays silent; check_compat reports it."""
         doc = _write_support_doc(tmp_path / "guide.md", [("1.0.0", "supported")])
-        assert _lint.find_support_table_drift(
-            doc_path=doc, supported_file=tmp_path / "SUPPORTED"
-        ) == []
+        assert _lint.find_support_table_drift(doc_path=doc, supported_file=tmp_path / "SUPPORTED") == []
 
 
 class TestSupportTableMirrorCli:
@@ -1161,9 +1105,7 @@ class TestSupportTableMirrorCli:
     """
 
     @staticmethod
-    def _fixture_tree(
-        tmp_path: pathlib.Path, rows: list[tuple[str, str]]
-    ) -> list[str]:
+    def _fixture_tree(tmp_path: pathlib.Path, rows: list[tuple[str, str]]) -> list[str]:
         """Build ICD, baselines and support-doc fixtures; return main() argv."""
         doc = {"openapi": "3.1.0", "info": {"title": "fixture", "version": "1.1.0"}, "paths": {}}
         icd = tmp_path / "icd.json"
@@ -1174,10 +1116,14 @@ class TestSupportTableMirrorCli:
             _write_icd(baselines_dir / f"icd-v{version}.json", doc)
         support_doc = _write_support_doc(tmp_path / "guide.md", rows)
         return [
-            "--icd", str(icd),
-            "--baselines-dir", str(baselines_dir),
-            "--main-ref", "no_such_ref",
-            "--support-doc", str(support_doc),
+            "--icd",
+            str(icd),
+            "--baselines-dir",
+            str(baselines_dir),
+            "--main-ref",
+            "no_such_ref",
+            "--support-doc",
+            str(support_doc),
         ]
 
     def test_drift_records_finding_and_exits_0_with_remedy_block(
@@ -1205,9 +1151,7 @@ class TestSupportTableMirrorCli:
         self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Each path a baseline has and the current ICD lost is its own finding; exit 0."""
-        argv = self._fixture_tree(
-            tmp_path, [("1.0.0", "supported"), ("1.1.0", "supported")]
-        )
+        argv = self._fixture_tree(tmp_path, [("1.0.0", "supported"), ("1.1.0", "supported")])
         baseline = pathlib.Path(argv[3]) / "icd-v1.0.0.json"
         _write_icd(
             baseline,
@@ -1235,18 +1179,12 @@ class TestSupportTableMirrorCli:
         argv = self._fixture_tree(tmp_path, [("1.0.0", "supported")])
         icd, baselines_dir = pathlib.Path(argv[1]), pathlib.Path(argv[3])
 
-        assert _lint.check_compat(
-            icd_path=icd, baselines_dir=baselines_dir, main_ref="no_such_ref"
-        ) is True
+        assert _lint.check_compat(icd_path=icd, baselines_dir=baselines_dir, main_ref="no_such_ref") is True
         assert "support table" not in capsys.readouterr().err
 
-    def test_mirrored_table_exits_0(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_mirrored_table_exits_0(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A table mirroring SUPPORTED lets main() return 0 with an ok line and no findings."""
-        argv = self._fixture_tree(
-            tmp_path, [("1.0.0", "supported"), ("1.1.0", "supported")]
-        )
+        argv = self._fixture_tree(tmp_path, [("1.0.0", "supported"), ("1.1.0", "supported")])
         findings_file = tmp_path / "findings.json"
 
         assert _lint.main(argv + ["--findings-file", str(findings_file)]) == 0
@@ -1276,9 +1214,7 @@ class TestResolveMainRefRefusedPrefix:
     def test_refused_prefix_reads_as_an_unreadable_project_cfg(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, value: str
     ) -> None:
-        monkeypatch.setenv(
-            "PGAI_AGENT_KANBAN_ROOT_PATH", str(self._kanban_root(tmp_path / "none", None))
-        )
+        monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(self._kanban_root(tmp_path / "none", None)))
         unreadable = _lint._resolve_main_ref()
 
         monkeypatch.setenv(
@@ -1290,9 +1226,7 @@ class TestResolveMainRefRefusedPrefix:
         assert refused == unreadable == "ai_main"
         assert value not in refused
 
-    def test_inline_comment_is_stripped(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_inline_comment_is_stripped(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(
             "PGAI_AGENT_KANBAN_ROOT_PATH",
             str(self._kanban_root(tmp_path, "[project]\nbranch_prefix = zz_  # note\n")),
@@ -1304,9 +1238,7 @@ class TestResolveMainRefUnimportableReader:
     """_resolve_main_ref() has no fallback for an unimportable branch-prefix
     reader: the ImportError reaches the caller instead of a branch name."""
 
-    def test_unimportable_reader_raises_import_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unimportable_reader_raises_import_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "pgai_agent_kanban.lib.branch_prefix", None)
 
         with pytest.raises(ImportError, match="branch_prefix"):

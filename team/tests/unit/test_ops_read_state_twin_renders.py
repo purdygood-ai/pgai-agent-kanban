@@ -57,8 +57,7 @@ _RELEASE_STATE_STDOUT = (
     "last_released=v1.2.2\n"
 )
 _MALFORMED_RELEASE_STATE = (
-    "## Active RC\nNOTAVERSION\n\n## RC Opened At\nnone\n\n"
-    "## RC Opened By Task\nnone\n\n## Last Released\nnone\n"
+    "## Active RC\nNOTAVERSION\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n\n## Last Released\nnone\n"
 )
 _LEDGER_STDOUT = (
     f"project: {_PROJECT}\n"
@@ -104,17 +103,31 @@ def _seed_ledger(root: pathlib.Path) -> None:
     project = _project(root)
     (project / "project.cfg").write_text("[release]\ndeep_verify = off\n", encoding="utf-8")
     ledger = str(project / "deep-verify-ledger.md")
-    append_record(ledger, DeepVerifyRecord(
-        timestamp="2026-01-01T00:00:00+00:00", project=_PROJECT, version="v1.0.0",
-        commit="aaaaaaa", verdict="built", detail="all pairs built",
-    ))
-    append_record(ledger, DeepVerifyRecord(
-        timestamp="2026-01-08T00:00:00+00:00", project=_PROJECT, version="v1.1.0",
-        commit="bbbbbbb", verdict="failed-to-build", detail="docker/x: failed at step: boom",
-    ))
+    append_record(
+        ledger,
+        DeepVerifyRecord(
+            timestamp="2026-01-01T00:00:00+00:00",
+            project=_PROJECT,
+            version="v1.0.0",
+            commit="aaaaaaa",
+            verdict="built",
+            detail="all pairs built",
+        ),
+    )
+    append_record(
+        ledger,
+        DeepVerifyRecord(
+            timestamp="2026-01-08T00:00:00+00:00",
+            project=_PROJECT,
+            version="v1.1.0",
+            commit="bbbbbbb",
+            verdict="failed-to-build",
+            detail="docker/x: failed at step: boom",
+        ),
+    )
 
 
-def _diagnostic(result: "subprocess.CompletedProcess | ops_read.ReadOutput") -> str:
+def _diagnostic(result: subprocess.CompletedProcess | ops_read.ReadOutput) -> str:
     code = getattr(result, "returncode", getattr(result, "exit_code", None))
     return f"--- exit {code} ---\n--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
 
@@ -151,9 +164,11 @@ def test_release_state_refuses_a_project_with_no_directory_with_exit_2(board: pa
     assert output.stderr == f"release-state.sh: Project not found: {_UNBUILT!r} (expected at {expected_dir})\n"
 
 
-@pytest.mark.parametrize("release_state_text", [_MALFORMED_RELEASE_STATE, None], ids=["malformed-field", "missing-file"])
+@pytest.mark.parametrize(
+    "release_state_text", [_MALFORMED_RELEASE_STATE, None], ids=["malformed-field", "missing-file"]
+)
 def test_release_state_refuses_a_schema_failure_with_the_error_contract_and_exit_3(
-    board: pathlib.Path, release_state_text: "str | None"
+    board: pathlib.Path, release_state_text: str | None
 ) -> None:
     if release_state_text is not None:
         (_project(board) / "release-state.md").write_text(release_state_text, encoding="utf-8")
@@ -213,9 +228,7 @@ def test_deep_verify_status_refuses_a_project_with_no_directory_with_exit_2(boar
 
     expected_dir = board / "projects" / _UNBUILT
     assert (output.exit_code, output.stdout) == (2, ""), _diagnostic(output)
-    assert output.stderr == (
-        f"deep-verify-status.sh: Project not found: {_UNBUILT!r} (expected at {expected_dir})\n"
-    )
+    assert output.stderr == (f"deep-verify-status.sh: Project not found: {_UNBUILT!r} (expected at {expected_dir})\n")
 
 
 def test_deep_verify_status_prints_a_malformed_ledger_refusal_verbatim_with_exit_3(board: pathlib.Path) -> None:
@@ -250,8 +263,15 @@ def test_deep_verify_status_refuses_an_unrecognized_mode_naming_the_file_with_ex
 
 def _ops_cli(*args: str) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(_TEAM_DIR), "LANG": "C.UTF-8"}
-    return subprocess.run([sys.executable, "-m", "pgai_agent_kanban.ops", *args], capture_output=True,
-                          text=True, env=env, cwd=str(_TEAM_DIR), timeout=60, stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        [sys.executable, "-m", "pgai_agent_kanban.ops", *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 def test_cli_verbs_print_the_render_result_and_exit_with_its_code(board: pathlib.Path) -> None:
@@ -269,7 +289,9 @@ def test_cli_verbs_print_the_render_result_and_exit_with_its_code(board: pathlib
     for argv, expected in cases:
         result = _ops_cli(*argv)
         assert (result.returncode, result.stdout, result.stderr) == (
-            expected.exit_code, expected.stdout, expected.stderr
+            expected.exit_code,
+            expected.stdout,
+            expected.stderr,
         ), f"{argv}\n{_diagnostic(result)}"
     assert {expected.exit_code for _argv, expected in cases} == {2, 3, 0}
 
@@ -307,8 +329,15 @@ def _run_script(script: str, root: pathlib.Path, project: str, tmp_path: pathlib
         "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
         "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
     }
-    return subprocess.run(["bash", str(_SCRIPTS_DIR / script), "--project", project], capture_output=True,
-                          text=True, env=env, cwd=str(foreign), timeout=60, stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        ["bash", str(_SCRIPTS_DIR / script), "--project", project],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(foreign),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 @pytest.mark.parametrize(
@@ -318,13 +347,14 @@ def _run_script(script: str, root: pathlib.Path, project: str, tmp_path: pathlib
         pytest.param("release-state.sh", "render_release_state", "malformed", _PROJECT, id="release-state-refused"),
         pytest.param("release-state.sh", "render_release_state", None, _UNBUILT, id="release-state-not-found"),
         pytest.param("deep-verify-status.sh", "render_deep_verify_status", "ledger", _PROJECT, id="deep-verify-ok"),
-        pytest.param("deep-verify-status.sh", "render_deep_verify_status", "bad-ledger", _PROJECT,
-                     id="deep-verify-refused"),
+        pytest.param(
+            "deep-verify-status.sh", "render_deep_verify_status", "bad-ledger", _PROJECT, id="deep-verify-refused"
+        ),
         pytest.param("deep-verify-status.sh", "render_deep_verify_status", None, _UNBUILT, id="deep-verify-not-found"),
     ],
 )
 def test_script_prints_exactly_what_its_render_function_returns(
-    board: pathlib.Path, tmp_path: pathlib.Path, script: str, render: str, seed: "str | None", project: str
+    board: pathlib.Path, tmp_path: pathlib.Path, script: str, render: str, seed: str | None, project: str
 ) -> None:
     project_dir = _project(board)
     if seed == "release-state":
@@ -340,5 +370,7 @@ def test_script_prints_exactly_what_its_render_function_returns(
     result = _run_script(script, board, project, tmp_path)
 
     assert (result.returncode, result.stdout, result.stderr) == (
-        expected.exit_code, expected.stdout, expected.stderr
+        expected.exit_code,
+        expected.stdout,
+        expected.stderr,
     ), f"expected:\n{_diagnostic(expected)}\nactual:\n{_diagnostic(result)}"

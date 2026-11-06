@@ -75,7 +75,7 @@ def _contract(stderr: str) -> dict:
         for key in ("error", "message", "remedy"):
             prefix = f"{key}:"
             if line.startswith(prefix) and key not in fields:
-                fields[key] = line[len(prefix):].strip()
+                fields[key] = line[len(prefix) :].strip()
     return fields
 
 
@@ -97,10 +97,18 @@ class _Sandbox:
         self.py_bin.mkdir()
         (self.py_bin / "python3").symlink_to(pathlib.Path(sys.executable))
 
-    def running(self, *, agent_polls: int | None = None, with_agent: bool = True, name: str = _NAME,
-                scheduler: dict | None = None, driver_polls: int | None = None,
-                with_driver: bool = False, sweep_polls: int | None = None,
-                with_sweep: bool = False) -> None:
+    def running(
+        self,
+        *,
+        agent_polls: int | None = None,
+        with_agent: bool = True,
+        name: str = _NAME,
+        scheduler: dict | None = None,
+        driver_polls: int | None = None,
+        with_driver: bool = False,
+        sweep_polls: int | None = None,
+        with_sweep: bool = False,
+    ) -> None:
         """A running container with a scheduler and (by default) one agent
         session listed for *agent_polls* 'ps' polls (forever when None);
         with *with_driver*, also a wake-batch.sh process listed for
@@ -112,10 +120,15 @@ class _Sandbox:
         if with_driver:
             processes.append(wake_driver_process(_DRIVER_PID, self.root, exits_after_polls=driver_polls))
         if with_sweep:
-            processes.append(wake_driver_process(
-                _SWEEP_PID, self.root, script="overwatch-sweep.sh", args="--only block-triage --lock-wait 60",
-                exits_after_polls=sweep_polls,
-            ))
+            processes.append(
+                wake_driver_process(
+                    _SWEEP_PID,
+                    self.root,
+                    script="overwatch-sweep.sh",
+                    args="--only block-triage --lock-wait 60",
+                    exits_after_polls=sweep_polls,
+                )
+            )
         self.scenario(containers={name: container(processes=processes)})
 
     def liveness_record(self, task_id: str, pid: int) -> None:
@@ -280,7 +293,7 @@ def test_scheduler_is_sent_sigterm_before_its_tmux_session_is_closed(sandbox):
     assert has_session < sigterm < close, calls
     # The session is closed only after a process-table read that no longer
     # lists the scheduler.
-    reads_between = [c for c in calls[sigterm + 1:close] if c[:3] == ["exec", _NAME, "ps"]]
+    reads_between = [c for c in calls[sigterm + 1 : close] if c[:3] == ["exec", _NAME, "ps"]]
     assert reads_between, calls
     assert "sent SIGTERM to scheduler process(es) 40" in result.stdout, _diagnostic(result)
     assert "closed after the scheduler exited" in result.stdout, _diagnostic(result)
@@ -297,7 +310,9 @@ def test_scheduler_session_still_open_after_the_scheduler_exits_is_closed(sandbo
     result = sandbox.down()
 
     assert result.returncode == 0, _diagnostic(result)
-    assert _index_of_call(sandbox, lambda a: a[:3] == ["exec", _NAME, "kill"]) < _index_of_call(sandbox, _is_scheduler_stop)
+    assert _index_of_call(sandbox, lambda a: a[:3] == ["exec", _NAME, "kill"]) < _index_of_call(
+        sandbox, _is_scheduler_stop
+    )
     tmux_calls = sandbox.calls_named("exec tmux")
     assert [c[3] for c in tmux_calls] == ["has-session", "kill-session"], tmux_calls
     _assert_stopped_then_removed(sandbox)
@@ -317,7 +332,7 @@ def test_wake_driver_with_no_provider_pid_keeps_the_container_busy_until_it_exit
 
     assert result.returncode == 0, _diagnostic(result)
     commands = sandbox.commands()
-    reads_before_stop = commands[:commands.index("stop")].count("exec ps")
+    reads_before_stop = commands[: commands.index("stop")].count("exec ps")
     assert reads_before_stop >= polls_listed + 1, commands
     progress = [line for line in result.stdout.splitlines() if "waiting for" in line]
     assert progress and all(_DRIVER_PROGRESS in line for line in progress), _diagnostic(result)
@@ -333,7 +348,7 @@ def test_running_overwatch_sweep_keeps_the_container_busy_until_it_exits(sandbox
 
     assert result.returncode == 0, _diagnostic(result)
     commands = sandbox.commands()
-    reads_before_stop = commands[:commands.index("stop")].count("exec ps")
+    reads_before_stop = commands[: commands.index("stop")].count("exec ps")
     assert reads_before_stop >= polls_listed + 1, commands
     progress = [line for line in result.stdout.splitlines() if "waiting for" in line]
     assert progress and all(_SWEEP_PROGRESS in line for line in progress), _diagnostic(result)
@@ -356,7 +371,7 @@ def test_no_session_and_no_wake_driver_reads_idle_at_once(sandbox):
     # the scheduler stop and the container stop are all the wait's own.
     commands = sandbox.commands()
     scheduler_stop = _index_of_call(sandbox, _is_scheduler_stop)
-    wait_reads = commands[scheduler_stop + 1:commands.index("stop")].count("exec ps")
+    wait_reads = commands[scheduler_stop + 1 : commands.index("stop")].count("exec ps")
     assert wait_reads == 1, f"the wait loop read the process table {wait_reads} times: {commands}"
     _assert_stopped_then_removed(sandbox)
 
@@ -414,7 +429,9 @@ def test_now_names_a_wake_driver_it_ends(sandbox):
     result = sandbox.down("--now")
 
     assert result.returncode == 0, _diagnostic(result)
-    assert "--now: stopping with 1 wake driver process(es) still running: wake-batch.sh pid 60" in result.stdout, _diagnostic(result)
+    assert (
+        "--now: stopping with 1 wake driver process(es) still running: wake-batch.sh pid 60" in result.stdout
+    ), _diagnostic(result)
     assert "waiting for" not in result.stdout, _diagnostic(result)
     _assert_stopped_then_removed(sandbox)
 
@@ -527,8 +544,12 @@ def test_malformed_stop_timeout_is_refused_and_its_remedy_fixes_it(sandbox):
     assert "<" not in fields["remedy"], fields["remedy"]
 
     applied = subprocess.run(
-        ["bash", "-c", fields["remedy"]], capture_output=True, text=True,
-        env=sandbox.env(), cwd=str(sandbox.tmp), timeout=30,
+        ["bash", "-c", fields["remedy"]],
+        capture_output=True,
+        text=True,
+        env=sandbox.env(),
+        cwd=str(sandbox.tmp),
+        timeout=30,
     )
     assert applied.returncode == 0, _diagnostic(applied)
     cfg = (sandbox.root / "kanban.cfg").read_text(encoding="utf-8")

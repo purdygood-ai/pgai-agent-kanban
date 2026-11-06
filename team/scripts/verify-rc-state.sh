@@ -66,20 +66,20 @@ PROJECT_ARG=""
 VERBOSE=0
 
 # shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
 # Brings this script into the same declared-flag-vocabulary / uniform-
 # unknown-flag-refusal contract every other operator verb uses
 # (team/scripts/show.sh is the model read verb) -- operator_args_parse,
 # argparse_has, operator_args_validate_known, and
 # operator_args_render_help_for_flags.
 # shellcheck source=lib/operator_args.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/operator_args.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/operator_args.sh"
 # Sourced early (before strict mode, before env_bootstrap) so the
 # argument-shape refusals below -- which fire during argument parsing,
 # ahead of project_paths.sh's own later, guarded source of this same file
 # -- can already speak the dual-channel contract.
 # shellcheck source=lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/error_contract.sh"
 
 # This script as installed under the kanban root, shell-quoted, so the
 # argument-shape remedies below run as printed from any directory. Those
@@ -207,12 +207,12 @@ esac
 # script runs from a fresh shell without manual pre-sourcing.  Explicit
 # operator exports win via env_bootstrap.sh's idempotency guard.
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # ---------------------------------------------------------------------------
 # Resolve script / library paths (BEFORE strict mode)
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # Resolve KANBAN_ROOT
 # PGAI_AGENT_KANBAN_ROOT_PATH is now set by env_bootstrap.sh or the operator.

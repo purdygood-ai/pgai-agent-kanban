@@ -98,8 +98,7 @@ def test_still_held_false_after_a_takeover_by_a_different_pid(
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "HELD=no" in result.stdout, (
-        f"a provenance record naming a different pid must read as lost.\n"
-        f"stdout: {result.stdout}"
+        f"a provenance record naming a different pid must read as lost.\n" f"stdout: {result.stdout}"
     )
 
 
@@ -139,8 +138,7 @@ def test_reverify_healthy_path_is_completely_silent(tmp_path: pathlib.Path) -> N
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "RC=0" in result.stdout
     assert result.stderr == "", (
-        f"the healthy re-verification path must produce zero extra output.\n"
-        f"stderr: {result.stderr}"
+        f"the healthy re-verification path must produce zero extra output.\n" f"stderr: {result.stderr}"
     )
 
 
@@ -162,17 +160,16 @@ def test_reverify_on_loss_narrates_dual_channel_naming_current_holder(
     """)
     result = run_bash(tmp_path, script)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert "RC=1" in result.stdout, (
-        f"a lost lock must return non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert (
+        "RC=1" in result.stdout
+    ), f"a lost lock must return non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert "error:   lock.provenance.reverify_lost" in result.stderr
     assert "holder=new-holder" in result.stderr
     assert "pid=424242" in result.stderr
     assert "op=wake-chain:other" in result.stderr
     assert "task=TASK-9" in result.stderr
     assert "'merge'" in result.stderr, (
-        f"expected the narration to name which phase boundary stopped.\n"
-        f"stderr: {result.stderr}"
+        f"expected the narration to name which phase boundary stopped.\n" f"stderr: {result.stderr}"
     )
     assert "remedy:" in result.stderr and "release-locks.sh" in result.stderr
 
@@ -230,9 +227,9 @@ def test_abandon_never_touches_the_new_holders_on_disk_record(
         f"call after loss must leave the new holder's record byte-for-byte "
         f"intact.\nexpected: {expected!r}\nstdout: {result.stdout!r}"
     )
-    assert lock_file.read_text(encoding="utf-8") == new_holder_record, (
-        "the lock file on disk must be untouched by pgai_lock_abandon"
-    )
+    assert (
+        lock_file.read_text(encoding="utf-8") == new_holder_record
+    ), "the lock file on disk must be untouched by pgai_lock_abandon"
 
 
 def test_abandon_drops_bookkeeping_so_trap_sweep_never_touches_the_file(
@@ -306,7 +303,4 @@ def test_still_held_and_reverify_never_call_flock_or_sleep(tmp_path: pathlib.Pat
             f"{fn} must never take a flock -- it is a cheap read-only check "
             f"run at every mutating phase boundary of every chain."
         )
-        assert "sleep" not in body, (
-            f"{fn} must never sleep -- see this file's own cheapness "
-            f"constraint."
-        )
+        assert "sleep" not in body, f"{fn} must never sleep -- see this file's own cheapness " f"constraint."

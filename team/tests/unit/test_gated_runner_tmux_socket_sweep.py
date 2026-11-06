@@ -43,7 +43,11 @@ def _stale_socket(path: pathlib.Path, *, old: bool = True) -> pathlib.Path:
 def _sweep(env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", "-c", 'source "$1" && gated_runner_tmux_socket_sweep', "sweep", str(_LINT_LIB)],
-        capture_output=True, text=True, env=env, timeout=60, cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        cwd=str(_TEAM_DIR),
     )
 
 
@@ -63,7 +67,10 @@ def test_sweep_removes_only_stale_pgai_sockets(pgai_tests_temp_dir: pathlib.Path
         foreign = _stale_socket(socket_dir / "other-stale")
         subprocess.run(
             [guard.path, "-L", live_name, "-f", "/dev/null", "new-session", "-d", "-s", "s"],
-            env=env, check=True, capture_output=True, timeout=15,
+            env=env,
+            check=True,
+            capture_output=True,
+            timeout=15,
         )
         live = socket_dir / live_name
         assert live.is_socket(), f"tmux did not create its socket at {live}"
@@ -78,7 +85,9 @@ def test_sweep_removes_only_stale_pgai_sockets(pgai_tests_temp_dir: pathlib.Path
         assert live.is_socket(), "a socket with a live server must be kept\n" + diagnostic
         alive = subprocess.run(
             [guard.path, "-L", live_name, "has-session", "-t", "s"],
-            env=env, capture_output=True, timeout=10,
+            env=env,
+            capture_output=True,
+            timeout=10,
         )
         assert alive.returncode == 0, "the sweep must never stop a live server\n" + diagnostic
         assert foreign.is_socket(), "a socket not named pgai-* must be kept\n" + diagnostic

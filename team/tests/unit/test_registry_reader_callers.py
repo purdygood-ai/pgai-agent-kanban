@@ -46,9 +46,7 @@ _INSTALL_SH = _TEAM_DIR.parent / "install.sh"
 
 # upgrade.sh's resolver definition, from its opening line to the first
 # lone closing brace. Liberal about spacing around the parentheses.
-_RESOLVER_RE = re.compile(
-    r"^_upg_resolve_branch_prefix\s*\(\s*\)\s*\{.*?^\}\s*$", re.M | re.S
-)
+_RESOLVER_RE = re.compile(r"^_upg_resolve_branch_prefix\s*\(\s*\)\s*\{.*?^\}\s*$", re.M | re.S)
 
 # Priority order and file order disagree: zeta is first in the file,
 # alpha has the best priority.
@@ -104,8 +102,14 @@ def _bash(tmp_path: pathlib.Path, root: pathlib.Path, script: str, **extra: str)
     cwd = tmp_path / "cwd"
     cwd.mkdir(exist_ok=True)
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(cwd), timeout=60, stdin=subprocess.DEVNULL, check=False,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
+        check=False,
     )
 
 
@@ -113,8 +117,14 @@ def _run(tmp_path: pathlib.Path, root: pathlib.Path, script: pathlib.Path, *args
     cwd = tmp_path / "cwd"
     cwd.mkdir(exist_ok=True)
     return subprocess.run(
-        [str(script), *args], capture_output=True, text=True, env=_env(tmp_path, root),
-        cwd=str(cwd), timeout=120, stdin=subprocess.DEVNULL, check=False,
+        [str(script), *args],
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root),
+        cwd=str(cwd),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
+        check=False,
     )
 
 
@@ -161,8 +171,11 @@ def _resolver_source() -> str:
 def test_upgrade_prefix_comes_from_the_first_project_in_file_order(tmp_path: pathlib.Path) -> None:
     root = _root(tmp_path, "kanban", _INI_REGISTRY)
     result = _bash(
-        tmp_path, root, _RESOLVER_DRIVER,
-        LIB_DIR=str(_LIB_DIR), RESOLVER_SOURCE=_resolver_source(),
+        tmp_path,
+        root,
+        _RESOLVER_DRIVER,
+        LIB_DIR=str(_LIB_DIR),
+        RESOLVER_SOURCE=_resolver_source(),
     )
     assert result.returncode == 0, _say(result)
     assert "prefix=[z_]" in result.stdout, _say(result)
@@ -171,8 +184,11 @@ def test_upgrade_prefix_comes_from_the_first_project_in_file_order(tmp_path: pat
 def test_upgrade_prefix_reads_a_colon_legacy_registry_as_unprefixed(tmp_path: pathlib.Path) -> None:
     root = _root(tmp_path, "kanban", _COLON_REGISTRY)
     result = _bash(
-        tmp_path, root, _RESOLVER_DRIVER,
-        LIB_DIR=str(_LIB_DIR), RESOLVER_SOURCE=_resolver_source(),
+        tmp_path,
+        root,
+        _RESOLVER_DRIVER,
+        LIB_DIR=str(_LIB_DIR),
+        RESOLVER_SOURCE=_resolver_source(),
     )
     assert result.returncode == 0, _say(result)
     assert "prefix=[]" in result.stdout, _say(result)
@@ -275,19 +291,27 @@ echo "rc=$?"
     [
         pytest.param(
             "[project:alpha-two]\npriority=1\n[project:alpha]\npriority=2\n",
-            "alpha", "[project:alpha]\npriority=2\nrc=0\n", id="ini-name-is-not-a-prefix-match",
+            "alpha",
+            "[project:alpha]\npriority=2\nrc=0\n",
+            id="ini-name-is-not-a-prefix-match",
         ),
         pytest.param(
             "[project:alpha]\npriority=1\n[project:zeta]\npriority=2\n[project:alpha]\npriority=9\n",
-            "alpha", "[project:alpha]\npriority=1\nrc=0\n", id="ini-first-section-of-a-duplicate",
+            "alpha",
+            "[project:alpha]\npriority=1\nrc=0\n",
+            id="ini-first-section-of-a-duplicate",
         ),
         pytest.param(
             "[project:alpha]  \npriority=1\n",
-            "alpha", "[project:alpha]  \npriority=1\nrc=0\n", id="ini-header-with-trailing-spaces",
+            "alpha",
+            "[project:alpha]  \npriority=1\nrc=0\n",
+            id="ini-header-with-trailing-spaces",
         ),
         pytest.param(
             "# alpha:0 is a comment\nalpha-two:1\nalpha:2:#378ADD\n",
-            "alpha", "alpha:2:#378ADD\nrc=0\n", id="colon-legacy-whole-name-field",
+            "alpha",
+            "alpha:2:#378ADD\nrc=0\n",
+            id="colon-legacy-whole-name-field",
         ),
         pytest.param("[project:zeta]\npriority=1\n", "alpha", "rc=1\n", id="ini-unregistered"),
         pytest.param("zeta:1\n", "alpha", "rc=1\n", id="colon-legacy-unregistered"),
@@ -333,22 +357,35 @@ def _assert_seeded(root: pathlib.Path, result: subprocess.CompletedProcess) -> N
 def test_install_seeds_project_log_dirs_from_the_registry_reader(tmp_path: pathlib.Path, registry: str) -> None:
     root = _seed_root(tmp_path, registry)
     result = _run(
-        tmp_path, root, _INSTALL_SH,
-        "--force", "--wake-tier", "none", "--stamp-version", "v0.0.0-sandbox-test",
+        tmp_path,
+        root,
+        _INSTALL_SH,
+        "--force",
+        "--wake-tier",
+        "none",
+        "--stamp-version",
+        "v0.0.0-sandbox-test",
     )
     _assert_seeded(root, result)
-    assert (
-        "Ensured per-project log subdirs: projects/p1/logs/debug/archive/ and logs/training/"
-        in result.stdout
-    ), _say(result)
+    assert "Ensured per-project log subdirs: projects/p1/logs/debug/archive/ and logs/training/" in result.stdout, _say(
+        result
+    )
 
 
 @pytest.mark.parametrize("registry", _SEED_REGISTRIES)
 def test_upgrade_seeds_project_log_dirs_from_the_registry_reader(tmp_path: pathlib.Path, registry: str) -> None:
     root = _seed_root(tmp_path, registry)
     result = _run(
-        tmp_path, root, _UPGRADE_SH,
-        "--phase2", "--phase2-protocol", "1", "--kanban-root", str(root),
-        "--force", "--stamp-version", "v0.0.1-sandbox-test",
+        tmp_path,
+        root,
+        _UPGRADE_SH,
+        "--phase2",
+        "--phase2-protocol",
+        "1",
+        "--kanban-root",
+        str(root),
+        "--force",
+        "--stamp-version",
+        "v0.0.1-sandbox-test",
     )
     _assert_seeded(root, result)

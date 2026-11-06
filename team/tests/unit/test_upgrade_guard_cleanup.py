@@ -46,6 +46,8 @@ import textwrap
 
 import pytest
 
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
+
 # ---------------------------------------------------------------------------
 # Real script paths
 # ---------------------------------------------------------------------------
@@ -63,16 +65,23 @@ _REAL_VERSION_STAMP_SH = _TEAM_SCRIPTS_DIR / "lib" / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _TEAM_SCRIPTS_DIR / "lib" / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _TEAM_SCRIPTS_DIR / "lib" / "script_common.sh"
 _REAL_CONFIG_LOADER_SH = _TEAM_SCRIPTS_DIR / "lib" / "config_loader.sh"
+_REAL_DEV_TREE_SH = _TEAM_SCRIPTS_DIR / "lib" / "dev_tree.sh"
+_REAL_PP_RUN_OPS_SH = _TEAM_SCRIPTS_DIR / "lib" / "pp_run_ops.sh"
 
 _REAL_LIBS = [
     _REAL_ARGPARSE_SH,
     _REAL_ENV_BOOTSTRAP_SH,
     _REAL_INI_PARSER_SH,
-    _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+    _REAL_PROJECT_PATHS_SH,
+    _REAL_GIT_REMOTE_DEFAULT_SH,
     _REAL_ERROR_CONTRACT_SH,
     _REAL_TEMP_SH,
     _REAL_VERSION_STAMP_SH,
-    _REAL_SUBAGENT_DEPLOY_SH, _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+    _REAL_SUBAGENT_DEPLOY_SH,
+    _REAL_SCRIPT_COMMON_SH,
+    _REAL_CONFIG_LOADER_SH,
+    _REAL_DEV_TREE_SH,
+    _REAL_PP_RUN_OPS_SH,
 ]
 
 _SANDBOX_VERSION = "v1.7.0-sandbox-converted"
@@ -106,12 +115,10 @@ def _build_sandbox(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     installed_upgrade.chmod(0o755)
 
     (kanban_root / "kanban.cfg").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             [paths]
             dev_tree_path = {dev_tree}
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     (kanban_root / "VERSION").write_text("v1.6.0-sandbox\n", encoding="utf-8")
@@ -128,12 +135,18 @@ def _build_sandbox(tmp_path: pathlib.Path) -> dict[str, pathlib.Path]:
     for lib_src in _REAL_LIBS:
         if lib_src.exists():
             shutil.copy2(lib_src, dev_lib / lib_src.name)
+    seed_provider_home_rule(dev_tree / "team")
 
     for doc_name in ["README.md", "DIRECTIVES.md", "OVERVIEW.md", "SOP-core.md"]:
         (dev_tree / "team" / doc_name).write_text(f"# {doc_name} stub\n", encoding="utf-8")
     for sub_name in [
-        "roles", "pm-agent", "workflows", "pgai_agent_kanban",
-        "halt_after", "templates", "demos",
+        "roles",
+        "pm-agent",
+        "workflows",
+        "pgai_agent_kanban",
+        "halt_after",
+        "templates",
+        "demos",
     ]:
         sub = dev_tree / "team" / sub_name
         sub.mkdir(parents=True, exist_ok=True)
@@ -178,8 +191,10 @@ def _run_upgrade(
             str(kanban_root / "scripts" / "upgrade.sh"),
             "--force",
             "--no-backup",
-            "--dev-tree", str(dev_tree),
-            "--stamp-version", _SANDBOX_VERSION,
+            "--dev-tree",
+            str(dev_tree),
+            "--stamp-version",
+            _SANDBOX_VERSION,
         ],
         capture_output=True,
         text=True,
@@ -217,8 +232,7 @@ def test_no_temp_self_copy_created_by_successful_upgrade(
     result = _run_upgrade(sandbox, tmp_path)
 
     assert result.returncode == 0, (
-        f"Upgrade failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"Upgrade failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     leaked = list(pgai_temp.glob("upgrade_self.*"))
@@ -226,8 +240,7 @@ def test_no_temp_self_copy_created_by_successful_upgrade(
         f"Unexpected upgrade_self.* artifacts found under {pgai_temp} after "
         f"successful upgrade.  The two-phase architecture should not create a "
         f"temp self-copy at all.\n"
-        f"Found {len(leaked)} file(s):\n"
-        + "\n".join(f"  {f}" for f in leaked)
+        f"Found {len(leaked)} file(s):\n" + "\n".join(f"  {f}" for f in leaked)
     )
 
 
@@ -247,14 +260,12 @@ def test_no_temp_self_copy_created_by_failed_upgrade(
     # Create a broken dev-tree script so the upgrade fails at bash -n.
     broken = tmp_path / "broken_upgrade.sh"
     broken.write_text(
-        textwrap.dedent(
-            """\
+        textwrap.dedent("""\
             #!/usr/bin/env bash
             if [[ true ]]; then
               echo "unclosed if — syntax error
             # missing fi
-            """
-        ),
+            """),
         encoding="utf-8",
     )
     broken.chmod(0o755)
@@ -270,16 +281,12 @@ def test_no_temp_self_copy_created_by_failed_upgrade(
     result = _run_upgrade(sandbox, tmp_path)
 
     # Must fail.
-    assert result.returncode != 0, (
-        f"Expected non-zero exit for broken dev-tree script; "
-        f"got {result.returncode}."
-    )
+    assert result.returncode != 0, f"Expected non-zero exit for broken dev-tree script; " f"got {result.returncode}."
 
     leaked = list(pgai_temp.glob("upgrade_self.*"))
     assert not leaked, (
         f"Unexpected upgrade_self.* artifacts found under {pgai_temp} after "
-        f"failed upgrade.  Found {len(leaked)} file(s):\n"
-        + "\n".join(f"  {f}" for f in leaked)
+        f"failed upgrade.  Found {len(leaked)} file(s):\n" + "\n".join(f"  {f}" for f in leaked)
     )
 
 
@@ -320,15 +327,13 @@ def test_lib_sourcing_succeeds_in_phase1_and_phase2(
         f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
     assert "Upgrade complete!" in result.stdout, (
-        f"'Upgrade complete!' not found — upgrade did not reach the summary.\n"
-        f"stdout:\n{result.stdout}"
+        f"'Upgrade complete!' not found — upgrade did not reach the summary.\n" f"stdout:\n{result.stdout}"
     )
 
     # Confirm no argparse error appeared.
     combined = result.stdout + result.stderr
     assert "argparse.sh not found" not in combined, (
-        f"argparse.sh-not-found error appeared despite successful exit code.\n"
-        f"Output:\n{combined}"
+        f"argparse.sh-not-found error appeared despite successful exit code.\n" f"Output:\n{combined}"
     )
 
 
@@ -352,9 +357,7 @@ def test_upgrade_no_temp_copy_guard() -> None:
     character is '#') so that past-tense explanatory comments describing the
     retirement are allowed to remain as historical documentation.
     """
-    assert _REAL_UPGRADE_SH.exists(), (
-        f"upgrade.sh not found at {_REAL_UPGRADE_SH}; cannot run guard check."
-    )
+    assert _REAL_UPGRADE_SH.exists(), f"upgrade.sh not found at {_REAL_UPGRADE_SH}; cannot run guard check."
 
     _RETIRED_GUARD_PATTERN = (
         "_PGAI_UPGRADE_SELF_COPY",
@@ -380,6 +383,5 @@ def test_upgrade_no_temp_copy_guard() -> None:
         f"{_REAL_UPGRADE_SH}.  The two-phase architecture retired these in "
         f"v1.7.0; their reappearance indicates a squash-merge conflict restored "
         f"the pre-retirement block.  Remove the listed lines and re-run.\n\n"
-        f"Executable hits ({len(executable_hits)}):\n"
-        + "\n".join(f"  line {n}: {l}" for n, l in executable_hits)
+        f"Executable hits ({len(executable_hits)}):\n" + "\n".join(f"  line {n}: {l}" for n, l in executable_hits)
     )

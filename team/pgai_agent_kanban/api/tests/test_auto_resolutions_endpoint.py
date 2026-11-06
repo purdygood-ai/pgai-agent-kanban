@@ -47,7 +47,7 @@ from fastapi.testclient import TestClient
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _API_TESTS_DIR = _THIS_FILE.parent
 _TEAM_DIR = _API_TESTS_DIR.parent.parent.parent  # team/
-_PROJECT_ROOT = _TEAM_DIR.parent                  # project root (contains team/)
+_PROJECT_ROOT = _TEAM_DIR.parent  # project root (contains team/)
 
 _project_root_str = str(_PROJECT_ROOT)
 if _project_root_str not in sys.path:
@@ -58,7 +58,6 @@ from pgai_agent_kanban.overwatch.ledger import (  # noqa: E402
     append_entry,
     ledger_path_for_project,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixture builder helpers (mirrors test_auto_resolutions_window.py pattern)
@@ -199,9 +198,21 @@ class TestAutoResolutionsEmptyState:
 
 
 _REQUIRED_FIELDS = {
-    "project", "rc", "attempt_from", "attempt_to", "ceiling",
-    "attempt_display", "decision", "outcome", "trigger", "findings",
-    "evidence_paths", "ledger_path", "entry_id", "family_key", "timestamp",
+    "project",
+    "rc",
+    "attempt_from",
+    "attempt_to",
+    "ceiling",
+    "attempt_display",
+    "decision",
+    "outcome",
+    "trigger",
+    "findings",
+    "evidence_paths",
+    "ledger_path",
+    "entry_id",
+    "family_key",
+    "timestamp",
 }
 
 
@@ -412,9 +423,7 @@ class TestAutoResolutionsUnknownProject:
         with _make_client(tmp_path, monkeypatch) as client:
             resp = client.get("/auto-resolutions", params={"project": "does-not-exist"})
 
-        assert resp.status_code == 422, (
-            f"Expected 422 for unknown project, got {resp.status_code}: {resp.text}"
-        )
+        assert resp.status_code == 422, f"Expected 422 for unknown project, got {resp.status_code}: {resp.text}"
 
     def test_unknown_project_detail_names_project(
         self,
@@ -611,10 +620,7 @@ class TestAutoResolutionsJsonVsTmuxWindow:
         assert resp.status_code == 200
         json_records = resp.json()
 
-        json_set = {
-            (r["project"], r["rc"], r["entry_id"])
-            for r in json_records
-        }
+        json_set = {(r["project"], r["rc"], r["entry_id"]) for r in json_records}
 
         buf = io.StringIO()
         old_stdout = sys.stdout
@@ -627,14 +633,8 @@ class TestAutoResolutionsJsonVsTmuxWindow:
 
         tmux_set = self._parse_tmux_records(rendered)
 
-        assert tmux_set, (
-            "tmux window parsed no records from rendered output.\n"
-            f"Rendered text:\n{rendered}"
-        )
-        assert json_set, (
-            "JSON endpoint returned no records.\n"
-            f"Response: {json_records}"
-        )
+        assert tmux_set, "tmux window parsed no records from rendered output.\n" f"Rendered text:\n{rendered}"
+        assert json_set, "JSON endpoint returned no records.\n" f"Response: {json_records}"
 
         missing_from_tmux = json_set - tmux_set
         assert not missing_from_tmux, (

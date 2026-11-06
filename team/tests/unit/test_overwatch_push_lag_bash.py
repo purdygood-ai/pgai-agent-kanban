@@ -22,6 +22,14 @@ Fixtures exercised:
       the remote refuses, the check records push-main-failed and
       push-tag-failed, changes nothing on the remote and returns non-zero;
       once the remote accepts, the next run pushes main and the tag.
+  (H) A remote that cannot be read (its URL names a missing repository):
+      main ahead and a local release tag. The check writes one
+      remote-unreachable row carrying git's error, pushes nothing and
+      returns 0.
+  (I) The real overwatch_protocol.sh logger (no stub): a reason holding
+      newlines, carriage returns or tabs -- git's multi-line push output
+      from a refusing remote among them -- is written as one physical,
+      six-field row, and a one-line reason is written unchanged.
 
 All tests run against synthetic environments and never touch the live kanban root.
 """
@@ -29,6 +37,7 @@ All tests run against synthetic environments and never touch the live kanban roo
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import textwrap
 
@@ -48,6 +57,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="overwatch-push-lag-bash")
 
+
 # ---------------------------------------------------------------------------
 # Paths to the check modules.
 # When pytest is run from the team/ directory (the standard invocation via
@@ -63,6 +73,7 @@ _PROTOCOL_SH = "scripts/lib/overwatch_protocol.sh"
 # ---------------------------------------------------------------------------
 # Git helpers
 # ---------------------------------------------------------------------------
+
 
 def _git(repo: pathlib.Path, *args: str) -> str:
     """Run a git command inside repo; return stripped stdout."""
@@ -111,11 +122,12 @@ def _make_branch(repo: pathlib.Path, branch: str) -> None:
 # Kanban fixture builder
 # ---------------------------------------------------------------------------
 
+
 def _build_kanban(
     kanban_root: pathlib.Path,
     project_name: str,
     dev_tree: pathlib.Path,
-    push_to_remote: "str | None" = "true",
+    push_to_remote: str | None = "true",
     branch_prefix: str = "",
 ) -> pathlib.Path:
     """
@@ -127,9 +139,7 @@ def _build_kanban(
     Returns the project directory path.
     """
     kanban_root.mkdir(parents=True, exist_ok=True)
-    (kanban_root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority = 1\n", encoding="utf-8"
-    )
+    (kanban_root / "projects.cfg").write_text(f"[project:{project_name}]\npriority = 1\n", encoding="utf-8")
     proj_dir = kanban_root / "projects" / project_name
     (proj_dir / "overwatch" / "backups").mkdir(parents=True)
     (proj_dir / "overwatch" / "actions.log").write_text("", encoding="utf-8")
@@ -148,9 +158,7 @@ def _build_kanban(
     (proj_dir / "project.cfg").write_text("".join(cfg_lines), encoding="utf-8")
 
     # Minimal release-state.md
-    (proj_dir / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n", encoding="utf-8"
-    )
+    (proj_dir / "release-state.md").write_text("# Release State\n\n## Active RC\nnone\n", encoding="utf-8")
 
     return proj_dir
 
@@ -223,20 +231,14 @@ def test_push_lag_local_mode_staged_by_design(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-push-lag should exit 0 in local mode\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-push-lag should exit 0 in local mode\nstderr={result.stderr}"
 
     log = _action_log(proj_dir)
-    assert "staged-by-design" in log, (
-        f"Expected 'staged-by-design' in action log, got:\n{log}\nstderr={result.stderr}"
-    )
+    assert "staged-by-design" in log, f"Expected 'staged-by-design' in action log, got:\n{log}\nstderr={result.stderr}"
     # Verify no git push was attempted (origin should still be behind).
     local_sha = _git(dev_tree, "rev-parse", "main")
     origin_sha = _git(dev_tree, "rev-parse", "origin/main")
-    assert local_sha != origin_sha, (
-        "origin/main should not have been updated (push_to_remote=false)"
-    )
+    assert local_sha != origin_sha, "origin/main should not have been updated (push_to_remote=false)"
 
 
 # ---------------------------------------------------------------------------
@@ -294,19 +296,14 @@ def test_push_lag_remote_mode_enters_push_path(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-push-lag --dry-run should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-push-lag --dry-run should exit 0\nstderr={result.stderr}"
 
     log = _action_log(proj_dir)
     assert "dry-run-push-lag-detected" in log, (
-        f"Expected 'dry-run-push-lag-detected' in action log, got:\n{log}"
-        f"\nstderr={result.stderr}"
+        f"Expected 'dry-run-push-lag-detected' in action log, got:\n{log}" f"\nstderr={result.stderr}"
     )
     # The staged-by-design path must NOT have been taken.
-    assert "staged-by-design" not in log, (
-        f"push_to_remote=true should not trigger staged-by-design; log:\n{log}"
-    )
+    assert "staged-by-design" not in log, f"push_to_remote=true should not trigger staged-by-design; log:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -338,9 +335,7 @@ def test_orphan_rc_branches_prefix_aware(tmp_path: pathlib.Path) -> None:
         branch_prefix="ai_",
     )
     # release-state.md: Active RC = none (so ai_rc/v1.0.0 is not the active RC)
-    (proj_dir / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n", encoding="utf-8"
-    )
+    (proj_dir / "release-state.md").write_text("# Release State\n\n## Active RC\nnone\n", encoding="utf-8")
 
     script = textwrap.dedent(f"""\
         set -euo pipefail
@@ -360,19 +355,14 @@ def test_orphan_rc_branches_prefix_aware(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-orphan-rc-branches --dry-run should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-orphan-rc-branches --dry-run should exit 0\nstderr={result.stderr}"
 
     log = _action_log(proj_dir)
     assert "dry-run-orphan-rc-branch-detected" in log, (
-        f"Expected 'dry-run-orphan-rc-branch-detected' in action log, got:\n{log}"
-        f"\nstderr={result.stderr}"
+        f"Expected 'dry-run-orphan-rc-branch-detected' in action log, got:\n{log}" f"\nstderr={result.stderr}"
     )
     # The detected branch should be ai_rc/v1.0.0 (prefixed form)
-    assert "ai_rc/v1.0.0" in log, (
-        f"Expected 'ai_rc/v1.0.0' in action log target, got:\n{log}"
-    )
+    assert "ai_rc/v1.0.0" in log, f"Expected 'ai_rc/v1.0.0' in action log target, got:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -428,14 +418,11 @@ def test_stale_active_rc_prefix_aware(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-stale-active-rc --dry-run should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-stale-active-rc --dry-run should exit 0\nstderr={result.stderr}"
 
     log = _action_log(proj_dir)
     assert "dry-run-stale-active-rc-detected" in log, (
-        f"Expected 'dry-run-stale-active-rc-detected' in action log, got:\n{log}"
-        f"\nstderr={result.stderr}"
+        f"Expected 'dry-run-stale-active-rc-detected' in action log, got:\n{log}" f"\nstderr={result.stderr}"
     )
 
 
@@ -490,14 +477,10 @@ def test_push_lag_local_mode_no_lag_exits_clean(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-push-lag should exit 0 when no lag\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-push-lag should exit 0 when no lag\nstderr={result.stderr}"
     # No action log entry expected — local matches origin, nothing to do.
     log = _action_log(proj_dir)
-    assert "staged-by-design" not in log, (
-        f"No 'staged-by-design' expected when local matches origin; log:\n{log}"
-    )
+    assert "staged-by-design" not in log, f"No 'staged-by-design' expected when local matches origin; log:\n{log}"
 
 
 # ---------------------------------------------------------------------------
@@ -561,9 +544,9 @@ def test_push_lag_pushes_only_the_prefixed_lanes_main_and_release_tag(tmp_path: 
     assert result.returncode == 0, result.stderr
     assert _origin_tags(origin) == {"ai_v9.0.0"}, "only the lane's own release tag is published"
     assert _git(origin, "rev-parse", "refs/heads/ai_main") == _git(dev_tree, "rev-parse", "ai_main")
-    assert _git(origin, "rev-parse", "refs/heads/main") == before["refs/heads/main"], (
-        "the other lane's main is never pushed"
-    )
+    assert (
+        _git(origin, "rev-parse", "refs/heads/main") == before["refs/heads/main"]
+    ), "the other lane's main is never pushed"
     log = _action_log(proj_dir)
     assert "pushed-main-to-origin\tai_main" in log and "pushed-tag-to-origin\tai_v9.0.0" in log, log
     assert "v9.0.0\t" not in log.replace("ai_v9.0.0\t", "")
@@ -585,13 +568,18 @@ def test_push_lag_pushes_nothing_unless_push_to_remote_is_true(tmp_path: pathlib
     assert "staged-by-design" in _action_log(proj_dir)
 
 
-
 # ---------------------------------------------------------------------------
 # (G) a release push the remote refused is pushed once the remote accepts
 # ---------------------------------------------------------------------------
 
 
-def test_push_lag_left_by_a_refused_release_push_is_pushed_once_the_remote_accepts(tmp_path: pathlib.Path) -> None:
+def _release_behind_a_refusing_origin(tmp_path: pathlib.Path) -> tuple:
+    """A dev tree whose main is one release commit ahead of its origin, with
+    the release tag v1.0.0 local only, and an origin whose pre-receive hook
+    refuses every push (ls-remote still reads it).
+
+    Returns (dev_tree, origin, the hook's path, origin's main before the release).
+    """
     origin = tmp_path / "origin.git"
     origin.mkdir()
     _git(origin, "init", "--bare")
@@ -607,6 +595,11 @@ def test_push_lag_left_by_a_refused_release_push_is_pushed_once_the_remote_accep
     hook = origin / "hooks" / "pre-receive"
     hook.write_text("#!/bin/sh\necho 'fixture remote: rejected' >&2\nexit 1\n", encoding="utf-8")
     hook.chmod(0o755)
+    return dev_tree, origin, hook, origin_main_before
+
+
+def test_push_lag_left_by_a_refused_release_push_is_pushed_once_the_remote_accepts(tmp_path: pathlib.Path) -> None:
+    dev_tree, origin, hook, origin_main_before = _release_behind_a_refusing_origin(tmp_path)
     kanban_root = tmp_path / "kanban"
     project_name = "release-lane"
     proj_dir = _build_kanban(kanban_root, project_name, dev_tree, push_to_remote="true")
@@ -629,3 +622,155 @@ def test_push_lag_left_by_a_refused_release_push_is_pushed_once_the_remote_accep
     assert _origin_tags(origin) == {"v1.0.0"}
     log = _action_log(proj_dir)
     assert "pushed-main-to-origin\tmain" in log and "pushed-tag-to-origin\tv1.0.0" in log, log
+
+
+# ---------------------------------------------------------------------------
+# (H) an unreadable remote is one remote-unreachable row, never a push
+# ---------------------------------------------------------------------------
+
+
+def test_push_lag_unreadable_remote_records_one_row_and_pushes_nothing(tmp_path: pathlib.Path) -> None:
+    missing = tmp_path / "missing-origin.git"
+    dev_tree = tmp_path / "dev"
+    _make_git_repo(dev_tree)
+    _git(dev_tree, "branch", "-M", "main")
+    _git(dev_tree, "remote", "add", "origin", str(missing))
+    _git(dev_tree, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _make_commit(dev_tree, "release-commit")
+    _make_tag(dev_tree, "v1.0.0")
+    kanban_root = tmp_path / "kanban"
+    project_name = "unreadable-remote"
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, push_to_remote="true")
+
+    result = _run_live_push_lag(tmp_path, kanban_root, project_name, proj_dir)
+
+    assert result.returncode == 0, result.stderr
+    assert not missing.exists(), "nothing may be pushed to the unreadable remote"
+    rows = [line.split("\t") for line in _action_log(proj_dir).splitlines() if line]
+    assert [row[:3] for row in rows] == [["check-push-lag", "remote-unreachable", "origin"]], rows
+    assert str(missing) in rows[0][3] and "main ahead=1" in rows[0][3], rows[0][3]
+    assert "unpushed tag:" not in result.stderr, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# (I) the real logger writes one physical, six-field row per action
+# ---------------------------------------------------------------------------
+
+_ROW_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\t")
+
+
+def _action_log_rows(proj_dir: pathlib.Path) -> list:
+    """The action log split on LF only -- one entry per physical line --
+    after checking that each line starts with a timestamp and has exactly
+    six tab-separated fields. Read as bytes: universal newlines would turn
+    a written CR into LF."""
+    log = (proj_dir / "overwatch" / "actions.log").read_bytes().decode("utf-8")
+    assert log.endswith("\n") and "\r" not in log, repr(log)
+    lines = log[:-1].split("\n")
+    for line in lines:
+        assert _ROW_START_RE.match(line), f"a line that is not a record: {line!r}\nlog:\n{log}"
+        assert len(line.split("\t")) == 6, f"a record without exactly six fields: {line!r}"
+    return [line.split("\t") for line in lines]
+
+
+def test_push_lag_refused_by_the_remote_logs_one_row_per_action_through_the_real_logger(
+    tmp_path: pathlib.Path,
+) -> None:
+    dev_tree, _origin, _hook, _before = _release_behind_a_refusing_origin(tmp_path)
+    kanban_root = tmp_path / "kanban"
+    project_name = "refused-lane"
+    proj_dir = _build_kanban(kanban_root, project_name, dev_tree, push_to_remote="true")
+    script = textwrap.dedent(f"""\
+        set -euo pipefail
+        source {_PROTOCOL_SH}
+        overwatch_halt_first_fix() {{ "$@"; }}
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="{project_name}"
+        source {_CHECK_PUSH_LAG}
+        overwatch_check_push_lag
+    """)
+
+    result = run_bash(tmp_path, script)
+
+    assert result.returncode != 0, result.stderr
+    rows = _action_log_rows(proj_dir)
+    assert [(row[1], row[2], row[3]) for row in rows] == [
+        ("check-push-lag", "main", "push-main-failed"),
+        ("check-push-lag", "v1.0.0", "push-tag-failed"),
+    ], rows
+    for row in rows:
+        assert "[remote rejected]" in row[5], row[5]
+        assert "fixture remote: rejected" in row[5], row[5]
+
+
+_MULTI_LINE_REASON = (
+    "remote: pushes are frozen\r\n"
+    "To /srv/origin.git\n"
+    " ! [remote rejected] main -> main (pre-receive hook declined)\n"
+    "error:\tfailed to push some refs\n"
+)
+_ONE_LINE_REASON = " already one line,  inner  spacing kept "
+
+
+@pytest.mark.parametrize(
+    ("reason", "written"),
+    [
+        (
+            _MULTI_LINE_REASON,
+            "remote: pushes are frozen To /srv/origin.git ! [remote rejected] main -> main "
+            "(pre-receive hook declined) error: failed to push some refs",
+        ),
+        (_ONE_LINE_REASON, _ONE_LINE_REASON),
+    ],
+    ids=["newline-cr-tab-flattened", "one-line-unchanged"],
+)
+def test_overwatch_log_action_writes_one_six_field_row_whatever_the_reason_holds(
+    tmp_path: pathlib.Path, reason: str, written: str
+) -> None:
+    proj_dir = tmp_path / "kanban" / "projects" / "demo"
+    (proj_dir / "overwatch").mkdir(parents=True)
+    script = textwrap.dedent(f"""\
+        set -euo pipefail
+        source {_PROTOCOL_SH}
+        export KANBAN_ROOT="{tmp_path / "kanban"}"
+        export OVERWATCH_PROJECT="demo"
+        overwatch_log_action check-push-lag main push-main-failed none "$REASON"
+    """)
+
+    result = run_bash(tmp_path, script, extra_env={"REASON": reason})
+
+    assert result.returncode == 0, result.stderr
+    rows = _action_log_rows(proj_dir)
+    assert len(rows) == 1, rows
+    assert rows[0][1:5] == ["check-push-lag", "main", "push-main-failed", "none"]
+    assert rows[0][5] == written
+    assert rows[0][5].split() == reason.split(), "every word of every original line is kept, in order"
+
+
+_BROKEN_FIELD = "first\tpart\r\nsecond  part\n"
+_FLATTENED_FIELD = "first part second part"
+_WRITER_ARGS = {"name": "check-push-lag", "target": "main", "action": "push-main-failed", "backup_path": "none"}
+
+
+@pytest.mark.parametrize("field", list(_WRITER_ARGS))
+def test_overwatch_log_action_writes_one_six_field_row_whatever_any_field_holds(
+    tmp_path: pathlib.Path, field: str
+) -> None:
+    proj_dir = tmp_path / "kanban" / "projects" / "demo"
+    (proj_dir / "overwatch").mkdir(parents=True)
+    args = dict(_WRITER_ARGS, **{field: _BROKEN_FIELD})
+    script = textwrap.dedent(f"""\
+        set -euo pipefail
+        source {_PROTOCOL_SH}
+        export KANBAN_ROOT="{tmp_path / "kanban"}"
+        export OVERWATCH_PROJECT="demo"
+        overwatch_log_action "$NAME" "$TARGET" "$ACTION" "$BACKUP_PATH" "one line"
+    """)
+
+    result = run_bash(tmp_path, script, extra_env={key.upper(): value for key, value in args.items()})
+
+    assert result.returncode == 0, result.stderr
+    rows = _action_log_rows(proj_dir)
+    assert len(rows) == 1, rows
+    expected = dict(args, **{field: _FLATTENED_FIELD})
+    assert rows[0][1:] == [expected[key] for key in _WRITER_ARGS] + ["one line"]

@@ -23,7 +23,11 @@
 #       branch (create_task_worktree, worktree.sh). A task with no Block
 #       Record resumes in the mode its ## Resume Mode section names -- the
 #       wake writes 'branch' there when its time budget stops a dispatch
-#       (requeue_after_budget_stop, wake_task_budget.sh) -- and starts fresh
+#       (requeue_after_budget_stop, wake_task_budget.sh) and when its
+#       stale-active sweep returns an orphaned task to BACKLOG keeping a
+#       feature branch holding unmerged commits (reconcile_stale_active,
+#       wake_reconcile_sweeps.sh), and an operator reset writes it when it
+#       keeps such a branch (reset_item, ops/write.py) -- and starts fresh
 #       when it has no such section either. For tester:
 #       loads the workflow plugin and (when git_mode != none) parks the
 #       canonical dev tree and creates a detached worktree at the RC branch
@@ -275,9 +279,12 @@ wd_setup_task_worktree() {
       # A task with no Block Record reads the wake-owned ## Resume Mode
       # section instead: a budget stop (requeue_after_budget_stop) writes
       # 'branch' there, so a task the wake's own clock stopped keeps its
-      # commits. No section, or any body other than 'branch' (first word,
-      # any case), is 'fresh' -- the answer for a task that never ran. A
-      # status.md the section reader cannot read is 'branch'.
+      # commits; the stale-active sweep (reconcile_stale_active) writes it
+      # when it returns an orphaned task to BACKLOG keeping a feature branch
+      # that holds unmerged commits, as does a reset that kept such a branch.
+      # No section, or any body other than 'branch' (first word, any case),
+      # is 'fresh' -- the answer for a task that never ran. A status.md the
+      # section reader cannot read is 'branch'.
       local _resume_mode="fresh" _rm_exit=0
       set +e
       _resume_mode="$(block_record_field "$task_status" resume none)"
@@ -296,7 +303,7 @@ wd_setup_task_worktree() {
         set -e
         read -r _rs_body _rs_rest <<< "${_rs_body,,}" || true
         if [[ $_rs_exit -eq 0 && "$_rs_body" == "branch" ]]; then
-          log "task ${task_id}: ## Resume Mode: branch (the wake's time budget stopped an earlier dispatch); an existing feature branch is attached unchanged"
+          log "task ${task_id}: ## Resume Mode: branch (a budget stop, a reset or the stale-active sweep kept the feature branch of an earlier dispatch); an existing feature branch is attached unchanged"
           _resume_mode="branch"
         elif [[ $_rs_exit -ne 0 && $_rs_exit -ne 3 ]]; then
           log "task ${task_id}: WARNING: could not read the ## Resume Mode section (exit ${_rs_exit}); resuming in branch mode so an existing feature branch is kept"

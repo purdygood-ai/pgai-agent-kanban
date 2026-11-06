@@ -9,8 +9,9 @@ team/pgai_agent_kanban/task_status.py.
 
 Test coverage:
 
-  1. Real-tree green — the shipped team/scripts/*.sh default scan surface
-     (minus the two named exemptions) produces zero findings.
+  1. Real-tree green — the shipped default scan surface (team/scripts/*.sh
+     and team/pgai_agent_kanban/**/*.py, minus the named exemptions)
+     produces zero findings.
   2. A synthetic direct mutation of ## State (the exact shape a bespoke
      re.subn edit would take) is detected.
   3. A read-only reference to a managed heading (re.search, not re.sub) is
@@ -27,6 +28,12 @@ Test coverage:
   9. Remedy block names the offending file:line and the enforced rule.
   10. The two named exemptions (task-status.sh, unwind-rc.sh) are excluded
       from the default scan even when they exist on disk.
+  11. The default scan covers the Python package: a package module holding
+      a hand-rolled Blocked Reason / Blockers splice is flagged, and
+      main() with no --paths exits 1 on it.
+  12. The package's own task_status.py, the sanctioned writer, is left out
+      of the default scan; every other package module, nested ones
+      included, is in it.
 """
 
 from __future__ import annotations
@@ -67,19 +74,22 @@ def _write_sh(path: Path, content: str) -> Path:
 
 
 def test_real_tree_default_scope_has_zero_findings() -> None:
-    """The shipped team/scripts/*.sh surface (minus the two named
-    exemptions) produces zero findings.
+    """The shipped default surface (team/scripts/*.sh and
+    team/pgai_agent_kanban/**/*.py, minus the named exemptions) produces
+    zero findings.
 
     If this test fails, a direct status.md field mutation was introduced
-    into an agent-facing script — exactly the regression class this lint
-    exists to catch.
+    into an agent-facing script or a package module — exactly the
+    regression class this lint exists to catch.
     """
     scan_targets = _lint._default_scan_targets(_TEAM_DIR)
     assert scan_targets, "expected at least one team/scripts/*.sh file to scan"
+    assert any(
+        p.suffix == ".py" for p in scan_targets
+    ), "expected the default scan to include team/pgai_agent_kanban/ modules"
     violations = _lint.scan_paths(scan_targets)
-    assert violations == [], (
-        "Unexpected status-writer-bypass finding(s) on the real tree:\n"
-        + "\n".join(f"  {v.path}:{v.line} ({v.kind}) {v.snippet}" for v in violations)
+    assert violations == [], "Unexpected status-writer-bypass finding(s) on the real tree:\n" + "\n".join(
+        f"  {v.path}:{v.line} ({v.kind}) {v.snippet}" for v in violations
     )
 
 
@@ -261,7 +271,8 @@ def test_main_returns_two_on_empty_default_scope(tmp_path: Path) -> None:
     (team_dir / "scripts").mkdir(parents=True, exist_ok=True)
     rc = _lint.main(["--team-dir", str(team_dir)])
     assert rc == 2, (
-        f"Expected main() to return 2 when no team/scripts/*.sh files exist, got {rc}"
+        "Expected main() to return 2 when no team/scripts/*.sh or "
+        f"team/pgai_agent_kanban/**/*.py files exist, got {rc}"
     )
 
 
@@ -328,3 +339,66 @@ def test_default_scan_targets_excludes_named_exemptions(tmp_path: Path) -> None:
     assert "task-status.sh" not in names
     assert "unwind-rc.sh" not in names
     assert "other.sh" in names
+
+
+# ---------------------------------------------------------------------------
+# Case 11 — The default scan covers the Python package
+# ---------------------------------------------------------------------------
+
+# A package module that decides where to splice a section by searching for
+# ## Blockers itself and then rewrites status.md with re.sub, instead of
+# going through task_status.
+_PACKAGE_SPLICE = r"""
+import re
+
+
+def mark(text, reason):
+    if re.search(r'^## Blocked Reason\s*$', text, flags=re.M):
+        return text
+    elif re.search(r'^## Blockers\s*$', text, flags=re.M):
+        text = re.sub(
+            r'(^## Blockers[^\S\n]*)((?:\n(?!##)[^\n]*)*?)(\n+##|\n*\Z)',
+            lambda m: m.group(1) + m.group(2) + "\n\n## Blocked Reason\n" + reason + m.group(3),
+            text,
+            flags=re.M,
+            count=1,
+        )
+    return text
+"""
+
+
+def _team_with_package_module(tmp_path: Path, relpath: str, content: str) -> Path:
+    team_dir = tmp_path / "team"
+    _write_sh(team_dir / "scripts" / "clean.sh", "#!/usr/bin/env bash\necho clean\n")
+    _write_sh(team_dir / "pgai_agent_kanban" / relpath, content)
+    return team_dir
+
+
+def test_package_module_splice_is_flagged_by_default_scan(tmp_path: Path, capsys) -> None:
+    team_dir = _team_with_package_module(tmp_path, "overwatch/wont_do_splice.py", _PACKAGE_SPLICE)
+    module = team_dir / "pgai_agent_kanban" / "overwatch" / "wont_do_splice.py"
+
+    violations = _lint.scan_paths(_lint._default_scan_targets(team_dir))
+
+    assert violations, "expected the package module's splice to be flagged"
+    assert {v.path for v in violations} == {module}
+    assert r"elif re.search(r'^## Blockers\s*$', text, flags=re.M):" in [v.snippet for v in violations]
+    assert _lint.main(["--team-dir", str(team_dir)]) == 1
+    assert f"{module}:" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Case 12 — The package's task_status.py is the sanctioned writer
+# ---------------------------------------------------------------------------
+
+
+def test_default_scan_targets_package_modules_except_task_status(tmp_path: Path) -> None:
+    team_dir = _team_with_package_module(tmp_path, "task_status.py", _PACKAGE_SPLICE)
+    _write_sh(team_dir / "pgai_agent_kanban" / "ops" / "deep" / "nested.py", "X = 1\n")
+    package_dir = team_dir / "pgai_agent_kanban"
+
+    targets = _lint._default_scan_targets(team_dir)
+    package_targets = {p.relative_to(package_dir).as_posix() for p in targets if p.suffix == ".py"}
+
+    assert package_targets == {"ops/deep/nested.py"}
+    assert _lint.main(["--team-dir", str(team_dir)]) == 0

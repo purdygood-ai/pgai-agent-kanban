@@ -50,7 +50,6 @@ import datetime
 import pathlib
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Run by file path, this module has no parent package; put its own package
 # root first on sys.path so the imports below resolve from the same tree.
@@ -72,7 +71,7 @@ EXIT_USAGE = 2
 EXIT_NOT_YET = 3
 
 
-def backoff_window_s(retry_count: int, table_path: "str | Path | None" = None) -> Optional[int]:
+def backoff_window_s(retry_count: int, table_path: str | Path | None = None) -> int | None:
     """Seconds the requeue after a record at *retry_count* waits after the block.
 
     None when the table does not load or has no transient row (fail open).
@@ -86,9 +85,7 @@ def backoff_window_s(retry_count: int, table_path: "str | Path | None" = None) -
     return rule.window_s(max(retry_count, 1) - 1)
 
 
-def requeue_not_before(
-    status_text: str, table_path: "str | Path | None" = None
-) -> Optional[datetime.datetime]:
+def requeue_not_before(status_text: str, table_path: str | Path | None = None) -> datetime.datetime | None:
     """The earliest time the next transient requeue may happen, or None for "now".
 
     Measured from the Block Record's ``last_blocked_at``; None when there is
@@ -109,17 +106,17 @@ def requeue_not_before(
 
 
 def requeue_due(
-    status_file: "str | Path",
+    status_file: str | Path,
     *,
-    now: "datetime.datetime | None" = None,
-    table_path: "str | Path | None" = None,
-) -> tuple[bool, Optional[str]]:
+    now: datetime.datetime | None = None,
+    table_path: str | Path | None = None,
+) -> tuple[bool, str | None]:
     """``(due, not_before)`` for the task's next transient requeue.
 
     ``not_before`` is the canonical ISO time the window ends, or None when
     there is no window to wait out. An unreadable status.md is due.
     """
-    moment = now or datetime.datetime.now(datetime.timezone.utc)
+    moment = now or datetime.datetime.now(datetime.UTC)
     try:
         text = Path(status_file).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -152,7 +149,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point; returns the exit code."""
     parser = _parser()
     args = parser.parse_args(argv)

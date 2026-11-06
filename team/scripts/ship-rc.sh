@@ -96,7 +96,7 @@
 # BLOCK-WORTHY: an unreachable bootstrap prelude leaves every downstream
 # tunable/path resolution undefined for this release-shipping script.
 # CENSUS-ANCHOR: ship-rc-env-bootstrap-01
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 _ship_rc_usage() {
   echo "Usage: $(basename "$0") --project <name> --key vX.Y.Z [--dry-run] [--help]" >&2
@@ -215,7 +215,7 @@ fi
 # aliases that would trip strict mode. Source them first; a release hook
 # inherits whatever they export.
 # PGAI_AGENT_KANBAN_ROOT_PATH is set by env_bootstrap.sh (sourced above) or the operator.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 [[ -f "$KANBAN_ROOT/bashrc" ]] && source "$KANBAN_ROOT/bashrc"
 [[ -f "$KANBAN_ROOT/env" ]] && source "$KANBAN_ROOT/env"

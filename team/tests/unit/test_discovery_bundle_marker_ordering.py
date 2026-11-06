@@ -69,8 +69,7 @@ class TestSingleMarkedItem:
         ordered = _order(tmp_path, [a, b, c])
 
         assert ordered == [str(b), str(a), str(c)], (
-            f"Expected the marked item first with the others following in "
-            f"their original order; got {ordered}"
+            f"Expected the marked item first with the others following in " f"their original order; got {ordered}"
         )
 
 
@@ -105,8 +104,7 @@ class TestNoMarkedItemsIsUnchanged:
         ordered = _order(tmp_path, [a, b, c])
 
         assert ordered == [str(a), str(b), str(c)], (
-            "Ordinary bundling (no markers present) must be provably "
-            f"unchanged: got {ordered}"
+            "Ordinary bundling (no markers present) must be provably " f"unchanged: got {ordered}"
         )
 
 
@@ -123,8 +121,7 @@ class TestUnparseableMarkerIsTreatedAsUnmarked:
         malformed = _write(
             tmp_path,
             "BUG-0002-bravo.md",
-            "# BUG-0002-bravo\n\n## Status\nopen\n\n"
-            "## Known Issue Carry Forward\n\n## Other Field\nx\n",
+            "# BUG-0002-bravo\n\n## Status\nopen\n\n" "## Known Issue Carry Forward\n\n## Other Field\nx\n",
         )
         c = _plain_item(tmp_path, "BUG-0003-charlie")
 
@@ -147,9 +144,10 @@ class TestUnparseableMarkerIsTreatedAsUnmarked:
 
         ordered = _order(tmp_path, [a, malformed])
 
-        assert ordered == [str(a), str(malformed)], (
-            f"A marker header truncated at EOF must be treated as unmarked; got {ordered}"
-        )
+        assert ordered == [
+            str(a),
+            str(malformed),
+        ], f"A marker header truncated at EOF must be treated as unmarked; got {ordered}"
 
     def test_unreadable_path_stays_in_place_and_is_not_dropped(self, tmp_path):
         # A path in the list that does not exist on disk (e.g. removed
@@ -161,9 +159,11 @@ class TestUnparseableMarkerIsTreatedAsUnmarked:
 
         ordered = _order(tmp_path, [a, missing, b])
 
-        assert ordered == [str(b), str(a), str(missing)], (
-            f"An unreadable path must be treated as unmarked (not dropped); got {ordered}"
-        )
+        assert ordered == [
+            str(b),
+            str(a),
+            str(missing),
+        ], f"An unreadable path must be treated as unmarked (not dropped); got {ordered}"
 
 
 class TestMarkerRecognitionIsPresenceOnly:
@@ -174,13 +174,11 @@ class TestMarkerRecognitionIsPresenceOnly:
         oddly_valued = _write(
             tmp_path,
             "BUG-0002-bravo.md",
-            "# BUG-0002-bravo\n\n## Status\nopen\n\n"
-            "## Known Issue Carry Forward\nnot-a-version-string\n",
+            "# BUG-0002-bravo\n\n## Status\nopen\n\n" "## Known Issue Carry Forward\nnot-a-version-string\n",
         )
 
         ordered = _order(tmp_path, [a, oddly_valued])
 
         assert ordered == [str(oddly_valued), str(a)], (
-            "Ordering must key on marker presence, not on the value looking "
-            f"like a version string; got {ordered}"
+            "Ordering must key on marker presence, not on the value looking " f"like a version string; got {ordered}"
         )

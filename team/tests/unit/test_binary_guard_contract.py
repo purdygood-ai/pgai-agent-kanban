@@ -60,8 +60,7 @@ def test_calling_an_absent_binary_with_no_guard_fails_loud() -> None:
     with pytest.raises(FileNotFoundError) as excinfo:
         subprocess.run([_ABSENT_BINARY, "-V"], capture_output=True)
     assert _ABSENT_BINARY in str(excinfo.value), (
-        "expected the FileNotFoundError to name the missing binary; "
-        f"got: {excinfo.value!r}"
+        "expected the FileNotFoundError to name the missing binary; " f"got: {excinfo.value!r}"
     )
 
 
@@ -73,9 +72,9 @@ def test_calling_the_same_absent_binary_through_the_guard_skips_instead_of_error
     """
     with pytest.raises(pytest.skip.Exception) as excinfo:
         require_binary(_ABSENT_BINARY, label="binary-guard-contract")
-    assert _ABSENT_BINARY in str(excinfo.value), (
-        f"expected the skip reason to name the missing binary; got: {excinfo.value!r}"
-    )
+    assert _ABSENT_BINARY in str(
+        excinfo.value
+    ), f"expected the skip reason to name the missing binary; got: {excinfo.value!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +99,9 @@ def test_a_guard_whose_absent_binary_branch_raises_fails_loud() -> None:
     """
     with pytest.raises(RuntimeError) as excinfo:
         _broken_require_binary_that_raises(_ABSENT_BINARY)
-    assert _ABSENT_BINARY in str(excinfo.value), (
-        f"expected the RuntimeError to name the missing binary; got: {excinfo.value!r}"
-    )
+    assert _ABSENT_BINARY in str(
+        excinfo.value
+    ), f"expected the RuntimeError to name the missing binary; got: {excinfo.value!r}"
 
 
 def test_the_shared_guard_skips_instead_of_raising_for_the_same_absent_binary() -> None:
@@ -140,9 +139,9 @@ def test_an_unconditional_teardown_after_a_skipped_setup_fails_loud() -> None:
 
     with pytest.raises(TypeError) as excinfo:
         _unconditional_teardown()
-    assert "NoneType" in str(excinfo.value), (
-        f"expected the TypeError to complain about the None path; got: {excinfo.value!r}"
-    )
+    assert "NoneType" in str(
+        excinfo.value
+    ), f"expected the TypeError to complain about the None path; got: {excinfo.value!r}"
 
 
 def test_binary_guard_teardown_is_a_no_op_after_a_skipped_setup() -> None:
@@ -158,10 +157,7 @@ def test_binary_guard_teardown_is_a_no_op_after_a_skipped_setup() -> None:
     invoked: list[str] = []
     guard.teardown(lambda path: invoked.append(path))
 
-    assert invoked == [], (
-        "BinaryGuard.teardown() must not invoke its callable when the "
-        "guard never resolved a path"
-    )
+    assert invoked == [], "BinaryGuard.teardown() must not invoke its callable when the " "guard never resolved a path"
 
 
 # ---------------------------------------------------------------------------
@@ -188,9 +184,7 @@ def test_calling_docker_with_no_guard_fails_loud_when_docker_is_absent(
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(FileNotFoundError) as excinfo:
         subprocess.run(["docker", "info"], capture_output=True)
-    assert "docker" in str(excinfo.value), (
-        f"expected the FileNotFoundError to name docker; got: {excinfo.value!r}"
-    )
+    assert "docker" in str(excinfo.value), f"expected the FileNotFoundError to name docker; got: {excinfo.value!r}"
 
 
 def test_calling_the_same_absent_docker_through_the_guard_skips_instead_of_erroring(
@@ -207,9 +201,7 @@ def test_calling_the_same_absent_docker_through_the_guard_skips_instead_of_error
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(pytest.skip.Exception) as excinfo:
         require_docker_daemon(label="binary-guard-contract")
-    assert "docker" in str(excinfo.value), (
-        f"expected the skip reason to name docker; got: {excinfo.value!r}"
-    )
+    assert "docker" in str(excinfo.value), f"expected the skip reason to name docker; got: {excinfo.value!r}"
 
 
 def test_docker_present_but_daemon_unreachable_skips_naming_the_daemon_not_the_binary(
@@ -236,17 +228,15 @@ def test_docker_present_but_daemon_unreachable_skips_naming_the_daemon_not_the_b
     with pytest.raises(pytest.skip.Exception) as excinfo:
         require_docker_daemon(label="binary-guard-contract")
     reason = str(excinfo.value)
-    assert "daemon" in reason and "not reachable" in reason, (
-        f"expected the skip reason to say the daemon is unreachable; got: {reason!r}"
-    )
-    assert "not found on PATH" not in reason, (
-        f"docker resolved on PATH here; the skip must not claim it is missing: {reason!r}"
-    )
+    assert (
+        "daemon" in reason and "not reachable" in reason
+    ), f"expected the skip reason to say the daemon is unreachable; got: {reason!r}"
+    assert (
+        "not found on PATH" not in reason
+    ), f"docker resolved on PATH here; the skip must not claim it is missing: {reason!r}"
 
 
-def test_calling_git_with_no_guard_fails_loud_when_git_is_absent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_calling_git_with_no_guard_fails_loud_when_git_is_absent(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """
     Seeded violation: a call site that skips the guard entirely and invokes
     git directly. PATH is scrubbed to an empty directory for this test only
@@ -257,9 +247,7 @@ def test_calling_git_with_no_guard_fails_loud_when_git_is_absent(
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(FileNotFoundError) as excinfo:
         subprocess.run(["git", "status"], capture_output=True)
-    assert "git" in str(excinfo.value), (
-        f"expected the FileNotFoundError to name git; got: {excinfo.value!r}"
-    )
+    assert "git" in str(excinfo.value), f"expected the FileNotFoundError to name git; got: {excinfo.value!r}"
 
 
 def test_calling_the_same_absent_git_through_the_guard_skips_instead_of_erroring(
@@ -273,9 +261,7 @@ def test_calling_the_same_absent_git_through_the_guard_skips_instead_of_erroring
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(pytest.skip.Exception) as excinfo:
         require_binary("git", label="binary-guard-contract")
-    assert "git" in str(excinfo.value), (
-        f"expected the skip reason to name git; got: {excinfo.value!r}"
-    )
+    assert "git" in str(excinfo.value), f"expected the skip reason to name git; got: {excinfo.value!r}"
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
 
 from tests.unit.shell_harness import run_bash
 

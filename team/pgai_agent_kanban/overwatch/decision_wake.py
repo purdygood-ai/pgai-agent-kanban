@@ -133,7 +133,7 @@ import datetime
 import pathlib
 import sys
 from pathlib import Path
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 # Run by file path the module has no parent package; put this tree's own
 # package root first so the package imports resolve from the same tree.
@@ -239,7 +239,7 @@ class Stop:
     item: str
     subject: str
     inputs: dc.DecisionInput
-    status_file: Optional[Path] = None
+    status_file: Path | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -259,9 +259,9 @@ class StopResult:
     stop: Stop
     result: str
     detail: str
-    outcome: Optional[dc.Outcome] = None
-    execution: Optional[dx.ExecutionResult] = None
-    error: Optional[tuple] = None
+    outcome: dc.Outcome | None = None
+    execution: dx.ExecutionResult | None = None
+    error: tuple | None = None
 
     def as_tsv(self) -> str:
         """ITEM, SUBJECT, OUTCOME, VERB, RESULT, DETAIL, tab-separated, one line."""
@@ -285,7 +285,7 @@ class WakeReport:
 
     project: str
     results: list = dataclasses.field(default_factory=list)
-    stopped: Optional[str] = None
+    stopped: str | None = None
     warnings: list = dataclasses.field(default_factory=list)
 
     @property
@@ -340,17 +340,13 @@ def _cause_checks(ctx: OpsContext, project: str, provenance: HaltProvenance) -> 
         halt_text = Path(provenance.path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ()
-    return tuple(
-        run_cause_checks(row, str(ctx.kanban_root), project, str(project_root), provenance.path, halt_text)
-    )
+    return tuple(run_cause_checks(row, str(ctx.kanban_root), project, str(project_root), provenance.path, halt_text))
 
 
 def _halt_stop(ctx: OpsContext, project: str, provenance: HaltProvenance, common: Mapping) -> Stop:
     checks = _cause_checks(ctx, project, provenance) if provenance.is_chain else ()
     item = ITEM_RC_FAILURE if provenance.is_chain and provenance.writer == WRITER_CM_RELEASE else ITEM_HALT
-    inputs = dc.DecisionInput(
-        subject=dc.SUBJECT_HALT, project=project, halt=provenance, cause_checks=checks, **common
-    )
+    inputs = dc.DecisionInput(subject=dc.SUBJECT_HALT, project=project, halt=provenance, cause_checks=checks, **common)
     return Stop(item, f"halt:{project}", inputs)
 
 
@@ -374,8 +370,8 @@ def _block_inputs(
     project: str,
     release_state: Path,
     budget: _Budget,
-    worktree_base: Optional[str],
-    table_path: Optional[str],
+    worktree_base: str | None,
+    table_path: str | None,
     moment: datetime.datetime,
     common: Mapping,
 ) -> dc.DecisionInput:
@@ -400,21 +396,29 @@ def _block_inputs(
             # the RC's one requeue is spent, and the block cause it carries.
             facts = {**facts, **verification_retry.verification_facts(status.parent, common.get("active_rc", ""))}
     return dc.DecisionInput(
-        subject=dc.SUBJECT_BLOCK, project=project, task_id=task_id, record=record, record_error=record_error,
-        task_state=state, history=dx.task_history(release_state, task_id), facts=facts,
-        transient_retry=transient_retry_state(text), requeue_budget=requeue_budget, **common,
+        subject=dc.SUBJECT_BLOCK,
+        project=project,
+        task_id=task_id,
+        record=record,
+        record_error=record_error,
+        task_state=state,
+        history=dx.task_history(release_state, task_id),
+        facts=facts,
+        transient_retry=transient_retry_state(text),
+        requeue_budget=requeue_budget,
+        **common,
     )
 
 
 def gather(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     *,
-    now: "datetime.datetime | str | None" = None,
+    now: datetime.datetime | str | None = None,
     runaway_trips: tuple = (),
-    worktree_base: Optional[str] = None,
-    table_path: Optional[str] = None,
-    warnings: Optional[list] = None,
+    worktree_base: str | None = None,
+    table_path: str | None = None,
+    warnings: list | None = None,
 ) -> list:
     """Every stop in *project*, in the order they are decided, with decide's
     inputs. Reads only (block triage's plan and facts run read-only git).
@@ -449,14 +453,26 @@ def gather(
             state = ts.section_value(text, "State").strip().upper()
             if state == "BLOCKED":
                 inputs = _block_inputs(
-                    status, text, state, project=project, release_state=release_state, budget=budget,
-                    worktree_base=worktree_base, table_path=table_path, moment=moment, common=common,
+                    status,
+                    text,
+                    state,
+                    project=project,
+                    release_state=release_state,
+                    budget=budget,
+                    worktree_base=worktree_base,
+                    table_path=table_path,
+                    moment=moment,
+                    common=common,
                 )
                 blocks.append(Stop(ITEM_BLOCK, status.parent.name, inputs, status))
             elif state in _NEEDS_HUMAN_STATES and ts.section_value(text, "Needs Human").strip().lower() == "yes":
                 inputs = dc.DecisionInput(
-                    subject=dc.SUBJECT_NEEDS_HUMAN, project=project, task_id=status.parent.name, task_state=state,
-                    history=dx.task_history(release_state, status.parent.name), **common,
+                    subject=dc.SUBJECT_NEEDS_HUMAN,
+                    project=project,
+                    task_id=status.parent.name,
+                    task_state=state,
+                    history=dx.task_history(release_state, status.parent.name),
+                    **common,
                 )
                 needs_human.append(Stop(ITEM_NEEDS_HUMAN, status.parent.name, inputs, status))
         except _STOP_FAILURES as exc:
@@ -480,7 +496,10 @@ def _report_detector_off(ctx: OpsContext, project: str, exc: runaway.RunawayErro
     runaway detector off for *project*; one line saying what was written."""
     lead = f"The runaway detector is off for project {project}"
     entry_id, created, error = dx.ask_operator(
-        ctx.kanban_root, project, source=project, lead=lead,
+        ctx.kanban_root,
+        project,
+        source=project,
+        lead=lead,
         question=(
             f"{lead}: {one_line(exc.message)} Until this is fixed nothing stops {project} if it starts "
             "repeating itself (releases, RC cycles, the same block, inbox entries). Will you fix the setting?"
@@ -521,10 +540,10 @@ def _record_first_cooldown(
     stop: Stop,
     *,
     moment: datetime.datetime,
-    worktree_base: Optional[str],
-    table_path: Optional[str],
-    lock_wait_seconds: Optional[float],
-    env: Optional[Mapping[str, str]],
+    worktree_base: str | None,
+    table_path: str | None,
+    lock_wait_seconds: float | None,
+    env: Mapping[str, str] | None,
 ) -> str:
     """Record a block's first cool-down window through block triage's own
     record step, under HALT-first; one line saying what happened."""
@@ -541,17 +560,34 @@ def _record_first_cooldown(
         backup = halt_first.backup_file(ctx.kanban_root, project, status, halt_first.firing_timestamp(moment))
         queue = dx.find_queue_file(ctx.project_root(project), task_id) or status.parent / "no-queue-line"
         result = bt.apply_task(
-            status, queue, project=project, kanban_root=ctx.kanban_root, backups={"status.md": backup, "queue": ""},
-            now=moment, table_path=table_path, worktree_base=worktree_base, requeue_budget=budget,
+            status,
+            queue,
+            project=project,
+            kanban_root=ctx.kanban_root,
+            backups={"status.md": backup, "queue": ""},
+            now=moment,
+            table_path=table_path,
+            worktree_base=worktree_base,
+            requeue_budget=budget,
         )
         log_action(
-            str(ctx.kanban_root), project, _LOG_NAME, task_id, f"block-triage:{result.reason_code}:record",
-            one_line(result.detail), backup_path=backup,
+            str(ctx.kanban_root),
+            project,
+            _LOG_NAME,
+            task_id,
+            f"block-triage:{result.reason_code}:record",
+            one_line(result.detail),
+            backup_path=backup,
         )
         return f"block triage recorded the first cool-down: {result.detail}"
 
     envelope = halt_first.run_halt_first(
-        ctx.kanban_root, project, _fix, op="record-cooldown", task=task_id, lock_wait_seconds=lock_wait_seconds,
+        ctx.kanban_root,
+        project,
+        _fix,
+        op="record-cooldown",
+        task=task_id,
+        lock_wait_seconds=lock_wait_seconds,
         env=env,
     )
     return envelope.value if envelope.ran else envelope.detail
@@ -568,9 +604,7 @@ def _first_cooldown(outcome: dc.Outcome) -> bool:
     )
 
 
-def _failed(
-    ctx: OpsContext, stop: Stop, exc: BaseException, outcome: Optional[dc.Outcome], *, report: bool
-) -> StopResult:
+def _failed(ctx: OpsContext, stop: Stop, exc: BaseException, outcome: dc.Outcome | None, *, report: bool) -> StopResult:
     """The failed stop's result; with *report*, the operator is told in the
     inbox (what was decided, that it did not run, the error, the fix)."""
     fields = _failure_fields(exc, ctx, stop.inputs.project)
@@ -578,7 +612,10 @@ def _failed(
     if report:
         try:
             entry_id, created, error = dx.report_not_carried_out(
-                ctx.kanban_root, stop.inputs, outcome, cause=f"{fields[1]} ({fields[0]})",
+                ctx.kanban_root,
+                stop.inputs,
+                outcome,
+                cause=f"{fields[1]} ({fields[0]})",
                 fix=f"Fix what the error names; this command shows or fixes it: {fields[2]}",
             )
         except _STOP_FAILURES as report_exc:
@@ -597,23 +634,36 @@ def _decide_one(
     moment: datetime.datetime,
     dry_run: bool,
     triage_enabled: bool,
-    worktree_base: Optional[str],
-    table_path: Optional[str],
-    lock_wait_seconds: Optional[float],
-    env: Optional[Mapping[str, str]],
+    worktree_base: str | None,
+    table_path: str | None,
+    lock_wait_seconds: float | None,
+    env: Mapping[str, str] | None,
 ) -> StopResult:
     table = bc.load_table(table_path) if table_path else None
     outcome = dc.decide(stop.inputs, table=table)
     if dry_run:
         name = f" {outcome.name}" if outcome.name else ""
         detail = f"would carry out {outcome.kind}{name} ({outcome.why}): {outcome.detail}; nothing written"
-        log_action(str(ctx.kanban_root), stop.inputs.project, _LOG_NAME, stop.subject, "decision-wake-dry-run",
-                   one_line(detail))
+        log_action(
+            str(ctx.kanban_root),
+            stop.inputs.project,
+            _LOG_NAME,
+            stop.subject,
+            "decision-wake-dry-run",
+            one_line(detail),
+        )
         return StopResult(stop, RESULT_DRY_RUN, detail, outcome)
     try:
         execution = dx.execute(
-            outcome, stop.inputs, kanban_root=ctx.kanban_root, now=moment, triage_enabled=triage_enabled,
-            worktree_base=worktree_base, table_path=table_path, lock_wait_seconds=lock_wait_seconds, env=env,
+            outcome,
+            stop.inputs,
+            kanban_root=ctx.kanban_root,
+            now=moment,
+            triage_enabled=triage_enabled,
+            worktree_base=worktree_base,
+            table_path=table_path,
+            lock_wait_seconds=lock_wait_seconds,
+            env=env,
         )
     except Exception as exc:  # noqa: BLE001 - one stop's failure is reported, never the end of the run
         return _failed(ctx, stop, exc, outcome, report=True)
@@ -621,8 +671,13 @@ def _decide_one(
     if _first_cooldown(outcome) and stop.status_file is not None:
         if triage_enabled:
             said = _record_first_cooldown(
-                ctx, stop, moment=moment, worktree_base=worktree_base, table_path=table_path,
-                lock_wait_seconds=lock_wait_seconds, env=env,
+                ctx,
+                stop,
+                moment=moment,
+                worktree_base=worktree_base,
+                table_path=table_path,
+                lock_wait_seconds=lock_wait_seconds,
+                env=env,
             )
         else:
             said = "[overwatch] block_triage is false: the first cool-down is not recorded"
@@ -631,16 +686,16 @@ def _decide_one(
 
 
 def run_project(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     *,
     triage_enabled: bool = True,
-    worktree_base: Optional[str] = None,
-    lock_wait_seconds: Optional[float] = None,
-    now: "datetime.datetime | str | None" = None,
+    worktree_base: str | None = None,
+    lock_wait_seconds: float | None = None,
+    now: datetime.datetime | str | None = None,
     dry_run: bool = False,
-    table_path: Optional[str] = None,
-    env: Optional[Mapping[str, str]] = None,
+    table_path: str | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> WakeReport:
     """Decide every stop in *project* once and carry each outcome out (see
     the module docstring).
@@ -666,14 +721,26 @@ def run_project(
     report = WakeReport(project)
     trips = _runaway_trips(ctx, project, moment, observe=not dry_run, report=not dry_run, warnings=report.warnings)
     stops = gather(
-        ctx.kanban_root, project, now=moment, runaway_trips=trips, worktree_base=worktree_base,
-        table_path=table_path, warnings=report.warnings,
+        ctx.kanban_root,
+        project,
+        now=moment,
+        runaway_trips=trips,
+        worktree_base=worktree_base,
+        table_path=table_path,
+        warnings=report.warnings,
     )
     for stop in stops:
         try:
             line = _decide_one(
-                ctx, stop, moment=moment, dry_run=dry_run, triage_enabled=triage_enabled,
-                worktree_base=worktree_base, table_path=table_path, lock_wait_seconds=lock_wait_seconds, env=env,
+                ctx,
+                stop,
+                moment=moment,
+                dry_run=dry_run,
+                triage_enabled=triage_enabled,
+                worktree_base=worktree_base,
+                table_path=table_path,
+                lock_wait_seconds=lock_wait_seconds,
+                env=env,
             )
         except _STOP_FAILURES as exc:
             line = _failed(ctx, stop, exc, None, report=not dry_run)
@@ -715,29 +782,37 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--kanban-root", required=True, metavar="DIR", help="the kanban root holding projects/")
     parser.add_argument("--project", required=True, metavar="NAME", help="the project whose stops are decided")
     parser.add_argument(
-        "--triage-enabled", type=bt.true_false_arg, default=True, metavar="true|false",
+        "--triage-enabled",
+        type=bt.true_false_arg,
+        default=True,
+        metavar="true|false",
         help="the resolved [overwatch] block_triage value; false leaves every task verb unrun (default: true)",
     )
     parser.add_argument(
-        "--worktree-base", metavar="DIR",
+        "--worktree-base",
+        metavar="DIR",
         help="the directory task worktrees live under (worktree.sh pgai_worktree_base); without it no "
         "worktree residue is shown to be inside it",
     )
     parser.add_argument(
-        "--lock-wait", type=_seconds_arg, default=None, metavar="SECONDS",
+        "--lock-wait",
+        type=_seconds_arg,
+        default=None,
+        metavar="SECONDS",
         help="how long a held repo lock is retried per write before it is declined and the run stops "
         "(default: OVERWATCH_LOCK_WAIT_SECONDS, else 0)",
     )
     parser.add_argument("--now", metavar="ISO", help="the decision time (ISO-8601); default: the current UTC time")
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="decide and print only: nothing is carried out, the runaway counters are not updated, and one "
         "decision-wake-dry-run action-log row is written per stop",
     )
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point; returns the exit code."""
     parser = _parser()
     args = parser.parse_args(argv)
@@ -747,8 +822,13 @@ def main(argv: Optional[list] = None) -> int:
     if not project_root.is_dir():
         parser.error(f"project root {project_root} does not exist")
     report = run_project(
-        args.kanban_root, args.project, triage_enabled=args.triage_enabled, worktree_base=args.worktree_base,
-        lock_wait_seconds=args.lock_wait, now=args.now, dry_run=args.dry_run,
+        args.kanban_root,
+        args.project,
+        triage_enabled=args.triage_enabled,
+        worktree_base=args.worktree_base,
+        lock_wait_seconds=args.lock_wait,
+        now=args.now,
+        dry_run=args.dry_run,
     )
     for warning in report.warnings:
         sys.stderr.write(f"decision-wake: {args.project}: warning: {one_line(warning)}\n")

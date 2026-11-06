@@ -13,6 +13,10 @@ Fixtures exercised:
        behavior is preserved for genuinely fresh repos.
   (c)  release-state.md has a shipped record — state wins unchanged (no
        regression from changing the tag-scan fallback path).
+  (d)  Git repo with no tag matching the branch prefix — release-state.md
+       ``## Last Released`` is the answer when it is a valid vX.Y.Z; with the
+       file absent, the heading absent, or the value ``none``, the v0.0.0
+       sentinel. A matching tag still wins over a state value.
 
 These tests use the bash harness with synthetic git repos in tmp_path so they
 never touch the live kanban root or any real dev tree.
@@ -39,6 +43,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="pp-last-released-version-bash")
 
+
 _LIB = "scripts/lib/project_paths.sh"
 
 # ---------------------------------------------------------------------------
@@ -52,8 +57,7 @@ def _make_project_cfg(
     branch_prefix: str = "",
 ) -> None:
     """Write a minimal project.cfg pointing at the given dev_tree."""
-    lines = ["[project]\n", f"project_name={proj_dir.name}\n",
-             f"dev_tree_path={dev_tree}\n"]
+    lines = ["[project]\n", f"project_name={proj_dir.name}\n", f"dev_tree_path={dev_tree}\n"]
     if branch_prefix:
         lines.append(f"branch_prefix={branch_prefix}\n")
     (proj_dir / "project.cfg").write_text("".join(lines), encoding="utf-8")
@@ -97,10 +101,13 @@ def _ensure_branch(repo: pathlib.Path, branch: str) -> None:
     porcelain output and handles both cases cleanly.
     """
     ref = f"refs/heads/{branch}"
-    branch_exists = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--verify", ref],
-        capture_output=True,
-    ).returncode == 0
+    branch_exists = (
+        subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", ref],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
 
     if branch_exists:
         # Determine which branch HEAD currently points at (empty when detached).
@@ -188,13 +195,11 @@ def test_prefixed_project_rejects_stale_version_requirement(
         f"source {_LIB} && "
         f"KANBAN_ROOT={kanban_root} "
         f"floor=$(pp_last_released_version myproject) && "
-        f"if semver_gt v0.9.0 \"$floor\"; then echo ACCEPTED; else echo REJECTED; fi",
+        f'if semver_gt v0.9.0 "$floor"; then echo ACCEPTED; else echo REJECTED; fi',
         extra_env={"KANBAN_ROOT": str(kanban_root)},
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == "REJECTED", (
-        f"v0.9.0 should be REJECTED when floor is {result.stdout.strip()!r}"
-    )
+    assert result.stdout.strip() == "REJECTED", f"v0.9.0 should be REJECTED when floor is {result.stdout.strip()!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -278,9 +283,9 @@ def test_tagless_repo_returns_sentinel(
 
     result = _run(tmp_path, kanban_root, "pp_last_released_version freshproject")
     assert result.returncode == 0
-    assert result.stdout.strip() == "v0.0.0", (
-        "tagless repo must return sentinel so first-doc-declares principle is preserved"
-    )
+    assert (
+        result.stdout.strip() == "v0.0.0"
+    ), "tagless repo must return sentinel so first-doc-declares principle is preserved"
 
 
 def test_tagless_unprefixed_repo_returns_sentinel(
@@ -352,9 +357,9 @@ def test_git_project_with_tags_ignores_release_state(
 
     result = _run(tmp_path, kanban_root, "pp_last_released_version gitproject")
     assert result.returncode == 0
-    assert result.stdout.strip() == "v1.5.0", (
-        "git project must use tag scan even when release-state has no Last Released"
-    )
+    assert (
+        result.stdout.strip() == "v1.5.0"
+    ), "git project must use tag scan even when release-state has no Last Released"
 
 
 def test_tags_sorted_by_semver_not_lexicographically(
@@ -385,6 +390,71 @@ def test_tags_sorted_by_semver_not_lexicographically(
 
     result = _run(tmp_path, kanban_root, "pp_last_released_version semverproject")
     assert result.returncode == 0
-    assert result.stdout.strip() == "v1.10.0", (
-        "v1.10.0 must win over v1.9.0 in semver sort (not lexicographic)"
-    )
+    assert result.stdout.strip() == "v1.10.0", "v1.10.0 must win over v1.9.0 in semver sort (not lexicographic)"
+
+
+# ---------------------------------------------------------------------------
+# Fixture (d) — git repo with no matching tag: release-state.md is the fallback
+# ---------------------------------------------------------------------------
+
+_STATE_LAST_RELEASED = "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## Last Released\n{}\n"
+_STATE_NO_LAST_RELEASED = "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n"
+
+
+def _untagged_git_project(tmp_path: pathlib.Path, state_text: str | None) -> pathlib.Path:
+    """A prefixed git project whose repo holds no ai_v* tag; returns the kanban root.
+
+    The repo carries a bare v9.9.9 tag so the fixture proves tags of another
+    prefix are not a match. *state_text*, when given, is written as the
+    project's release-state.md.
+    """
+    kanban_root = tmp_path / "kanban"
+    dev_tree = tmp_path / "dev"
+    _make_git_repo(dev_tree)
+    _make_tag(dev_tree, "v9.9.9")
+    _ensure_branch(dev_tree, "ai_main")
+    proj_dir = kanban_root / "projects" / "untagged"
+    proj_dir.mkdir(parents=True)
+    _make_project_cfg(proj_dir, dev_tree, branch_prefix="ai_")
+    if state_text is not None:
+        (proj_dir / "release-state.md").write_text(state_text, encoding="utf-8")
+    return kanban_root
+
+
+def test_git_project_without_matching_tag_reads_release_state(tmp_path: pathlib.Path) -> None:
+    """(d) No ai_v* tag anywhere, ## Last Released v3.5.0 — the resolver echoes v3.5.0."""
+    kanban_root = _untagged_git_project(tmp_path, _STATE_LAST_RELEASED.format("v3.5.0"))
+
+    result = _run(tmp_path, kanban_root, "pp_last_released_version untagged", PGAI_GIT_LOCAL_ONLY="1")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "v3.5.0", result.stderr
+
+
+@pytest.mark.parametrize(
+    "state_text",
+    [
+        pytest.param(None, id="file-absent"),
+        pytest.param(_STATE_NO_LAST_RELEASED, id="heading-absent"),
+        pytest.param(_STATE_LAST_RELEASED.format("none"), id="value-none"),
+        pytest.param(_STATE_LAST_RELEASED.format("3.5.0"), id="value-not-vXYZ"),
+    ],
+)
+def test_git_project_without_matching_tag_or_state_value_returns_sentinel(
+    tmp_path: pathlib.Path, state_text: str | None
+) -> None:
+    """(d) No ai_v* tag and no valid ## Last Released value — the v0.0.0 sentinel."""
+    kanban_root = _untagged_git_project(tmp_path, state_text)
+
+    result = _run(tmp_path, kanban_root, "pp_last_released_version untagged", PGAI_GIT_LOCAL_ONLY="1")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "v0.0.0", result.stderr
+
+
+def test_matching_tag_wins_over_release_state_value(tmp_path: pathlib.Path) -> None:
+    """(d) A matching tag is the answer even when ## Last Released names another version."""
+    kanban_root = _untagged_git_project(tmp_path, _STATE_LAST_RELEASED.format("v3.5.0"))
+    _make_tag(tmp_path / "dev", "ai_v1.5.0")
+
+    result = _run(tmp_path, kanban_root, "pp_last_released_version untagged", PGAI_GIT_LOCAL_ONLY="1")
+    assert result.returncode == 0
+    assert result.stdout.strip() == "v1.5.0", result.stderr

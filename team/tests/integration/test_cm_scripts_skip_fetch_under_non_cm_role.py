@@ -82,15 +82,33 @@ def _build_board(tmp_path: pathlib.Path, real_git: str) -> tuple[pathlib.Path, p
     """A throwaway kanban root (push_to_remote=true) plus its dev tree."""
     root = tmp_path / "board"
     proj = root / "projects" / _PROJECT
-    for d in (root / "tmp", root / "logs", root / "locks", proj / "release-state",
-              proj / "tasks" / "queues", root / "pgai_agent_kanban" / "cm"):
+    for d in (
+        root / "tmp",
+        root / "logs",
+        root / "locks",
+        proj / "release-state",
+        proj / "tasks" / "queues",
+        root / "pgai_agent_kanban" / "cm",
+    ):
         d.mkdir(parents=True, exist_ok=True)
     repo = root / "repo"
     repo.mkdir()
-    subprocess.run([real_git, "init", "-q", "--initial-branch=main", str(repo)],
-                   capture_output=True, text=True, check=True)
-    _git(real_git, repo, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
-         "commit", "-q", "--allow-empty", "-m", "init")
+    subprocess.run(
+        [real_git, "init", "-q", "--initial-branch=main", str(repo)], capture_output=True, text=True, check=True
+    )
+    _git(
+        real_git,
+        repo,
+        "-c",
+        "user.email=t@example.invalid",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
+    )
     _git(real_git, repo, "tag", "v1.2.3")
     _git(real_git, repo, "remote", "add", "origin", "git@example.invalid:org/repo.git")
 
@@ -115,8 +133,7 @@ def _build_board(tmp_path: pathlib.Path, real_git: str) -> tuple[pathlib.Path, p
         encoding="utf-8",
     )
     (proj / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
     # The scripts read release-state.md through the install root's own copy
@@ -167,7 +184,11 @@ def _run_script(
 
     result = subprocess.run(
         ["bash", str(script), *args],
-        capture_output=True, text=True, env=env, cwd=str(root), timeout=90,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(root),
+        timeout=90,
     )
     return result, evidence, net_log
 
@@ -204,30 +225,23 @@ def test_non_cm_role_skips_the_fetch_narrates_it_and_records_nothing(
         f"{script.name} under PGAI_AGENT_ROLE={role} must print a line narrating the "
         f"skipped fetch (containing {_SKIP_MARKER!r}).\n--- script output ---\n{combined}"
     )
-    assert any(role in l for l in skip_lines), (
-        f"the narration must name the role that caused the skip ({role}); got:\n{skip_lines}"
-    )
-    assert _FETCH_MARKER not in result.stdout, (
-        f"{script.name} must not announce a fetch it skipped.\n{result.stdout}"
-    )
+    assert any(
+        role in l for l in skip_lines
+    ), f"the narration must name the role that caused the skip ({role}); got:\n{skip_lines}"
+    assert _FETCH_MARKER not in result.stdout, f"{script.name} must not announce a fetch it skipped.\n{result.stdout}"
     assert "fetch origin" not in _network_calls(net_log), (
-        f"no fetch may reach the binary behind the shim under {role}; the stub logged:\n"
-        f"{_network_calls(net_log)}"
+        f"no fetch may reach the binary behind the shim under {role}; the stub logged:\n" f"{_network_calls(net_log)}"
     )
 
 
 @pytest.mark.parametrize("script, args", _SCRIPTS)
-def test_cm_role_still_reaches_the_fetch(
-    tmp_path: pathlib.Path, script: pathlib.Path, args: list[str]
-) -> None:
+def test_cm_role_still_reaches_the_fetch(tmp_path: pathlib.Path, script: pathlib.Path, args: list[str]) -> None:
     result, evidence, net_log = _run_script(tmp_path, script, args, role="cm")
     combined = result.stdout + result.stderr
-    assert _FETCH_MARKER in result.stdout, (
-        f"{script.name} under PGAI_AGENT_ROLE=cm must announce and attempt the fetch.\n{combined}"
-    )
-    assert _SKIP_MARKER not in result.stdout, (
-        f"{script.name} under cm must never narrate a skipped fetch.\n{combined}"
-    )
+    assert (
+        _FETCH_MARKER in result.stdout
+    ), f"{script.name} under PGAI_AGENT_ROLE=cm must announce and attempt the fetch.\n{combined}"
+    assert _SKIP_MARKER not in result.stdout, f"{script.name} under cm must never narrate a skipped fetch.\n{combined}"
     assert "fetch origin" in _network_calls(net_log), (
         "the CM fetch must reach the binary behind PATH (the stub); it logged:\n"
         f"{_network_calls(net_log)!r}\n--- script output ---\n{combined}"
@@ -239,17 +253,15 @@ def test_cm_role_still_reaches_the_fetch(
 
 
 @pytest.mark.parametrize("script, args", _SCRIPTS)
-def test_no_role_at_all_keeps_the_fetch(
-    tmp_path: pathlib.Path, script: pathlib.Path, args: list[str]
-) -> None:
+def test_no_role_at_all_keeps_the_fetch(tmp_path: pathlib.Path, script: pathlib.Path, args: list[str]) -> None:
     """An operator's own shell carries no PGAI_AGENT_ROLE and is not a
     non-CM agent: the fetch is attempted exactly as before."""
     result, _evidence, net_log = _run_script(tmp_path, script, args, role=None)
     combined = result.stdout + result.stderr
-    assert _FETCH_MARKER in result.stdout, (
-        f"{script.name} with no PGAI_AGENT_ROLE must still attempt the fetch.\n{combined}"
-    )
+    assert (
+        _FETCH_MARKER in result.stdout
+    ), f"{script.name} with no PGAI_AGENT_ROLE must still attempt the fetch.\n{combined}"
     assert _SKIP_MARKER not in result.stdout, combined
-    assert "fetch origin" in _network_calls(net_log), (
-        f"the fetch must reach the binary behind PATH; the stub logged:\n{_network_calls(net_log)!r}"
-    )
+    assert "fetch origin" in _network_calls(
+        net_log
+    ), f"the fetch must reach the binary behind PATH; the stub logged:\n{_network_calls(net_log)!r}"

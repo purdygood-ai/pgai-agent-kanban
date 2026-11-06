@@ -158,9 +158,7 @@ def test_text_route_stdout_equals_the_script_stdout(tree, client, cli_label, res
 def test_costs_route_reports_a_missing_roll_up_without_aggregating(tree, client):
     root, _work, _today = tree
     with cases.rest_environment(root):
-        response = assert_route_reaches_function(
-            client, _costs_row(), params={"project": "demo", "day": "2026-06-30"}
-        )
+        response = assert_route_reaches_function(client, _costs_row(), params={"project": "demo", "day": "2026-06-30"})
     assert response.json()["stdout"] == "no data for day=2026-06-30\n"
     assert not (root / "projects" / "demo" / "usage" / "daily" / "2026-06-30.json").exists()
 
@@ -173,15 +171,21 @@ def test_costs_route_reports_a_missing_roll_up_without_aggregating(tree, client)
 def _costs_row():
     """GET /costs and cost-report.sh have no manifest row; this one names their shared function."""
     return types.SimpleNamespace(
-        name="cost-report", impl="module:pgai_agent_kanban.lib.metrics.cost_report",
-        rest_method="GET", rest_route="/costs", script="scripts/cost-report.sh",
+        name="cost-report",
+        impl="module:pgai_agent_kanban.lib.metrics.cost_report",
+        rest_method="GET",
+        rest_route="/costs",
+        script="scripts/cost-report.sh",
     )
 
 
 def _cli_only_row(function: str, script: str):
     return types.SimpleNamespace(
-        name=pathlib.Path(script).stem, impl=f"module:pgai_agent_kanban.lib.metrics.{function}",
-        rest_method="GET", rest_route="/", script=script,
+        name=pathlib.Path(script).stem,
+        impl=f"module:pgai_agent_kanban.lib.metrics.{function}",
+        rest_method="GET",
+        rest_route="/",
+        script=script,
     )
 
 
@@ -202,8 +206,11 @@ def test_metrics_route_and_show_metrics_reach_show_metrics(tree, tmp_path):
     (tmp_path / "scratch").mkdir()
     with cases.rest_environment(root):
         result = assert_route_cli_parity(
-            "rc-metrics", build_api_client(root), params={"project": "demo"},
-            cli_args=["--project", "demo"], env=_parity_env(tree, tmp_path, TERM="xterm"),
+            "rc-metrics",
+            build_api_client(root),
+            params={"project": "demo"},
+            cli_args=["--project", "demo"],
+            env=_parity_env(tree, tmp_path, TERM="xterm"),
             scratch_dir=tmp_path / "scratch",
         )
     assert result.cli.completed.returncode == 0
@@ -215,8 +222,11 @@ def test_agent_metrics_route_and_script_reach_compute_agent_averages(tree, tmp_p
     (tmp_path / "scratch").mkdir()
     with cases.rest_environment(root):
         result = assert_route_cli_parity(
-            "agent-metrics", build_api_client(root), params={"project": "demo"},
-            cli_args=["--project", "demo", "--no-color"], env=_parity_env(tree, tmp_path),
+            "agent-metrics",
+            build_api_client(root),
+            params={"project": "demo"},
+            cli_args=["--project", "demo", "--no-color"],
+            env=_parity_env(tree, tmp_path),
             scratch_dir=tmp_path / "scratch",
         )
     assert result.response.status_code == 200
@@ -228,8 +238,11 @@ def test_costs_route_and_cost_report_reach_cost_report(tree, tmp_path):
     (tmp_path / "scratch").mkdir()
     with cases.rest_environment(root):
         result = assert_route_cli_parity(
-            _costs_row(), build_api_client(root), params={"project": "demo", "rc": "v1.2.0"},
-            cli_args=["--project", "demo", "--rc", "v1.2.0"], env=_parity_env(tree, tmp_path),
+            _costs_row(),
+            build_api_client(root),
+            params={"project": "demo", "rc": "v1.2.0"},
+            cli_args=["--project", "demo", "--rc", "v1.2.0"],
+            env=_parity_env(tree, tmp_path),
             scratch_dir=tmp_path / "scratch",
         )
     assert result.response.json()["stdout"] == result.cli.completed.stdout
@@ -248,8 +261,10 @@ def test_costs_route_and_cost_report_reach_cost_report(tree, tmp_path):
 def test_scripts_without_a_route_reach_the_package(tree, tmp_path, function, script, cli_args, extra):
     (tmp_path / "scratch").mkdir()
     run = assert_cli_reaches_function(
-        _cli_only_row(function, script), cli_args=cli_args,
-        env=_parity_env(tree, tmp_path, **extra), scratch_dir=tmp_path / "scratch",
+        _cli_only_row(function, script),
+        cli_args=cli_args,
+        env=_parity_env(tree, tmp_path, **extra),
+        scratch_dir=tmp_path / "scratch",
     )
     assert run.completed.returncode == 0, run.completed.stderr
 
@@ -293,12 +308,15 @@ def test_range_scopes_resolve_against_today(argv, value):
 def test_csv_rows_carry_the_resolved_range_value(tree):
     root, _work, _today = tree
     result = metrics.cost_report(
-        ["--project", "demo", "--last", "3", "--csv"], default_kanban_root=str(root),
+        ["--project", "demo", "--last", "3", "--csv"],
+        default_kanban_root=str(root),
         today=datetime.date(2026, 5, 3),
     )
     assert result.exit_code == 0
     rows = result.stdout.splitlines()[1:]
-    assert rows and all(r.startswith("range,2026-05-01|2026-05-03|Last 3 days (2026-05-01 through 2026-05-03),demo,") for r in rows)
+    assert rows and all(
+        r.startswith("range,2026-05-01|2026-05-03|Last 3 days (2026-05-01 through 2026-05-03),demo,") for r in rows
+    )
 
 
 def test_default_scope_is_the_current_month(tree):
@@ -311,8 +329,10 @@ def test_a_missing_roll_up_is_handed_to_the_aggregator(tree):
     root, _work, _today = tree
     calls: list[tuple[str, list[str]]] = []
     result = metrics.cost_report(
-        ["--project", "demo", "--rc", "v9.9.9"], default_kanban_root=str(root),
-        aggregator=str(root / "aggregate_tokens.py"), aggregate=lambda path, args: calls.append((path, args)),
+        ["--project", "demo", "--rc", "v9.9.9"],
+        default_kanban_root=str(root),
+        aggregator=str(root / "aggregate_tokens.py"),
+        aggregate=lambda path, args: calls.append((path, args)),
     )
     assert result.stdout == "no data for rc=v9.9.9\n"
     # The named aggregator does not exist and the kanban root has no pm-agent/:
@@ -325,8 +345,10 @@ def test_a_missing_roll_up_is_handed_to_the_aggregator(tree):
     stub.write_text("", encoding="utf-8")
     try:
         metrics.cost_report(
-            ["--project", "demo", "--rc", "v9.9.9", "--kanban-root", str(root)], default_kanban_root="",
-            aggregator=str(stub), aggregate=lambda path, args: calls.append((path, args)),
+            ["--project", "demo", "--rc", "v9.9.9", "--kanban-root", str(root)],
+            default_kanban_root="",
+            aggregator=str(stub),
+            aggregate=lambda path, args: calls.append((path, args)),
         )
     finally:
         stub.unlink()
@@ -390,7 +412,7 @@ def test_json_rows_and_text_read_one_history(tree):
 # ---------------------------------------------------------------------------
 
 
-def _metrics_cli(tmp_path: pathlib.Path, *args: str) -> "subprocess.CompletedProcess":
+def _metrics_cli(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     import subprocess
 
     from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
@@ -399,7 +421,12 @@ def _metrics_cli(tmp_path: pathlib.Path, *args: str) -> "subprocess.CompletedPro
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(team_dir)})
     return subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.metrics", *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -459,12 +486,14 @@ def _install_shaped_root(tmp_path: pathlib.Path, *, with_pricing: bool) -> tuple
         f"[project]\nproject_name = alpha\ndev_tree_path = {dev_tree}\n", encoding="utf-8"
     )
     (project / "usage" / "daily" / "2026-05-02.json").write_text(
-        json.dumps({
-            "totals": {"input_tokens": 500, "output_tokens": 100, "cost_usd": 0.05, "invocations": 1},
-            "by_agent": {"pm": {"input": 500, "output": 100, "cost_usd": 0.05, "invocations": 1}},
-            "by_model": {"claude-sonnet-4-6": {"input": 500, "output": 100, "cost_usd": 0.05, "invocations": 1}},
-            "rcs_shipped": [],
-        }),
+        json.dumps(
+            {
+                "totals": {"input_tokens": 500, "output_tokens": 100, "cost_usd": 0.05, "invocations": 1},
+                "by_agent": {"pm": {"input": 500, "output": 100, "cost_usd": 0.05, "invocations": 1}},
+                "by_model": {"claude-sonnet-4-6": {"input": 500, "output": 100, "cost_usd": 0.05, "invocations": 1}},
+                "rcs_shipped": [],
+            }
+        ),
         encoding="utf-8",
     )
     return root, dev_tree
@@ -517,7 +546,6 @@ def test_with_no_pricing_table_the_warning_names_the_kanban_side_path_only(tmp_p
     assert "Subscription comparison:" not in result.stdout
     expected = root / "scripts" / "lib" / "token_pricing.json"
     assert (
-        "WARNING: token_pricing.json not found; subscription comparison unavailable. "
-        f"Expected at: {expected}"
+        "WARNING: token_pricing.json not found; subscription comparison unavailable. " f"Expected at: {expected}"
     ) in result.stderr
     assert str(dev_tree) not in result.stdout + result.stderr

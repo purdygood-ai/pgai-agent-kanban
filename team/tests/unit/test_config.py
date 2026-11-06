@@ -18,7 +18,6 @@ for config files and monkeypatch is used to control os.environ.  No bare
 
 from __future__ import annotations
 
-import os
 import pathlib
 
 import pytest
@@ -28,6 +27,7 @@ try:
     from pm_agent.lib.config import get_config, _parse_cfg
 except ImportError:
     import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib import config as config_mod  # type: ignore[no-redef]
     from lib.config import get_config, _parse_cfg  # type: ignore[no-redef]
@@ -42,34 +42,38 @@ except ImportError:
     "cfg_content, expected",
     [
         pytest.param(
-            "FOO=bar\nBAZ=qux\n", {"FOO": "bar", "BAZ": "qux"},
+            "FOO=bar\nBAZ=qux\n",
+            {"FOO": "bar", "BAZ": "qux"},
             id="reads_key_value_pairs",
         ),
         pytest.param(
-            'KEY="/some/path with spaces"\n', {"KEY": "/some/path with spaces"},
+            'KEY="/some/path with spaces"\n',
+            {"KEY": "/some/path with spaces"},
             id="strips_double_quoted_values",
         ),
         pytest.param(
-            "KEY='/opt/value'\n", {"KEY": "/opt/value"},
+            "KEY='/opt/value'\n",
+            {"KEY": "/opt/value"},
             id="strips_single_quoted_values",
         ),
         pytest.param(
-            "# this is a comment\nFOO=real\n", {"FOO": "real"},
+            "# this is a comment\nFOO=real\n",
+            {"FOO": "real"},
             id="ignores_comment_lines",
         ),
         pytest.param(
-            "\n\nFOO=bar\n\n", {"FOO": "bar"},
+            "\n\nFOO=bar\n\n",
+            {"FOO": "bar"},
             id="ignores_blank_lines",
         ),
         pytest.param(
-            "export MY_VAR=hello\n", {"MY_VAR": "hello"},
+            "export MY_VAR=hello\n",
+            {"MY_VAR": "hello"},
             id="accepts_export_prefix",
         ),
     ],
 )
-def test_parse_cfg_reads_shell_style_key_value_file(
-    tmp_path: pathlib.Path, cfg_content: str, expected: dict
-) -> None:
+def test_parse_cfg_reads_shell_style_key_value_file(tmp_path: pathlib.Path, cfg_content: str, expected: dict) -> None:
     """_parse_cfg parses a bash-sourcing-style KEY=value file into exactly the dict
     the content specifies — quotes stripped, comments and blank lines skipped, and
     an 'export ' prefix tolerated."""
@@ -90,9 +94,7 @@ def test_parse_cfg_returns_empty_dict_for_nonexistent_file() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_config_returns_dict_with_all_known_keys(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_config_returns_dict_with_all_known_keys(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """get_config returns a dict that contains all expected PGAI_* keys."""
     monkeypatch.delenv("PGAI_AGENT_KANBAN_ROOT_PATH", raising=False)
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
@@ -149,9 +151,7 @@ def test_get_config_kanban_root_field_reflects_argument(
 # ---------------------------------------------------------------------------
 
 
-def test_get_config_install_cfg_overrides_default(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_config_install_cfg_overrides_default(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """get_config reads per-install config.cfg and applies it over defaults."""
     # Write a config.cfg in the kanban root
     cfg_content = "PGAI_REQUIREMENTS_DIR=/custom/requirements\n"
@@ -162,9 +162,7 @@ def test_get_config_install_cfg_overrides_default(
     assert result["PGAI_REQUIREMENTS_DIR"] == "/custom/requirements"
 
 
-def test_get_config_install_cfg_ignores_unknown_keys(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_config_install_cfg_ignores_unknown_keys(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """get_config does not include keys from install cfg that are not in _DEFAULTS."""
     cfg_content = "UNKNOWN_KEY=some_value\nPGAI_TASKS_DIR=/custom/tasks\n"
     (tmp_path / "config.cfg").write_text(cfg_content, encoding="utf-8")
@@ -180,14 +178,10 @@ def test_get_config_install_cfg_ignores_unknown_keys(
 # ---------------------------------------------------------------------------
 
 
-def test_get_config_env_var_wins_over_install_cfg(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_config_env_var_wins_over_install_cfg(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Environment variables override install config.cfg values when the
     caller passes no explicit kanban_root (the ambient-environment path)."""
-    (tmp_path / "config.cfg").write_text(
-        "PGAI_REQUIREMENTS_DIR=/from-cfg\n", encoding="utf-8"
-    )
+    (tmp_path / "config.cfg").write_text("PGAI_REQUIREMENTS_DIR=/from-cfg\n", encoding="utf-8")
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
     monkeypatch.setenv("PGAI_REQUIREMENTS_DIR", "/from-env")
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
@@ -195,9 +189,7 @@ def test_get_config_env_var_wins_over_install_cfg(
     assert result["PGAI_REQUIREMENTS_DIR"] == "/from-env"
 
 
-def test_get_config_env_var_wins_over_default(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_config_env_var_wins_over_default(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Environment variables override computed defaults when the caller
     passes no explicit kanban_root (the ambient-environment path)."""
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(tmp_path))
@@ -207,9 +199,7 @@ def test_get_config_env_var_wins_over_default(
     assert result["PGAI_TASKS_DIR"] == "/env-override/tasks"
 
 
-def test_get_config_cleanup_days_overridden_by_env(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_config_cleanup_days_overridden_by_env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """PGAI_CLEANUP_RETENTION_DAYS env var overrides the '30' default."""
     monkeypatch.setenv("PGAI_CLEANUP_RETENTION_DAYS", "90")
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
@@ -337,9 +327,7 @@ def test_get_config_explicit_root_wins_over_both_project_root_and_dir_env(
     project_root = tmp_path / "elsewhere" / "some-other-project"
     project_root.mkdir(parents=True)
     monkeypatch.setenv("PGAI_PROJECT_ROOT", str(project_root))
-    monkeypatch.setenv(
-        "PGAI_TASKS_DIR", str(tmp_path / "live-root" / "projects" / "pgai-agent-kanban" / "tasks")
-    )
+    monkeypatch.setenv("PGAI_TASKS_DIR", str(tmp_path / "live-root" / "projects" / "pgai-agent-kanban" / "tasks"))
     result = get_config(kanban_root=str(tmp_path))
     assert result["PGAI_TASKS_DIR"] == str(tmp_path / "tasks")
     assert result["KANBAN_ROOT"] == str(tmp_path)
@@ -373,9 +361,7 @@ def test_get_config_explicit_root_still_honours_install_cfg(
     """An explicit kanban_root outranks ambient environment, but not the
     install cfg living inside the named root itself — that file is data
     the caller placed under the root it named, not ambient environment."""
-    (tmp_path / "config.cfg").write_text(
-        "PGAI_REQUIREMENTS_DIR=/custom/requirements\n", encoding="utf-8"
-    )
+    (tmp_path / "config.cfg").write_text("PGAI_REQUIREMENTS_DIR=/custom/requirements\n", encoding="utf-8")
     monkeypatch.delenv("PGAI_REQUIREMENTS_DIR", raising=False)
     monkeypatch.delenv("PGAI_PROJECT_ROOT", raising=False)
     result = get_config(kanban_root=str(tmp_path))

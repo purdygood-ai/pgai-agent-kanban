@@ -48,6 +48,12 @@
 #
 # --dry-run: scans and logs findings but does NOT modify cache files.
 
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CCMD_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CCMD_SELF_DIR=""
+_CCMD_LIB_DIR="${_CCMD_SELF_DIR%/*}"
+
 # overwatch_registered_projects: the shared projects.cfg reader.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
@@ -58,35 +64,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _ccmd_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-cache-marker-drift: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        # Resolve from projects.cfg — never silently fall back to first project.
-        # On a multi-project install the caller MUST set OVERWATCH_PROJECT; this
-        # path is only safe for single-project installs.
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-cache-marker-drift: ERROR: OVERWATCH_PROJECT is not set and multiple projects are registered." >&2
-            echo "  Set OVERWATCH_PROJECT to the target project name before running this check." >&2
-            echo "  Registered projects: $(echo "${_all_projects}" | tr '\n' ' ')" >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-cache-marker-drift: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            echo "  Set OVERWATCH_PROJECT or register a project in ${KANBAN_ROOT}/projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-cache-marker-drift || return 1
     return 0
 }
 
@@ -104,7 +82,7 @@ _ccmd_load_md_field() {
     local runner=""
     runner="$(declare -f pp_run_ops 2>/dev/null)" || runner=""
     # shellcheck source=../md_field.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../md_field.sh" || return 1
+    source "${_CCMD_LIB_DIR}/md_field.sh" || return 1
     [[ -n "${runner}" ]] && eval "${runner}"
     declare -F read_md_field >/dev/null 2>&1
 }
@@ -168,7 +146,7 @@ _ccmd_is_marked_processed() {
 # ---------------------------------------------------------------------------
 _ccmd_reset_marker() (
     # shellcheck source=../pp_run_ops.sh
-    source "$(dirname "${BASH_SOURCE[0]}")/../pp_run_ops.sh" || exit 1
+    source "${_CCMD_LIB_DIR}/pp_run_ops.sh" || exit 1
     pp_run_ops pgai_agent_kanban.overwatch.cache_marker_reset -- "$1" "$2"
 )
 
@@ -291,7 +269,8 @@ overwatch_check_cache_marker_drift() {
     # Source overwatch_protocol.sh if not already loaded
     if ! declare -f overwatch_log_action >/dev/null 2>&1; then
         local lib_dir
-        lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        lib_dir="${_CCMD_SELF_DIR}"
+        [[ -n "${lib_dir}" ]] || {
             echo "check-cache-marker-drift: cannot resolve lib dir" >&2
             return 1
         }

@@ -28,10 +28,10 @@ import pathlib
 import re
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Pricing helpers
 # ---------------------------------------------------------------------------
+
 
 def load_pricing(pricing_path: str) -> dict[str, Any]:
     """Load token_pricing.json.  Returns empty dict on any failure."""
@@ -68,16 +68,17 @@ def model_cost_parts(
     rates = get_model_rates(pricing, model)
     if rates is None:
         return (0.0, 0.0, 0.0, 0.0)
-    i_cost  = input_tok     * float(rates.get("input_per_1m",            0)) / 1_000_000
-    cc_cost = cache_create  * float(rates.get("cache_creation_per_1m",   0)) / 1_000_000
-    cr_cost = cache_read    * float(rates.get("cache_read_per_1m",        0)) / 1_000_000
-    o_cost  = output_tok    * float(rates.get("output_per_1m",            0)) / 1_000_000
+    i_cost = input_tok * float(rates.get("input_per_1m", 0)) / 1_000_000
+    cc_cost = cache_create * float(rates.get("cache_creation_per_1m", 0)) / 1_000_000
+    cr_cost = cache_read * float(rates.get("cache_read_per_1m", 0)) / 1_000_000
+    o_cost = output_tok * float(rates.get("output_per_1m", 0)) / 1_000_000
     return (round(i_cost, 6), round(cc_cost, 6), round(cr_cost, 6), round(o_cost, 6))
 
 
 # ---------------------------------------------------------------------------
 # Rollup loading
 # ---------------------------------------------------------------------------
+
 
 def load_rollup(rollup_path: pathlib.Path) -> dict[str, Any] | None:
     """Load a rollup JSON file.  Returns None on any failure."""
@@ -95,6 +96,7 @@ def load_rollup(rollup_path: pathlib.Path) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
+
 
 def fmt_tokens(n: int) -> str:
     """Return a token count with thousands separators (``1,234,567``)."""
@@ -115,54 +117,62 @@ def fmt_usd(v: float) -> str:
 # Also reads pre-computed costs from aggregator fields when available.
 # ---------------------------------------------------------------------------
 
+
 def extract_by_model(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Aggregate token and cost data by model from a rollup dict."""
     result: dict[str, dict[str, Any]] = {}
 
-    def _add(model: str, i: int, cc: int, cr: int, o: int,
-             i_cost: float, cc_cost: float, cr_cost: float, o_cost: float) -> None:
+    def _add(
+        model: str, i: int, cc: int, cr: int, o: int, i_cost: float, cc_cost: float, cr_cost: float, o_cost: float
+    ) -> None:
         if model not in result:
             result[model] = {
-                "input": 0, "cache_create": 0, "cache_read": 0, "output": 0,
-                "input_cost": 0.0, "cc_cost": 0.0, "cr_cost": 0.0, "o_cost": 0.0,
+                "input": 0,
+                "cache_create": 0,
+                "cache_read": 0,
+                "output": 0,
+                "input_cost": 0.0,
+                "cc_cost": 0.0,
+                "cr_cost": 0.0,
+                "o_cost": 0.0,
             }
-        result[model]["input"]        += i
+        result[model]["input"] += i
         result[model]["cache_create"] += cc
-        result[model]["cache_read"]   += cr
-        result[model]["output"]       += o
-        result[model]["input_cost"]   += i_cost
-        result[model]["cc_cost"]      += cc_cost
-        result[model]["cr_cost"]      += cr_cost
-        result[model]["o_cost"]       += o_cost
+        result[model]["cache_read"] += cr
+        result[model]["output"] += o
+        result[model]["input_cost"] += i_cost
+        result[model]["cc_cost"] += cc_cost
+        result[model]["cr_cost"] += cr_cost
+        result[model]["o_cost"] += o_cost
 
     # Day rollup: by_model key
     if "by_model" in data:
         for model, mv in data["by_model"].items():
-            i   = int(mv.get("input",  0) or 0)
-            cc  = int(mv.get("cache_creation_tokens", 0) or 0)
-            cr  = int(mv.get("cache_read_tokens",     0) or 0)
-            o   = int(mv.get("output", 0) or 0)
+            i = int(mv.get("input", 0) or 0)
+            cc = int(mv.get("cache_creation_tokens", 0) or 0)
+            cr = int(mv.get("cache_read_tokens", 0) or 0)
+            o = int(mv.get("output", 0) or 0)
 
             # Use aggregator-computed costs when present (avoid double-computing)
-            i_cost  = float(mv.get("input_cost_usd",          0) or 0)
-            cc_cost = float(mv.get("cache_creation_cost_usd",  0) or 0)
-            cr_cost = float(mv.get("cache_read_cost_usd",      0) or 0)
-            o_cost  = float(mv.get("output_cost_usd",          0) or 0)
+            i_cost = float(mv.get("input_cost_usd", 0) or 0)
+            cc_cost = float(mv.get("cache_creation_cost_usd", 0) or 0)
+            cr_cost = float(mv.get("cache_read_cost_usd", 0) or 0)
+            o_cost = float(mv.get("output_cost_usd", 0) or 0)
             _add(model, i, cc, cr, o, i_cost, cc_cost, cr_cost, o_cost)
 
     # RC rollup: tasks list (no by_model; aggregate from tasks)
     elif "tasks" in data:
         for task in data.get("tasks", []):
             model = str(task.get("model", "unknown"))
-            i   = int(task.get("input",  0) or 0)
-            cc  = int(task.get("cache_creation_tokens", 0) or 0)
-            cr  = int(task.get("cache_read_tokens",     0) or 0)
-            o   = int(task.get("output", 0) or 0)
+            i = int(task.get("input", 0) or 0)
+            cc = int(task.get("cache_creation_tokens", 0) or 0)
+            cr = int(task.get("cache_read_tokens", 0) or 0)
+            o = int(task.get("output", 0) or 0)
 
-            i_cost  = float(task.get("input_cost_usd",          0) or 0)
-            cc_cost = float(task.get("cache_creation_cost_usd",  0) or 0)
-            cr_cost = float(task.get("cache_read_cost_usd",      0) or 0)
-            o_cost  = float(task.get("output_cost_usd",          0) or 0)
+            i_cost = float(task.get("input_cost_usd", 0) or 0)
+            cc_cost = float(task.get("cache_creation_cost_usd", 0) or 0)
+            cr_cost = float(task.get("cache_read_cost_usd", 0) or 0)
+            o_cost = float(task.get("output_cost_usd", 0) or 0)
             _add(model, i, cc, cr, o, i_cost, cc_cost, cr_cost, o_cost)
 
     return result

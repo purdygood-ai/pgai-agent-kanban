@@ -77,7 +77,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
-from typing import Sequence
+from collections.abc import Sequence
 
 # (suite, runner basename) in start order. The runners sit beside
 # run-gated-suites.sh in the same scripts/ directory.

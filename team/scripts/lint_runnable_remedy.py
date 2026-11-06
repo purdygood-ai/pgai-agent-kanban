@@ -119,7 +119,6 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 # ``lint_dual_channel_pair.py`` lives next to this script; importing it
 # directly (rather than re-deriving its scanning logic) is the reuse the
@@ -197,7 +196,7 @@ def _scan_bash_file(path: Path) -> list[_Finding]:
 # ---------------------------------------------------------------------------
 
 
-def _remedy_literal_text(node: ast.expr) -> Optional[str]:
+def _remedy_literal_text(node: ast.expr) -> str | None:
     """Return the literal text of *node* for placeholder scanning.
 
     A plain string constant returns its value whole. An f-string
@@ -218,7 +217,7 @@ def _remedy_literal_text(node: ast.expr) -> Optional[str]:
     return None
 
 
-def _python_call_finding(path: Path, node: ast.Call, func_name: str) -> Optional[_Finding]:
+def _python_call_finding(path: Path, node: ast.Call, func_name: str) -> _Finding | None:
     if any(isinstance(a, ast.Starred) for a in node.args):
         return None
     if any(kw.arg is None for kw in node.keywords):
@@ -341,7 +340,7 @@ def _print_findings_block(findings: list[_Finding], repo_root: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="lint_runnable_remedy.py",
         description=(
@@ -391,7 +390,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the runnable-remedy lint and print each placeholder-bearing remedy.
 
     Exit codes (standalone): 0 no remedy carries an angle-bracket placeholder;
@@ -402,12 +401,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     script_dir = Path(__file__).resolve().parent  # team/scripts/
     repo_root = script_dir.parent.parent  # repo root
 
-    bash_dirs = (
-        [Path(d) for d in args.bash_dirs] if args.bash_dirs else _ldc._default_bash_dirs(script_dir)
-    )
-    python_dir = (
-        Path(args.python_dir) if args.python_dir else (repo_root / "team" / "pgai_agent_kanban")
-    )
+    bash_dirs = [Path(d) for d in args.bash_dirs] if args.bash_dirs else _ldc._default_bash_dirs(script_dir)
+    python_dir = Path(args.python_dir) if args.python_dir else (repo_root / "team" / "pgai_agent_kanban")
 
     bash_files = _ldc._iter_bash_files(bash_dirs)
     python_files = _ldc._iter_python_files(python_dir)
@@ -441,8 +436,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if not findings:
         print(
-            f"lint_runnable_remedy: OK — {len(bash_files) + len(python_files)} "
-            "file(s) checked, 0 offenders.",
+            f"lint_runnable_remedy: OK — {len(bash_files) + len(python_files)} " "file(s) checked, 0 offenders.",
             flush=True,
         )
         print("\nFINDINGS_JSON:", flush=True)

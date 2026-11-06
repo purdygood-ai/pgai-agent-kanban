@@ -57,7 +57,7 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Source required libraries for project name resolution
@@ -67,6 +67,8 @@ _OR_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "${_OR_SCRIPT_DIR}/lib/project_paths.sh"
 # shellcheck source=lib/projects.sh
 source "${_OR_SCRIPT_DIR}/lib/projects.sh"
+# shellcheck source=lib/overwatch_protocol.sh
+source "${_OR_SCRIPT_DIR}/lib/overwatch_protocol.sh"
 unset _OR_SCRIPT_DIR
 
 # ---------------------------------------------------------------------------
@@ -383,8 +385,10 @@ _or_find_original_path() {
 
 # ---------------------------------------------------------------------------
 # _or_append_log <name> <target> <action> <backup_path> <reason>
-# Append one record to actions.log using the same format as overwatch_log_action
-# in overwatch_protocol.sh.
+# Append one record to actions.log, built by overwatch_action_record
+# (lib/overwatch_protocol.sh) exactly as overwatch_log_action builds its own:
+# one LF-terminated line of six tab-separated fields, whatever any argument
+# holds -- a field with a tab, CR or LF is flattened to one line first.
 #
 # Format: timestamp<TAB>name<TAB>target<TAB>action<TAB>backup_path<TAB>reason
 # ---------------------------------------------------------------------------
@@ -407,13 +411,7 @@ _or_append_log() {
     local timestamp
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "${timestamp}" \
-        "${name}" \
-        "${target}" \
-        "${action}" \
-        "${backup_path:-none}" \
-        "${reason:-}" \
+    overwatch_action_record "${timestamp}" "${name}" "${target}" "${action}" "${backup_path}" "${reason}" \
         >> "${log_file}" || {
         _or_err "write failed to ${log_file}"
         return 2
@@ -774,4 +772,8 @@ main() {
     esac
 }
 
-main "$@"
+# Run only when executed; sourcing the script defines its functions and runs
+# nothing, so a test can call one (the action-log writer, say) on its own.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

@@ -53,7 +53,7 @@ def _run(*args: str, cwd: pathlib.Path) -> subprocess.CompletedProcess:
 
 
 def _findings(result: subprocess.CompletedProcess) -> list[str]:
-    return [line[len(_PREFIX):] for line in result.stdout.splitlines() if line.startswith(_PREFIX)]
+    return [line[len(_PREFIX) :] for line in result.stdout.splitlines() if line.startswith(_PREFIX)]
 
 
 def _scan(root: pathlib.Path, *paths: pathlib.Path) -> list[str]:

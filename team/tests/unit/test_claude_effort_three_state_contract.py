@@ -214,9 +214,7 @@ def test_absent_effort_state_matches_pre_change_baseline_command(
     the assembled command is byte-identical to the pre-effort baseline."""
     result = _resolve_and_invoke(tmp_path, llm_effort=None, env_effort=None)
 
-    assert result.returncode == 0, (
-        f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     assert "RESOLVE_EXIT=0" in result.stdout
     assert "RESOLVED_EFFORT=[]" in result.stdout
 
@@ -246,9 +244,7 @@ def test_valid_cfg_effort_state_appends_flag_and_records_cost_artifact(
     artifact."""
     result = _resolve_and_invoke(tmp_path, llm_effort="high", env_effort=None)
 
-    assert result.returncode == 0, (
-        f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     assert "RESOLVED_EFFORT=[high]" in result.stdout
     assert "RESOLVED_SOURCE=[[providers] llm_effort cfg]" in result.stdout
 
@@ -257,9 +253,9 @@ def test_valid_cfg_effort_state_appends_flag_and_records_cost_artifact(
     assert argv[argv.index("--effort") + 1] == "high"
 
     log_text = (tmp_path / "wake.log").read_text(encoding="utf-8")
-    assert "effort: high (from [providers] llm_effort cfg)" in log_text, (
-        f"Expected effort narration naming value and cfg source; got:\n{log_text}"
-    )
+    assert (
+        "effort: high (from [providers] llm_effort cfg)" in log_text
+    ), f"Expected effort narration naming value and cfg source; got:\n{log_text}"
 
     tokens_json = tmp_path / "artifacts" / "tokens.json"
     data = json.loads(tokens_json.read_text(encoding="utf-8"))
@@ -275,25 +271,37 @@ def test_valid_cfg_effort_state_appends_flag_and_records_cost_artifact(
     "llm_effort, env_effort, expected_stderr_substrings",
     [
         pytest.param(
-            "ludicrous", None,
+            "ludicrous",
+            None,
             ["[providers] llm_effort", "ludicrous"],
             id="invalid_cfg_value_names_cfg_key",
         ),
         pytest.param(
-            None, "bogus",
+            None,
+            "bogus",
             ["PGAI_CODER_EFFORT", "bogus"],
             id="invalid_env_value_names_env_var",
         ),
         pytest.param(
-            "minimal", None,
-            ["config_loader.providers.invalid_effort", "[providers] llm_effort", "minimal",
-             "valid for claude: low medium high xhigh max"],
+            "minimal",
+            None,
+            [
+                "config_loader.providers.invalid_effort",
+                "[providers] llm_effort",
+                "minimal",
+                "valid for claude: low medium high xhigh max",
+            ],
             id="codex_only_cfg_value_names_claude_list",
         ),
         pytest.param(
-            None, "minimal",
-            ["config_loader.providers.invalid_effort", "PGAI_CODER_EFFORT", "minimal",
-             "valid for claude: low medium high xhigh max"],
+            None,
+            "minimal",
+            [
+                "config_loader.providers.invalid_effort",
+                "PGAI_CODER_EFFORT",
+                "minimal",
+                "valid for claude: low medium high xhigh max",
+            ],
             id="codex_only_env_value_names_claude_list",
         ),
     ],
@@ -310,17 +318,12 @@ def test_invalid_effort_state_fails_loud_naming_the_key(
     result = _resolve_and_invoke(tmp_path, llm_effort=llm_effort, env_effort=env_effort)
 
     assert result.returncode != 0, (
-        f"Expected non-zero exit for invalid effort value; "
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"Expected non-zero exit for invalid effort value; " f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     for substring in expected_stderr_substrings:
-        assert substring in result.stderr, (
-            f"Expected {substring!r} named in the error; stderr: {result.stderr!r}"
-        )
+        assert substring in result.stderr, f"Expected {substring!r} named in the error; stderr: {result.stderr!r}"
     # No provider dispatch happened -- no argv was ever captured.
-    assert not (tmp_path / "argv.txt").exists(), (
-        "provider_dispatch must not run when effort resolution fails."
-    )
+    assert not (tmp_path / "argv.txt").exists(), "provider_dispatch must not run when effort resolution fails."
 
 
 # ---------------------------------------------------------------------------
@@ -339,27 +342,24 @@ def test_env_override_beats_cfg_and_narrates_the_winning_source(
     explicitly naming the env var, not the cfg key."""
     result = _resolve_and_invoke(tmp_path, llm_effort="medium", env_effort="high")
 
-    assert result.returncode == 0, (
-        f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
-    )
-    assert "RESOLVED_EFFORT=[high]" in result.stdout, (
-        "Expected the env value ('high') to win over the cfg value ('medium')."
-    )
-    assert "RESOLVED_SOURCE=[PGAI_CODER_EFFORT env]" in result.stdout, (
-        "Expected the winning source to name the env var, not the cfg key."
-    )
+    assert result.returncode == 0, f"harness failed:\nstdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+    assert (
+        "RESOLVED_EFFORT=[high]" in result.stdout
+    ), "Expected the env value ('high') to win over the cfg value ('medium')."
+    assert (
+        "RESOLVED_SOURCE=[PGAI_CODER_EFFORT env]" in result.stdout
+    ), "Expected the winning source to name the env var, not the cfg key."
 
     argv = _read_argv(tmp_path)
     assert "--effort" in argv
     assert argv[argv.index("--effort") + 1] == "high", (
-        f"Expected the assembled command to carry the env value 'high', not "
-        f"the cfg value 'medium': {argv}"
+        f"Expected the assembled command to carry the env value 'high', not " f"the cfg value 'medium': {argv}"
     )
 
     log_text = (tmp_path / "wake.log").read_text(encoding="utf-8")
-    assert "effort: high (from PGAI_CODER_EFFORT env)" in log_text, (
-        f"Expected the wake log to narrate the env source as the winner; got:\n{log_text}"
-    )
-    assert "from [providers] llm_effort cfg" not in log_text, (
-        f"Wake log incorrectly narrated the losing cfg source; got:\n{log_text}"
-    )
+    assert (
+        "effort: high (from PGAI_CODER_EFFORT env)" in log_text
+    ), f"Expected the wake log to narrate the env source as the winner; got:\n{log_text}"
+    assert (
+        "from [providers] llm_effort cfg" not in log_text
+    ), f"Wake log incorrectly narrated the losing cfg source; got:\n{log_text}"

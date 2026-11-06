@@ -67,10 +67,7 @@ import re
 # 1-4 digit bound and (?!-\d) guard the lint's task-ID pattern uses, so the
 # short branch never claims the first segment of a longer identifier.
 _LEDGER_ID_PATTERN = r"\b(?:BUG|PRIORITY)-\d+\b"
-_TASK_ID_PATTERN = (
-    r"\b(?:CODER|WRITER|TESTER|CM|PM|PO)-"
-    r"(?:\d{8}-\d+(?:-[A-Za-z0-9]+)*|\d{1,4}(?!-\d))\b"
-)
+_TASK_ID_PATTERN = r"\b(?:CODER|WRITER|TESTER|CM|PM|PO)-" r"(?:\d{8}-\d+(?:-[A-Za-z0-9]+)*|\d{1,4}(?!-\d))\b"
 _INTERNAL_ID_RE = re.compile(f"{_LEDGER_ID_PATTERN}|{_TASK_ID_PATTERN}", re.IGNORECASE)
 _TASK_ID_RE = re.compile(_TASK_ID_PATTERN, re.IGNORECASE)
 
@@ -93,12 +90,10 @@ _COMMIT_ID_RE = re.compile(
 )
 
 # A release-candidate branch name: rc/vX.Y.Z with or without a branch prefix
-# ("ai_rc/v2.53.5", "rc/v1.2.3"), bare or backticked, plus any "-suffix".
-# A version on its own ("v2.53.5") is not a branch name and survives.
+# ("ai_rc/v1.2.3", "rc/v1.2.3"), bare or backticked, plus any "-suffix".
+# A version on its own ("v1.2.3") is not a branch name and survives.
 _RC_BRANCH_CORE = r"(?:[A-Za-z0-9][\w-]*?[_-])?rc/v\d+\.\d+\.\d+(?:[-_][\w.-]*\w)?"
-_RC_BRANCH_RE = re.compile(
-    rf"`{_RC_BRANCH_CORE}`|(?<![\w./-]){_RC_BRANCH_CORE}(?![\w/-]|\.\d)"
-)
+_RC_BRANCH_RE = re.compile(rf"`{_RC_BRANCH_CORE}`|(?<![\w./-]){_RC_BRANCH_CORE}(?![\w/-]|\.\d)")
 # A Markdown code span: a run of backticks closed by a run of the same
 # length. An unmatched backtick opens nothing and stays literal text. The
 # release-notes generator's first-sentence split reads this same pattern.
@@ -115,8 +110,7 @@ _RC_BRANCH_REPLACEMENT_TEXT = "the release candidate"
 # the lint's unshipped-requirements-path pattern and is replaced by a noun
 # phrase that keeps the sentence readable.
 _REQUIREMENTS_PATH_RE = re.compile(
-    r"`requirements/v\d+\.\d+\.\d+[\w.-]*`"
-    r"|(?<![\w.])requirements/v\d+\.\d+\.\d+[\w.-]*",
+    r"`requirements/v\d+\.\d+\.\d+[\w.-]*`" r"|(?<![\w.])requirements/v\d+\.\d+\.\d+[\w.-]*",
     re.IGNORECASE,
 )
 _REQUIREMENTS_PATH_REPLACEMENT_TEXT = "the release's requirements document"
@@ -178,11 +172,11 @@ def _substitute_branches_and_commits(text):
 def _tidy(text):
     """Collapse what a substitution or deletion can leave behind, outside
     code spans, then strip. A code span is kept byte for byte: the space in
-    `pvg build . --scene 2` is part of the command."""
+    `my-app build . --target 2` is part of the command."""
     pieces = []
     last = 0
     for span in _CODE_SPAN_RE.finditer(text):
-        pieces.append(_tidy_prose(text[last:span.start()]))
+        pieces.append(_tidy_prose(text[last : span.start()]))
         pieces.append(span.group(0))
         last = span.end()
     pieces.append(_tidy_prose(text[last:]))

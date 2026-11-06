@@ -104,8 +104,12 @@ def test_unhalt_closes_the_chain_halt_as_human_chain_and_resets_both_streaks(roo
     halt = _chain_writes_halt(root)
     ledger = ledger_path_for_project(str(root), _PROJECT)
     append_block_start(
-        ledger, "no-rc", "halt:project", "2026-10-18T10:00:00+00:00",
-        cause=sentinel_cause(halt), reason_code="cm.release_trigger",
+        ledger,
+        "no-rc",
+        "halt:project",
+        "2026-10-18T10:00:00+00:00",
+        cause=sentinel_cause(halt),
+        reason_code="cm.release_trigger",
     )
 
     ops_write.unhalt(ctx, _PROJECT)

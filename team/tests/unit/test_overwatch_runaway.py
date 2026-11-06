@@ -45,7 +45,7 @@ _MODULE_FILE = pathlib.Path(runaway.__file__).resolve()
 PROJECT = "demo"
 OTHER = "sibling"
 
-NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+NOW = datetime.datetime(2026, 3, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +83,13 @@ def _ship(root: pathlib.Path, version: str, closed: datetime.datetime, project: 
     state_dir = root / "projects" / project / "release-state"
     state_dir.mkdir(parents=True, exist_ok=True)
     record = {
-        "attempt": 1, "cargo": ["BUG-0001-example.md"], "closed_at": _iso(closed),
-        "family_key": "family-0000", "opened_at": _iso(closed - datetime.timedelta(minutes=5)),
-        "outcome": "shipped", "rc": version,
+        "attempt": 1,
+        "cargo": ["BUG-0001-example.md"],
+        "closed_at": _iso(closed),
+        "family_key": "family-0000",
+        "opened_at": _iso(closed - datetime.timedelta(minutes=5)),
+        "outcome": "shipped",
+        "rc": version,
     }
     (state_dir / f"{version}.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
 
@@ -95,9 +99,13 @@ def _cancel(root: pathlib.Path, version: str, closed: datetime.datetime) -> None
     history = root / "projects" / PROJECT / "release-state" / "history"
     history.mkdir(parents=True, exist_ok=True)
     record = {
-        "attempt": 1, "cargo": ["BUG-0001-example.md"], "closed_at": _iso(closed),
-        "family_key": "family-0000", "opened_at": _iso(closed - datetime.timedelta(minutes=30)),
-        "outcome": "cancelled", "rc": version,
+        "attempt": 1,
+        "cargo": ["BUG-0001-example.md"],
+        "closed_at": _iso(closed),
+        "family_key": "family-0000",
+        "opened_at": _iso(closed - datetime.timedelta(minutes=30)),
+        "outcome": "cancelled",
+        "rc": version,
     }
     stamp = _iso(closed).replace(":", "-").replace("T", "-")
     (history / f"{version}-cancelled-{stamp}.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
@@ -126,8 +134,12 @@ def _blocks(ctx: OpsContext, root: pathlib.Path, task_id: str, reason: str, time
 def _inbox_entries(ctx: OpsContext, count: int, start: datetime.datetime) -> None:
     for n in range(count):
         inbox.write_entry(
-            ctx, PROJECT, source=f"CODER-20260301-{n:03d}-example", question=f"Question {n}?",
-            meanwhile="Carried on.", how_to_answer="Answer with the inbox command.",
+            ctx,
+            PROJECT,
+            source=f"CODER-20260301-{n:03d}-example",
+            question=f"Question {n}?",
+            meanwhile="Carried on.",
+            how_to_answer="Answer with the inbox command.",
             now=start + datetime.timedelta(minutes=n),
         )
 
@@ -141,8 +153,9 @@ def _all_entries(ctx: OpsContext, project: str = PROJECT) -> tuple:
     return box.open + box.done
 
 
-def _assert_one_stop(ctx: OpsContext, root: pathlib.Path, result, counter: str, threshold: int,
-                     events: int, inbox_before: int = 0) -> str:
+def _assert_one_stop(
+    ctx: OpsContext, root: pathlib.Path, result, counter: str, threshold: int, events: int, inbox_before: int = 0
+) -> str:
     """The result tripped *counter*: one chain HALT naming it and its events, one new inbox entry."""
     assert result.outcome == runaway.OUTCOME_TRIPPED, result
     assert [t.counter for t in result.trips] == [counter]
@@ -229,8 +242,13 @@ def _two_cycles(ctx, root):
 
 
 def _three_repeats(ctx, root):
-    _blocks(ctx, root, "CODER-20260301-001-example", "per_task_timeout",
-            [NOW - datetime.timedelta(hours=h) for h in (6, 4, 2)])
+    _blocks(
+        ctx,
+        root,
+        "CODER-20260301-001-example",
+        "per_task_timeout",
+        [NOW - datetime.timedelta(hours=h) for h in (6, 4, 2)],
+    )
 
 
 def _twenty_inbox_entries(ctx, root):
@@ -238,7 +256,8 @@ def _twenty_inbox_entries(ctx, root):
 
 
 @pytest.mark.parametrize(
-    "fill", [_five_releases, _two_cycles, _three_repeats, _twenty_inbox_entries],
+    "fill",
+    [_five_releases, _two_cycles, _three_repeats, _twenty_inbox_entries],
     ids=["releases", "rc-cycles", "reason-repeats", "inbox-entries"],
 )
 def test_a_counter_at_its_threshold_writes_no_halt_and_no_inbox_entry(ctx, root, fill):
@@ -315,8 +334,13 @@ def test_record_event_counts_a_block_unless_its_requeues_rose_since_the_last(ctx
     task = "CODER-20260301-006-example"
     for h in (8, 6, 4, 2):
         assert runaway.record_event(
-            ctx, PROJECT, runaway.COUNTER_REASON_REPEATS, key="", at=NOW - datetime.timedelta(hours=h),
-            subject=task, detail="agent_unclassified",
+            ctx,
+            PROJECT,
+            runaway.COUNTER_REASON_REPEATS,
+            key="",
+            at=NOW - datetime.timedelta(hours=h),
+            subject=task,
+            detail="agent_unclassified",
         )
     (trip,) = runaway.evaluate(ctx, PROJECT, now=NOW)
     assert trip.count == 4
@@ -324,8 +348,14 @@ def test_record_event_counts_a_block_unless_its_requeues_rose_since_the_last(ctx
     other = "CODER-20260301-007-example"
     for n, h in enumerate((8, 6, 4, 2)):
         runaway.record_event(
-            ctx, PROJECT, runaway.COUNTER_REASON_REPEATS, key="", at=NOW - datetime.timedelta(hours=h),
-            subject=other, detail="agent_unclassified", requeues=n,
+            ctx,
+            PROJECT,
+            runaway.COUNTER_REASON_REPEATS,
+            key="",
+            at=NOW - datetime.timedelta(hours=h),
+            subject=other,
+            detail="agent_unclassified",
+            requeues=n,
         )
     assert [t.subject for t in runaway.evaluate(ctx, PROJECT, now=NOW)] == [f"{task}:agent_unclassified"]
 
@@ -478,8 +508,9 @@ def test_an_unrecognised_value_refuses_dual_channel_with_a_runnable_remedy(ctx, 
     assert exc.error == error
     assert value in exc.message and str(cfg) in exc.message
     assert "<" not in exc.remedy
-    subprocess.run(["bash", "-c", exc.remedy], check=True, cwd=str(root), timeout=30,
-                   env=build_scrubbed_env(home_dir=root / "tmp"))
+    subprocess.run(
+        ["bash", "-c", exc.remedy], check=True, cwd=str(root), timeout=30, env=build_scrubbed_env(home_dir=root / "tmp")
+    )
     runaway.resolve_thresholds(root, PROJECT)
     runaway.resolve_halt_after_auto_resume(root, PROJECT)
 
@@ -508,7 +539,11 @@ def _cli(tmp_path: pathlib.Path, root: pathlib.Path, *args: str) -> subprocess.C
     )
     return subprocess.run(
         [sys.executable, str(_MODULE_FILE), *args],
-        cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=60,
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
 
@@ -520,8 +555,14 @@ def test_cli_check_stops_a_runaway_and_prints_the_dual_channel_block(tmp_path, r
     assert "tripped" in done.stdout
     assert re.search(r"^error:\s+runaway\.releases_per_hour$", done.stderr, re.M), done.stderr
     remedy = re.search(r"^remedy:\s+(.*)$", done.stderr, re.M).group(1)
-    shown = subprocess.run(["bash", "-c", remedy], cwd=str(tmp_path), capture_output=True, text=True, timeout=60,
-                           env=build_scrubbed_env(home_dir=tmp_path / "home"))
+    shown = subprocess.run(
+        ["bash", "-c", remedy],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=build_scrubbed_env(home_dir=tmp_path / "home"),
+    )
     assert shown.returncode == 0, shown.stderr
     assert "releases_per_hour" in shown.stdout
     assert _halt(root).exists()

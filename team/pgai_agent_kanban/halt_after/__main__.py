@@ -82,9 +82,7 @@ def main() -> int:
     project_root = pathlib.Path(sys.argv[1])
     # Optional second arg: directory containing release-state.md.
     # Falls back to project_root when not provided (backward-compatible).
-    release_state_root: "pathlib.Path | None" = (
-        pathlib.Path(sys.argv[2]) if len(sys.argv) == 3 else None
-    )
+    release_state_root: pathlib.Path | None = pathlib.Path(sys.argv[2]) if len(sys.argv) == 3 else None
 
     halt_after_path = project_root / _HALT_AFTER_FILENAME
 
@@ -119,9 +117,7 @@ def main() -> int:
     # rc_gate.evaluate wants a concrete release-state directory; fall back to
     # project_root when the caller passed no second positional argument
     # (backward-compatible default — matches check_drain's own fallback).
-    _release_state_root = (
-        release_state_root if release_state_root is not None else project_root
-    )
+    _release_state_root = release_state_root if release_state_root is not None else project_root
 
     try:
         result = rc_gate_evaluate(project_root, _release_state_root, event)
@@ -135,15 +131,12 @@ def main() -> int:
         return _EXIT_DRAIN_IN_PROGRESS
 
     if result.outcome is RcGateOutcome.NOT_DRAINED:
-        logger.info(
-            "drain not yet satisfied for event=%r — chain continues", result.event
-        )
+        logger.info("drain not yet satisfied for event=%r — chain continues", result.event)
         return _EXIT_DRAIN_IN_PROGRESS
 
     if result.outcome is RcGateOutcome.DEFERRED:
         logger.info(
-            "drain satisfied for event=%r but Active RC is open — promotion "
-            "deferred to RC close — chain continues",
+            "drain satisfied for event=%r but Active RC is open — promotion " "deferred to RC close — chain continues",
             result.event,
         )
         return _EXIT_DEFERRED_RC_OPEN

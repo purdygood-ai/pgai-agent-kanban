@@ -153,9 +153,7 @@ def test_twelve_findings_across_three_classes_produce_exactly_three_bugs(
     assert len(findings) == 12
     _write_findings_file(findings_path, findings)
 
-    results = file_or_cite_hygiene_bugs(
-        str(bugs_dir), project="demo", findings_path=str(findings_path)
-    )
+    results = file_or_cite_hygiene_bugs(str(bugs_dir), project="demo", findings_path=str(findings_path))
 
     assert len(results) == 3
     assert {r.cls for r in results} == {"provenance", "comment-drift", "version-named-test"}
@@ -224,9 +222,7 @@ def _commit_file(root: pathlib.Path, relpath: str, content: str, message: str) -
     target.write_text(content, encoding="utf-8")
     subprocess.run(["git", "add", relpath], cwd=str(root), check=True)
     subprocess.run(["git", "commit", "-q", "-m", message], cwd=str(root), check=True)
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
-    )
+    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True)
     return result.stdout.strip()
 
 
@@ -257,9 +253,7 @@ def test_finding_in_a_modified_but_uncommitted_file_files_no_bug(tmp_path: pathl
     _commit_file(repo, "existing.py", "def foo():\n    return 1\n", "add existing.py")
     # Modify the already-committed file without committing the change --
     # the file exists in HEAD, but the line the finding cites does not.
-    (repo / "existing.py").write_text(
-        "def foo():\n    return 1\n\n# an uncommitted edit\n", encoding="utf-8"
-    )
+    (repo / "existing.py").write_text("def foo():\n    return 1\n\n# an uncommitted edit\n", encoding="utf-8")
 
     bugs_dir = tmp_path / "bugs"
     findings_path = tmp_path / "findings.json"
@@ -438,9 +432,7 @@ def test_finding_in_a_file_absent_at_the_commit_is_still_filed(tmp_path: pathlib
 # ---------------------------------------------------------------------------
 
 
-def test_repo_root_that_is_not_a_git_repository_files_nothing_and_says_why(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_repo_root_that_is_not_a_git_repository_files_nothing_and_says_why(tmp_path: pathlib.Path, capsys) -> None:
     not_a_repo = tmp_path / "not-a-repo"
     not_a_repo.mkdir()
 
@@ -460,9 +452,7 @@ def test_repo_root_that_is_not_a_git_repository_files_nothing_and_says_why(
     assert "cannot resolve a commit" in stderr
 
 
-def test_git_repository_with_no_commits_yet_files_nothing_and_says_why(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_git_repository_with_no_commits_yet_files_nothing_and_says_why(tmp_path: pathlib.Path, capsys) -> None:
     empty_repo = tmp_path / "empty-repo"
     _init_repo(empty_repo)
     # _init_repo only runs `git init`; no commit has been made, so HEAD
@@ -633,9 +623,7 @@ def test_missing_findings_file_files_no_bug_and_does_not_raise(tmp_path: pathlib
     bugs_dir = tmp_path / "bugs"
     missing_findings_path = tmp_path / "does-not-exist.json"
 
-    results = file_or_cite_hygiene_bugs(
-        str(bugs_dir), project="demo", findings_path=str(missing_findings_path)
-    )
+    results = file_or_cite_hygiene_bugs(str(bugs_dir), project="demo", findings_path=str(missing_findings_path))
 
     assert results == []
 
@@ -700,11 +688,16 @@ def test_filed_bug_remedies_omit_the_scan_root_and_run_from_a_fresh_checkout(
 
     lint_result = subprocess.run(
         [
-            sys.executable, "team/scripts/lint_hygiene.py",
-            "--code-dirs", "code",
-            "--test-tree-dirs", "empty_tests",
-            "--prose-dirs", "empty_prose",
-            "--findings-file", str(raw_findings_path),
+            sys.executable,
+            "team/scripts/lint_hygiene.py",
+            "--code-dirs",
+            "code",
+            "--test-tree-dirs",
+            "empty_tests",
+            "--prose-dirs",
+            "empty_prose",
+            "--findings-file",
+            str(raw_findings_path),
         ],
         cwd=str(checkout),
         capture_output=True,
@@ -724,12 +717,12 @@ def test_filed_bug_remedies_omit_the_scan_root_and_run_from_a_fresh_checkout(
     content = pathlib.Path(results[0].bug_path).read_text(encoding="utf-8")
 
     scan_root = str(checkout)
-    assert scan_root not in content, (
-        f"filed bug still names the ephemeral scan root {scan_root!r} that produced it: {content}"
-    )
-    assert "repository root" in content.lower(), (
-        "the ## Remedies section must tell the reader where to run its commands from"
-    )
+    assert (
+        scan_root not in content
+    ), f"filed bug still names the ephemeral scan root {scan_root!r} that produced it: {content}"
+    assert (
+        "repository root" in content.lower()
+    ), "the ## Remedies section must tell the reader where to run its commands from"
 
     match = re.search(r'^\d+\. .*(python3 "team/scripts/lint_hygiene\.py".*)$', content, re.MULTILINE)
     assert match, f"no --add-suppression command found in filed bug: {content}"
@@ -745,7 +738,11 @@ def test_filed_bug_remedies_omit_the_scan_root_and_run_from_a_fresh_checkout(
     shutil.copy(code_dir / "dirty.py", second_code_dir / "dirty.py")
 
     add_result = subprocess.run(
-        remedy_command, shell=True, cwd=str(second_checkout), capture_output=True, text=True,
+        remedy_command,
+        shell=True,
+        cwd=str(second_checkout),
+        capture_output=True,
+        text=True,
     )
     assert add_result.returncode == 0, add_result.stderr
 
@@ -792,11 +789,16 @@ def test_filed_bug_for_an_unregistered_class_omits_the_scan_root_and_runs(
 
     lint_result = subprocess.run(
         [
-            sys.executable, "team/scripts/lint_hygiene.py",
-            "--code-dirs", "empty_code",
-            "--test-tree-dirs", "empty_tests",
-            "--prose-dirs", "empty_prose",
-            "--findings-file", str(raw_findings_path),
+            sys.executable,
+            "team/scripts/lint_hygiene.py",
+            "--code-dirs",
+            "empty_code",
+            "--test-tree-dirs",
+            "empty_tests",
+            "--prose-dirs",
+            "empty_prose",
+            "--findings-file",
+            str(raw_findings_path),
         ],
         cwd=str(checkout),
         capture_output=True,
@@ -818,27 +820,31 @@ def test_filed_bug_for_an_unregistered_class_omits_the_scan_root_and_runs(
     content = pathlib.Path(results[0].bug_path).read_text(encoding="utf-8")
 
     scan_root = str(checkout)
-    assert scan_root not in content, (
-        f"filed bug still names the ephemeral scan root {scan_root!r} that produced it: {content}"
-    )
+    assert (
+        scan_root not in content
+    ), f"filed bug still names the ephemeral scan root {scan_root!r} that produced it: {content}"
 
     reproduction_section = content.split("## Reproduction", 1)[1].split("## Files Involved", 1)[0]
     match = re.search(r"`([^`]*python3[^`]*)`", reproduction_section)
     assert match, f"no runnable command found in the Reproduction section: {reproduction_section}"
     reproduction_command = match.group(1)
-    assert "--classes" not in reproduction_command, (
-        f"reproduction command still passes an unregistered class to --classes: {reproduction_command}"
-    )
+    assert (
+        "--classes" not in reproduction_command
+    ), f"reproduction command still passes an unregistered class to --classes: {reproduction_command}"
 
     repro_result = subprocess.run(
-        reproduction_command, shell=True, cwd=str(checkout), capture_output=True, text=True,
+        reproduction_command,
+        shell=True,
+        cwd=str(checkout),
+        capture_output=True,
+        text=True,
     )
-    assert repro_result.returncode == 0, (
-        f"reproduction command {reproduction_command!r} did not exit 0: {repro_result.stderr}"
-    )
-    assert unregistered_class in repro_result.stdout or "hygiene-lint-allowlist.json" in repro_result.stdout, (
-        f"reproduction command output does not surface the finding it claims to reproduce: {repro_result.stdout}"
-    )
+    assert (
+        repro_result.returncode == 0
+    ), f"reproduction command {reproduction_command!r} did not exit 0: {repro_result.stderr}"
+    assert (
+        unregistered_class in repro_result.stdout or "hygiene-lint-allowlist.json" in repro_result.stdout
+    ), f"reproduction command output does not surface the finding it claims to reproduce: {repro_result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -884,9 +890,7 @@ def test_live_bug_with_an_ordinal_variant_slug_is_cited_and_nothing_is_filed(
     findings_path = tmp_path / "findings.json"
     _write_findings_file(findings_path, [_hygiene_finding("provenance", "a.py", 1, "BUG-0009")])
 
-    results = file_or_cite_hygiene_bugs(
-        str(bugs_dir), project="demo", findings_path=str(findings_path), repo_root=repo
-    )
+    results = file_or_cite_hygiene_bugs(str(bugs_dir), project="demo", findings_path=str(findings_path), repo_root=repo)
 
     assert results == [FilingResult(cls="provenance", outcome="duplicate", bug_id="BUG-9402", bug_path=None, count=1)]
     assert sorted(bugs_dir.glob("BUG-*.md")) == [hand_filed]
@@ -904,9 +908,7 @@ def test_closed_bugs_matching_by_class_or_slug_do_not_suppress_a_fresh_filing(
     findings_path = tmp_path / "findings.json"
     _write_findings_file(findings_path, [_hygiene_finding("provenance", "a.py", 1, "BUG-0009")])
 
-    results = file_or_cite_hygiene_bugs(
-        str(bugs_dir), project="demo", findings_path=str(findings_path), repo_root=repo
-    )
+    results = file_or_cite_hygiene_bugs(str(bugs_dir), project="demo", findings_path=str(findings_path), repo_root=repo)
 
     assert len(results) == 1
     assert results[0].outcome == "filed"

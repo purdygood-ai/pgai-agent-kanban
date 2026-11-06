@@ -35,7 +35,6 @@ from pgai_agent_kanban.cm.changelog_writer import (
     remove_bogus_public_ids,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture helpers (mirrored from test_changelog_writer.py for self-contained tests)
 # ---------------------------------------------------------------------------
@@ -164,9 +163,7 @@ class TestLooksLikeVersionString:
             pytest.param("1.2.3", True, id="version_without_prefix_accepted"),
             pytest.param("ai_v1.2.3", True, id="ai_v_prefix_accepted"),
             pytest.param("v1.22", True, id="two_part_version_accepted"),
-            pytest.param(
-                "(internal — plugin era; no KI)", False, id="internal_prose_rejected"
-            ),
+            pytest.param("(internal — plugin era; no KI)", False, id="internal_prose_rejected"),
             pytest.param("", False, id="empty_string_rejected"),
             pytest.param("v", False, id="bare_letter_v_rejected"),
             pytest.param("v1.0.0 (fixed)", False, id="typo_extra_text_rejected"),
@@ -185,9 +182,7 @@ class TestLooksLikeVersionString:
 class TestProseAffectsMintsNothingAndWarns:
     """regenerate() must not assign a Public ID when ## Affects is prose."""
 
-    def test_prose_affects_no_public_id_minted(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_prose_affects_no_public_id_minted(self, tmp_path: pathlib.Path) -> None:
         """A bug with prose ## Affects receives no Public ID after regeneration."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -208,13 +203,9 @@ class TestProseAffectsMintsNothingAndWarns:
         regenerate(repo_root, ["v1.0.0"], ["v1.0.0"], bugs_dir)
 
         rec = parse_bug_file(bug_path)
-        assert rec.public_id == "", (
-            f"Expected no Public ID for prose-affects bug; got {rec.public_id!r}"
-        )
+        assert rec.public_id == "", f"Expected no Public ID for prose-affects bug; got {rec.public_id!r}"
 
-    def test_prose_affects_no_ki_in_output(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_prose_affects_no_ki_in_output(self, tmp_path: pathlib.Path) -> None:
         """A prose-affects bug does not appear in any KI section of the output."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -235,20 +226,16 @@ class TestProseAffectsMintsNothingAndWarns:
         content = regenerate(repo_root, ["v1.0.0"], ["v1.0.0"], bugs_dir)
 
         # No KI- identifier anywhere
-        assert "KI-" not in content, (
-            "KI- identifier appeared in output for a prose-affects bug"
-        )
+        assert "KI-" not in content, "KI- identifier appeared in output for a prose-affects bug"
         # Symptom must not appear in the KI section
         ki_section_match = re.search(r"### Known Issues\n(.+?)(?=###|\Z)", content, re.DOTALL)
         if ki_section_match:
             ki_body = ki_section_match.group(1).strip()
-            assert "Internal defect that should not be disclosed" not in ki_body, (
-                "Prose-affects bug symptom appeared in Known Issues section"
-            )
+            assert (
+                "Internal defect that should not be disclosed" not in ki_body
+            ), "Prose-affects bug symptom appeared in Known Issues section"
 
-    def test_prose_affects_emits_warning_to_stderr(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
-    ) -> None:
+    def test_prose_affects_emits_warning_to_stderr(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture) -> None:
         """regenerate() emits a warning to stderr naming the bug file for prose-affects."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -270,17 +257,13 @@ class TestProseAffectsMintsNothingAndWarns:
 
         _, err = capsys.readouterr()
         # Warning must name the file
-        assert str(bug_path) in err or bug_path.name in err, (
-            f"Expected bug filename in stderr warning; got: {err!r}"
-        )
+        assert str(bug_path) in err or bug_path.name in err, f"Expected bug filename in stderr warning; got: {err!r}"
         # Warning must mention the standard phrase
-        assert "Affects value not a known release" in err, (
-            f"Expected 'Affects value not a known release' in stderr; got: {err!r}"
-        )
+        assert (
+            "Affects value not a known release" in err
+        ), f"Expected 'Affects value not a known release' in stderr; got: {err!r}"
 
-    def test_typo_version_emits_warning_to_stderr(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
-    ) -> None:
+    def test_typo_version_emits_warning_to_stderr(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture) -> None:
         """A typo'd real version (non-parseable) also emits a warning — fail-loud both directions."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -301,16 +284,14 @@ class TestProseAffectsMintsNothingAndWarns:
         regenerate(repo_root, ["v1.0.0"], ["v1.0.0"], bugs_dir)
 
         _, err = capsys.readouterr()
-        assert str(bug_path) in err or bug_path.name in err, (
-            f"Expected bug filename in stderr for typo'd affects; got: {err!r}"
-        )
-        assert "Affects value not a known release" in err, (
-            f"Expected warning phrase in stderr for typo'd affects; got: {err!r}"
-        )
+        assert (
+            str(bug_path) in err or bug_path.name in err
+        ), f"Expected bug filename in stderr for typo'd affects; got: {err!r}"
+        assert (
+            "Affects value not a known release" in err
+        ), f"Expected warning phrase in stderr for typo'd affects; got: {err!r}"
 
-    def test_absent_affects_section_no_warning(
-        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
-    ) -> None:
+    def test_absent_affects_section_no_warning(self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture) -> None:
         """A bug with no ## Affects section at all produces no warning (internal convention)."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -333,9 +314,9 @@ class TestProseAffectsMintsNothingAndWarns:
         _, err = capsys.readouterr()
         # An absent Affects section produces no warning — absence is the correct
         # internal-bug convention.
-        assert "Affects value not a known release" not in err, (
-            f"Unexpected warning for bug with absent ## Affects; stderr: {err!r}"
-        )
+        assert (
+            "Affects value not a known release" not in err
+        ), f"Unexpected warning for bug with absent ## Affects; stderr: {err!r}"
 
 
 # ===========================================================================
@@ -346,9 +327,7 @@ class TestProseAffectsMintsNothingAndWarns:
 class TestRealAffectsRegressionStillReceivesCounter:
     """After the gating fix, bugs with valid version Affects still get Public IDs."""
 
-    def test_valid_affects_bug_receives_public_id(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_valid_affects_bug_receives_public_id(self, tmp_path: pathlib.Path) -> None:
         """A bug with Affects=v1.0.0 (a real published version) gets a KI- Public ID."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -369,17 +348,11 @@ class TestRealAffectsRegressionStillReceivesCounter:
         content = regenerate(repo_root, ["v1.0.0"], ["v1.0.0"], bugs_dir)
 
         rec = parse_bug_file(bug_path)
-        assert rec.public_id.startswith("KI-1.0.0."), (
-            f"Expected KI-1.0.0.N public ID; got {rec.public_id!r}"
-        )
-        assert rec.public_id in content, (
-            "Public ID not present in generated CHANGELOG content"
-        )
+        assert rec.public_id.startswith("KI-1.0.0."), f"Expected KI-1.0.0.N public ID; got {rec.public_id!r}"
+        assert rec.public_id in content, "Public ID not present in generated CHANGELOG content"
         assert "KI-1.0.0.1" in content
 
-    def test_valid_affects_bug_renders_in_ki_section(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_valid_affects_bug_renders_in_ki_section(self, tmp_path: pathlib.Path) -> None:
         """A valid-affects bug appears in the Known Issues section of the CHANGELOG."""
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
@@ -407,9 +380,7 @@ class TestRealAffectsRegressionStillReceivesCounter:
         assert "KI-1.0.0.1" in ki_body
         assert "Disclosed symptom for KI section" in ki_body
 
-    def test_prose_affects_does_not_advance_counter_for_valid_bugs(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_prose_affects_does_not_advance_counter_for_valid_bugs(self, tmp_path: pathlib.Path) -> None:
         """A prose-affects bug does not consume a counter slot for the same anchor.
 
         Two bugs: one with prose Affects (should get nothing), one with
@@ -444,8 +415,7 @@ class TestRealAffectsRegressionStillReceivesCounter:
         rec = parse_bug_file(valid_bug_path)
         # Counter must be 1, not 2 (prose bug must not have consumed .1)
         assert rec.public_id == "KI-1.0.0.1", (
-            f"Expected KI-1.0.0.1 (prose bug must not advance counter); "
-            f"got {rec.public_id!r}"
+            f"Expected KI-1.0.0.1 (prose bug must not advance counter); " f"got {rec.public_id!r}"
         )
         assert "KI-1.0.0.1" in content
         # No KI-1.0.0.2 (prose bug did not get one)
@@ -460,9 +430,7 @@ class TestRealAffectsRegressionStillReceivesCounter:
 class TestRemoveBogusPublicIds:
     """remove_bogus_public_ids must remove bogus stamps and be idempotent."""
 
-    def test_bogus_stamp_removed_from_prose_affects_bug(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bogus_stamp_removed_from_prose_affects_bug(self, tmp_path: pathlib.Path) -> None:
         """A bug with prose Affects and an existing Public ID has that ID removed."""
         bugs_dir = tmp_path / "bugs"
 
@@ -478,24 +446,16 @@ class TestRemoveBogusPublicIds:
 
         # Confirm the Public ID is present before cleanup.
         rec_before = parse_bug_file(bug_path)
-        assert rec_before.public_id == "KI-1.0.0.12", (
-            "Test setup error: Public ID not present before cleanup"
-        )
+        assert rec_before.public_id == "KI-1.0.0.12", "Test setup error: Public ID not present before cleanup"
 
         modified = remove_bogus_public_ids(bugs_dir, ["v1.0.0"])
 
-        assert bug_path in modified, (
-            "Expected bug_path in the list of modified files"
-        )
+        assert bug_path in modified, "Expected bug_path in the list of modified files"
 
         rec_after = parse_bug_file(bug_path)
-        assert rec_after.public_id == "", (
-            f"Expected Public ID to be removed; got {rec_after.public_id!r}"
-        )
+        assert rec_after.public_id == "", f"Expected Public ID to be removed; got {rec_after.public_id!r}"
 
-    def test_clean_ledger_is_byte_identical(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_clean_ledger_is_byte_identical(self, tmp_path: pathlib.Path) -> None:
         """Running the cleanup on a clean ledger (no bogus stamps) changes no bytes."""
         bugs_dir = tmp_path / "bugs"
 
@@ -513,17 +473,13 @@ class TestRemoveBogusPublicIds:
         content_before = bug_path.read_text(encoding="utf-8")
         modified = remove_bogus_public_ids(bugs_dir, ["v1.0.0"])
 
-        assert bug_path not in modified, (
-            "Clean bug was included in the list of modified files"
-        )
+        assert bug_path not in modified, "Clean bug was included in the list of modified files"
         content_after = bug_path.read_text(encoding="utf-8")
-        assert content_before == content_after, (
-            "Clean bug file content changed after running cleanup — not byte-identical"
-        )
+        assert (
+            content_before == content_after
+        ), "Clean bug file content changed after running cleanup — not byte-identical"
 
-    def test_cleanup_is_idempotent(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_cleanup_is_idempotent(self, tmp_path: pathlib.Path) -> None:
         """Running remove_bogus_public_ids twice on the same ledger is idempotent."""
         bugs_dir = tmp_path / "bugs"
 
@@ -545,18 +501,12 @@ class TestRemoveBogusPublicIds:
 
         # Second run: bug now has no Public ID — should be a no-op.
         modified_second = remove_bogus_public_ids(bugs_dir, ["v1.0.0"])
-        assert bug_path not in modified_second, (
-            "Second cleanup run included a bug that was already clean"
-        )
+        assert bug_path not in modified_second, "Second cleanup run included a bug that was already clean"
 
         content_after_second = bug_path.read_text(encoding="utf-8")
-        assert content_after_first == content_after_second, (
-            "Second cleanup run changed file content — not idempotent"
-        )
+        assert content_after_first == content_after_second, "Second cleanup run changed file content — not idempotent"
 
-    def test_cleanup_targets_only_prose_affects_bugs(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_cleanup_targets_only_prose_affects_bugs(self, tmp_path: pathlib.Path) -> None:
         """Cleanup removes only the bogus stamp; valid stamps are not touched."""
         bugs_dir = tmp_path / "bugs"
 
@@ -592,9 +542,7 @@ class TestRemoveBogusPublicIds:
         rec = parse_bug_file(bogus_path)
         assert rec.public_id == ""
 
-    def test_cleanup_absent_affects_bug_with_stamp_is_not_modified(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_cleanup_absent_affects_bug_with_stamp_is_not_modified(self, tmp_path: pathlib.Path) -> None:
         """A bug with no ## Affects section but an existing Public ID is not touched.
 
         The cleanup only removes Public IDs when ## Affects is non-empty prose.
@@ -617,8 +565,6 @@ class TestRemoveBogusPublicIds:
         content_before = bug_path.read_text(encoding="utf-8")
         modified = remove_bogus_public_ids(bugs_dir, ["v1.0.0"])
 
-        assert bug_path not in modified, (
-            "Cleanup must not touch a bug with absent ## Affects"
-        )
+        assert bug_path not in modified, "Cleanup must not touch a bug with absent ## Affects"
         content_after = bug_path.read_text(encoding="utf-8")
         assert content_before == content_after

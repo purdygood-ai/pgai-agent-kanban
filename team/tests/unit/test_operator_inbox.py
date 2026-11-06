@@ -37,7 +37,7 @@ _MODULE_FILE = pathlib.Path(inbox.__file__).resolve()
 # on disk.
 _REQUIRED_LABELS = ("Date", "Source", "Question", "Meanwhile", "How to answer")
 
-_T0 = datetime.datetime(2026, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+_T0 = datetime.datetime(2026, 1, 1, 10, 0, 0, tzinfo=datetime.UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +288,14 @@ def test_write_once_reuses_the_open_entry_with_the_same_source_and_question(ctx)
     first = _write(ctx, "Make the registry readable?", source="wake-batch", once=True)
     before = _inbox_file(ctx).read_bytes()
 
-    again = _write(ctx, "Make the  registry\nreadable?", source=" wake-batch ", minutes=5,
-                   meanwhile="different meanwhile text", once=True)
+    again = _write(
+        ctx,
+        "Make the  registry\nreadable?",
+        source=" wake-batch ",
+        minutes=5,
+        meanwhile="different meanwhile text",
+        once=True,
+    )
 
     assert again == first
     assert _inbox_file(ctx).read_bytes() == before
@@ -302,8 +308,21 @@ def test_write_once_reuses_the_open_entry_with_the_same_source_and_question(ctx)
 
 
 def test_cli_write_once_prints_the_existing_entry_and_writes_nothing(root, ctx, tmp_path):
-    args = ("write", "--project", PROJECT, "--source", "wake-batch", "--question", "Readable?",
-            "--meanwhile", "kept going", "--how-to-answer", "chmod u+r projects.cfg", "--once", "--json")
+    args = (
+        "write",
+        "--project",
+        PROJECT,
+        "--source",
+        "wake-batch",
+        "--question",
+        "Readable?",
+        "--meanwhile",
+        "kept going",
+        "--how-to-answer",
+        "chmod u+r projects.cfg",
+        "--once",
+        "--json",
+    )
     first = _run_cli(root, tmp_path, *args)
     assert first.returncode == 0, first.stderr
     before = _inbox_file(ctx).read_bytes()
@@ -381,8 +400,10 @@ def test_closed_entry_is_refused_with_nothing_written(ctx, operation):
         (lambda c: inbox.answer_entry(c, PROJECT, "first one", "yes"), "inbox.bad_entry_id"),
         (lambda c: inbox.close_entry(c, PROJECT, ""), "inbox.bad_entry_id"),
         (lambda c: inbox.list_open(c, "../project-a"), "inbox.bad_project"),
-        (lambda c: inbox.write_entry(c, "Project A", source="s", question="q", meanwhile="m", how_to_answer="h"),
-         "inbox.bad_project"),
+        (
+            lambda c: inbox.write_entry(c, "Project A", source="s", question="q", meanwhile="m", how_to_answer="h"),
+            "inbox.bad_project",
+        ),
     ],
 )
 def test_malformed_input_is_refused_with_nothing_written(ctx, call, error):
@@ -518,8 +539,20 @@ def _run_cli(root: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> subproce
 
 def test_cli_round_trip_by_file_path(root, ctx, tmp_path):
     written = _run_cli(
-        root, tmp_path, "write", "--project", PROJECT, "--source", "rc:v1.2.3",
-        "--question", "Cancel?", "--meanwhile", "kept going", "--how-to-answer", "answer cancel", "--json",
+        root,
+        tmp_path,
+        "write",
+        "--project",
+        PROJECT,
+        "--source",
+        "rc:v1.2.3",
+        "--question",
+        "Cancel?",
+        "--meanwhile",
+        "kept going",
+        "--how-to-answer",
+        "answer cancel",
+        "--json",
     )
     assert written.returncode == 0, written.stderr
     assert json.loads(written.stdout)["entry_id"] == "INBOX-0001"
@@ -554,7 +587,11 @@ def test_cli_refusal_prints_dual_channel_and_remedy_runs(root, ctx, tmp_path):
     remedy = subprocess.run(
         ["bash", "-c", match.group(2)],
         cwd=str(tmp_path),
-        env=build_scrubbed_env(home_dir=home, extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": str(root)}),
+        env=build_scrubbed_env(
+            home_dir=home,
+            extra_path_dirs=[pathlib.Path(sys.executable).parent],
+            extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": str(root)},
+        ),
         capture_output=True,
         text=True,
         timeout=60,

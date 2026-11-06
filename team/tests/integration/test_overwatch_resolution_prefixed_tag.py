@@ -31,14 +31,19 @@ def _require_git() -> None:
 
 
 def _git(repo: pathlib.Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
-    ).stdout
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
 
 
 def test_post_tag_ship_policy_halt_on_a_prefixed_project_is_a_hard_halt(tmp_path: pathlib.Path) -> None:
     (
-        kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+        kanban_root,
+        proj,
+        repo_path,
+        version,
+        halt_path,
+        task_id,
+        cm_task_id,
+        bug_id,
     ) = _build_golden_fixture(tmp_path)
     _git(repo_path, "tag", f"ai_{version}", "ai_main")
 

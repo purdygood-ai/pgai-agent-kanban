@@ -95,7 +95,6 @@ import pathlib
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Run by file path, this module has no parent package; put its own package
 # root first on sys.path so the imports below resolve from the same tree.
@@ -157,14 +156,12 @@ _ISO_RE = re.compile(
 _UNIT_SECONDS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
 _DURATION_PART = r"\d+\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b"
 _RELATIVE_RE = re.compile(
-    r"(?:try again|resets?|available again)\s+in\s+"
-    rf"((?:{_DURATION_PART}[\s,]*(?:and\s+)?)+)",
+    r"(?:try again|resets?|available again)\s+in\s+" rf"((?:{_DURATION_PART}[\s,]*(?:and\s+)?)+)",
     re.IGNORECASE,
 )
 _DURATION_PART_RE = re.compile(r"(\d+)\s*([dhms])", re.IGNORECASE)
 _CLOCK_RE = re.compile(
-    r"reset(?:s)?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"
-    r"(?:\s*\(\s*([A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\s*\))?",
+    r"reset(?:s)?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?" r"(?:\s*\(\s*([A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\s*\))?",
     re.IGNORECASE,
 )
 
@@ -214,7 +211,7 @@ class PauseState:
 # ---------------------------------------------------------------------------
 
 
-def _local_zone(name: Optional[str]) -> datetime.tzinfo:
+def _local_zone(name: str | None) -> datetime.tzinfo:
     """The IANA zone *name*, or the host's local zone when absent or unknown."""
     if name:
         try:
@@ -223,10 +220,10 @@ def _local_zone(name: Optional[str]) -> datetime.tzinfo:
             return ZoneInfo(name)
         except Exception:  # noqa: BLE001 - an unknown zone falls back to local
             pass
-    return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+    return datetime.datetime.now().astimezone().tzinfo or datetime.UTC
 
 
-def _hour_minute(hour_text: str, minute_text: Optional[str], meridiem: Optional[str]) -> Optional[tuple[int, int]]:
+def _hour_minute(hour_text: str, minute_text: str | None, meridiem: str | None) -> tuple[int, int] | None:
     """24-hour (hour, minute) from a clock time, or None when it is not one."""
     if minute_text is None and meridiem is None:
         return None  # a bare number is not a clock time
@@ -241,7 +238,7 @@ def _hour_minute(hour_text: str, minute_text: Optional[str], meridiem: Optional[
     return hour, minute
 
 
-def _clock_reset(match: "re.Match[str]", now: datetime.datetime) -> Optional[datetime.datetime]:
+def _clock_reset(match: re.Match[str], now: datetime.datetime) -> datetime.datetime | None:
     hour_text, minute_text, meridiem, zone = match.groups()
     clock = _hour_minute(hour_text, minute_text, meridiem)
     if clock is None:
@@ -250,10 +247,10 @@ def _clock_reset(match: "re.Match[str]", now: datetime.datetime) -> Optional[dat
     candidate = local_now.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0)
     if candidate <= local_now:
         candidate += datetime.timedelta(days=1)
-    return candidate.astimezone(datetime.timezone.utc)
+    return candidate.astimezone(datetime.UTC)
 
 
-def _date_clock_reset(match: "re.Match[str]", now: datetime.datetime) -> Optional[datetime.datetime]:
+def _date_clock_reset(match: re.Match[str], now: datetime.datetime) -> datetime.datetime | None:
     month_text, day_text, hour_text, minute_text, meridiem, zone = match.groups()
     month_key = month_text[:3].lower()
     clock = _hour_minute(hour_text, minute_text, meridiem)
@@ -263,17 +260,22 @@ def _date_clock_reset(match: "re.Match[str]", now: datetime.datetime) -> Optiona
     for year in (local_now.year, local_now.year + 1):
         try:
             candidate = local_now.replace(
-                year=year, month=_MONTHS.index(month_key) + 1, day=int(day_text),
-                hour=clock[0], minute=clock[1], second=0, microsecond=0,
+                year=year,
+                month=_MONTHS.index(month_key) + 1,
+                day=int(day_text),
+                hour=clock[0],
+                minute=clock[1],
+                second=0,
+                microsecond=0,
             )
         except ValueError:
             return None
         if candidate > local_now:
-            return candidate.astimezone(datetime.timezone.utc)
+            return candidate.astimezone(datetime.UTC)
     return None
 
 
-def parse_reset(text: str, now: datetime.datetime) -> Optional[datetime.datetime]:
+def parse_reset(text: str, now: datetime.datetime) -> datetime.datetime | None:
     """Return the reset time *text* states, or None when it states none.
 
     Tries the epoch, ISO-8601, relative, date-and-clock and clock shapes
@@ -281,10 +283,10 @@ def parse_reset(text: str, now: datetime.datetime) -> Optional[datetime.datetime
     shape that yields a time. A time not after *now*, or more than
     :data:`MAX_STATED_PAUSE_S` after it, is not trusted (None).
     """
-    found: Optional[datetime.datetime] = None
+    found: datetime.datetime | None = None
     epochs = _EPOCH_RE.findall(text)
     if epochs:
-        found = datetime.datetime.fromtimestamp(int(epochs[-1]), datetime.timezone.utc)
+        found = datetime.datetime.fromtimestamp(int(epochs[-1]), datetime.UTC)
     if found is None:
         isos = _ISO_RE.findall(text)
         if isos:
@@ -292,9 +294,7 @@ def parse_reset(text: str, now: datetime.datetime) -> Optional[datetime.datetime
     if found is None:
         relatives = _RELATIVE_RE.findall(text)
         if relatives:
-            seconds = sum(
-                int(n) * _UNIT_SECONDS[unit.lower()] for n, unit in _DURATION_PART_RE.findall(relatives[-1])
-            )
+            seconds = sum(int(n) * _UNIT_SECONDS[unit.lower()] for n, unit in _DURATION_PART_RE.findall(relatives[-1]))
             if seconds > 0:
                 found = now + datetime.timedelta(seconds=seconds)
     if found is None:
@@ -312,10 +312,10 @@ def parse_reset(text: str, now: datetime.datetime) -> Optional[datetime.datetime
         return None
     if found <= now or (found - now).total_seconds() > MAX_STATED_PAUSE_S:
         return None
-    return found.astimezone(datetime.timezone.utc)
+    return found.astimezone(datetime.UTC)
 
 
-def detect(text: str, now: datetime.datetime, default_s: int = DEFAULT_PAUSE_S) -> Optional[UsageLimit]:
+def detect(text: str, now: datetime.datetime, default_s: int = DEFAULT_PAUSE_S) -> UsageLimit | None:
     """Return the usage limit *text* reports, or None when it reports none.
 
     Only the last :data:`TAIL_LINES` lines are read, and a line counts only
@@ -345,7 +345,7 @@ def detect(text: str, now: datetime.datetime, default_s: int = DEFAULT_PAUSE_S) 
 # ---------------------------------------------------------------------------
 
 
-def marker_path(kanban_root: "Path | str", provider: str) -> Path:
+def marker_path(kanban_root: Path | str, provider: str) -> Path:
     """``<kanban_root>/provider-pause/<provider>.pause``."""
     return Path(kanban_root) / _MARKER_DIR / f"{provider}{_MARKER_SUFFIX}"
 
@@ -364,7 +364,7 @@ def _read_marker(path: Path) -> dict:
 
 
 def record(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     provider: str,
     limit: UsageLimit,
     now: datetime.datetime,
@@ -395,7 +395,7 @@ def record(
     return path, fields
 
 
-def check(kanban_root: "Path | str", provider: str, now: datetime.datetime) -> PauseState:
+def check(kanban_root: Path | str, provider: str, now: datetime.datetime) -> PauseState:
     """Whether *provider* is paused at *now*.
 
     ``paused`` while ``resumes_at`` is ahead; ``ended`` when it has passed
@@ -428,7 +428,7 @@ def _now(value: str) -> datetime.datetime:
         if parsed is None:
             raise argparse.ArgumentTypeError(f"--now {value!r} is not an ISO-8601 time")
         return parsed
-    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    return datetime.datetime.now(datetime.UTC).replace(microsecond=0)
 
 
 def _provider(value: str) -> str:
@@ -489,7 +489,7 @@ def _print_fields(fields: dict, marker: Path) -> None:
     print(f"marker={marker}")
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the provider-pause CLI.
 
     ``record KANBAN_ROOT PROVIDER LOG_FILE [...]`` records a pause when the log

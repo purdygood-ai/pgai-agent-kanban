@@ -45,7 +45,7 @@ divided with truncation toward zero:
 from __future__ import annotations
 
 import dataclasses
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from pgai_agent_kanban.dashboard.task_counts import QUEUE_ROLES, TaskCounts
 from pgai_agent_kanban.lib.palette import ansi_code
@@ -148,7 +148,7 @@ def render_status_summary(
     *,
     use_color: bool,
     now: int,
-    environ: Optional[Mapping[str, str]] = None,
+    environ: Mapping[str, str] | None = None,
 ) -> str:
     """Render *snapshot* as the status summary text (see the module docstring).
 

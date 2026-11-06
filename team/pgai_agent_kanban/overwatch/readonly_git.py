@@ -42,7 +42,6 @@ import dataclasses
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 #: Subcommands block triage may run with any arguments. Each only reads
 #: refs, objects and the working tree (merge-tree --write-tree also writes
@@ -93,9 +92,7 @@ class GitResult:
         return self.returncode == 0
 
 
-def run_readonly_git(
-    repo: "Path | str", subcommand: str, *args: str, exact_bytes: bool = False
-) -> Optional[GitResult]:
+def run_readonly_git(repo: Path | str, subcommand: str, *args: str, exact_bytes: bool = False) -> GitResult | None:
     """Run ``git -C <repo> <subcommand> <args...>`` when *subcommand* is read-only.
 
     Args:
@@ -132,7 +129,7 @@ def run_readonly_git(
     return _run(repo, subcommand, *args, errors="surrogateescape" if exact_bytes else "replace")
 
 
-def run_worktree_cleanup(repo: "Path | str", verb: str, *args: str) -> Optional[GitResult]:
+def run_worktree_cleanup(repo: Path | str, verb: str, *args: str) -> GitResult | None:
     """Run ``git -C <repo> worktree remove <path>`` or ``git -C <repo> worktree prune``.
 
     Args:
@@ -164,7 +161,7 @@ def run_worktree_cleanup(repo: "Path | str", verb: str, *args: str) -> Optional[
     return _run(repo, "worktree", verb, *args)
 
 
-def _run(repo: "Path | str", *argv: str, errors: str = "replace") -> Optional[GitResult]:
+def _run(repo: Path | str, *argv: str, errors: str = "replace") -> GitResult | None:
     """Run ``git -C <repo> <argv...>`` once the caller has checked *argv*."""
     if not Path(repo).is_dir():
         return None

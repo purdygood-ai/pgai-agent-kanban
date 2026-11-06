@@ -14,6 +14,9 @@ install-shaped kanban root rather than from this dev tree:
       _ctae_do_requeue / _ctae_do_escalate
   the ## Block Record writes at the ceiling escalation and the zero-progress
       cap (block_record.sh, lazily loaded by overwatch_load_module_runner)
+  the bug deposits of check-transient-api-error.sh (_ctae_file_bug) and
+      check-stale-worktrees.sh (_csw_file_bug), which reach the installed
+      scripts/intake.sh through overwatch_deposit_bug
 
 The harness provider's ## State / ## Summary writers (team/scripts/wake/
 harness.sh) are exercised end-to-end by the testing-only pipeline
@@ -140,7 +143,10 @@ def test_durable_records_read_and_write_from_an_install_root(
     assert proc.returncode == 0, _explain(proc)
     assert "runner loaded at source time" not in proc.stderr, _explain(proc)
     assert proc.stdout.splitlines() == [
-        "zp-empty=0", "zp=2", "tr=1", "zp-reset=0 reason=none",
+        "zp-empty=0",
+        "zp=2",
+        "tr=1",
+        "zp-reset=0 reason=none",
     ], _explain(proc)
     assert status.read_text(encoding="utf-8") == (
         "## State\nWORKING\n\n## Zero Progress\nreason_code: none\ncount: 0\nlimit: 3\ndetail: none\n\n"
@@ -177,7 +183,9 @@ def test_transient_requeue_and_escalate_run_from_an_install_root(
 
     assert proc.returncode == 0, _explain(proc)
     assert proc.stdout.splitlines() == [
-        "LOG: transient-auto-requeued", "LOG: transient-ceiling-needs-human-escalated", "count=2",
+        "LOG: transient-auto-requeued",
+        "LOG: transient-ceiling-needs-human-escalated",
+        "count=2",
     ], _explain(proc)
     assert status.read_text(encoding="utf-8") == (
         "## State\nBACKLOG\n\n## Summary\nAuto-requeued by OVERWATCH check-transient-api-error: "
@@ -191,9 +199,7 @@ def test_transient_requeue_and_escalate_run_from_an_install_root(
     _no_scratch(status.parent)
 
 
-def test_block_records_written_from_an_install_root(
-    tmp_path: pathlib.Path, install_root: pathlib.Path
-) -> None:
+def test_block_records_written_from_an_install_root(tmp_path: pathlib.Path, install_root: pathlib.Path) -> None:
     """The ceiling escalation and the zero-progress cap each write a ## Block Record.
 
     Both reach block_record.sh only through overwatch_load_module_runner's
@@ -245,3 +251,44 @@ def test_block_records_written_from_an_install_root(
     assert record.evidence.startswith("worktree=gone; branch=none; ahead=0; merged=no; batch_log=none")
     assert escalated.stat().st_mode & 0o777 == 0o640
     _no_scratch(escalated.parent)
+
+
+def test_check_bug_reports_are_deposited_through_the_installed_intake(
+    tmp_path: pathlib.Path, install_root: pathlib.Path
+) -> None:
+    """Both checks' bug reports land as intake-numbered files from an install root.
+
+    overwatch_deposit_bug finds intake.sh beside its own lib directory and
+    stages its draft under the temp root; a wrong root or a missing source
+    breaks this, not the unit tests. The second deposit of the ceiling
+    report is refused as the same defect.
+    """
+    # Intake's number claim reads pm-agent/lib beside the package, as installed.
+    shutil.copytree(
+        _TEAM_DIR / "pm-agent", install_root / "pm-agent", ignore=shutil.ignore_patterns("__pycache__", "tests")
+    )
+    bugs = install_root / "projects" / "demo" / "bugs"
+    bugs.mkdir(parents=True)
+    (install_root / "projects.cfg").write_text("[project:demo]\npriority = 1\n", encoding="utf-8")
+
+    proc = _run(
+        tmp_path,
+        install_root,
+        f"""\
+        source "{install_root}/scripts/lib/overwatch_protocol.sh"
+        source "{install_root}/scripts/lib/overwatch-checks/check-transient-api-error.sh"
+        source "{install_root}/scripts/lib/overwatch-checks/check-stale-worktrees.sh"
+        rc=0; out="$(_ctae_file_bug demo ceiling {_TASK} "ceiling reached")" || rc=$?; echo "ceiling=$rc $out"
+        rc=0; out="$(_ctae_file_bug demo ceiling {_TASK} "ceiling reached")" || rc=$?; echo "again=$rc $out"
+        rc=0; out="$(_csw_file_bug demo {_TASK} /example/worktree "carries commits")" || rc=$?; echo "stale=$rc $out"
+        """,
+    )
+
+    assert proc.returncode == 0, _explain(proc)
+    ceiling = bugs / "BUG-0001-transient-retry-ceiling-coder-20260101-001-install-root-task-reached.md"
+    stale = bugs / "BUG-0002-stale-worktree-coder-20260101-001-install-root-task-carries-commits.md"
+    assert proc.stdout.splitlines() == [f"ceiling=0 {ceiling}", f"again=2 {ceiling}", f"stale=0 {stale}"], _explain(
+        proc
+    )
+    assert sorted(p.name for p in bugs.glob("BUG-*.md")) == [ceiling.name, stale.name]
+    assert not list((tmp_path / "kanban-temp").glob("overwatch-bug-draft*")), "the staged drafts are removed"

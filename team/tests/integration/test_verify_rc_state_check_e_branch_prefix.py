@@ -48,6 +48,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="verify-rc-state-check-e-branch-prefix")
 
+
 # ---------------------------------------------------------------------------
 # Path helpers — resolve from this file's own location.
 # ---------------------------------------------------------------------------
@@ -61,7 +62,8 @@ def _init_local_repo(repo_path: pathlib.Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=repo_path, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=repo_path, check=True,
+        cwd=repo_path,
+        check=True,
     )
     subprocess.run(["git", "config", "user.name", "test"], cwd=repo_path, check=True)
     (repo_path / "README.md").write_text("fixture\n", encoding="utf-8")
@@ -134,16 +136,17 @@ def _write_release_state(project_root: pathlib.Path, active_rc: str) -> None:
     )
 
 
-def _run_verify_rc_state(
-    kanban_root: pathlib.Path, project_name: str
-) -> subprocess.CompletedProcess:
+def _run_verify_rc_state(kanban_root: pathlib.Path, project_name: str) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
     base_env["KANBAN_ROOT"] = str(kanban_root)
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     return subprocess.run(
         ["bash", str(_VERIFY_SCRIPT), project_name, "--verbose"],
-        capture_output=True, text=True, env=base_env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        timeout=60,
     )
 
 
@@ -162,17 +165,12 @@ def test_check_e_prefixed_project_ok_when_matching_branch_exists(
     _init_local_repo(repo)
     _create_branch(repo, "ai_rc/v2.11.1")
     kanban_root = _build_kanban_root(tmp_path, "verifytest-prefixed", repo, "ai_")
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-prefixed", "v2.11.1"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-prefixed", "v2.11.1")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-prefixed")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (
-        "[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1"
-        in result.stdout
-    ), result.stdout
+    assert "[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1" in result.stdout, result.stdout
     assert "0 errors" in result.stdout
 
 
@@ -186,17 +184,12 @@ def test_check_e_prefixed_project_error_when_branch_missing(
     _init_local_repo(repo)
     # No ai_rc/v9.9.9 branch created.
     kanban_root = _build_kanban_root(tmp_path, "verifytest-prefixed-err", repo, "ai_")
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-prefixed-err", "v9.9.9"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-prefixed-err", "v9.9.9")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-prefixed-err")
 
     assert result.returncode == 1, result.stdout + result.stderr
-    error_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[ERROR]") and "Active RC" in line
-    ]
+    error_lines = [line for line in result.stdout.splitlines() if line.startswith("[ERROR]") and "Active RC" in line]
     assert error_lines, result.stdout
     assert "ai_rc/v9.9.9" in error_lines[0], error_lines[0]
 
@@ -211,16 +204,11 @@ def test_check_e_prefixed_project_warn_on_stray_branch_when_active_rc_none(
     _init_local_repo(repo)
     _create_branch(repo, "ai_rc/v0.0.1")
     kanban_root = _build_kanban_root(tmp_path, "verifytest-prefixed-warn", repo, "ai_")
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-prefixed-warn", "none"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-prefixed-warn", "none")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-prefixed-warn")
 
-    warn_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[WARN]") and "ai_rc/v0.0.1" in line
-    ]
+    warn_lines = [line for line in result.stdout.splitlines() if line.startswith("[WARN]") and "ai_rc/v0.0.1" in line]
     assert warn_lines, result.stdout
 
 
@@ -235,20 +223,15 @@ def test_check_e_prefixed_project_warns_on_stray_unprefixed_branch_when_active_r
     _init_local_repo(repo)
     _create_branch(repo, "rc/v0.0.9")
     kanban_root = _build_kanban_root(tmp_path, "verifytest-stray-unprefixed", repo, "ai_")
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-stray-unprefixed", "none"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-stray-unprefixed", "none")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-stray-unprefixed")
 
-    warn_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[WARN]") and "rc/v0.0.9" in line
-    ]
+    warn_lines = [line for line in result.stdout.splitlines() if line.startswith("[WARN]") and "rc/v0.0.9" in line]
     assert warn_lines, result.stdout
-    assert "ai_rc/v0.0.9" not in warn_lines[0], (
-        f"the stray is a bare rc/v0.0.9 branch, not a prefixed one\n{warn_lines[0]}"
-    )
+    assert (
+        "ai_rc/v0.0.9" not in warn_lines[0]
+    ), f"the stray is a bare rc/v0.0.9 branch, not a prefixed one\n{warn_lines[0]}"
 
 
 def test_check_e_prefixed_project_ok_for_active_rc_and_warn_for_stray_unprefixed(
@@ -263,20 +246,12 @@ def test_check_e_prefixed_project_ok_for_active_rc_and_warn_for_stray_unprefixed
     _create_branch(repo, "ai_rc/v2.11.1")
     _create_branch(repo, "rc/v0.0.9")
     kanban_root = _build_kanban_root(tmp_path, "verifytest-stray-plus-active", repo, "ai_")
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-stray-plus-active", "v2.11.1"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-stray-plus-active", "v2.11.1")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-stray-plus-active")
 
-    assert (
-        "[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1"
-        in result.stdout
-    ), result.stdout
-    warn_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[WARN]") and "rc/v0.0.9" in line
-    ]
+    assert "[OK]    Active RC v2.11.1 has matching local branch: ai_rc/v2.11.1" in result.stdout, result.stdout
+    warn_lines = [line for line in result.stdout.splitlines() if line.startswith("[WARN]") and "rc/v0.0.9" in line]
     assert warn_lines, result.stdout
     assert "ai_rc/v0.0.9" not in warn_lines[0], warn_lines[0]
 
@@ -302,10 +277,7 @@ def test_check_e_unprefixed_project_ok_when_matching_branch_exists(
     result = _run_verify_rc_state(kanban_root, "verifytest-unprefixed")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (
-        "[OK]    Active RC v1.0.0 has matching local branch: rc/v1.0.0"
-        in result.stdout
-    ), result.stdout
+    assert "[OK]    Active RC v1.0.0 has matching local branch: rc/v1.0.0" in result.stdout, result.stdout
     assert "0 errors" in result.stdout
 
 
@@ -317,17 +289,12 @@ def test_check_e_unprefixed_project_error_when_branch_missing(
     repo = tmp_path / "repo"
     _init_local_repo(repo)
     kanban_root = _build_kanban_root(tmp_path, "verifytest-unprefixed-err", repo)
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-unprefixed-err", "v9.9.9"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-unprefixed-err", "v9.9.9")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-unprefixed-err")
 
     assert result.returncode == 1, result.stdout + result.stderr
-    error_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[ERROR]") and "Active RC" in line
-    ]
+    error_lines = [line for line in result.stdout.splitlines() if line.startswith("[ERROR]") and "Active RC" in line]
     assert error_lines, result.stdout
     assert "rc/v9.9.9" in error_lines[0], error_lines[0]
     assert "ai_rc/v9.9.9" not in error_lines[0], error_lines[0]
@@ -342,16 +309,11 @@ def test_check_e_unprefixed_project_warn_on_stray_branch_when_active_rc_none(
     _init_local_repo(repo)
     _create_branch(repo, "rc/v0.0.1")
     kanban_root = _build_kanban_root(tmp_path, "verifytest-unprefixed-warn", repo)
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-unprefixed-warn", "none"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-unprefixed-warn", "none")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-unprefixed-warn")
 
-    warn_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[WARN]") and "rc/v0.0.1" in line
-    ]
+    warn_lines = [line for line in result.stdout.splitlines() if line.startswith("[WARN]") and "rc/v0.0.1" in line]
     assert warn_lines, result.stdout
 
 
@@ -366,17 +328,11 @@ def test_check_e_unprefixed_project_reports_each_stray_branch_exactly_once(
     _init_local_repo(repo)
     _create_branch(repo, "rc/v0.0.1")
     kanban_root = _build_kanban_root(tmp_path, "verifytest-unprefixed-once", repo)
-    _write_release_state(
-        kanban_root / "projects" / "verifytest-unprefixed-once", "none"
-    )
+    _write_release_state(kanban_root / "projects" / "verifytest-unprefixed-once", "none")
 
     result = _run_verify_rc_state(kanban_root, "verifytest-unprefixed-once")
 
-    warn_lines = [
-        line for line in result.stdout.splitlines()
-        if line.startswith("[WARN]") and "rc/v0.0.1" in line
-    ]
+    warn_lines = [line for line in result.stdout.splitlines() if line.startswith("[WARN]") and "rc/v0.0.1" in line]
     assert len(warn_lines) == 1, (
-        f"expected exactly one [WARN] line naming rc/v0.0.1, found "
-        f"{len(warn_lines)}:\n{result.stdout}"
+        f"expected exactly one [WARN] line naming rc/v0.0.1, found " f"{len(warn_lines)}:\n{result.stdout}"
     )

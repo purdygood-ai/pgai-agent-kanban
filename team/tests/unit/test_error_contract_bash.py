@@ -57,10 +57,7 @@ def test_format_prints_house_shape_to_stdout(tmp_path) -> None:
     lines = result.stdout.rstrip("\n").split("\n")
     assert len(lines) == 3
     assert lines[0] == "error:   gate.rc-branch-mismatch"
-    assert (
-        lines[1]
-        == "message: the release stopped because the checkout was not on the release branch"
-    )
+    assert lines[1] == "message: the release stopped because the checkout was not on the release branch"
     assert lines[2] == "remedy:  git checkout rc/v1.2.3 && re-run the release script"
 
 
@@ -68,9 +65,7 @@ def test_format_machine_key_is_verbatim_and_greppable(tmp_path) -> None:
     """The error field carries the exact machine key string, unaltered."""
     result = run_bash(
         tmp_path,
-        _source(
-            "pgai_format_error_contract 'hook.pre-squash-nonexecutable' 'msg text' 'remedy text'"
-        ),
+        _source("pgai_format_error_contract 'hook.pre-squash-nonexecutable' 'msg text' 'remedy text'"),
     )
     assert result.returncode == 0
     error_line = result.stdout.split("\n", 1)[0]
@@ -88,10 +83,7 @@ def test_format_fields_are_colon_aligned_to_same_value_column(tmp_path) -> None:
     )
     assert result.returncode == 0
     lines = result.stdout.rstrip("\n").split("\n")
-    starts = [
-        line.index(value)
-        for line, value in zip(lines, ("AAA_ERR", "BBB_MSG", "CCC_REM"))
-    ]
+    starts = [line.index(value) for line, value in zip(lines, ("AAA_ERR", "BBB_MSG", "CCC_REM"))]
     assert starts[0] == starts[1] == starts[2]
 
 
@@ -186,9 +178,7 @@ def test_emit_with_project_records_a_refusal_ledger_entry(tmp_path) -> None:
     kanban_root.mkdir()
     result = run_bash(
         tmp_path,
-        _source_scoped(
-            "pgai_emit_error_contract gate.ledger 'ledger message' 'ledger remedy' demo-project"
-        ),
+        _source_scoped("pgai_emit_error_contract gate.ledger 'ledger message' 'ledger remedy' demo-project"),
         extra_env={"KANBAN_ROOT": str(kanban_root), "PGAI_PROJECT_NAME": ""},
     )
     assert result.returncode == 0
@@ -229,9 +219,7 @@ def test_second_emit_replaces_first_ledger_entry(tmp_path) -> None:
     )
     run_bash(
         tmp_path,
-        _source_scoped(
-            "pgai_emit_error_contract gate.second 'second message' 'second remedy' demo-project"
-        ),
+        _source_scoped("pgai_emit_error_contract gate.second 'second message' 'second remedy' demo-project"),
         extra_env=env,
     )
 
@@ -267,8 +255,7 @@ def test_emit_with_unwritable_ledger_path_preserves_exit_status_and_stderr(tmp_p
         result = run_bash(
             tmp_path,
             _source_scoped(
-                "pgai_emit_error_contract gate.unwritable 'unwritable message' "
-                "'unwritable remedy' locked-project"
+                "pgai_emit_error_contract gate.unwritable 'unwritable message' " "'unwritable remedy' locked-project"
             ),
             extra_env={"KANBAN_ROOT": str(kanban_root), "PGAI_PROJECT_NAME": ""},
         )
@@ -285,9 +272,7 @@ def test_emit_with_unwritable_ledger_path_preserves_exit_status_and_stderr(tmp_p
     ]
 
 
-def test_python_emitted_record_parses_identically_via_bash_reader(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_python_emitted_record_parses_identically_via_bash_reader(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A refusal emitted through the Python emitter produces a record the
     bash reader (refusal_ledger.sh's refusal_ledger_read_latest) parses
     identically to a bash-emitted one."""
@@ -351,9 +336,7 @@ def test_bash_emitted_refusal_records_context_test_while_pytest_current_test_is_
     kanban_root.mkdir()
     run_bash(
         tmp_path,
-        _source_scoped(
-            "pgai_emit_error_contract gate.ctx 'ctx message' 'ctx remedy' demo-project"
-        ),
+        _source_scoped("pgai_emit_error_contract gate.ctx 'ctx message' 'ctx remedy' demo-project"),
         extra_env={"KANBAN_ROOT": str(kanban_root), "PGAI_PROJECT_NAME": ""},
     )
 
@@ -378,9 +361,7 @@ def test_bash_emitted_refusal_records_context_install_when_pytest_current_test_i
     kanban_root.mkdir()
     run_bash(
         tmp_path,
-        _source_scoped(
-            "pgai_emit_error_contract gate.ctx 'ctx message' 'ctx remedy' demo-project"
-        ),
+        _source_scoped("pgai_emit_error_contract gate.ctx 'ctx message' 'ctx remedy' demo-project"),
         extra_env={"KANBAN_ROOT": str(kanban_root), "PGAI_PROJECT_NAME": ""},
     )
 

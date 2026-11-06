@@ -18,8 +18,8 @@
 #                              Print "<pane_seq> <script>" one pane per
 #                              line for the named window. <variant>
 #                              defaults to "-" (the only variant most
-#                              windows have; drill-N needs "release" or
-#                              "document").
+#                              windows have; operator needs "merged" or
+#                              "split", drill-N "release" or "document").
 #
 # Exit codes:
 #   0  success
@@ -27,14 +27,19 @@
 #   2  no window matches the requested tmux_index/variant
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/dashboard_window_census.sh
 source "${SCRIPT_DIR}/../lib/dashboard_window_census.sh"
 
 _usage() {
   # shellcheck source=../lib/header_help.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+  source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
   header_help_print "${BASH_SOURCE[0]}"
 }
 
@@ -44,10 +49,6 @@ if [[ $# -eq 0 ]]; then
 fi
 
 case "$1" in
-  -h|--help)
-    _usage
-    exit 0
-    ;;
   --list)
     kind_idx=0
     while IFS=$'\t' read -r kind idx name variant _count; do

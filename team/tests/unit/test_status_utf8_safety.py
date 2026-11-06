@@ -65,8 +65,9 @@ def _env(extra: dict[str, str]) -> dict[str, str]:
     return env
 
 
-def _pp_run_ops(module: str, *args: "str | bytes", env_extra: dict[str, str], stdin: bytes | None = None
-                ) -> subprocess.CompletedProcess:
+def _pp_run_ops(
+    module: str, *args: str | bytes, env_extra: dict[str, str], stdin: bytes | None = None
+) -> subprocess.CompletedProcess:
     """Run ``pp_run_ops MODULE ARGS...`` in bash; bytes in and out."""
     return subprocess.run(
         ["bash", "-c", f'source "{_PP_RUN_OPS}"; pp_run_ops "$@"', "pp", module, *args],
@@ -91,9 +92,7 @@ def _scan_tree(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path, path
     bad = _status(tasks, _BAD, b"# Status\n\n## State\nBACKLOG\n\n## Summary\nsplit \xe2 here\n")
     _status(tasks, _GOOD_B, b"# Status\n\n## State\nBACKLOG\n")
     queue = tmp_path / "coder_backlog.md"
-    queue.write_text(
-        f"# Coder Backlog\n\n- [ ] {_GOOD_A}\n- [ ] {_BAD}\n- [ ] {_GOOD_B}\n", encoding="utf-8"
-    )
+    queue.write_text(f"# Coder Backlog\n\n- [ ] {_GOOD_A}\n- [ ] {_BAD}\n- [ ] {_GOOD_B}\n", encoding="utf-8")
     return queue, tasks, bad
 
 
@@ -108,9 +107,7 @@ def test_scan_queue_returns_the_other_tasks_and_names_the_undecodable_one(
     queue, tasks, bad = _scan_tree(tmp_path)
     unreadable: list[pathlib.Path] = []
 
-    found = scan_queue(
-        queue, tasks, [parse_scan_rule(" B=,BACKLOG")], id_pattern=_ID_PATTERN, unreadable=unreadable
-    )
+    found = scan_queue(queue, tasks, [parse_scan_rule(" B=,BACKLOG")], id_pattern=_ID_PATTERN, unreadable=unreadable)
 
     assert found == [_GOOD_A, _GOOD_B], "the readable tasks on both sides of the bad one must be returned"
     assert unreadable == [bad], "the undecodable status.md must be reported to the caller"
@@ -141,7 +138,13 @@ def test_scan_queue_verb_exits_zero_printing_the_readable_keys(tmp_path: pathlib
     queue, tasks, bad = _scan_tree(tmp_path)
 
     result = _pp_run_ops(
-        "pgai_agent_kanban.ops", "scan_queue", str(queue), str(tasks), _ID_PATTERN, "0", " B=,BACKLOG",
+        "pgai_agent_kanban.ops",
+        "scan_queue",
+        str(queue),
+        str(tasks),
+        _ID_PATTERN,
+        "0",
+        " B=,BACKLOG",
         env_extra=_C_LOCALES["c-locale"],
     )
 
@@ -172,8 +175,12 @@ def test_valid_utf8_text_replaces_escaped_bytes_and_keeps_valid_text() -> None:
 @pytest.mark.parametrize("locale_name", sorted(_C_LOCALES))
 def test_clip_keeps_a_multibyte_80th_character_whole(locale_name: str) -> None:
     result = _pp_run_ops(
-        "pgai_agent_kanban.task_status", "clip", "--chars", "80",
-        env_extra=_C_LOCALES[locale_name], stdin=(_SIG_MULTIBYTE_80TH + "\n").encode("utf-8"),
+        "pgai_agent_kanban.task_status",
+        "clip",
+        "--chars",
+        "80",
+        env_extra=_C_LOCALES[locale_name],
+        stdin=(_SIG_MULTIBYTE_80TH + "\n").encode("utf-8"),
     )
 
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
@@ -185,7 +192,11 @@ def test_clip_keeps_a_multibyte_80th_character_whole(locale_name: str) -> None:
 def test_clip_cuts_ascii_to_exactly_80_characters(locale_name: str) -> None:
     ascii_sig = "API Error: 503 " + "y" * 120
     result = _pp_run_ops(
-        "pgai_agent_kanban.task_status", "clip", "--chars", "80", ascii_sig,
+        "pgai_agent_kanban.task_status",
+        "clip",
+        "--chars",
+        "80",
+        ascii_sig,
         env_extra=_C_LOCALES[locale_name],
     )
 
@@ -195,8 +206,12 @@ def test_clip_cuts_ascii_to_exactly_80_characters(locale_name: str) -> None:
 
 def test_clip_prints_invalid_input_bytes_as_replacement_characters() -> None:
     result = _pp_run_ops(
-        "pgai_agent_kanban.task_status", "clip", "--chars", "80",
-        env_extra=_C_LOCALES["c-locale"], stdin=b"half \xe2\x80 dash\n",
+        "pgai_agent_kanban.task_status",
+        "clip",
+        "--chars",
+        "80",
+        env_extra=_C_LOCALES["c-locale"],
+        stdin=b"half \xe2\x80 dash\n",
     )
 
     assert result.returncode == 0
@@ -219,12 +234,18 @@ def test_clip_without_a_character_count_exits_one() -> None:
 def test_render_output_is_valid_utf8_when_a_body_carries_a_split_character(
     tmp_path: pathlib.Path, locale_name: str
 ) -> None:
-    status = _status(tmp_path, "task", "# Status\n\n## State\nBLOCKED\n\n## Blocked Reason\nnone\n".encode())
+    status = _status(tmp_path, "task", b"# Status\n\n## State\nBLOCKED\n\n## Blocked Reason\nnone\n")
     # A body cut mid-character by a byte-counting tool: 0xe2 0x80 without its last byte.
-    body = b"TRANSIENT API ERROR \xe2\x80\x94 " + _SIG_MULTIBYTE_80TH.encode("utf-8")[:80] + b" \xe2\x80\x94 safe to retry"
+    body = (
+        b"TRANSIENT API ERROR \xe2\x80\x94 " + _SIG_MULTIBYTE_80TH.encode("utf-8")[:80] + b" \xe2\x80\x94 safe to retry"
+    )
 
     result = _pp_run_ops(
-        "pgai_agent_kanban.task_status", "render", str(status), "--section=Blocked Reason", b"--body=" + body,
+        "pgai_agent_kanban.task_status",
+        "render",
+        str(status),
+        "--section=Blocked Reason",
+        b"--body=" + body,
         env_extra=_C_LOCALES[locale_name],
     )
 
@@ -235,7 +256,7 @@ def test_render_output_is_valid_utf8_when_a_body_carries_a_split_character(
 
 
 def test_set_section_writes_valid_utf8_for_a_body_with_escaped_bytes(tmp_path: pathlib.Path) -> None:
-    status = _status(tmp_path, "task", "# Status\n\n## State\nBLOCKED\n\n## Blockers\nnone\n".encode())
+    status = _status(tmp_path, "task", b"# Status\n\n## State\nBLOCKED\n\n## Blockers\nnone\n")
 
     set_section(status, "Blockers", os.fsdecode(b"cut \xe2\x80 short"))
 
@@ -270,8 +291,20 @@ def test_status_writer_refuses_an_undecodable_status_file_without_a_traceback(
         PGAI_AGENT_KANBAN_TEMP_DIR=str(root / "tmp"),
     )
     result = subprocess.run(
-        ["bash", str(_TASK_STATUS_SH), "--project", "demo", "--key", key, "--state", "BLOCKED",
-         "--summary", "x", "--reason-code", "agent_unclassified"],
+        [
+            "bash",
+            str(_TASK_STATUS_SH),
+            "--project",
+            "demo",
+            "--key",
+            key,
+            "--state",
+            "BLOCKED",
+            "--summary",
+            "x",
+            "--reason-code",
+            "agent_unclassified",
+        ],
         capture_output=True,
         env=env,
         timeout=60,

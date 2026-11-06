@@ -89,7 +89,9 @@ def _write_cfg(path: pathlib.Path, text: str) -> pathlib.Path:
     return path
 
 
-def _load_config(cfg_file: pathlib.Path, *export_vars: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _load_config(
+    cfg_file: pathlib.Path, *export_vars: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     """Run load_config against cfg_file, echoing each named exported variable
     as NAME=[value] on success so a test can assert the resolved value."""
     script = f"source {str(_CONFIG_LOADER)!r} && load_config {str(cfg_file)!r}"
@@ -286,9 +288,7 @@ def test_lock_wait_keys_absent_or_empty_take_their_defaults(
 
 def test_lock_wait_keys_set_values_are_honoured(tmp_path: pathlib.Path) -> None:
     """Configured whole numbers, 0 included, are exported as given."""
-    cfg = _write_cfg(
-        tmp_path / "kanban.cfg", "[wake]\nlock_wait_seconds = 0\nlock_starvation_firings = 5\n"
-    )
+    cfg = _write_cfg(tmp_path / "kanban.cfg", "[wake]\nlock_wait_seconds = 0\nlock_starvation_firings = 5\n")
     result = _load_config(cfg, "LOCK_WAIT_SECONDS", "LOCK_STARVATION_FIRINGS")
     assert result.returncode == 0, result.stderr
     assert "LOCK_WAIT_SECONDS=[0]" in result.stdout
@@ -300,9 +300,7 @@ def test_lock_wait_keys_environment_override_wins(tmp_path: pathlib.Path) -> Non
     outranks the cfg value -- the operator override
     (`LOCK_WAIT_SECONDS=45 wake-batch.sh ...`) -- even over a cfg that pins
     lock_wait_seconds = 0."""
-    cfg = _write_cfg(
-        tmp_path / "kanban.cfg", "[wake]\nlock_wait_seconds = 0\nlock_starvation_firings = 5\n"
-    )
+    cfg = _write_cfg(tmp_path / "kanban.cfg", "[wake]\nlock_wait_seconds = 0\nlock_starvation_firings = 5\n")
     env = _base_env(LOCK_WAIT_SECONDS="45", LOCK_STARVATION_FIRINGS="7")
     result = _load_config(cfg, "LOCK_WAIT_SECONDS", "LOCK_STARVATION_FIRINGS", env=env)
     assert result.returncode == 0, result.stderr
@@ -336,9 +334,7 @@ def test_systemic_block_reasons_set_value_is_exported_as_written(tmp_path: pathl
     """A configured list, unknown members included, is exported as written
     and never refused: the reader warns about and drops what it does not
     know, so a typo cannot stop a wake."""
-    cfg = _write_cfg(
-        tmp_path / "kanban.cfg", "[wake]\nsystemic_block_reasons = plugin_load_failed, not_a_code\n"
-    )
+    cfg = _write_cfg(tmp_path / "kanban.cfg", "[wake]\nsystemic_block_reasons = plugin_load_failed, not_a_code\n")
     result = _load_config(cfg, "SYSTEMIC_BLOCK_REASONS")
     assert result.returncode == 0, result.stderr
     assert "SYSTEMIC_BLOCK_REASONS=[plugin_load_failed, not_a_code]" in result.stdout
@@ -347,9 +343,7 @@ def test_systemic_block_reasons_set_value_is_exported_as_written(tmp_path: pathl
 def test_systemic_block_reasons_environment_override_wins(tmp_path: pathlib.Path) -> None:
     """An already-exported SYSTEMIC_BLOCK_REASONS outranks the cfg value."""
     cfg = _write_cfg(tmp_path / "kanban.cfg", "[wake]\nsystemic_block_reasons = plugin_load_failed\n")
-    result = _load_config(
-        cfg, "SYSTEMIC_BLOCK_REASONS", env=_base_env(SYSTEMIC_BLOCK_REASONS="none")
-    )
+    result = _load_config(cfg, "SYSTEMIC_BLOCK_REASONS", env=_base_env(SYSTEMIC_BLOCK_REASONS="none"))
     assert result.returncode == 0, result.stderr
     assert "SYSTEMIC_BLOCK_REASONS=[none]" in result.stdout
 
@@ -599,7 +593,9 @@ def test_registry_comment_and_known_keys_array_agree() -> None:
     comment_keys = _known_keys_from_registry_comment(source)
     assert comment_keys, "registry comment parsed to nothing; its format changed"
     missing_from_array = sorted(comment_keys - array_keys)
-    assert not missing_from_array, f"in the Key Registry comment but not _CONFIG_LOADER_KNOWN_KEYS: {missing_from_array}"
+    assert (
+        not missing_from_array
+    ), f"in the Key Registry comment but not _CONFIG_LOADER_KNOWN_KEYS: {missing_from_array}"
     # The models.* sections list their roles in prose, not one per line, so
     # only keys the comment states one-per-line are checked in this direction.
     unexplained = sorted(k for k in array_keys - comment_keys if not k.startswith("models."))

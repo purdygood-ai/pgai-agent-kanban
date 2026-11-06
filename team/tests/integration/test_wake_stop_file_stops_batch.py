@@ -157,8 +157,7 @@ def _build_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
     )
     (root / "projects.cfg").write_text(
         "".join(
-            f"[project:{name}]\npriority={i}\nenabled=true\n\n"
-            for i, (name, _agent) in enumerate(_PROJECTS, start=1)
+            f"[project:{name}]\npriority={i}\nenabled=true\n\n" for i, (name, _agent) in enumerate(_PROJECTS, start=1)
         ),
         encoding="utf-8",
     )
@@ -167,9 +166,7 @@ def _build_kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
         proj = root / "projects" / name
         proj.mkdir(parents=True, exist_ok=True)
         (proj / "project.cfg").write_text(
-            "[project]\n"
-            f"project_name = {name}\n"
-            "workflow_type = document\n",
+            "[project]\n" f"project_name = {name}\n" "workflow_type = document\n",
             encoding="utf-8",
         )
         queues_dir = proj / "tasks" / "queues"
@@ -212,8 +209,7 @@ def _install_stub_provider(
         d.mkdir(parents=True, exist_ok=True)
     (control_dir / "mode").write_text(mode + "\n", encoding="utf-8")
 
-    script = textwrap.dedent(
-        f"""\
+    script = textwrap.dedent(f"""\
         #!/usr/bin/env bash
         # Test-only stand-in for the provider CLI: completes the dispatched
         # task and, in choreograph mode, drives the stop-file handshake the
@@ -303,8 +299,7 @@ def _install_stub_provider(
 
         echo '{{"type":"result","result":"stub agent completed the task","usage":{{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}'
         exit 0
-        """
-    )
+        """)
     stub_path = bin_dir / "claude"
     stub_path.write_text(script, encoding="utf-8")
     stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -480,9 +475,9 @@ def test_stop_file_touched_mid_task_stops_both_agents_batches_and_persists(tmp_p
         f"(tester-first); dispatch ledger: {_dispatched_projects(control_dir)}.{context}"
     )
     assert _task_state(root, "writer-first", "writer") == "DONE", context
-    assert _task_state(root, "tester-first", "tester") == "DONE", (
-        f"the tester's in-flight task must run to completion, never be interrupted.{context}"
-    )
+    assert (
+        _task_state(root, "tester-first", "tester") == "DONE"
+    ), f"the tester's in-flight task must run to completion, never be interrupted.{context}"
     assert _task_state(root, "writer-second", "writer") == "BACKLOG", context
     assert _task_state(root, "tester-second", "tester") == "BACKLOG", context
 
@@ -490,40 +485,40 @@ def test_stop_file_touched_mid_task_stops_both_agents_batches_and_persists(tmp_p
     # then the between-projects boundary stopped the batch before the next
     # project was even entered.
     stop_reason = f'reason="stop file present at {stop_file}'
-    assert f"project writer-first: done:" in writer_log and stop_reason in writer_log, (
-        f"expected writer-first's chain to end with a stop reason naming {stop_file}.{context}"
-    )
-    assert f"stop file present at {stop_file} -- stopping the batch before project tester-first" in writer_log, (
-        f"expected the writer batch to stop at the between-projects boundary.{context}"
-    )
+    assert (
+        f"project writer-first: done:" in writer_log and stop_reason in writer_log
+    ), f"expected writer-first's chain to end with a stop reason naming {stop_file}.{context}"
+    assert (
+        f"stop file present at {stop_file} -- stopping the batch before project tester-first" in writer_log
+    ), f"expected the writer batch to stop at the between-projects boundary.{context}"
     for later in ("tester-first", "writer-second", "tester-second"):
-        assert f"project {later}: beginning chain" not in writer_log, (
-            f"writer batch entered project {later} after the stop file appeared.{context}"
-        )
+        assert (
+            f"project {later}: beginning chain" not in writer_log
+        ), f"writer batch entered project {later} after the stop file appeared.{context}"
 
     # Tester batch: contended on writer-first (the writer held it), worked
     # tester-first to completion, then stopped at every later boundary --
     # including the retry pass it would otherwise have run for writer-first.
-    assert "project writer-first: repo lock held by holder=writer" in tester_log, (
-        f"expected the tester batch to be lock-contended on writer-first by the writer.{context}"
-    )
-    assert "project tester-first: done:" in tester_log and stop_reason in tester_log, (
-        f"expected tester-first's chain to end with a stop reason naming {stop_file}.{context}"
-    )
-    assert f"stop file present at {stop_file} -- stopping the batch before project writer-second" in tester_log, (
-        f"expected the tester batch to stop at the between-projects boundary.{context}"
-    )
+    assert (
+        "project writer-first: repo lock held by holder=writer" in tester_log
+    ), f"expected the tester batch to be lock-contended on writer-first by the writer.{context}"
+    assert (
+        "project tester-first: done:" in tester_log and stop_reason in tester_log
+    ), f"expected tester-first's chain to end with a stop reason naming {stop_file}.{context}"
+    assert (
+        f"stop file present at {stop_file} -- stopping the batch before project writer-second" in tester_log
+    ), f"expected the tester batch to stop at the between-projects boundary.{context}"
     assert (
         f"retry pass: stop file present at {stop_file} -- performing no retry for 1 contended project(s): writer-first"
         in tester_log
     ), f"expected the contention retry pass to be skipped because of the stop file.{context}"
-    assert "retry pass: retrying after end-of-iteration deferral" not in tester_log, (
-        f"the retry pass must not run once the stop file exists.{context}"
-    )
+    assert (
+        "retry pass: retrying after end-of-iteration deferral" not in tester_log
+    ), f"the retry pass must not run once the stop file exists.{context}"
     for later in ("writer-second", "tester-second"):
-        assert f"project {later}: beginning chain" not in tester_log, (
-            f"tester batch entered project {later} after the stop file appeared.{context}"
-        )
+        assert (
+            f"project {later}: beginning chain" not in tester_log
+        ), f"tester batch entered project {later} after the stop file appeared.{context}"
 
 
 # ---------------------------------------------------------------------------
@@ -544,13 +539,13 @@ def test_batch_started_while_stop_file_exists_dispatches_nothing_until_operator_
 
     rc, log = _run_wake(root, "writer", env)
     assert rc == 0, f"writer batch exited {rc}, expected 0.\n{log}"
-    assert f"stop file present at {stop_file} -- stopping the batch before project writer-first" in log, (
-        f"expected the batch to stop before its first project.\n{log}"
-    )
+    assert (
+        f"stop file present at {stop_file} -- stopping the batch before project writer-first" in log
+    ), f"expected the batch to stop before its first project.\n{log}"
     assert "beginning chain" not in log, f"no project chain may start while the stop file exists.\n{log}"
-    assert _dispatched_projects(control_dir) == [], (
-        f"nothing may dispatch while the stop file exists; ledger: {_dispatched_projects(control_dir)}\n{log}"
-    )
+    assert (
+        _dispatched_projects(control_dir) == []
+    ), f"nothing may dispatch while the stop file exists; ledger: {_dispatched_projects(control_dir)}\n{log}"
     assert _task_state(root, "writer-first", "writer") == "BACKLOG", log
     assert stop_file.exists(), f"the wake batch removed the operator's stop file at {stop_file}.\n{log}"
 

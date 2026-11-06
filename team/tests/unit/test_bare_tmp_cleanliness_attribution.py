@@ -76,7 +76,7 @@ def _run_check(
             f"pgai_tmp_snapshot() {{ printf '%s\\n' {current} | sort; }}",
             f"pgai_tmp_cleanliness_check {shlex.quote(str(snapshot))}",
             "_rc=$?",
-            "for _e in \"${PGAI_TMP_RESIDUE_FOUND[@]}\"; do printf 'FOUND=%s\\n' \"$_e\"; done",
+            'for _e in "${PGAI_TMP_RESIDUE_FOUND[@]}"; do printf \'FOUND=%s\\n\' "$_e"; done',
             "exit $_rc",
         ]
     )
@@ -90,11 +90,7 @@ def _run_check(
 def _found(stdout: str) -> list[str]:
     """The basenames PGAI_TMP_RESIDUE_FOUND held after the check (the
     per-instance list the runners record one finding each for)."""
-    return [
-        os.path.basename(line.removeprefix("FOUND="))
-        for line in stdout.splitlines()
-        if line.startswith("FOUND=")
-    ]
+    return [os.path.basename(line.removeprefix("FOUND=")) for line in stdout.splitlines() if line.startswith("FOUND=")]
 
 
 def _sections(stderr: str) -> dict[str, list[tuple[str, str]]]:
@@ -128,33 +124,28 @@ def test_sibling_project_temp_root_is_reported_as_unproven_not_as_kanban_residue
         f"an entry shaped like a sibling project's temp root ({_SIBLING_ROOT}) must not by "
         f"itself fail the check; exit {result.returncode}\nstderr:\n{result.stderr}"
     )
-    assert _FAIL_HEADER not in result.stderr, (
-        f"{_SIBLING_ROOT} was attributed to the kanban suite:\n{result.stderr}"
-    )
-    assert [name for name, _ in blocks["note"]] == [_SIBLING_ROOT], (
-        f"{_SIBLING_ROOT} should be listed once under the NOTE block; got {blocks}"
-    )
-    assert _UNPROVEN_MARK in blocks["note"][0][1], (
-        f"the NOTE entry line must say its origin is unproven; got {blocks['note'][0][1]!r}"
-    )
+    assert _FAIL_HEADER not in result.stderr, f"{_SIBLING_ROOT} was attributed to the kanban suite:\n{result.stderr}"
+    assert [name for name, _ in blocks["note"]] == [
+        _SIBLING_ROOT
+    ], f"{_SIBLING_ROOT} should be listed once under the NOTE block; got {blocks}"
+    assert (
+        _UNPROVEN_MARK in blocks["note"][0][1]
+    ), f"the NOTE entry line must say its origin is unproven; got {blocks['note'][0][1]!r}"
     assert _found(result.stdout) == [], result.stdout
 
 
 @pytest.mark.parametrize("kanban_entry", ["pgai_tmp.ABC123", "tmp.ABC123"])
-def test_kanban_shaped_entry_is_still_reported_as_kanban_residue(
-    tmp_path: pathlib.Path, kanban_entry: str
-) -> None:
+def test_kanban_shaped_entry_is_still_reported_as_kanban_residue(tmp_path: pathlib.Path, kanban_entry: str) -> None:
     result = _run_check(tmp_path, (kanban_entry,))
     blocks = _sections(result.stderr)
 
     assert result.returncode != 0, (
-        f"kanban-shaped residue {kanban_entry} must still fail the check\n"
-        f"stderr:\n{result.stderr}"
+        f"kanban-shaped residue {kanban_entry} must still fail the check\n" f"stderr:\n{result.stderr}"
     )
     assert _FAIL_HEADER in result.stderr
-    assert [name for name, _ in blocks["fail"]] == [kanban_entry], (
-        f"{kanban_entry} should be listed as kanban residue; got {blocks}"
-    )
+    assert [name for name, _ in blocks["fail"]] == [
+        kanban_entry
+    ], f"{kanban_entry} should be listed as kanban residue; got {blocks}"
     assert blocks["note"] == [], f"no NOTE block expected; got {blocks['note']}"
     assert _found(result.stdout) == [kanban_entry], result.stdout
 
@@ -166,12 +157,12 @@ def test_sibling_and_kanban_entries_together_are_each_attributed_correctly(
     blocks = _sections(result.stderr)
 
     assert result.returncode != 0, f"the kanban entry must still fail the check:\n{result.stderr}"
-    assert [name for name, _ in blocks["fail"]] == ["pgai_tmp.ABC123"], (
-        f"only the kanban-shaped entry belongs under the FAIL block; got {blocks}"
-    )
-    assert [name for name, _ in blocks["note"]] == [_SIBLING_ROOT], (
-        f"the sibling-shaped entry belongs under the NOTE block; got {blocks}"
-    )
+    assert [name for name, _ in blocks["fail"]] == [
+        "pgai_tmp.ABC123"
+    ], f"only the kanban-shaped entry belongs under the FAIL block; got {blocks}"
+    assert [name for name, _ in blocks["note"]] == [
+        _SIBLING_ROOT
+    ], f"the sibling-shaped entry belongs under the NOTE block; got {blocks}"
     assert _found(result.stdout) == ["pgai_tmp.ABC123"], (
         "only kanban residue is a per-instance finding; an entry of unproven "
         f"origin is a NOTE, never a finding: {result.stdout!r}"
@@ -179,20 +170,16 @@ def test_sibling_and_kanban_entries_together_are_each_attributed_correctly(
 
 
 @pytest.mark.parametrize("root_name", [_KANBAN_DEFAULT_ROOT_NAME, "pgai_custom_tmp"])
-def test_configured_kanban_temp_root_basename_is_never_reported(
-    tmp_path: pathlib.Path, root_name: str
-) -> None:
+def test_configured_kanban_temp_root_basename_is_never_reported(tmp_path: pathlib.Path, root_name: str) -> None:
     # pgai_custom_tmp has the sibling temp-root shape, but as the configured
     # root it is the kanban's own home and must not appear even as a NOTE.
     result = _run_check(tmp_path, (root_name,), root_name=root_name)
 
     assert result.returncode == 0, (
-        f"the configured temp-root basename {root_name} must not fail the check\n"
-        f"stderr:\n{result.stderr}"
+        f"the configured temp-root basename {root_name} must not fail the check\n" f"stderr:\n{result.stderr}"
     )
     assert result.stderr == "", (
-        f"the configured temp-root basename {root_name} must not be listed at all; "
-        f"got:\n{result.stderr}"
+        f"the configured temp-root basename {root_name} must not be listed at all; " f"got:\n{result.stderr}"
     )
 
 

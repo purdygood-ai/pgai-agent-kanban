@@ -146,13 +146,22 @@ def test_verdict_report_reaches_resolve_verdicts(tmp_path):
     cli_board = _board(tmp_path, "cli-board")
     (tmp_path / "scratch").mkdir()
     row = ovm.get_verb("why")
-    report_row = type("Row", (), {
-        "name": "why", "impl": row.impl, "rest_method": row.rest_method,
-        "rest_route": row.rest_route, "script": "scripts/verdict-report.sh",
-    })()
+    report_row = type(
+        "Row",
+        (),
+        {
+            "name": "why",
+            "impl": row.impl,
+            "rest_method": row.rest_method,
+            "rest_route": row.rest_route,
+            "script": "scripts/verdict-report.sh",
+        },
+    )()
     run = assert_cli_reaches_function(
-        report_row, cli_args=["--project", PROJECT_NAME, "--details"],
-        env=_env(tmp_path, cli_board), scratch_dir=tmp_path / "scratch",
+        report_row,
+        cli_args=["--project", PROJECT_NAME, "--details"],
+        env=_env(tmp_path, cli_board),
+        scratch_dir=tmp_path / "scratch",
     )
     assert run.completed.returncode == 0, run.completed.stderr
     assert run.completed.stdout.startswith(f"project={PROJECT_NAME}\nverdict=")
@@ -165,7 +174,7 @@ def test_no_shell_copy_of_the_verdict_remains():
         assert "verdict_resolve_project" not in text and "lib/verdict.sh" not in text, script
     reads = (_TEAM_DIR / "pgai_agent_kanban" / "api" / "reads.py").read_text(encoding="utf-8")
     assert "_parse_verdict_report_blocks" not in reads
-    assert "verdict-report.sh\"" not in reads
+    assert 'verdict-report.sh"' not in reads
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +408,8 @@ def test_resolving_reads_without_writing(tmp_path):
     def tree() -> dict:
         return {
             str(p): (hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_mtime_ns)
-            for p in sorted(root.rglob("*")) if p.is_file()
+            for p in sorted(root.rglob("*"))
+            if p.is_file()
         }
 
     before = tree()
@@ -417,9 +427,10 @@ def test_cli_refusals_exit_one_never_a_verdict_code(tmp_path, capsys):
     assert verdict._cli_main(["resolve_verdicts", "--render", "why", "alpha"]) == 1
     assert verdict._cli_main(["other"]) == 1
     capsys.readouterr()
-    assert verdict._cli_main(
-        ["resolve_verdicts", "--kanban-root", str(root), "--render", "why", "--", "alpha", "beta"]
-    ) == verdict.EXIT_IDLE
+    assert (
+        verdict._cli_main(["resolve_verdicts", "--kanban-root", str(root), "--render", "why", "--", "alpha", "beta"])
+        == verdict.EXIT_IDLE
+    )
     assert capsys.readouterr().out.count("\n") == 2
 
 
@@ -430,14 +441,32 @@ def test_cli_refusals_exit_one_never_a_verdict_code(tmp_path, capsys):
 
 def _bash(script: str, *args: str, env: dict | None = None) -> str:
     run = subprocess.run(
-        ["bash", "-c", script, "bash", *args], capture_output=True, env=env, timeout=60, check=False,
+        ["bash", "-c", script, "bash", *args],
+        capture_output=True,
+        env=env,
+        timeout=60,
+        check=False,
     )
     return run.stdout.decode("utf-8", "surrogateescape")
 
 
 _STATE_LINES = [
-    "WORKING", "  WORKING  ", "WORK\tING", "DONE's", 'a "b c" d', "a\\ b", "x\\", "it's \"q\"",
-    "-n", "-n x", "-nE x", "-x x", "-e a\\\\tb", "WORKING\r", "a\vb\fc", "",
+    "WORKING",
+    "  WORKING  ",
+    "WORK\tING",
+    "DONE's",
+    'a "b c" d',
+    "a\\ b",
+    "x\\",
+    'it\'s "q"',
+    "-n",
+    "-n x",
+    "-nE x",
+    "-x x",
+    "-e a\\\\tb",
+    "WORKING\r",
+    "a\vb\fc",
+    "",
 ]
 
 
@@ -447,9 +476,7 @@ def test_state_normaliser_matches_xargs(line):
     assert verdict._xargs_echo(line) == expected
 
 
-@pytest.mark.parametrize(
-    "line", ["a\tb\tc", "\ta\t\tb\tc\td\t", "a\t\tb", "a", "", "a b\tc d\te\tf g"]
-)
+@pytest.mark.parametrize("line", ["a\tb\tc", "\ta\t\tb\tc\td\t", "a\t\tb", "a", "", "a b\tc d\te\tf g"])
 def test_tab_fields_match_bash_read(line):
     expected = _bash('IFS=$\'\\t\' read -r a b c <<< "$1"; printf "%s|%s|%s" "$a" "$b" "$c"', line)
     assert "|".join(verdict._read_tab_fields(line, 3)) == expected
@@ -468,9 +495,7 @@ def test_task_state_reads_the_first_value_under_the_heading(tmp_path):
 
 
 def _lock_bash(root: pathlib.Path, body: str, *args: str) -> str:
-    script = (
-        f'source "{_LIB_DIR}/project_paths.sh"; source "{_LIB_DIR}/lock_provenance.sh"; ' + body
-    )
+    script = f'source "{_LIB_DIR}/project_paths.sh"; source "{_LIB_DIR}/lock_provenance.sh"; ' + body
     env = build_scrubbed_env(home_dir=root, extra_env={"KANBAN_ROOT": str(root)})
     return _bash(script, *args, env=env)
 
@@ -478,8 +503,16 @@ def _lock_bash(root: pathlib.Path, body: str, *args: str) -> str:
 def test_project_lock_files_match_the_shell_matcher(tmp_path):
     root = tmp_path / "root"
     locks = root / "locks"
-    for name in ("repo-wake-alpha.lock", "overwatch-alpha.lock", "x-alpha.lock", "repo-wake-alphabet.lock",
-                 ".hidden-alpha.lock", "alpha.lock", "repo-wake-beta.lock", "notes-alpha.txt"):
+    for name in (
+        "repo-wake-alpha.lock",
+        "overwatch-alpha.lock",
+        "x-alpha.lock",
+        "repo-wake-alphabet.lock",
+        ".hidden-alpha.lock",
+        "alpha.lock",
+        "repo-wake-beta.lock",
+        "notes-alpha.txt",
+    ):
         cases.write(locks / name, "")
     (locks / "dir-alpha.lock").mkdir()
     (locks / "dangling-alpha.lock").symlink_to(locks / "nowhere")
@@ -493,16 +526,26 @@ def test_project_lock_files_match_the_shell_matcher_for_hyphenated_projects(tmp_
     locks = root / "locks"
     for name in ("beta", "alpha-beta", "x", "coder-x"):
         (root / "projects" / name).mkdir(parents=True)
-    for name in ("repo-wake-beta.lock", "repo-wake-alpha-beta.lock", "overwatch-alpha-beta.lock",
-                 "overwatch-runaway-beta.lock", "wake-batch-coder-alpha-beta.lock", "wake-batch-coder-beta.lock",
-                 "wake-batch-coder-x.lock", "x-beta.lock"):
+    for name in (
+        "repo-wake-beta.lock",
+        "repo-wake-alpha-beta.lock",
+        "overwatch-alpha-beta.lock",
+        "overwatch-runaway-beta.lock",
+        "wake-batch-coder-alpha-beta.lock",
+        "wake-batch-coder-beta.lock",
+        "wake-batch-coder-x.lock",
+        "x-beta.lock",
+    ):
         cases.write(locks / name, "")
     cases.write(locks / "wake-batch-coder-x.record", "holder=wake-batch\npid=1\nop=wake-batch:coder:x\ntask=none\n")
     for project in ("beta", "alpha-beta", "x", "coder-x"):
         expected = _lock_bash(root, 'pgai_lock_files_for_project "$1"', project).splitlines()
         assert ops_locks.project_lock_files(str(locks), project) == expected, project
     assert [pathlib.Path(p).name for p in ops_locks.project_lock_files(str(locks), "beta")] == [
-        "overwatch-runaway-beta.lock", "repo-wake-beta.lock", "wake-batch-coder-beta.lock", "x-beta.lock",
+        "overwatch-runaway-beta.lock",
+        "repo-wake-beta.lock",
+        "wake-batch-coder-beta.lock",
+        "x-beta.lock",
     ]
 
 
@@ -512,8 +555,13 @@ def test_project_lock_files_match_the_shell_matcher_for_hyphenated_projects(tmp_
         ({}, {}),
         ({"projects/alpha/project.cfg": "[locks]\nstale_lock_reap_after_wake_periods = 400  # long\n"}, {}),
         ({"projects/alpha/PROJECT.cfg": "stale_lock_reap_after_wake_periods='300'\n"}, {}),
-        ({"projects/alpha/project.cfg": "[locks]\nstale_lock_reap_after_wake_periods = 0\n",
-          "kanban.cfg": "[locks]\nstale_lock_reap_after_wake_periods = 500\n"}, {}),
+        (
+            {
+                "projects/alpha/project.cfg": "[locks]\nstale_lock_reap_after_wake_periods = 0\n",
+                "kanban.cfg": "[locks]\nstale_lock_reap_after_wake_periods = 500\n",
+            },
+            {},
+        ),
         ({"kanban.cfg": "[locks]\nstale_lock_reap_after_wake_periods = 500\n[wake]\nmax_task_seconds = 60\n"}, {}),
         ({}, {"MAX_RUNTIME_SECONDS": "10", "MAX_TASK_SECONDS": "20", "KILL_GRACE_SECONDS": "5"}),
     ],
@@ -538,6 +586,8 @@ def test_stale_threshold_and_derivation_match_the_shell(tmp_path, monkeypatch, f
     assert (str(threshold.seconds), threshold.derivation) == (seconds, derivation)
 
 
-@pytest.mark.parametrize("seconds, text", [(-5, "0s"), (59, "59s"), (60, "1m 0s"), (3599, "59m 59s"), (3600, "1h 0m"), (90061, "25h 1m")])
+@pytest.mark.parametrize(
+    "seconds, text", [(-5, "0s"), (59, "59s"), (60, "1m 0s"), (3599, "59m 59s"), (3600, "1h 0m"), (90061, "25h 1m")]
+)
 def test_age_format(seconds, text):
     assert ops_locks.format_age_seconds(seconds) == text

@@ -312,19 +312,22 @@ class WholeTreeGuard:
 #: candidate left out and why.
 WHOLE_TREE_GUARDS: tuple[WholeTreeGuard, ...] = (
     WholeTreeGuard(
-        "env-bootstrap", ("scripts/lint_env_bootstrap.py",),
+        "env-bootstrap",
+        ("scripts/lint_env_bootstrap.py",),
         "read the kanban root through resolve_kanban_root() from pgai_agent_kanban.env "
         "(Python) or source scripts/lib/env_bootstrap.sh (bash) at each site named above, "
         "then re-check: python3 team/scripts/lint_env_bootstrap.py",
         findings_file=True,
     ),
     WholeTreeGuard(
-        "operator-verb-docs", ("scripts/generate_operator_verb_docs.py", "--check"),
+        "operator-verb-docs",
+        ("scripts/generate_operator_verb_docs.py", "--check"),
         "regenerate, then commit docs/operator-commands.md and docs/operator-api.md: "
         "python3 team/scripts/generate_operator_verb_docs.py",
     ),
     WholeTreeGuard(
-        "dashboard-window-docs", ("scripts/dashboard/generate_window_docs.py", "--check"),
+        "dashboard-window-docs",
+        ("scripts/dashboard/generate_window_docs.py", "--check"),
         "regenerate, then commit team/scripts/dashboard/create.sh, docs/DASHBOARD-PANES.md "
         "and docs/dashboard.md: python3 team/scripts/dashboard/generate_window_docs.py",
     ),
@@ -332,7 +335,8 @@ WHOLE_TREE_GUARDS: tuple[WholeTreeGuard, ...] = (
     # to the checker's To-fix block: the guard's output above it is cut at
     # _GUARD_OUTPUT_LINES, which can hide that block when findings are many.
     WholeTreeGuard(
-        "docs-citations", ("scripts/check_docs_citations.py",),
+        "docs-citations",
+        ("scripts/check_docs_citations.py",),
         "follow the checker's To fix steps: for a page not yet delivered, add the manifest "
         "line it names to team/config/docs-manifest.txt; for a recorded exclusion "
         "(EXCLUDED-CITATION-TARGETS), never add a manifest line -- drop the docs/ prefix "
@@ -451,10 +455,10 @@ def default_base(repo: str | pathlib.Path) -> tuple[str, str]:
     prefix = feature.group("prefix") if feature else None
 
     rc_branches = [
-        b for b in branches
-        if (m := _RC_BRANCH_RE.match(b)) and (prefix is None or m.group("prefix") == prefix)
+        b for b in branches if (m := _RC_BRANCH_RE.match(b)) and (prefix is None or m.group("prefix") == prefix)
     ]
     if rc_branches:
+
         def rank(branch: str) -> tuple[int, tuple[int, int, int]]:
             version = _RC_BRANCH_RE.match(branch).group("version")
             major, minor, patch = semver.version_sort_key(version)
@@ -486,8 +490,13 @@ def default_base(repo: str | pathlib.Path) -> tuple[str, str]:
 def _run(argv: Sequence[str], cwd: pathlib.Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run *argv* in *cwd*, capturing combined output as text."""
     return subprocess.run(
-        list(argv), cwd=str(cwd), env=env, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, check=False,
+        list(argv),
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
     )
 
 
@@ -529,8 +538,7 @@ def _load_lane_planner():
     if spec is None or spec.loader is None or not path.is_file():
         raise InvocationError(
             "pre_merge.lane_planner_missing",
-            f"the gated runners' lane planner is missing at {path}; this run plans its "
-            f"pytest lanes with it",
+            f"the gated runners' lane planner is missing at {path}; this run plans its " f"pytest lanes with it",
             f"ls -l {path.parent}",
         )
     module = importlib.util.module_from_spec(spec)
@@ -577,15 +585,24 @@ class _PytestOutcome:
 
 
 def _run_pytest(
-    team_dir: pathlib.Path, files: Sequence[str], *, suite: str, workers: int,
-    scratch: pathlib.Path, label: str, single_lane: bool,
+    team_dir: pathlib.Path,
+    files: Sequence[str],
+    *,
+    suite: str,
+    workers: int,
+    scratch: pathlib.Path,
+    label: str,
+    single_lane: bool,
 ) -> _PytestOutcome:
     """Run pytest on *files* from *team_dir* through the lane planner."""
     planner = _load_lane_planner()
     argv = [
-        "-p", "no:randomly", *files,
+        "-p",
+        "no:randomly",
+        *files,
         *(f"--ignore={ignored}" for ignored in IGNORED_TEST_FILES.get(suite, ())),
-        "-m", MARKER_SELECTION,
+        "-m",
+        MARKER_SELECTION,
     ]
     plan = planner.plan_lanes(argv, suite=suite, workers=workers, targeted=single_lane)
     if single_lane:
@@ -598,7 +615,8 @@ def _run_pytest(
     for lane in plan.lanes:
         basetemp = scratch / f"pytest-{label}-{lane.name}"
         done = _run(
-            [sys.executable, "-m", "pytest", *lane.argv, f"--basetemp={basetemp}"], team_dir,
+            [sys.executable, "-m", "pytest", *lane.argv, f"--basetemp={basetemp}"],
+            team_dir,
         )
         codes.append(done.returncode)
         output.append(done.stdout)
@@ -624,18 +642,20 @@ def check_by_path(team_dir: pathlib.Path, *, scratch: pathlib.Path) -> CheckResu
         result.detail = [f"{BY_PATH_TEST} is missing under {team_dir}; the by-path check cannot run"]
         return result
     outcome = _run_pytest(
-        team_dir, [BY_PATH_TEST], suite="unit", workers=1, scratch=scratch,
-        label="by-path", single_lane=True,
+        team_dir,
+        [BY_PATH_TEST],
+        suite="unit",
+        workers=1,
+        scratch=scratch,
+        label="by-path",
+        single_lane=True,
     )
     result.passed = outcome.exit_code == 0
     if result.passed:
         result.note = BY_PATH_TEST
         return result
     failing = failed_test_files(outcome.output)
-    nodes = [
-        line.strip() for line in outcome.output.splitlines()
-        if _FAILED_NODE_RE.match(line.strip())
-    ]
+    nodes = [line.strip() for line in outcome.output.splitlines() if _FAILED_NODE_RE.match(line.strip())]
     result.note = f"pytest exited {outcome.exit_code}"
     result.detail = nodes or _tail(outcome.output)
     if not failing and outcome.exit_code == _PYTEST_NO_TESTS:
@@ -648,7 +668,10 @@ def check_by_path(team_dir: pathlib.Path, *, scratch: pathlib.Path) -> CheckResu
 
 
 def check_ratchet_lint(
-    team_dir: pathlib.Path, lint: RatchetLint, *, scratch: pathlib.Path,
+    team_dir: pathlib.Path,
+    lint: RatchetLint,
+    *,
+    scratch: pathlib.Path,
 ) -> CheckResult:
     """Run one ratchet lint as the gated runners do and judge its findings."""
     result = CheckResult(f"lint: {lint.name}", passed=False)
@@ -670,6 +693,7 @@ def check_ratchet_lint(
         result.note = "the lint could not run"
         result.detail = [f"lint exited {done.returncode}", *_tail(done.stdout, 10)]
         return result
+
     # A narrated kind is a quality finding no requirement authorised to fail
     # this check; it is counted, not judged.
     def _narrated(finding) -> bool:
@@ -709,7 +733,10 @@ def _guard_findings(findings_file: pathlib.Path) -> list | None:
 
 
 def check_whole_tree_guard(
-    team_dir: pathlib.Path, guard: WholeTreeGuard, *, scratch: pathlib.Path | None = None,
+    team_dir: pathlib.Path,
+    guard: WholeTreeGuard,
+    *,
+    scratch: pathlib.Path | None = None,
 ) -> CheckResult:
     """Run one always-run whole-tree guard over the tree and judge it: exit
     0 passes, anything else fails, and for a guard that writes a findings
@@ -752,8 +779,13 @@ def check_whole_tree_guard(
 
 
 def check_affected_tests(
-    team_dir: pathlib.Path, names: Sequence[str], *, suite: str,
-    cap: int | None, workers: int, scratch: pathlib.Path,
+    team_dir: pathlib.Path,
+    names: Sequence[str],
+    *,
+    suite: str,
+    cap: int | None,
+    workers: int,
+    scratch: pathlib.Path,
     narrate: Callable[[str], None],
 ) -> CheckResult:
     """Select the test files citing *names* (the names changed in
@@ -792,8 +824,13 @@ def check_affected_tests(
         return result
 
     outcome = _run_pytest(
-        team_dir, selected, suite=suite, workers=workers, scratch=scratch,
-        label=suite, single_lane=len(selected) < 2,
+        team_dir,
+        selected,
+        suite=suite,
+        workers=workers,
+        scratch=scratch,
+        label=suite,
+        single_lane=len(selected) < 2,
     )
     for line in outcome.narration:
         narrate(f"affected tests: {line}")
@@ -804,13 +841,9 @@ def check_affected_tests(
         return result
     failing = failed_test_files(outcome.output)
     result.note = f"{count}; pytest exited {outcome.exit_code}"
-    result.detail = (
-        [f"failing test file: {path}" for path in failing] if failing else _tail(outcome.output)
-    )
+    result.detail = [f"failing test file: {path}" for path in failing] if failing else _tail(outcome.output)
     if failing:
-        result.detail.append(
-            "a failing test asserting behaviour this change altered is updated in the same change"
-        )
+        result.detail.append("a failing test asserting behaviour this change altered is updated in the same change")
     return result
 
 
@@ -831,8 +864,12 @@ def _scratch_root() -> str:
 
 
 def run_pre_merge(
-    repo: str | pathlib.Path, *, suite: str = "unit", base: str | None = None,
-    cap: int | None = DEFAULT_CAP, workers: int = 1,
+    repo: str | pathlib.Path,
+    *,
+    suite: str = "unit",
+    base: str | None = None,
+    cap: int | None = DEFAULT_CAP,
+    workers: int = 1,
     narrate: Callable[[str], None] = print,
 ) -> PreMergeRun:
     """Run the pre-merge checks for *repo* and return what they found.
@@ -872,18 +909,27 @@ def run_pre_merge(
     names = names_from_diff(toplevel, base)
 
     run = PreMergeRun(
-        repo=toplevel, suite=suite, base=base, base_reason=base_reason, cap=cap, workers=workers,
+        repo=toplevel,
+        suite=suite,
+        base=base,
+        base_reason=base_reason,
+        cap=cap,
+        workers=workers,
     )
 
     def say(line: str) -> None:
         run.narration.append(line)
         narrate(f"pre-merge: {line}")
 
-    say(f"repo {toplevel}; suite {suite}; base {base} ({base_reason}); "
-        f"cap {cap if cap is not None else 'none'}; workers {workers}")
+    say(
+        f"repo {toplevel}; suite {suite}; base {base} ({base_reason}); "
+        f"cap {cap if cap is not None else 'none'}; workers {workers}"
+    )
     if _dirty(toplevel):
-        say("uncommitted changes are not part of base...HEAD and take no part in choosing "
-            "affected tests; commit them and re-run to include them")
+        say(
+            "uncommitted changes are not part of base...HEAD and take no part in choosing "
+            "affected tests; commit them and re-run to include them"
+        )
 
     scratch = pathlib.Path(tempfile.mkdtemp(prefix="pre-merge-", dir=_scratch_root()))
     try:
@@ -895,12 +941,20 @@ def run_pre_merge(
                 run.checks.append(_timed(lambda lint=lint: check_ratchet_lint(team_dir, lint, scratch=scratch)))
             for guard in WHOLE_TREE_GUARDS:
                 say(f"guard: running {guard.name} ({guard.command})")
-                run.checks.append(_timed(
-                    lambda guard=guard: check_whole_tree_guard(team_dir, guard, scratch=scratch)
-                ))
-        run.checks.append(_timed(lambda: check_affected_tests(
-            team_dir, names, suite=suite, cap=cap, workers=workers, scratch=scratch, narrate=say,
-        )))
+                run.checks.append(_timed(lambda guard=guard: check_whole_tree_guard(team_dir, guard, scratch=scratch)))
+        run.checks.append(
+            _timed(
+                lambda: check_affected_tests(
+                    team_dir,
+                    names,
+                    suite=suite,
+                    cap=cap,
+                    workers=workers,
+                    scratch=scratch,
+                    narrate=say,
+                )
+            )
+        )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     run.duration = time.monotonic() - started
@@ -918,8 +972,7 @@ def format_summary(run: PreMergeRun) -> str:
         rule,
         "pre-merge summary",
         f"base:    {run.base} ({run.base_reason})",
-        f"suite:   {run.suite}; cap {run.cap if run.cap is not None else 'none'}; "
-        f"workers {run.workers}",
+        f"suite:   {run.suite}; cap {run.cap if run.cap is not None else 'none'}; " f"workers {run.workers}",
         "-" * 72,
     ]
     for check in run.checks:
@@ -1001,28 +1054,40 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--base", metavar="REF", default=None,
+        "--base",
+        metavar="REF",
+        default=None,
         help="diff base for choosing affected tests (default: the local RC branch "
-             "this worktree was cut from; with none, the main branch)",
+        "this worktree was cut from; with none, the main branch)",
     )
     parser.add_argument(
-        "--suite", choices=tuple(SUITE_TEST_DIRS), default="unit",
+        "--suite",
+        choices=tuple(SUITE_TEST_DIRS),
+        default="unit",
         help=f"unit: by-path, the six ratchet lints and the tracked-files lint, the always-run whole-tree guards "
-             f"({_GUARD_NAMES}; {GUARD_BUDGET_SECONDS:.1f}s budget) and affected unit tests "
-             f"(default); integration: affected integration tests only",
+        f"({_GUARD_NAMES}; {GUARD_BUDGET_SECONDS:.1f}s budget) and affected unit tests "
+        f"(default); integration: affected integration tests only",
     )
     parser.add_argument(
-        "--cap", metavar="N", type=_non_negative_int, default=DEFAULT_CAP,
+        "--cap",
+        metavar="N",
+        type=_non_negative_int,
+        default=DEFAULT_CAP,
         help=f"most affected test files to run, the most-referencing first; "
-             f"0 means no cap (default: {DEFAULT_CAP}, the [testing] "
-             f"pre_merge_affected_cap default)",
+        f"0 means no cap (default: {DEFAULT_CAP}, the [testing] "
+        f"pre_merge_affected_cap default)",
     )
     parser.add_argument(
-        "--workers", metavar="N", type=_non_negative_int, default=1,
+        "--workers",
+        metavar="N",
+        type=_non_negative_int,
+        default=1,
         help="[testing] workers budget for pytest; 0 or 1 runs single-process (default: 1)",
     )
     parser.add_argument(
-        "--repo", metavar="DIR", default=".",
+        "--repo",
+        metavar="DIR",
+        default=".",
         help="a directory inside the git repository to check (default: the current directory)",
     )
     return parser
@@ -1037,17 +1102,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     # finder's own command line does.
     try:
         run = run_pre_merge(
-            args.repo, suite=args.suite, base=args.base, cap=cap, workers=args.workers,
+            args.repo,
+            suite=args.suite,
+            base=args.base,
+            cap=cap,
+            workers=args.workers,
             narrate=lambda line: print(line, flush=True),
         )
     except (DiffReadError, InvocationError) as exc:
         print(format_error_contract(exc.error, exc.message, exc.remedy), file=sys.stderr)
         return 2
     except ValueError as exc:
-        print(format_error_contract(
-            "pre_merge.bad_argument", str(exc),
-            "python3 team/pgai_agent_kanban/testing/pre_merge.py --help",
-        ), file=sys.stderr)
+        print(
+            format_error_contract(
+                "pre_merge.bad_argument",
+                str(exc),
+                "python3 team/pgai_agent_kanban/testing/pre_merge.py --help",
+            ),
+            file=sys.stderr,
+        )
         return 2
 
     print(format_summary(run), flush=True)
@@ -1061,12 +1134,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"--repo {run.repo} --suite {run.suite} --base {run.base} --workers {run.workers} "
         f"--cap {run.cap if run.cap is not None else 0}"
     )
-    print(format_error_contract(
-        "pre_merge.checks_failed",
-        f"{len(run.failed)} pre-merge check(s) failed: "
-        f"{', '.join(c.name for c in run.failed)}; the summary above names each failure",
-        rerun,
-    ), file=sys.stderr)
+    print(
+        format_error_contract(
+            "pre_merge.checks_failed",
+            f"{len(run.failed)} pre-merge check(s) failed: "
+            f"{', '.join(c.name for c in run.failed)}; the summary above names each failure",
+            rerun,
+        ),
+        file=sys.stderr,
+    )
     return 1
 
 

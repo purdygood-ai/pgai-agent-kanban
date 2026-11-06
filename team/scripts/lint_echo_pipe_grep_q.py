@@ -138,7 +138,7 @@ SKIPPED_DIR_NAMES = frozenset({"__pycache__", "node_modules"})
 BASH_SUFFIXES = frozenset({".sh", ".bash"})
 RUN_COMMAND = "python3 team/scripts/lint_echo_pipe_grep_q.py"
 REMEDY = (
-    "test the text without a pipe -- grep -q PATTERN <<< \"$text\" (same pattern and "
+    'test the text without a pipe -- grep -q PATTERN <<< "$text" (same pattern and '
     f"flags) or [[ $text =~ $re ]] -- then re-run: {RUN_COMMAND}"
 )
 
@@ -156,10 +156,28 @@ _REDIRECT_RE = re.compile(r"^(?:\d+|&)?(?:>>?|<|>&|<&|&>>?|>\|)")
 _BARE_REDIRECT_RE = re.compile(r"^(?:\d+|&)?(?:>>?|<|>&|<&|&>>?|>\|)$")
 
 #: Words skipped before a stage's command word.
-_PREFIX_KEYWORDS = frozenset({
-    "if", "then", "elif", "else", "do", "while", "until", "!", "time",
-    "{", "}", "fi", "done", "esac", "command", "builtin", "exec", "nohup",
-})
+_PREFIX_KEYWORDS = frozenset(
+    {
+        "if",
+        "then",
+        "elif",
+        "else",
+        "do",
+        "while",
+        "until",
+        "!",
+        "time",
+        "{",
+        "}",
+        "fi",
+        "done",
+        "esac",
+        "command",
+        "builtin",
+        "exec",
+        "nohup",
+    }
+)
 _PRODUCERS = frozenset({"echo", "printf"})
 _GREPS = frozenset({"grep", "egrep", "fgrep"})
 #: grep short options that take an argument: the rest of their cluster, or
@@ -238,7 +256,7 @@ class _Tokenizer:
 
     def _advance(self, count: int = 1) -> str:
         end = self.pos + count
-        chunk = self.text[self.pos:end]
+        chunk = self.text[self.pos : end]
         if "\n" in chunk:
             self.line += chunk.count("\n")
         self.pos = end
@@ -265,7 +283,7 @@ class _Tokenizer:
         self._advance()  # opening '
         end = self.text.find("'", self.pos)
         end = self.n if end == -1 else end
-        self._word.append(self.text[self.pos:end])
+        self._word.append(self.text[self.pos : end])
         self._advance(end - self.pos)
         if self.pos < self.n:
             self._advance()  # closing '
@@ -336,7 +354,7 @@ class _Tokenizer:
                 self._advance(len(closer))
             else:
                 self._advance()
-        return self.text[start:self.pos]
+        return self.text[start : self.pos]
 
     def _substitution(self, skip: int, closer: str) -> None:
         """A command or process substitution: its tokens go between ``(``
@@ -368,7 +386,7 @@ class _Tokenizer:
             if ch in "'\"":
                 end = self.text.find(ch, self.pos + 1)
                 end = self.n if end == -1 else end
-                delim.append(self.text[self.pos + 1:end])
+                delim.append(self.text[self.pos + 1 : end])
                 self._advance(end + 1 - self.pos)
             elif ch == "\\":
                 self._advance()
@@ -383,7 +401,7 @@ class _Tokenizer:
             while self.pos < self.n:
                 end = self.text.find("\n", self.pos)
                 end = self.n if end == -1 else end
-                body_line = self.text[self.pos:end]
+                body_line = self.text[self.pos : end]
                 if dash:
                     body_line = body_line.lstrip("\t")
                 self._advance(min(end + 1, self.n) - self.pos)
@@ -536,7 +554,7 @@ def _command_word(words: list[Token]) -> tuple[Token | None, list[Token]]:
         elif _REDIRECT_RE.match(text):
             i += 2 if _BARE_REDIRECT_RE.match(text) else 1
         else:
-            return words[i], words[i + 1:]
+            return words[i], words[i + 1 :]
     return None, []
 
 
@@ -662,7 +680,8 @@ def iter_scan_files(root: Path, scan_paths: list[Path]) -> list[Path]:
             candidates = []
             for dirpath, dirnames, filenames in os.walk(scan):
                 dirnames[:] = [
-                    d for d in dirnames
+                    d
+                    for d in dirnames
                     if not d.startswith(".") and d not in SKIPPED_DIR_NAMES and d not in TEST_DIR_NAMES
                 ]
                 candidates.extend(Path(dirpath, name) for name in filenames)
@@ -709,12 +728,16 @@ def load_allowlist(path: Path, allowlist_rel: str) -> tuple[dict[str, tuple[int,
     entries: dict[str, tuple[int, int]] = {}
     findings: list[Finding] = []
     if not path.is_file():
-        findings.append(Finding(
-            "allowlist-missing", allowlist_rel, 0,
-            f"allowlist {allowlist_rel} not found; every site is reported as unlisted",
-            f"restore {allowlist_rel} from the source branch (git checkout HEAD -- {allowlist_rel}), "
-            f"then re-run: {RUN_COMMAND}",
-        ))
+        findings.append(
+            Finding(
+                "allowlist-missing",
+                allowlist_rel,
+                0,
+                f"allowlist {allowlist_rel} not found; every site is reported as unlisted",
+                f"restore {allowlist_rel} from the source branch (git checkout HEAD -- {allowlist_rel}), "
+                f"then re-run: {RUN_COMMAND}",
+            )
+        )
         return entries, findings
     for lineno, raw in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         line = raw.strip()
@@ -722,11 +745,15 @@ def load_allowlist(path: Path, allowlist_rel: str) -> tuple[dict[str, tuple[int,
             continue
         fields = line.split()
         if len(fields) != 2 or not fields[1].isdigit():
-            findings.append(Finding(
-                "allowlist-malformed", allowlist_rel, lineno,
-                f"allowlist line is not '<path> <sites>' and was ignored: {raw!r}",
-                f"{RUN_COMMAND} --emit-allowlist",
-            ))
+            findings.append(
+                Finding(
+                    "allowlist-malformed",
+                    allowlist_rel,
+                    lineno,
+                    f"allowlist line is not '<path> <sites>' and was ignored: {raw!r}",
+                    f"{RUN_COMMAND} --emit-allowlist",
+                )
+            )
             continue
         entries[fields[0]] = (int(fields[1]), lineno)
     return entries, findings
@@ -739,8 +766,10 @@ def format_allowlist(by_file: dict[str, list[Site]]) -> str:
 
 
 def compare(
-    by_file: dict[str, list[Site]], scanned: set[str],
-    allowlist: dict[str, tuple[int, int]], allowlist_rel: str,
+    by_file: dict[str, list[Site]],
+    scanned: set[str],
+    allowlist: dict[str, tuple[int, int]],
+    allowlist_rel: str,
 ) -> list[Finding]:
     """Compare measured sites with the allowlist; return findings."""
     findings: list[Finding] = []
@@ -750,17 +779,18 @@ def compare(
         if len(sites) <= allowed:
             continue
         kind = "above" if entry else "unlisted"
-        why = (
-            f"{len(sites)} site(s), above its allowlist entry of {allowed}"
-            if entry else "not in the allowlist"
-        )
+        why = f"{len(sites)} site(s), above its allowlist entry of {allowed}" if entry else "not in the allowlist"
         for site in sites:
-            findings.append(Finding(
-                kind, path, site.line,
-                f"{path}:{site.line} pipes {site.producer} into a quiet grep, which misses a "
-                f"match under pipefail when grep exits first ({why}): {site.text}",
-                REMEDY,
-            ))
+            findings.append(
+                Finding(
+                    kind,
+                    path,
+                    site.line,
+                    f"{path}:{site.line} pipes {site.producer} into a quiet grep, which misses a "
+                    f"match under pipefail when grep exits first ({why}): {site.text}",
+                    REMEDY,
+                )
+            )
     for path, (allowed, lineno) in sorted(allowlist.items()):
         measured = len(by_file.get(path, []))
         if measured >= allowed:
@@ -798,7 +828,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Race-free forms:\n"
-            "  grep -qE \"$re\" <<< \"$text\"\n"
+            '  grep -qE "$re" <<< "$text"\n'
             "  [[ $text =~ $re ]]\n\n"
             "Allowlist format: one '<path>\\t<sites>' line per file, path relative\n"
             "to the repository root. Entries are only ever lowered or removed, never\n"
@@ -806,19 +836,33 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit codes:\n  0  Always (findings are narrated, never fatal).\n"
         ),
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--scan", metavar="PATH", action="append", default=None,
-                        help="File or directory to scan, relative to --root or absolute; repeatable "
-                             f"(default: {' and '.join(DEFAULT_SCAN_PATHS)}).")
-    parser.add_argument("--allowlist", metavar="PATH", default=DEFAULT_ALLOWLIST,
-                        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write findings as a JSON array to PATH (always written).")
-    parser.add_argument("--emit-allowlist", action="store_true",
-                        help="Print measured counts in allowlist format and exit 0.")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print every site found, allowlisted or not.")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--scan",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="File or directory to scan, relative to --root or absolute; repeatable "
+        f"(default: {' and '.join(DEFAULT_SCAN_PATHS)}).",
+    )
+    parser.add_argument(
+        "--allowlist",
+        metavar="PATH",
+        default=DEFAULT_ALLOWLIST,
+        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).",
+    )
+    parser.add_argument(
+        "--findings-file", metavar="PATH", default=None, help="Write findings as a JSON array to PATH (always written)."
+    )
+    parser.add_argument(
+        "--emit-allowlist", action="store_true", help="Print measured counts in allowlist format and exit 0."
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print every site found, allowlisted or not.")
     return parser
 
 

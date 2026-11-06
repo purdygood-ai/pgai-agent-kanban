@@ -24,22 +24,36 @@ Static-analysis approach:
      split-window` calls that each add exactly one pane, and by zero or
      more calls to the shared board builder `dashboard_build_board_window`
      (team/scripts/dashboard/lib/board_window.sh), which adds the panes of
-     the `tmux split-window` calls in its own body -- all of them when the
-     call's shell-percentage argument is non-zero, all but the shell-row
-     split (the one sized `-l "$shell_h"`) when it is the literal 0. So a
-     window's actual built pane count is `1 + (split-window calls before
-     the next new-session/new-window call) + (splits each builder call in
-     that span adds)`.
-  2. The one census window with more than one row sharing a name --
-     drill-N, whose layout is chosen at runtime by
-     `[project] workflow_type` (see create.sh's `_drill_wftype` branch) --
-     needs its two `tmux new-window -n "${_DRILL_WIN}"` call sites
-     resolved to the matching census variant. This is done by locating
-     the `if [[ "$_drill_wftype" == "document" ]] ... else ... fi`
-     construct and checking which branch's text span contains each call
-     site, rather than by pane-count or script-name matching (both of
-     which are what this test is trying to verify in the first place, and
-     would make the check circular).
+     the `tmux split-window` calls in its own body. Three kinds of those
+     splits are conditional: the shell-row split (the one sized
+     `-l "$shell_h"`) runs unless the call's third argument, the shell
+     percentage, is the literal 0 or absent; the workbench-column split
+     (the one sized by `workbench_pct`) runs unless the call's fifth
+     argument, the workbench percentage, is the literal 0 or absent; and
+     the splits inside the builder's `if [[ "$column_set" == "split" ]]`
+     block (the five agent-queue columns) run only when the call's
+     seventh argument, the column set, is "split" or absent. The census
+     declares the wide-window layout, so a non-zero workbench argument
+     counts the workbench split even though the builder's narrow-window
+     guard can skip it at runtime. So a window's actual built pane count
+     is `1 + (split-window calls before the next new-session/new-window
+     call) + (splits each builder call in that span adds)`.
+  2. Two census windows have more than one row sharing a name, and each
+     is resolved to its variants differently:
+     - operator, whose builder call passes its column set as a variable
+       (create.sh's OPERATOR_BOARD_AGENTS, from [dashboard]
+       operator_board_agents). Its census variants are named for the
+       column sets, so each variant's pane count is checked against the
+       one build sequence counted with that column set.
+     - drill-N, whose layout is chosen at runtime by
+       `[project] workflow_type` (see create.sh's `_drill_wftype` branch),
+       needs its two `tmux new-window -n "${_DRILL_WIN}"` call sites
+       resolved to the matching census variant. This is done by locating
+       the `if [[ "$_drill_wftype" == "document" ]] ... else ... fi`
+       construct and checking which branch's text span contains each call
+       site, rather than by pane-count or script-name matching (both of
+       which are what this test is trying to verify in the first place,
+       and would make the check circular).
 
 A mismatch names the offending window (and variant, if it has one) so the
 fix is immediately actionable: either create.sh is building the wrong
@@ -54,6 +68,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import shlex
 import sys
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
@@ -90,42 +105,112 @@ _DRILL_CENSUS_NAME = "drill-N"
 # this construct's branch spans is how the two `-n "${_DRILL_WIN}"` call
 # sites are told apart -- see module docstring for why pane-count or
 # script-name matching would be circular here.
-_DRILL_VARIANT_IF_RE = re.compile(
-    r'if\s*\[\[\s*"\$_drill_wftype"\s*==\s*"document"\s*\]\]'
-)
+_DRILL_VARIANT_IF_RE = re.compile(r'if\s*\[\[\s*"\$_drill_wftype"\s*==\s*"document"\s*\]\]')
 _ELSE_LINE_RE = re.compile(r"\n[ \t]*else[ \t]*\n")
 
-# A call to the shared board builder, capturing its third argument (the
-# shell-row percentage): `dashboard_build_board_window "<session>" "<window>"
-# <shell_pct> ...`, tolerating a line continuation before the argument.
+# A call to the shared board builder, capturing its argument text up to the
+# end of the command, line continuations included:
+# `dashboard_build_board_window "<session>" "<window>" <shell_pct>
+# [<shell_min_rows>] [<workbench_pct>] [<workbench_min_cols>] [<column_set>]`.
 _BOARD_BUILDER_CALL_RE = re.compile(
-    r'^\s*dashboard_build_board_window\s+"[^"]*"\s+"[^"]*"\s*(?:\\\s*\n\s*)?(\S+)',
+    r"^[ \t]*dashboard_build_board_window[ \t]+((?:[^\n\\]|\\[ \t]*\n)*)",
     re.MULTILINE,
 )
 
+# Positions, in the builder's argument list, of the arguments that switch a
+# conditional split on.
+_SHELL_PCT_ARG = 2
+_WORKBENCH_PCT_ARG = 4
+_COLUMN_SET_ARG = 6
 
-def _board_builder_split_counts() -> tuple[int, int]:
-    """Return (splits without a shell row, splits with one) for the shared
-    board builder, counted from the `tmux split-window` lines in its body.
-    The shell-row split is the one sized by `-l "$shell_h"`; it only runs
-    when the builder is asked for a shell row."""
+# The column sets the builder builds, and the one it builds when the
+# column-set argument is absent.
+_COLUMN_SETS = ("merged", "split")
+_DEFAULT_COLUMN_SET = "split"
+
+# The builder's block of splits that only the "split" column set runs.
+_SPLIT_ONLY_BLOCK_RE = re.compile(
+    r'^[ \t]*if \[\[ "\$column_set" == "split" \]\]; then\n(.*?)^[ \t]*fi\b',
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _board_builder_split_counts() -> tuple[int, int, int, int]:
+    """Return (unconditional splits, shell-row splits, workbench splits,
+    split-column-set-only splits) for the shared board builder, counted from
+    the `tmux split-window` lines in its body. The shell-row split is the
+    one sized by `-l "$shell_h"`; the workbench split is the one sized by
+    `workbench_pct`; the split-only splits are those inside its
+    `if [[ "$column_set" == "split" ]]` block. Each runs only when the
+    builder is asked for that pane or column set."""
     lib_text = _BOARD_WINDOW_SH.read_text(encoding="utf-8")
     splits = re.findall(r"^\s*tmux split-window\b(.*)$", lib_text, re.MULTILINE)
     shell_splits = [s for s in splits if '"$shell_h"' in s]
+    workbench_splits = [s for s in splits if "workbench_pct" in s]
     assert len(shell_splits) == 1, (
-        f"expected exactly one shell-row split (-l \"$shell_h\") in "
-        f"{_BOARD_WINDOW_SH}; found {shell_splits}"
+        f'expected exactly one shell-row split (-l "$shell_h") in ' f"{_BOARD_WINDOW_SH}; found {shell_splits}"
     )
-    return len(splits) - len(shell_splits), len(splits)
+    assert len(workbench_splits) == 1, (
+        f"expected exactly one workbench-column split (sized by workbench_pct) "
+        f"in {_BOARD_WINDOW_SH}; found {workbench_splits}"
+    )
+    split_only = sum(
+        len(re.findall(r"^\s*tmux split-window\b", block, re.MULTILINE))
+        for block in _SPLIT_ONLY_BLOCK_RE.findall(lib_text)
+    )
+    assert split_only > 0, (
+        f'expected the split-window calls only the "split" column set runs '
+        f'inside an `if [[ "$column_set" == "split" ]]` block in '
+        f"{_BOARD_WINDOW_SH}; found none"
+    )
+    unconditional = len(splits) - len(shell_splits) - len(workbench_splits) - split_only
+    return unconditional, len(shell_splits), len(workbench_splits), split_only
 
 
-def _board_builder_panes_added(section: str) -> int:
-    """Panes added by every shared-board-builder call in *section*."""
-    without_shell, with_shell = _board_builder_split_counts()
+def _arg_enables_split(args: list[str], position: int) -> bool:
+    """True unless the builder argument at *position* is absent or the literal 0."""
+    return len(args) > position and args[position] != "0"
+
+
+def _builder_call_args(section: str) -> list[list[str]]:
+    """The argument list of every shared-board-builder call in *section*."""
+    return [
+        shlex.split(re.sub(r"\\[ \t]*\n", " ", arg_text), comments=True)
+        for arg_text in _BOARD_BUILDER_CALL_RE.findall(section)
+    ]
+
+
+def _column_set_is_variable(section: str) -> bool:
+    """True when a builder call in *section* passes its column set as a
+    shell variable, so the column set is chosen at runtime."""
+    return any(
+        len(args) > _COLUMN_SET_ARG and args[_COLUMN_SET_ARG].startswith("$") for args in _builder_call_args(section)
+    )
+
+
+def _board_builder_panes_added(section: str, column_set: str | None = None) -> int:
+    """Panes added by every shared-board-builder call in *section*. A call
+    whose column set is a shell variable is counted with *column_set*."""
+    unconditional, shell, workbench, split_only = _board_builder_split_counts()
     added = 0
-    for shell_arg in _BOARD_BUILDER_CALL_RE.findall(section):
-        added += without_shell if shell_arg == "0" else with_shell
+    for args in _builder_call_args(section):
+        added += unconditional
+        if _arg_enables_split(args, _SHELL_PCT_ARG):
+            added += shell
+        if _arg_enables_split(args, _WORKBENCH_PCT_ARG):
+            added += workbench
+        call_set = args[_COLUMN_SET_ARG] if len(args) > _COLUMN_SET_ARG else _DEFAULT_COLUMN_SET
+        if call_set.startswith("$"):
+            assert column_set is not None, (
+                f"a dashboard_build_board_window call passes its column set as "
+                f"{call_set}; count it with an explicit column set"
+            )
+            call_set = column_set
+        if call_set == "split":
+            added += split_only
     return added
+
+
 _FI_LINE_RE = re.compile(r"\n[ \t]*fi[ \t]*\n")
 
 
@@ -141,23 +226,26 @@ def _window_open_positions(content: str) -> list[tuple[int, str]]:
     return positions
 
 
-def _actual_pane_counts(content: str) -> list[tuple[int, str, int]]:
-    """Return [(char_offset, census_name, actual_pane_count), ...] -- one
-    entry per window-opening call, in file order. actual_pane_count is
-    1 (the pane the opening call itself creates) plus the number of
-    `tmux split-window` calls found before the next window-opening call
-    (or end of file, for the last window), plus the panes any shared
-    board-builder call in that span adds.
-    """
+def _window_sections(content: str) -> list[tuple[int, str, str]]:
+    """Return [(char_offset, census_name, section_text), ...] -- one entry
+    per window-opening call, in file order; a section runs to the next
+    window-opening call (or end of file, for the last window)."""
     opens = _window_open_positions(content)
     results = []
     for i, (start, name) in enumerate(opens):
         end = opens[i + 1][0] if i + 1 < len(opens) else len(content)
-        section = content[start:end]
-        split_count = len(re.findall(r"tmux split-window\b", section))
-        split_count += _board_builder_panes_added(section)
-        results.append((start, name, 1 + split_count))
+        results.append((start, name, content[start:end]))
     return results
+
+
+def _section_pane_count(section: str, column_set: str | None = None) -> int:
+    """1 (the pane the opening call itself creates) plus the number of
+    `tmux split-window` calls in *section*, plus the panes any shared
+    board-builder call in it adds (a runtime column set counted as
+    *column_set*)."""
+    split_count = len(re.findall(r"tmux split-window\b", section))
+    split_count += _board_builder_panes_added(section, column_set)
+    return 1 + split_count
 
 
 def _drill_variant_branch_spans(content: str) -> dict[str, tuple[int, int]]:
@@ -176,15 +264,9 @@ def _drill_variant_branch_spans(content: str) -> dict[str, tuple[int, int]]:
         "`tmux new-window` call sites belongs to which census variant"
     )
     else_match = _ELSE_LINE_RE.search(content, if_match.end())
-    assert else_match is not None, (
-        "no matching 'else' found after create.sh's drill-N "
-        "workflow_type if-branch"
-    )
+    assert else_match is not None, "no matching 'else' found after create.sh's drill-N " "workflow_type if-branch"
     fi_match = _FI_LINE_RE.search(content, else_match.end())
-    assert fi_match is not None, (
-        "no matching 'fi' found after create.sh's drill-N "
-        "workflow_type else-branch"
-    )
+    assert fi_match is not None, "no matching 'fi' found after create.sh's drill-N " "workflow_type else-branch"
     return {
         "document": (if_match.start(), else_match.start()),
         "release": (else_match.end(), fi_match.start()),
@@ -199,9 +281,10 @@ def _resolve_window(
     """Pick the one census Window record that the window-opening call at
     *offset* belongs to, out of *candidates* (all census rows sharing this
     window's name). A name with exactly one census row needs no
-    resolution; a name with more than one (drill-N's two workflow_type
-    variants, currently the only such case) is resolved by which branch
-    span of the census's is_wftype-else-fi construct the call falls in.
+    resolution; a name with more than one whose layout is not chosen by a
+    runtime column set (drill-N's two workflow_type variants, currently the
+    only such case) is resolved by which branch span of the census's
+    is_wftype-else-fi construct the call falls in.
     """
     if len(candidates) == 1:
         return candidates[0]
@@ -228,9 +311,7 @@ def _resolve_window(
 # ---------------------------------------------------------------------------
 
 
-def test_create_sh_builds_the_pane_count_the_census_declares_for_every_window() -> (
-    None
-):
+def test_create_sh_builds_the_pane_count_the_census_declares_for_every_window() -> None:
     """create.sh's actual `tmux split-window` call count, per window,
     agrees with that window's census-declared pane_count -- for every
     window create.sh builds, not just the operator window.
@@ -255,7 +336,7 @@ def test_create_sh_builds_the_pane_count_the_census_declares_for_every_window() 
 
     mismatches: list[str] = []
     unresolved: list[str] = []
-    for offset, name, actual_count in _actual_pane_counts(content):
+    for offset, name, section in _window_sections(content):
         candidates = remaining.get(name)
         if not candidates:
             unresolved.append(
@@ -265,12 +346,30 @@ def test_create_sh_builds_the_pane_count_the_census_declares_for_every_window() 
                 f"build of the same name)"
             )
             continue
+        if _column_set_is_variable(section):
+            # One build sequence, one census variant per column set.
+            for window in list(candidates):
+                candidates.remove(window)
+                if window.variant not in _COLUMN_SETS:
+                    mismatches.append(
+                        f"{name!r} (variant={window.variant!r}): create.sh chooses "
+                        f"this window's column set at runtime, so its census "
+                        f"variants must be named for the column sets {_COLUMN_SETS}"
+                    )
+                    continue
+                actual_count = _section_pane_count(section, window.variant)
+                if actual_count != window.pane_count:
+                    mismatches.append(
+                        f"{name!r} (variant={window.variant!r}): create.sh builds "
+                        f"{actual_count} pane(s) but the census declares "
+                        f"{window.pane_count}"
+                    )
+            continue
         window = _resolve_window(offset, candidates, drill_spans)
         candidates.remove(window)
+        actual_count = _section_pane_count(section)
         if actual_count != window.pane_count:
-            variant_note = (
-                f" (variant={window.variant!r})" if window.variant != "-" else ""
-            )
+            variant_note = f" (variant={window.variant!r})" if window.variant != "-" else ""
             mismatches.append(
                 f"{name!r}{variant_note}: create.sh builds {actual_count} "
                 f"pane(s) but the census declares {window.pane_count}"

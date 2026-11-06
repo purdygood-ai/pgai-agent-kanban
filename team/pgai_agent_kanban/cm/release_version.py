@@ -104,7 +104,7 @@ def release_version_of(raw: str) -> str:
     return version if version.startswith("v") else "v" + version
 
 
-def task_release_version(readme_path: "str | os.PathLike[str]") -> str:
+def task_release_version(readme_path: str | os.PathLike[str]) -> str:
     """The release version a task README's ``## Release Version`` names.
 
     Args:

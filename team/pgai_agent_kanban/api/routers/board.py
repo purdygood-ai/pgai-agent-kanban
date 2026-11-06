@@ -89,8 +89,7 @@ Constraints:
 from __future__ import annotations
 
 import pathlib
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -148,10 +147,7 @@ def _read_projects_registry(
     projects.
     """
     rows = dashboard_registry_rows(kanban_root) or []
-    return [
-        {"name": name, "color": color or "", "max_rows": _row_cap(max_rows)}
-        for name, color, max_rows in rows
-    ]
+    return [{"name": name, "color": color or "", "max_rows": _row_cap(max_rows)} for name, color, max_rows in rows]
 
 
 def _row_cap(raw: str) -> int:
@@ -226,37 +222,44 @@ def _input_column_items(
         if quarantined.origin != input_dir.name or not entry.name.endswith(".md"):
             continue
         key = compact_id(entry.stem, is_requirements)
-        items.append({
-            "id": f"{project_name}/quarantine/{key}",
-            "project": project_name,
-            "kind": "quarantine",
-            "key": key,
-            "title": entry.stem,
-            "status": "blocked",
-            "version_label": "",
-            "active_rc": False,
-            "color": project_color,
-        })
+        items.append(
+            {
+                "id": f"{project_name}/quarantine/{key}",
+                "project": project_name,
+                "kind": "quarantine",
+                "key": key,
+                "title": entry.stem,
+                "status": "blocked",
+                "version_label": "",
+                "active_rc": False,
+                "color": project_color,
+            }
+        )
 
     carried = frozenset() if is_requirements else intake_carried_names(input_dir)
     for path in input_files(input_dir):
         key = compact_id(path.stem, is_requirements)
         status, _raw_status = classify_input_file(
-            path, is_requirements=is_requirements, active_rc=active_rc, last_released=last_released,
+            path,
+            is_requirements=is_requirements,
+            active_rc=active_rc,
+            last_released=last_released,
             carried=carried,
         )
-        items.append({
-            "id": f"{project_name}/{kind}/{key}",
-            "project": project_name,
-            "kind": kind,
-            "key": key,
-            "title": path.stem,
-            "status": status,
-            # A requirement carries its target version; other intake items none.
-            "version_label": get_target_version_for_item(path) if is_requirements else "",
-            "active_rc": status == "label",
-            "color": project_color,
-        })
+        items.append(
+            {
+                "id": f"{project_name}/{kind}/{key}",
+                "project": project_name,
+                "kind": kind,
+                "key": key,
+                "title": path.stem,
+                "status": status,
+                # A requirement carries its target version; other intake items none.
+                "version_label": get_target_version_for_item(path) if is_requirements else "",
+                "active_rc": status == "label",
+                "color": project_color,
+            }
+        )
 
     return _cap(items, max_rows)
 
@@ -316,7 +319,7 @@ def _queue_column_items(
 )
 def get_board(
     request: Request,
-    project: Optional[str] = Query(
+    project: str | None = Query(
         default=None,
         description=(
             "Not accepted. GET /board is the unfiltered aggregation view; "
@@ -393,12 +396,14 @@ def get_board(
     for proj in projects_meta:
         project_dir = kanban_root / "projects" / proj["name"]
         halt_flag, halt_text = effective_halt_flag_and_text(project_dir, kanban_root)
-        projects_out.append({
-            "name": proj["name"],
-            "color": proj["color"],
-            "halt": halt_flag == "yes",
-            "halt_text": halt_text,
-        })
+        projects_out.append(
+            {
+                "name": proj["name"],
+                "color": proj["color"],
+                "halt": halt_flag == "yes",
+                "halt_text": halt_text,
+            }
+        )
 
     # Build columns.
     agent_queue_map = {
@@ -425,8 +430,7 @@ def get_board(
                 # read (git tags first), so the two agree.
                 active_rc = get_active_rc_for_project(project_dir)
                 last_released = (
-                    requirements_last_released(kanban_root, proj["name"])
-                    if col_name == "REQUIREMENTS" else ""
+                    requirements_last_released(kanban_root, proj["name"]) if col_name == "REQUIREMENTS" else ""
                 )
 
                 items, truncated = _input_column_items(
@@ -453,13 +457,15 @@ def get_board(
             all_items.extend(items)
             total_truncated += truncated
 
-        columns_out.append({
-            "name": col_name,
-            "items": all_items,
-            "truncated": total_truncated,
-        })
+        columns_out.append(
+            {
+                "name": col_name,
+                "items": all_items,
+                "truncated": total_truncated,
+            }
+        )
 
-    generated_at = datetime.now(tz=timezone.utc).isoformat()
+    generated_at = datetime.now(tz=UTC).isoformat()
     return JSONResponse(
         content={
             "generated_at": generated_at,

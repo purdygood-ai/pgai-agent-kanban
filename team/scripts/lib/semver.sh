@@ -7,7 +7,10 @@
 #
 # All functions accept versions with or without a leading "v" prefix.
 # Comparison is performed via sort -V (GNU version sort), which correctly
-# handles cross-decade components (e.g. v0.9.x < v0.10.x).
+# handles cross-decade components (e.g. v0.9.x < v0.10.x); a component's
+# leading zeros are ignored (v1.02.3 == v1.2.3). The ordering is the one
+# pgai_agent_kanban/lib/semver.py implements, and
+# tests/unit/test_semver_bash.py runs both on the same versions.
 #
 # Functions
 # ---------
@@ -25,12 +28,24 @@
 # sort -V.  Strips an optional leading "v" then re-adds it so that versions
 # with and without the prefix sort identically (sort -V handles "v" well, but
 # mixing "0.9.0" and "v0.9.0" can confuse it on some implementations).
+# An X.Y.Z version also loses the leading zeros of each component, so
+# "v1.02.3" and "v1.2.3" are one version -- each component is a number, as
+# pgai_agent_kanban/lib/semver.py compares it.
 # ---------------------------------------------------------------------------
 _semver_normalise() {
     local v="$1"
     # Strip leading 'v' or 'V'
     v="${v#v}"
     v="${v#V}"
+    if [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+        local i part out=""
+        for i in 1 2 3; do
+            part="${BASH_REMATCH[$i]}"
+            part="${part#"${part%%[!0]*}"}"
+            out+="${part:-0}."
+        done
+        v="${out%.}"
+    fi
     echo "v${v}"
 }
 

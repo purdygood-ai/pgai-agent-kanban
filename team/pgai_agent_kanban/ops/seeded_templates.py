@@ -98,7 +98,6 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import Optional
 
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.ops.projects import (
@@ -182,7 +181,7 @@ def _backup_path(target: str, stamp: str) -> str:
     return candidate
 
 
-def _read_bytes(path: str) -> Optional[bytes]:
+def _read_bytes(path: str) -> bytes | None:
     """The bytes at *path*, or None when it is not a readable regular file."""
     try:
         with open(path, "rb") as handle:
@@ -230,7 +229,9 @@ def _refresh_project(
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     _copy(source, target)
                 result.seeded.append((name, target_rel))
-                _say(f"{_PREFIX} project '{name}': {verb_seed} missing {target_rel} from the installed {workflow} template")
+                _say(
+                    f"{_PREFIX} project '{name}': {verb_seed} missing {target_rel} from the installed {workflow} template"
+                )
         except (OSError, IoError) as exc:
             reason = f"could not write {target_rel}: {exc}"
             result.skipped.append((name, reason))
@@ -363,15 +364,17 @@ def _closing_line(result: SeededTemplateRefresh) -> str:
             f"{_PREFIX} all intake copies in {count} registered project(s) already match the installed "
             f"templates; {snapshots}."
         )
-    return f"{_PREFIX} all copies in {count} registered project(s) already match the installed templates; nothing changed."
+    return (
+        f"{_PREFIX} all copies in {count} registered project(s) already match the installed templates; nothing changed."
+    )
 
 
 def refresh_seeded_templates(
     kanban_root: PathLike,
     *,
-    scripts_dir: Optional[PathLike] = None,
+    scripts_dir: PathLike | None = None,
     dry_run: bool = False,
-    now: Optional[datetime.datetime] = None,
+    now: datetime.datetime | None = None,
 ) -> SeededTemplateRefresh:
     """Refresh every registered project's seeded intake templates.
 
@@ -397,7 +400,7 @@ def refresh_seeded_templates(
     """
     root = str(kanban_root)
     scripts = str(scripts_dir) if scripts_dir is not None else str(_OWN_TREE / "scripts")
-    stamp = (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    stamp = (now or datetime.datetime.now(datetime.UTC)).strftime("%Y%m%dT%H%M%SZ")
     result = SeededTemplateRefresh(dry_run=dry_run)
 
     names = registered_project_names(root)
@@ -453,7 +456,7 @@ def refresh_seeded_templates(
 # ---------------------------------------------------------------------------
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run ``refresh_seeded_templates`` from the command line (see the module docstring)."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] not in CLI_VERBS:
@@ -480,6 +483,8 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print what would change; write nothing.")
     opts = parser.parse_args(args[1:])
     result = refresh_seeded_templates(
-        pathlib.Path(opts.kanban_root), scripts_dir=opts.scripts_dir, dry_run=opts.dry_run,
+        pathlib.Path(opts.kanban_root),
+        scripts_dir=opts.scripts_dir,
+        dry_run=opts.dry_run,
     )
     return 1 if result.skipped else 0

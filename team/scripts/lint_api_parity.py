@@ -143,7 +143,7 @@ _FLAG_EQUIVALENCES: dict[str, list[str]] = {
     "file": ["filename", "content"],
     # create-project.sh alias flags → primary body field names
     "dev-tree-path": ["dev_tree"],
-    "git-repo-url":  ["git_repo"],
+    "git-repo-url": ["git_repo"],
 }
 
 # ---------------------------------------------------------------------------
@@ -209,14 +209,12 @@ def _extract_operator_valid_flags(script_path: Path) -> list[str]:
     # We look for the opening paren after the assignment and collect
     # everything up to the balancing closing paren.
     pat = re.compile(
-        r"OPERATOR_VALID_FLAGS\s*=\s*\(",   # assignment start
+        r"OPERATOR_VALID_FLAGS\s*=\s*\(",  # assignment start
         re.MULTILINE,
     )
     m = pat.search(source)
     if not m:
-        raise ValueError(
-            f"OPERATOR_VALID_FLAGS declaration not found in {script_path}"
-        )
+        raise ValueError(f"OPERATOR_VALID_FLAGS declaration not found in {script_path}")
 
     # Walk forward from the opening paren to find the balanced close paren.
     start = m.end()  # position just after the opening '('
@@ -328,9 +326,7 @@ def check_parity(
 
         # Direct check: normalised flag name must appear as a body field.
         if normalised not in body_fields:
-            violations.append(
-                f"{script_name}: flag '--{flag}' not found in {model_name} body fields"
-            )
+            violations.append(f"{script_name}: flag '--{flag}' not found in {model_name} body fields")
 
     return violations
 
@@ -401,8 +397,7 @@ def check_response_model_has_warnings(model_class: Any) -> list[str]:
     fields = _model_fields(model_class)
     if "warnings" not in fields:
         return [
-            f"{model_class.__name__}: missing required field 'warnings' "
-            f"(all response models must declare warnings)"
+            f"{model_class.__name__}: missing required field 'warnings' " f"(all response models must declare warnings)"
         ]
     return []
 
@@ -442,9 +437,7 @@ def lint_all_op_models_dry_run(team_dir: Path) -> list[str]:
     try:
         ops_mod = importlib.import_module("pgai_agent_kanban.api.routers.operations")
     except ImportError as exc:
-        raise RuntimeError(
-            f"Cannot import pgai_agent_kanban.api.routers.operations: {exc}"
-        ) from exc
+        raise RuntimeError(f"Cannot import pgai_agent_kanban.api.routers.operations: {exc}") from exc
 
     violations: list[str] = []
     for attr_name in dir(ops_mod):
@@ -494,9 +487,7 @@ def lint_all_response_models_warnings(team_dir: Path) -> list[str]:
     try:
         ops_mod = importlib.import_module("pgai_agent_kanban.api.routers.operations")
     except ImportError as exc:
-        raise RuntimeError(
-            f"Cannot import pgai_agent_kanban.api.routers.operations: {exc}"
-        ) from exc
+        raise RuntimeError(f"Cannot import pgai_agent_kanban.api.routers.operations: {exc}") from exc
 
     # Collect response-shaped model classes from both the operations and reads
     # modules.  The naming convention for response models is names ending in
@@ -560,17 +551,13 @@ _SCHEMA_REQUIRED_KEYS: dict[str, frozenset[str]] = {
     # (those four plus error/message/remedy; an API-layer 422 carries the
     # triple plus warnings only), so the required set is the union of all
     # seven, matching the read-verb unions below.
-    "DualChannelShellEnvelope": frozenset(
-        {"exit_code", "stdout", "stderr", "error", "message", "remedy", "warnings"}
-    ),
+    "DualChannelShellEnvelope": frozenset({"exit_code", "stdout", "stderr", "error", "message", "remedy", "warnings"}),
     # GET /verdicts' full vocabulary: {"verdicts", "warnings"} with no
     # ?details=true, plus "posture" / "release_locks" / "queue_tails" when
     # it is given (see get_verdicts' own docstring) -- this checker unions
     # every literal return statement's keys, so the required set here is
     # the union across BOTH shapes, not either one alone.
-    "VerdictsResponse": frozenset(
-        {"verdicts", "posture", "release_locks", "queue_tails", "warnings"}
-    ),
+    "VerdictsResponse": frozenset({"verdicts", "posture", "release_locks", "queue_tails", "warnings"}),
     # GET /agent-metrics: the requested span and what it selected (span,
     # shipped_count, excluded_count) beside the per-agent rows.
     "AgentMetricsResponse": frozenset(
@@ -609,6 +596,11 @@ _SCHEMA_REQUIRED_KEYS: dict[str, frozenset[str]] = {
             "warnings",
         }
     ),
+    # GET /skills' union of BOTH shapes: the success body (the skills
+    # module's list -- source and providers -- plus warnings) and the 422
+    # refusal body (the module's error/message/remedy plus warnings) -- see
+    # get_skills' own docstring.
+    "SkillsResponse": frozenset({"providers", "source", "error", "message", "remedy", "warnings"}),
 }
 
 # The three script roots team/config/operator_verbs.manifest's own "script"
@@ -913,11 +905,7 @@ def _router_file_prefix(module: ast.Module) -> str:
         if callee_name != "APIRouter":
             continue
         for kw in call.keywords:
-            if (
-                kw.arg == "prefix"
-                and isinstance(kw.value, ast.Constant)
-                and isinstance(kw.value.value, str)
-            ):
+            if kw.arg == "prefix" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                 return kw.value.value
     return ""
 
@@ -1072,9 +1060,7 @@ _READ_PARITY_LEDGER_RELPATH = "tests/fixtures/read_parity_cases.py"
 _READ_PARITY_LEDGER_MODULE = "tests.fixtures.read_parity_cases"
 
 
-def _load_parity_ledger_verbs(
-    team_dir: Path, ledger_relpath: str, ledger_module: str, label: str
-) -> frozenset[str]:
+def _load_parity_ledger_verbs(team_dir: Path, ledger_relpath: str, ledger_module: str, label: str) -> frozenset[str]:
     """Return the verbs the parity ledger at *ledger_relpath* names at least
     once.
 
@@ -1099,9 +1085,7 @@ def _load_parity_ledger_verbs(
         module = importlib.import_module(ledger_module)
         module = importlib.reload(module)
     except Exception as exc:  # noqa: BLE001 -- any import failure is the same internal fault
-        raise RuntimeError(
-            f"Cannot import the {label} ledger {ledger_module} from {ledger_path}: {exc}"
-        ) from exc
+        raise RuntimeError(f"Cannot import the {label} ledger {ledger_module} from {ledger_path}: {exc}") from exc
     return frozenset(module.verbs_with_a_case())
 
 
@@ -1116,9 +1100,7 @@ def _load_action_parity_verbs(team_dir: Path) -> frozenset[str]:
 def _load_read_parity_verbs(team_dir: Path) -> frozenset[str]:
     """The verbs the read-parity ledger names at least once -- see
     ``_load_parity_ledger_verbs`` for the contract and the failures."""
-    return _load_parity_ledger_verbs(
-        team_dir, _READ_PARITY_LEDGER_RELPATH, _READ_PARITY_LEDGER_MODULE, "read-parity"
-    )
+    return _load_parity_ledger_verbs(team_dir, _READ_PARITY_LEDGER_RELPATH, _READ_PARITY_LEDGER_MODULE, "read-parity")
 
 
 def check_action_verbs_have_parity_fixture(
@@ -1138,11 +1120,7 @@ def check_action_verbs_have_parity_fixture(
     twenty-four.
     """
     findings: list[CensusFinding] = []
-    action_verbs = {
-        name
-        for name, v in verbs.items()
-        if v.status == "active" and v.verb_class == "action"
-    }
+    action_verbs = {name for name, v in verbs.items() if v.status == "active" and v.verb_class == "action"}
 
     if ledger_verbs is None:
         try:
@@ -1206,15 +1184,9 @@ def check_read_verbs_have_parity_fixture(
     as naming a verb the census does not know.
     """
     findings: list[CensusFinding] = []
-    read_verbs = {
-        name
-        for name, v in verbs.items()
-        if v.status == "active" and v.verb_class == "read"
-    }
+    read_verbs = {name for name, v in verbs.items() if v.status == "active" and v.verb_class == "read"}
     twinned_read_verbs = {
-        name
-        for name in read_verbs
-        if not (verbs[name].rest_method == "ABSENT" and verbs[name].rest_route == "ABSENT")
+        name for name in read_verbs if not (verbs[name].rest_method == "ABSENT" and verbs[name].rest_route == "ABSENT")
     }
 
     if ledger_verbs is None:
@@ -1307,9 +1279,7 @@ def run_census_gate(team_dir: Path) -> list[CensusFinding]:
     try:
         from pgai_agent_kanban.lib import operator_verb_manifest as ovm
     except ImportError as exc:
-        raise RuntimeError(
-            f"Cannot import pgai_agent_kanban.lib.operator_verb_manifest: {exc}"
-        ) from exc
+        raise RuntimeError(f"Cannot import pgai_agent_kanban.lib.operator_verb_manifest: {exc}") from exc
 
     try:
         verbs = ovm.load_manifest()
@@ -1386,19 +1356,14 @@ def _build_parity_map(team_dir: Path) -> list[tuple[Path, Any]]:
     try:
         from pgai_agent_kanban.lib.operator_verb_manifest import load_manifest
     except ImportError as exc:
-        raise RuntimeError(
-            f"Cannot import pgai_agent_kanban.lib.operator_verb_manifest: {exc}"
-        ) from exc
+        raise RuntimeError(f"Cannot import pgai_agent_kanban.lib.operator_verb_manifest: {exc}") from exc
 
     verbs = load_manifest()
 
     def _sp(relative_to_team: str) -> Path:
         p = team_dir / relative_to_team
         if not p.exists():
-            raise RuntimeError(
-                f"Script not found: {p}\n"
-                "Verify the scripts directory is complete."
-            )
+            raise RuntimeError(f"Script not found: {p}\n" "Verify the scripts directory is complete.")
         return p
 
     pairs: list[tuple[Path, Any]] = []
@@ -1435,10 +1400,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--team-dir",
         metavar="PATH",
-        help=(
-            "Root of the team/ directory.  Default: parent of this script's "
-            "directory (team/scripts/ → team/)."
-        ),
+        help=("Root of the team/ directory.  Default: parent of this script's " "directory (team/scripts/ → team/)."),
     )
     parser.add_argument(
         "--verbose",
@@ -1462,13 +1424,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.team_dir:
         team_dir = Path(args.team_dir).resolve()
     else:
-        script_dir = Path(__file__).resolve().parent   # team/scripts/
-        team_dir = script_dir.parent                   # team/
+        script_dir = Path(__file__).resolve().parent  # team/scripts/
+        team_dir = script_dir.parent  # team/
 
     if not team_dir.is_dir():
         print(
-            f"ERROR: team directory not found: {team_dir}\n"
-            "Use --team-dir to specify an alternative path.",
+            f"ERROR: team directory not found: {team_dir}\n" "Use --team-dir to specify an alternative path.",
             file=sys.stderr,
         )
         return 2
@@ -1502,8 +1463,7 @@ def main(argv: list[str] | None = None) -> int:
 
     all_violations.extend(dry_run_violations)
     print(
-        f"lint_api_parity: dry_run field — checked all *Body models "
-        f"({len(dry_run_violations)} violation(s)).",
+        f"lint_api_parity: dry_run field — checked all *Body models " f"({len(dry_run_violations)} violation(s)).",
         flush=True,
     )
 
@@ -1523,8 +1483,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if all_violations:
         print(
-            f"\nlint_api_parity: FAIL — {len(all_violations)} legacy flag/model "
-            "violation(s):\n",
+            f"\nlint_api_parity: FAIL — {len(all_violations)} legacy flag/model " "violation(s):\n",
             flush=True,
         )
         for v in all_violations:
@@ -1558,8 +1517,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if census_findings:
         print(
-            f"\nlint_api_parity: FAIL — {len(census_findings)} census-walk "
-            "violation(s):\n",
+            f"\nlint_api_parity: FAIL — {len(census_findings)} census-walk " "violation(s):\n",
             flush=True,
         )
         for finding in census_findings:

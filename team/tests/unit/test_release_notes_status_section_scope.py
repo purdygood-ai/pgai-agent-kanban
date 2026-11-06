@@ -123,14 +123,12 @@ def test_unmodified_template_copy_stamps_the_status_placeholder(tmp_path):
     assert result.returncode == 0, _diag(result)
     text = notes.read_text(encoding="utf-8")
     body = _status_body(text)
-    assert re.match(r"\A(?:[ \t]*<!--.*?-->[ \t]*\n)*KNOWN-BUGS\n", body), (
-        f"'## Status' must be followed by the target status (past its guidance comment):\n{body}"
-    )
+    assert re.match(
+        r"\A(?:[ \t]*<!--.*?-->[ \t]*\n)*KNOWN-BUGS\n", body
+    ), f"'## Status' must be followed by the target status (past its guidance comment):\n{body}"
     assert "<!-- scripts/cm/release.sh stamps this field at release time." in body, "the guidance comment is kept"
     assert _PLACEHOLDER not in body
-    assert _PLACEHOLDER in text.split("\n## Status\n", 1)[0], (
-        "the template's top-of-file comment is left as written"
-    )
+    assert _PLACEHOLDER in text.split("\n## Status\n", 1)[0], "the template's top-of-file comment is left as written"
 
 
 def test_multi_line_comment_block_before_the_placeholder_is_passed_over(tmp_path):
@@ -195,7 +193,8 @@ def test_already_stamped_notes_are_reported_and_left_unchanged(tmp_path):
 
 def test_comment_on_the_placeholder_line_is_kept():
     stamped = stamp_status_placeholder(
-        "## Status\n<!-- keep --> PENDING-RELEASE <!-- also kept -->\n", "KNOWN-ISSUE",
+        "## Status\n<!-- keep --> PENDING-RELEASE <!-- also kept -->\n",
+        "KNOWN-ISSUE",
     )
     assert stamped == "## Status\n<!-- keep --> KNOWN-ISSUE <!-- also kept -->\n"
 
@@ -258,8 +257,7 @@ _INLINE_CODE_OPENER = (
     "**Highlights:** the summary reader no longer treats a quoted `<!--` as a comment opener.\n\n"
 )
 _PROSE_OPENER = (
-    "# Release Notes: demo v1.4.0\n\n"
-    "Authors open a guidance comment with <!-- and nothing else on that line.\n\n"
+    "# Release Notes: demo v1.4.0\n\n" "Authors open a guidance comment with <!-- and nothing else on that line.\n\n"
 )
 _STATUS_AND_SUMMARY = "## Status\nPENDING-RELEASE\n\n## Summary\nText.\n"
 
@@ -313,7 +311,7 @@ def test_line_start_comment_stays_a_comment_after_a_stray_backtick():
         ("## Status\n<!-- note -->\n\nPENDING-RELEASE\n", "present"),
         ("## Status\nKNOWN-BUGS\nstill PENDING-RELEASE here\n\n## Summary\n", "present"),
         ("<!-- write PENDING-RELEASE under Status -->\n## Status\nFUNCTIONAL\n", "absent"),
-        ("## Status\nFUNCTIONAL\n\n## Bugs Skipped\n| x | prints \"PENDING-RELEASE\" |\n", "absent"),
+        ('## Status\nFUNCTIONAL\n\n## Bugs Skipped\n| x | prints "PENDING-RELEASE" |\n', "absent"),
         ("## Status\n<!-- leave PENDING-RELEASE as-is -->\nFUNCTIONAL\n", "absent"),
         ("# Notes\n\nPENDING-RELEASE\n", "absent"),
         ("A quoted `<!--` opener.\n\n## Status\nPENDING-RELEASE\n", "present"),
@@ -348,7 +346,8 @@ def test_placeholder_check_falls_back_to_the_whole_file_when_the_reader_cannot_r
     shadow = tmp_path / "shadow"
     (shadow / "pgai_agent_kanban").mkdir(parents=True)
     (shadow / "pgai_agent_kanban" / "__init__.py").write_text(
-        "raise ImportError('section reader unavailable in this fixture')\n", encoding="utf-8",
+        "raise ImportError('section reader unavailable in this fixture')\n",
+        encoding="utf-8",
     )
     elsewhere = tmp_path / "elsewhere.md"
     elsewhere.write_text("## Status\nFUNCTIONAL\n\n## Bugs Skipped\nPENDING-RELEASE quoted\n", encoding="utf-8")
@@ -375,7 +374,9 @@ def test_placeholder_check_falls_back_to_the_whole_file_when_the_reader_cannot_r
     ids=["placeholder-word-in-file", "no-placeholder-word"],
 )
 def test_placeholder_check_searches_the_whole_file_when_the_reader_finds_no_status_heading(
-    tmp_path, body, expected,
+    tmp_path,
+    body,
+    expected,
 ):
     # The file has a '## Status' line, but only inside a comment, so the
     # section reader finds no Status section: the check cannot tell, and
@@ -423,7 +424,7 @@ def _lane_with_notes(tmp_path: pathlib.Path, notes: str, *, quoting_finding: boo
         )
         (lane.project_root / "bugs" / "BUG-0101-fixture.md").write_text(
             "# BUG-0101-fixture\n\n## Status\nopen\n\n## Symptom\n"
-            "The release stamp prints \"PENDING-RELEASE placeholder not found\" "
+            'The release stamp prints "PENDING-RELEASE placeholder not found" '
             "on notes that keep the template's guidance comment.\n\n"
             "## Severity\nmedium\n",
             encoding="utf-8",
@@ -437,7 +438,9 @@ def _lane_with_notes(tmp_path: pathlib.Path, notes: str, *, quoting_finding: boo
 def _head_subject(lane) -> str:
     return subprocess.run(
         ["git", "-C", str(lane.repo), "log", "-1", "--format=%s"],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
 
@@ -453,9 +456,9 @@ def test_step_4e_stamps_template_notes_that_quote_the_placeholder_elsewhere(tmp_
     body = _status_body(notes)
     assert "\nKNOWN-BUGS\n" in body and _PLACEHOLDER not in body, body
     skipped = notes.split("\n## Bugs Skipped\n", 1)[1].split("\n## ", 1)[0]
-    assert 'prints "PENDING-RELEASE placeholder not found"' in skipped, (
-        f"the stamp renders the skipped bug's substance, word and all:\n{skipped}"
-    )
+    assert (
+        'prints "PENDING-RELEASE placeholder not found"' in skipped
+    ), f"the stamp renders the skipped bug's substance, word and all:\n{skipped}"
     assert _PLACEHOLDER in notes.split("\n## Status\n", 1)[0], "the top-of-file comment is kept"
     assert _head_subject(lane) == f"Stamp release-notes/{VERSION}.md ## Status: KNOWN-BUGS"
 
@@ -487,7 +490,7 @@ def test_step_4e_still_halts_when_the_placeholder_survives_under_status(tmp_path
     "notes",
     [
         "<!-- WRITER leaves PENDING-RELEASE below -->\n# Release Notes\n\n## Status\nKNOWN-BUGS\n\n"
-        "## Bugs Skipped\n| A defect. | internal-only | LOW | prints \"PENDING-RELEASE placeholder not found\". |\n",
+        '## Bugs Skipped\n| A defect. | internal-only | LOW | prints "PENDING-RELEASE placeholder not found". |\n',
         "# Release Notes\n\n## Status\nKNOWN-BUGS\n\n## Summary\nText.\n",
     ],
     ids=["concrete-status-word-elsewhere", "already-stamped-rerun"],
@@ -584,7 +587,9 @@ def test_step_4e_halts_when_the_stamp_step_fails_under_set_e(tmp_path, _git):
     lane = _lane_with_notes(tmp_path, notes)
 
     result = run_ship_policy(
-        tmp_path, lane, before="cm_stamp_release_notes_status() { echo stub-stamp-ran >&2; return 7; }",
+        tmp_path,
+        lane,
+        before="cm_stamp_release_notes_status() { echo stub-stamp-ran >&2; return 7; }",
     )
 
     assert result.returncode != 0, _diag(result)

@@ -26,11 +26,11 @@
 #   [release] deferral posture: DEFER-LOW-BUGS, project.cfg, kanban.cfg
 #                                                  (bugs block, deferred count)
 #
-# Designed to run under `watch -t -c -n $REFRESH_INTERVAL metrics.sh`
+# Designed to run under `cadence-loop.sh --interval $REFRESH_INTERVAL -- metrics.sh`
 # in the tmux Metrics window created by dashboard/create.sh.
-# The -c flag in watch preserves ANSI color sequences (truecolor safe).
+# cadence-loop.sh passes ANSI color sequences through unmodified (truecolor safe).
 # This script does NOT use `clear` at the top level — truecolor is preserved
-# because watch -c handles screen clearing itself.
+# because cadence-loop.sh handles screen clearing itself.
 #
 # Usage:
 #   metrics.sh [--kanban-root <path>] [--no-color] [--now <iso>]
@@ -53,13 +53,18 @@
 # Exits 0 always; renders friendly placeholders on missing data.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -81,12 +86,6 @@ while [[ $# -gt 0 ]]; do
     --now)
       RENDER_NOW="${2:-}"
       shift 2
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2

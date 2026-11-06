@@ -34,6 +34,5 @@ def _assert_project_less_routing(resolved_path: str, kanban_root: pathlib.Path) 
     """Controlled kanban_root-relative form: no hardcoded absolute-path literal."""
     resolved_relative_parts = pathlib.Path(resolved_path).relative_to(kanban_root).parts
     assert "projects" not in resolved_relative_parts, (
-        f"Project-less debug log was incorrectly routed to a project directory: "
-        f"{resolved_path}"
+        f"Project-less debug log was incorrectly routed to a project directory: " f"{resolved_path}"
     )

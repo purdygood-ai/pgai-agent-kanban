@@ -65,7 +65,6 @@ from __future__ import annotations
 import pathlib
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path to show-queues.sh.
@@ -190,15 +189,11 @@ def test_human_approve_task_with_valid_queue_marker_renders_without_warning(
     result = _run_show_queues(tmp_path)
 
     # Script must exit cleanly
-    assert result.returncode == 0, (
-        f"show-queues.sh exited with {result.returncode}; "
-        f"stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"show-queues.sh exited with {result.returncode}; " f"stderr: {result.stderr!r}"
 
     # Human section must be present — confirms the task was rendered at all
     assert _TASK_ID in result.stdout, (
-        f"Expected {_TASK_ID!r} in output but it was absent.\n"
-        f"stdout:\n{result.stdout}"
+        f"Expected {_TASK_ID!r} in output but it was absent.\n" f"stdout:\n{result.stdout}"
     )
 
     # The load-bearing assertion: zero '⚠ no queue entry' occurrences
@@ -223,15 +218,11 @@ def test_human_approve_task_without_queue_entry_renders_warning(
     result = _run_show_queues(tmp_path)
 
     # Script must exit cleanly regardless of queue state
-    assert result.returncode == 0, (
-        f"show-queues.sh exited with {result.returncode}; "
-        f"stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"show-queues.sh exited with {result.returncode}; " f"stderr: {result.stderr!r}"
 
     # Human section must be present
     assert _TASK_ID in result.stdout, (
-        f"Expected {_TASK_ID!r} in output but it was absent.\n"
-        f"stdout:\n{result.stdout}"
+        f"Expected {_TASK_ID!r} in output but it was absent.\n" f"stdout:\n{result.stdout}"
     )
 
     # The guard assertion: warning IS present when queue entry is missing
@@ -260,14 +251,11 @@ def _build_resolve_fixture(root: pathlib.Path) -> None:
     an empty queues/ directory -- enough for show-queues.sh's compact
     render to produce all-zero counts without erroring."""
     (root / "projects.cfg").write_text(
-        f"[project:{_RESOLVE_PROJ}]\npriority=1\n"
-        f"[project:{_RESOLVE_SIBLING}]\npriority=2\n",
+        f"[project:{_RESOLVE_PROJ}]\npriority=1\n" f"[project:{_RESOLVE_SIBLING}]\npriority=2\n",
         encoding="utf-8",
     )
     for name in (_RESOLVE_PROJ, _RESOLVE_SIBLING):
-        (root / "projects" / name / "tasks" / "queues").mkdir(
-            parents=True, exist_ok=True
-        )
+        (root / "projects" / name / "tasks" / "queues").mkdir(parents=True, exist_ok=True)
 
 
 def _run_show_queues_argv(
@@ -313,12 +301,8 @@ def test_project_exact_name_and_unambiguous_prefix_render_identical_board(
     exact_result = _run_show_queues_argv(tmp_path, ["--project", _RESOLVE_PROJ])
     prefix_result = _run_show_queues_argv(tmp_path, ["--project", "resolve"])
 
-    assert exact_result.returncode == 0, (
-        f"exact-name invocation failed: {exact_result.stderr}"
-    )
-    assert prefix_result.returncode == 0, (
-        f"unambiguous-prefix invocation failed: {prefix_result.stderr}"
-    )
+    assert exact_result.returncode == 0, f"exact-name invocation failed: {exact_result.stderr}"
+    assert prefix_result.returncode == 0, f"unambiguous-prefix invocation failed: {prefix_result.stderr}"
     assert prefix_result.stdout == exact_result.stdout, (
         "an unambiguous prefix must render the identical board as the full "
         f"name.\nexact:\n{exact_result.stdout}\nprefix:\n{prefix_result.stdout}"
@@ -334,9 +318,7 @@ def test_unregistered_project_name_refuses_dual_channel_and_renders_no_board(
     for a project that was never found."""
     _build_resolve_fixture(tmp_path)
 
-    result = _run_show_queues_argv(
-        tmp_path, ["--project", "definitely-unregistered-project-name"]
-    )
+    result = _run_show_queues_argv(tmp_path, ["--project", "definitely-unregistered-project-name"])
 
     assert result.returncode != 0, (
         f"expected a non-zero exit for an unregistered project name; "
@@ -347,18 +329,14 @@ def test_unregistered_project_name_refuses_dual_channel_and_renders_no_board(
     assert "remedy:" in result.stderr, result.stderr
     # No board rendered: none of the compact-mode agent rows, and no
     # "Active provider" preamble line, ever reach stdout.
-    assert result.stdout == "", (
-        f"expected no board rendered for an unresolved project; "
-        f"stdout:\n{result.stdout}"
-    )
+    assert result.stdout == "", f"expected no board rendered for an unresolved project; " f"stdout:\n{result.stdout}"
 
 
 def _assert_no_project_refusal(result: subprocess.CompletedProcess) -> None:
     """Exit 1, the show_queues.no_project dual-channel block on stderr, and
     nothing at all on stdout -- no provider line, no counter row."""
     assert result.returncode == 1, (
-        f"expected exit 1 with no project named; "
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"expected exit 1 with no project named; " f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     lines = result.stderr.splitlines()
     assert "error:   show_queues.no_project" in lines, result.stderr
@@ -404,9 +382,7 @@ def test_absent_project_flag_with_details_iterates_every_registered_project(
 
     result = _run_show_queues_argv(tmp_path, ["--details"])
 
-    assert result.returncode == 0, (
-        f"show-queues.sh --details with no --project failed: {result.stderr}"
-    )
+    assert result.returncode == 0, f"show-queues.sh --details with no --project failed: {result.stderr}"
     listed = result.stdout.splitlines()
     for name, task_id in task_ids.items():
         assert f"  {task_id}" in listed, f"{name}'s task missing:\n{result.stdout}"
@@ -432,18 +408,14 @@ def test_unresolvable_project_name_on_registryless_root_refuses_and_renders_no_b
     result = _run_show_queues_argv(tmp_path, ["--project", "bogus-name"])
 
     assert result.returncode != 0, (
-        f"expected a non-zero exit on a registry-less root; "
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"expected a non-zero exit on a registry-less root; " f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     assert "error:" in result.stderr, result.stderr
     assert "message:" in result.stderr, result.stderr
     assert "remedy:" in result.stderr, result.stderr
     # No board rendered: none of the compact-mode agent rows, and no
     # "Active provider" preamble line, ever reach stdout.
-    assert result.stdout == "", (
-        f"expected no board rendered on a registry-less root; "
-        f"stdout:\n{result.stdout}"
-    )
+    assert result.stdout == "", f"expected no board rendered on a registry-less root; " f"stdout:\n{result.stdout}"
 
 
 def _build_single_project_root(root: pathlib.Path) -> None:
@@ -475,9 +447,7 @@ def test_absent_project_flag_refuses_on_a_single_project_root_with_real_queues(
     _assert_no_project_refusal(_run_show_queues_argv(tmp_path, []))
 
     details_result = _run_show_queues_argv(tmp_path, ["--details"])
-    assert details_result.returncode == 0, (
-        f"--details mode failed on a registry-less root: {details_result.stderr}"
-    )
+    assert details_result.returncode == 0, f"--details mode failed on a registry-less root: {details_result.stderr}"
 
 
 def test_show_multi_registryless_queues_fallback_surfaces_the_refusal(

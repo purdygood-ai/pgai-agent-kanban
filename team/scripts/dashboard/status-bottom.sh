@@ -82,8 +82,8 @@
 #   When no halt files exist anywhere, no halt segment is rendered at all.
 #   When no pending approvals exist the APPROVAL segment is omitted.
 #
-# Width budget / truncation rule (PGAI_DASHBOARD_STATUS_MAX_WIDTH, default
-# 320 characters): if the assembled line would exceed the budget, DROPPABLE
+# Width budget / truncation rule (PGAI_DASHBOARD_STATUS_MAX_WIDTH, else
+# kanban.cfg [dashboard] status_max_width, default 320 characters): if the assembled line would exceed the budget, DROPPABLE
 # (informational) segments are removed one at a time, starting from the
 # RIGHTMOST droppable segment and working left, re-measuring after each
 # removal, until the line fits or no droppable segment remains.  PROTECTED
@@ -118,22 +118,14 @@
 #       -h/--help also exits 0 after printing this usage.
 
 set -uo pipefail
-# -h/--help prints the header comment above and exits 0. It is handled before
-# env_bootstrap.sh so help never resolves a kanban root, reads an argument as
-# data, or starts the script's own work.
-for __help_arg in "$@"; do
-  case "$__help_arg" in
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
-      ;;
-  esac
-done
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Arguments
@@ -153,12 +145,12 @@ _DSB_EXPLICIT_PROJECT="${2:+yes}"
 [[ -f "$KANBAN_ROOT/env" ]]                    && source "$KANBAN_ROOT/env"                 2>/dev/null || true
 # Operator user config, then [chain] pm_mode (config_loader.sh).
 # shellcheck source=../lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT" 2>/dev/null || true
 # Source: kanban.cfg [paths] — INI format replaces legacy config.cfg
 # Source ini_parser.sh for read_ini (project_paths.sh not available here).
 # Source project_paths.sh and projects.sh for projects_cfg_list (project name resolution).
-_DSB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_DSB_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 [[ -f "${_DSB_SCRIPT_DIR}/../lib/ini_parser.sh" ]]    && source "${_DSB_SCRIPT_DIR}/../lib/ini_parser.sh"
 [[ -f "${_DSB_SCRIPT_DIR}/../lib/project_paths.sh" ]] && source "${_DSB_SCRIPT_DIR}/../lib/project_paths.sh"
 [[ -f "${_DSB_SCRIPT_DIR}/../lib/projects.sh" ]]      && source "${_DSB_SCRIPT_DIR}/../lib/projects.sh"
@@ -609,7 +601,8 @@ _dsb_assemble() {
     printf '%s' "$out"
 }
 
-_DSB_MAX_WIDTH="${PGAI_DASHBOARD_STATUS_MAX_WIDTH:-320}"
+config_export_tunables "$KANBAN_ROOT/kanban.cfg"
+_DSB_MAX_WIDTH="$PGAI_DASHBOARD_STATUS_MAX_WIDTH"
 _DSB_OUT="$(_dsb_assemble)"
 while [[ "${#_DSB_OUT}" -gt "$_DSB_MAX_WIDTH" ]]; do
     _dsb_dropped=0

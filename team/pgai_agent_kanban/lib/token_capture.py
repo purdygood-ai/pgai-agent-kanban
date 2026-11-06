@@ -59,7 +59,7 @@ import json
 import os
 import pathlib
 import sys
-from typing import Optional, Union
+from typing import Union
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path: put the package root this file sits in first,
@@ -99,7 +99,7 @@ _TOKEN_COUNT_KEYS = (
 )
 
 
-def coerce_elapsed_seconds(value: Union[int, str]) -> int:
+def coerce_elapsed_seconds(value: int | str) -> int:
     """Return *value* as whole elapsed seconds.
 
     An int is returned as is. A string counts only when ``str.isdigit()``
@@ -163,10 +163,10 @@ def write_tokens_record(
     model: str,
     provider: str,
     agent: str,
-    elapsed_seconds: Union[int, str],
+    elapsed_seconds: int | str,
     rc_version: str = "none",
     effort: str = "",
-    now: Optional[str] = None,
+    now: str | None = None,
 ) -> dict:
     """Write one invocation's usage record into a task's ``tokens.json``.
 
@@ -220,7 +220,7 @@ def write_tokens_record(
     elapsed = coerce_elapsed_seconds(elapsed_seconds)
     rc_version = rc_version or "none"
     if now is None:
-        now = datetime.datetime.now(tz=datetime.timezone.utc).strftime(TIMESTAMP_FORMAT)
+        now = datetime.datetime.now(tz=datetime.UTC).strftime(TIMESTAMP_FORMAT)
 
     if usage.get("captured") is False:
         record = {
@@ -241,9 +241,7 @@ def write_tokens_record(
         return record
 
     existing = _load_existing_record(tokens_file)
-    effective_rc_version = (
-        rc_version if rc_version != "none" else existing.get("rc_version", "none") or "none"
-    )
+    effective_rc_version = rc_version if rc_version != "none" else existing.get("rc_version", "none") or "none"
     new_total_cost = usage.get("total_cost_usd")
     new_model_usage = usage.get("model_usage")
 
@@ -280,7 +278,7 @@ def write_tokens_record(
     return record
 
 
-def dominant_output_token_model(tokens_json_path: PathLike) -> Optional[str]:
+def dominant_output_token_model(tokens_json_path: PathLike) -> str | None:
     """Return the model whose tokens.json ``model_usage`` entry has the
     greatest ``output_tokens``, or None when that cannot be determined.
 
@@ -390,7 +388,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parse.add_argument("json_file", help="The captured 'claude -p --output-format json' response.")
     parse.add_argument("result_text_file", help="Where the agent's text is written.")
     parse.add_argument(
-        "requested_model", nargs="?", default="",
+        "requested_model",
+        nargs="?",
+        default="",
         help="The model the wake requested; preferred as canonical_model_id when the response used it.",
     )
     parse.set_defaults(func=_cmd_parse_claude_json)
@@ -407,11 +407,15 @@ def _build_parser() -> argparse.ArgumentParser:
     write.add_argument("agent", help="Agent role, e.g. coder.")
     write.add_argument("elapsed_seconds", help="Seconds this invocation took; anything but digits reads as 0.")
     write.add_argument(
-        "rc_version", nargs="?", default="none",
+        "rc_version",
+        nargs="?",
+        default="none",
         help="RC version in scope, e.g. v1.2.3; empty or 'none' keeps the existing value (default: none).",
     )
     write.add_argument(
-        "effort", nargs="?", default="",
+        "effort",
+        nargs="?",
+        default="",
         help="Reasoning effort in force, e.g. high; empty keeps the existing value or omits the key.",
     )
     write.set_defaults(func=_cmd_write_tokens)

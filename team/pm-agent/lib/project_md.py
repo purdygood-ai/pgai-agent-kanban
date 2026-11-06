@@ -41,12 +41,10 @@ Raises ProjectMdError with a descriptive message when a file is missing or
 structurally unparseable.  Validation errors are returned as a list (not raised).
 """
 
-import os
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 try:
     from .workflow_loader import WorkflowDefinition
@@ -60,7 +58,6 @@ if _TEAM_ROOT not in sys.path:
     sys.path.insert(0, _TEAM_ROOT)
 from pgai_agent_kanban.task_status import read_section  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Constants — liberal field-header patterns
 # ---------------------------------------------------------------------------
@@ -69,38 +66,41 @@ from pgai_agent_kanban.task_status import read_section  # noqa: E402
 # reading matches each in any letter case with any run of blanks (none
 # included) around its words, so minor spacing and case differences work.
 _HEADING_WORKFLOW_TYPE = ("Workflow Type",)
-_HEADING_DESCRIPTION   = ("Description",)
-_HEADING_OUTPUT_NAME   = ("Output Name",)
+_HEADING_DESCRIPTION = ("Description",)
+_HEADING_OUTPUT_NAME = ("Output Name",)
 _HEADING_OUTPUT_FORMATS = ("Output Formats", "Output Format")
-_HEADING_PRIORITY      = ("Priority",)
-_HEADING_NEXT_VERSION  = ("Next Version",)
+_HEADING_PRIORITY = ("Priority",)
+_HEADING_NEXT_VERSION = ("Next Version",)
 
 # Project title: "# Project: <name>" (first line, liberal spacing)
-_TITLE_RE = re.compile(r'^#\s*Project\s*:\s*(.+?)\s*$', re.IGNORECASE | re.MULTILINE)
+_TITLE_RE = re.compile(r"^#\s*Project\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 # List-item stripper for Output Formats: "- item" or "* item"
-_LIST_ITEM_RE = re.compile(r'^\s*[-*]\s*(.+?)\s*$')
+_LIST_ITEM_RE = re.compile(r"^\s*[-*]\s*(.+?)\s*$")
 
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ProjectMetadata:
     """Metadata stored in PROJECT.md."""
-    name: str                           # from title line "# Project: <name>"
-    workflow_type: str = ""             # ## Workflow Type
-    description: str = ""              # ## Description
-    output_name: str = ""              # ## Output Name
+
+    name: str  # from title line "# Project: <name>"
+    workflow_type: str = ""  # ## Workflow Type
+    description: str = ""  # ## Description
+    output_name: str = ""  # ## Output Name
     output_formats: list = field(default_factory=list)  # ## Output Formats (list[str])
-    priority: Optional[int] = None     # ## Priority (integer)
-    next_version: int = 1              # ## Next Version
+    priority: int | None = None  # ## Priority (integer)
+    next_version: int = 1  # ## Next Version
 
 
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
+
 
 class ProjectMdError(Exception):
     """Raised when PROJECT.md is missing or structurally unparseable."""
@@ -110,7 +110,8 @@ class ProjectMdError(Exception):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _find_section(text: str, headings: tuple) -> Optional[str]:
+
+def _find_section(text: str, headings: tuple) -> str | None:
     """Return the body of the first ``## <heading>`` section found, or None.
 
     Each name in *headings* is read in turn through ``task_status.read_section``
@@ -138,6 +139,7 @@ def _parse_list_body(body: str) -> list:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def read_project_md(project_path) -> ProjectMetadata:
     """Parse PROJECT.md from a project directory and return ProjectMetadata.
 
@@ -163,13 +165,9 @@ def read_project_md(project_path) -> ProjectMetadata:
     try:
         text = md_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        raise ProjectMdError(
-            f"PROJECT.md not found in '{project_path}'"
-        )
+        raise ProjectMdError(f"PROJECT.md not found in '{project_path}'")
     except OSError as exc:
-        raise ProjectMdError(
-            f"Cannot read PROJECT.md in '{project_path}': {exc}"
-        ) from exc
+        raise ProjectMdError(f"Cannot read PROJECT.md in '{project_path}': {exc}") from exc
 
     # Extract project name from title
     title_match = _TITLE_RE.search(text)
@@ -319,10 +317,7 @@ def validate_project_md(
     if not metadata.workflow_type:
         errors.append("Missing required field: Workflow Type")
     elif metadata.workflow_type != workflow.name:
-        errors.append(
-            f"Workflow Type '{metadata.workflow_type}' does not match "
-            f"workflow name '{workflow.name}'"
-        )
+        errors.append(f"Workflow Type '{metadata.workflow_type}' does not match " f"workflow name '{workflow.name}'")
 
     # description is required
     if not metadata.description:
@@ -338,23 +333,19 @@ def validate_project_md(
     else:
         for i, fmt in enumerate(metadata.output_formats):
             if not isinstance(fmt, str) or not fmt.strip():
-                errors.append(
-                    f"Output Formats entry {i} must be a non-empty string"
-                )
+                errors.append(f"Output Formats entry {i} must be a non-empty string")
 
     # next_version must be a positive integer
     if not isinstance(metadata.next_version, int) or metadata.next_version < 1:
-        errors.append(
-            f"Next Version must be a positive integer, got {metadata.next_version!r}"
-        )
+        errors.append(f"Next Version must be a positive integer, got {metadata.next_version!r}")
 
     # Check workflow-specific required inputs that map to PROJECT.md fields.
     # The convention: if a required input item matches a known PROJECT.md field
     # key pattern, verify that field is populated.
     _FIELD_MAP = {
-        re.compile(r'output.?name', re.IGNORECASE): ("output_name", metadata.output_name),
-        re.compile(r'description', re.IGNORECASE): ("description", metadata.description),
-        re.compile(r'workflow.?type', re.IGNORECASE): ("workflow_type", metadata.workflow_type),
+        re.compile(r"output.?name", re.IGNORECASE): ("output_name", metadata.output_name),
+        re.compile(r"description", re.IGNORECASE): ("description", metadata.description),
+        re.compile(r"workflow.?type", re.IGNORECASE): ("workflow_type", metadata.workflow_type),
     }
     for required_input in workflow.inputs.required:
         for pattern, (field_name, field_value) in _FIELD_MAP.items():

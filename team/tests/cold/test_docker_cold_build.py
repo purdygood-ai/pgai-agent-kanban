@@ -111,6 +111,7 @@ _REPO_ROOT = _TEAM_DIR.parent
 
 class _FlavorConfig(NamedTuple):
     """Build parameters for one image flavor."""
+
     name: str
     dockerfile: pathlib.Path
     build_context: pathlib.Path
@@ -136,9 +137,7 @@ def _discover_flavors(repo_root: pathlib.Path) -> list[_FlavorConfig]:
 
 
 _FLAVORS: list[_FlavorConfig] = [
-    flavor
-    for flavor in _discover_flavors(_REPO_ROOT)
-    if flavor.name in load_selected_container_images(_REPO_ROOT)
+    flavor for flavor in _discover_flavors(_REPO_ROOT) if flavor.name in load_selected_container_images(_REPO_ROOT)
 ]
 
 
@@ -157,6 +156,7 @@ def _flavor_by_name(name: str) -> _FlavorConfig:
         f"flavor {name!r} is not declared in team/config/container-images.txt; "
         f"declared flavors: {[f.name for f in _FLAVORS]}"
     )
+
 
 # Container engines this lane checks for. Every current pgai-agent-kanban
 # deployment target runs one of these two; a host lacking one still runs
@@ -364,8 +364,7 @@ def _build_flavor_image(
     image_tag = tag or _image_tag(engine, flavor.name)
     build_arg_flags = build_arg_flags or []
     print(
-        f"\n[cold-build] [{engine}] [{flavor.name}] Building (--no-cache --pull) "
-        f"from {flavor.dockerfile} ...",
+        f"\n[cold-build] [{engine}] [{flavor.name}] Building (--no-cache --pull) " f"from {flavor.dockerfile} ...",
         flush=True,
     )
     result = subprocess.run(
@@ -416,19 +415,21 @@ def _build_flavor_image(
 # Module-scoped parametrized fixture: cold-build each (engine, flavor) pair
 # ---------------------------------------------------------------------------
 
-_ENGINE_FLAVOR_PAIRS: list[tuple[str, _FlavorConfig]] = [
-    (engine, flavor) for engine in _ENGINES for flavor in _FLAVORS
-]
+_ENGINE_FLAVOR_PAIRS: list[tuple[str, _FlavorConfig]] = [(engine, flavor) for engine in _ENGINES for flavor in _FLAVORS]
 _ENGINE_FLAVOR_IDS = [f"{engine}-{flavor.name}" for engine, flavor in _ENGINE_FLAVOR_PAIRS]
 
 
 @pytest.fixture(scope="module", params=_ENGINE_FLAVOR_PAIRS, ids=_ENGINE_FLAVOR_IDS)
-def cold_built_image(request: pytest.FixtureRequest) -> tuple[str, str, str] | None:
+def cold_built_image(
+    request: pytest.FixtureRequest, operator_container_tier: None
+) -> tuple[str, str, str] | None:
     """
     Cold-build one (engine, flavor) pair and yield (engine, flavor_name, image_tag).
 
     Parametrized over every discovered flavor crossed with every candidate
-    engine. Narrate-skips this specific pair (never the whole lane) when
+    engine. Skips without the operator's container-tier authorization
+    (operator_container_tier, tests/cold/conftest.py) before any engine
+    command. Narrate-skips this specific pair (never the whole lane) when
     engine is unavailable on the host, or when the flavor's base-image
     registry is unreachable under engine. Removes the built image in
     teardown so the lane leaves no images behind on success or failure.
@@ -488,11 +489,7 @@ def test_extract_base_images_returns_each_stage_image(tmp_path: pathlib.Path) ->
 def test_extract_base_images_skips_local_stage_reference(tmp_path: pathlib.Path) -> None:
     """A later FROM referencing an earlier stage's alias is not an external pull."""
     dockerfile = tmp_path / "Dockerfile"
-    dockerfile.write_text(
-        "FROM debian:12 AS base\n"
-        "FROM base\n"
-        "RUN echo hi\n"
-    )
+    dockerfile.write_text("FROM debian:12 AS base\n" "FROM base\n" "RUN echo hi\n")
     assert _extract_base_images(dockerfile) == ["debian:12"]
 
 
@@ -527,16 +524,13 @@ def test_engine_absent_skip_reason_names_the_engine(
 def _write_broken_dockerfile(tmp_path: pathlib.Path, base_image: str) -> pathlib.Path:
     """Write a Dockerfile whose RUN step cannot succeed against base_image."""
     dockerfile = tmp_path / "Dockerfile.broken"
-    dockerfile.write_text(
-        f"FROM {base_image}\n"
-        "RUN this-command-does-not-exist-and-never-will\n"
-    )
+    dockerfile.write_text(f"FROM {base_image}\n" "RUN this-command-does-not-exist-and-never-will\n")
     return dockerfile
 
 
 @pytest.mark.parametrize("engine", _ENGINES)
 def test_broken_run_step_fails_loud_on_reachable_base_image(
-    tmp_path: pathlib.Path, engine: str
+    tmp_path: pathlib.Path, engine: str, operator_container_tier: None
 ) -> None:
     """
     A Dockerfile whose RUN step cannot succeed fails the lane — not skips —
@@ -552,9 +546,7 @@ def test_broken_run_step_fails_loud_on_reachable_base_image(
         pytest.skip(f"{engine} not available; cannot demonstrate build behavior")
 
     dockerfile = _write_broken_dockerfile(tmp_path, "alpine:3")
-    flavor = _FlavorConfig(
-        name="synthetic-broken-run", dockerfile=dockerfile, build_context=tmp_path
-    )
+    flavor = _FlavorConfig(name="synthetic-broken-run", dockerfile=dockerfile, build_context=tmp_path)
     tag = _image_tag(engine, flavor.name, "broken")
     with pytest.raises(pytest.fail.Exception):
         _build_flavor_image(engine, flavor, tag=tag)
@@ -562,7 +554,7 @@ def test_broken_run_step_fails_loud_on_reachable_base_image(
 
 @pytest.mark.parametrize("engine", _ENGINES)
 def test_unreachable_base_image_skips_naming_the_probe(
-    tmp_path: pathlib.Path, engine: str
+    tmp_path: pathlib.Path, engine: str, operator_container_tier: None
 ) -> None:
     """
     An unreachable base image registry skips (does not fail) under every
@@ -580,9 +572,7 @@ def test_unreachable_base_image_skips_naming_the_probe(
         tmp_path,
         "this-registry-host-does-not-exist.invalid/nope:latest",
     )
-    flavor = _FlavorConfig(
-        name="synthetic-unreachable-base", dockerfile=dockerfile, build_context=tmp_path
-    )
+    flavor = _FlavorConfig(name="synthetic-unreachable-base", dockerfile=dockerfile, build_context=tmp_path)
     tag = _image_tag(engine, flavor.name, "unreachable")
     with pytest.raises(pytest.skip.Exception) as exc_info:
         _build_flavor_image(engine, flavor, tag=tag)
@@ -617,9 +607,9 @@ def _write_smoke_check_split_dockerfile(tmp_path: pathlib.Path, base_image: str)
         # models npm reporting a successful install for a package version
         # whose platform binary is missing or broken.
         "RUN printf '#!/bin/sh\\necho codex: launcher error, no working binary for "
-        "pinned version %s >&2\\nexit 1\\n' \"$CODEX_VERSION\" > /usr/local/bin/codex "
+        'pinned version %s >&2\\nexit 1\\n\' "$CODEX_VERSION" > /usr/local/bin/codex '
         "&& chmod +x /usr/local/bin/codex "
-        "&& echo \"install layer: codex ${CODEX_VERSION} placed, launcher untested\"\n"
+        '&& echo "install layer: codex ${CODEX_VERSION} placed, launcher untested"\n'
         # Smoke-check layer: its own RUN, separate from the install layer
         # above -- the layer this fixture's mutation must fail in.
         "RUN codex --version\n"
@@ -629,7 +619,7 @@ def _write_smoke_check_split_dockerfile(tmp_path: pathlib.Path, base_image: str)
 
 @pytest.mark.parametrize("engine", _ENGINES)
 def test_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
-    tmp_path: pathlib.Path, engine: str
+    tmp_path: pathlib.Path, engine: str, operator_container_tier: None
 ) -> None:
     """
     A CODEX_VERSION whose installed launcher cannot answer --version fails
@@ -644,9 +634,7 @@ def test_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
         pytest.skip(f"{engine} not available; cannot demonstrate build behavior")
 
     dockerfile = _write_smoke_check_split_dockerfile(tmp_path, "alpine:3")
-    flavor = _FlavorConfig(
-        name="synthetic-bad-codex-version", dockerfile=dockerfile, build_context=tmp_path
-    )
+    flavor = _FlavorConfig(name="synthetic-bad-codex-version", dockerfile=dockerfile, build_context=tmp_path)
     tag = _image_tag(engine, flavor.name, "bad-codex")
     # The exact value doesn't drive the synthetic launcher's behavior above
     # (it always fails, modeling a codex release whose platform binary is
@@ -668,9 +656,7 @@ def test_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
         f"smoke-check layer specifically, not the install layer above it; got: "
         f"{failure_text}"
     )
-    assert "codex" in failure_text.lower(), (
-        f"expected the failure to name codex; got: {failure_text}"
-    )
+    assert "codex" in failure_text.lower(), f"expected the failure to name codex; got: {failure_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -687,9 +673,7 @@ def test_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
 _REAL_SMOKE_CHECK_START = re.compile(r"^RUN\s+claude\s+--version\b")
 
 
-def _extract_dockerfile_instruction(
-    dockerfile: pathlib.Path, start_pattern: re.Pattern[str]
-) -> str:
+def _extract_dockerfile_instruction(dockerfile: pathlib.Path, start_pattern: re.Pattern[str]) -> str:
     """
     Return the verbatim source text of the first Dockerfile instruction
     whose first line matches start_pattern, including any backslash-
@@ -715,9 +699,7 @@ def _extract_dockerfile_instruction(
     )
 
 
-def _write_real_smoke_check_dockerfile(
-    flavor: _FlavorConfig, tmp_path: pathlib.Path, base_image: str
-) -> pathlib.Path:
+def _write_real_smoke_check_dockerfile(flavor: _FlavorConfig, tmp_path: pathlib.Path, base_image: str) -> pathlib.Path:
     """
     Write a synthetic Dockerfile that installs stand-in claude/codex
     launchers (fast, no npm registry round-trip) and then runs flavor's
@@ -733,9 +715,7 @@ def _write_real_smoke_check_dockerfile(
     specifically, exactly like the hand-written throwaway fixture above
     does, but coupled to the real file's own smoke-check instruction text.
     """
-    smoke_check_instruction = _extract_dockerfile_instruction(
-        flavor.dockerfile, _REAL_SMOKE_CHECK_START
-    )
+    smoke_check_instruction = _extract_dockerfile_instruction(flavor.dockerfile, _REAL_SMOKE_CHECK_START)
     dockerfile = tmp_path / "Dockerfile.real-flavor-smoke-check"
     dockerfile.write_text(
         f"FROM {base_image}\n"
@@ -748,17 +728,17 @@ def _write_real_smoke_check_dockerfile(
         "RUN printf '#!/bin/sh\\necho claude ${CLAUDE_CODE_VERSION}\\n' "
         "> /usr/local/bin/claude && chmod +x /usr/local/bin/claude "
         "&& printf '#!/bin/sh\\necho codex: launcher error, no working binary "
-        "for pinned version %s >&2\\nexit 1\\n' \"$CODEX_VERSION\" "
+        'for pinned version %s >&2\\nexit 1\\n\' "$CODEX_VERSION" '
         "> /usr/local/bin/codex && chmod +x /usr/local/bin/codex "
-        "&& echo \"install layer: claude ${CLAUDE_CODE_VERSION} and codex "
-        "${CODEX_VERSION} placed, launchers untested\"\n"
+        '&& echo "install layer: claude ${CLAUDE_CODE_VERSION} and codex '
+        '${CODEX_VERSION} placed, launchers untested"\n'
         f"{smoke_check_instruction}\n"
     )
     return dockerfile
 
 
 @pytest.mark.parametrize("engine", _ENGINES)
-def test_real_flavor_build_without_pins_fails_naming_the_unset_arg(engine: str) -> None:
+def test_real_flavor_build_without_pins_fails_naming_the_unset_arg(engine: str, operator_container_tier: None) -> None:
     """
     Building a real, shipped flavor's Dockerfile with no --build-arg at all
     fails, and the failure names the specific unset ARG -- proving the
@@ -781,7 +761,7 @@ def test_real_flavor_build_without_pins_fails_naming_the_unset_arg(engine: str) 
 
 @pytest.mark.parametrize("engine", _ENGINES)
 def test_real_flavor_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
-    tmp_path: pathlib.Path, engine: str
+    tmp_path: pathlib.Path, engine: str, operator_container_tier: None
 ) -> None:
     """
     A bad CODEX_VERSION fails at a real, shipped flavor's own smoke-check
@@ -819,8 +799,10 @@ def test_real_flavor_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
             synthetic_flavor,
             tag=tag,
             build_arg_flags=[
-                "--build-arg", f"CLAUDE_CODE_VERSION={good_claude_version}",
-                "--build-arg", f"CODEX_VERSION={bad_codex_version}",
+                "--build-arg",
+                f"CLAUDE_CODE_VERSION={good_claude_version}",
+                "--build-arg",
+                f"CODEX_VERSION={bad_codex_version}",
             ],
         )
     failure_text = str(exc_info.value)
@@ -829,9 +811,7 @@ def test_real_flavor_bad_codex_version_fails_the_smoke_check_layer_naming_codex(
         "smoke-check instruction ('claude --version && codex --version'), "
         f"not the install layer above it; got: {failure_text}"
     )
-    assert "codex" in failure_text.lower(), (
-        f"expected the failure to name codex; got: {failure_text}"
-    )
+    assert "codex" in failure_text.lower(), f"expected the failure to name codex; got: {failure_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -855,8 +835,7 @@ def test_image_builds_without_error(cold_built_image: tuple[str, str, str]) -> N
         timeout=15,
     )
     assert result.returncode == 0, (
-        f"Built image tag '{image_tag}' not found under {engine} after build; "
-        f"inspect stderr: {result.stderr}"
+        f"Built image tag '{image_tag}' not found under {engine} after build; " f"inspect stderr: {result.stderr}"
     )
 
 
@@ -876,9 +855,7 @@ def test_tmux_version_meets_floor_in_built_image(cold_built_image: tuple[str, st
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, (
-        f"tmux -V inside built image failed (rc={result.returncode}): {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux -V inside built image failed (rc={result.returncode}): {result.stderr}"
     version_line = result.stdout.strip()
     # Expected: "tmux 3.3a", "tmux 3.2a", or a git-snapshot build's
     # "tmux next-3.4" (Rocky 10's tmux-3.3a package reports this at
@@ -886,23 +863,21 @@ def test_tmux_version_meets_floor_in_built_image(cold_built_image: tuple[str, st
     # digit.digit pair anywhere in the version token rather than anchoring
     # at its start, so both formats parse the same way.
     parts = version_line.split()
-    assert len(parts) >= 2 and parts[0].lower() == "tmux", (
-        f"Unexpected tmux -V output: {version_line!r}"
-    )
+    assert len(parts) >= 2 and parts[0].lower() == "tmux", f"Unexpected tmux -V output: {version_line!r}"
     version_str = parts[1]
     match = re.search(r"(\d+)\.(\d+)", version_str)
     assert match is not None, f"Could not parse version from {version_str!r}"
     major, minor = int(match.group(1)), int(match.group(2))
-    assert (major, minor) >= (3, 1), (
-        f"tmux {version_str} inside built image is below required floor 3.1"
-    )
+    assert (major, minor) >= (3, 1), f"tmux {version_str} inside built image is below required floor 3.1"
 
 
 @pytest.mark.parametrize(
     "package, extra_engine_args, command_args",
     [
         pytest.param(
-            "ncurses (tput)", ["-e", "TERM=xterm-256color"], ["tput", "cols"],
+            "ncurses (tput)",
+            ["-e", "TERM=xterm-256color"],
+            ["tput", "cols"],
             id="tput",
         ),
         pytest.param("procps/procps-ng (watch)", [], ["watch", "--version"], id="watch"),
@@ -918,8 +893,7 @@ def test_package_available_in_built_image(
     """A spot-checked package's command runs successfully inside the cold-built image."""
     engine, _flavor_name, image_tag = cold_built_image
     result = subprocess.run(
-        [engine, "run", "--rm", "--entrypoint", "", *extra_engine_args,
-         image_tag, *command_args],
+        [engine, "run", "--rm", "--entrypoint", "", *extra_engine_args, image_tag, *command_args],
         capture_output=True,
         text=True,
         timeout=30,
@@ -934,22 +908,29 @@ def test_python3_available_in_built_image(cold_built_image: tuple[str, str, str]
     """python3 is present and is >= 3.12 inside the cold-built image."""
     engine, _flavor_name, image_tag = cold_built_image
     result = subprocess.run(
-        [engine, "run", "--rm", "--entrypoint", "", image_tag,
-         "python3", "-c", "import sys; print(sys.version_info[:2])"],
+        [
+            engine,
+            "run",
+            "--rm",
+            "--entrypoint",
+            "",
+            image_tag,
+            "python3",
+            "-c",
+            "import sys; print(sys.version_info[:2])",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert result.returncode == 0, (
-        f"python3 check failed inside built image (rc={result.returncode}): "
-        f"{result.stderr.strip()}"
+        f"python3 check failed inside built image (rc={result.returncode}): " f"{result.stderr.strip()}"
     )
     output = result.stdout.strip()
     import ast
+
     version_tuple = ast.literal_eval(output)
-    assert version_tuple >= (3, 12), (
-        f"python3 inside built image reports {version_tuple}; expected >= (3, 12)"
-    )
+    assert version_tuple >= (3, 12), f"python3 inside built image reports {version_tuple}; expected >= (3, 12)"
 
 
 if __name__ == "__main__":

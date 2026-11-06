@@ -64,7 +64,7 @@ class _Project:
         path.write_text(f"# {name}\n\n## Status\nrunning\n", encoding="utf-8")
         return path
 
-    def done_task(self, name: str, claims: str, release_version: "str | None") -> None:
+    def done_task(self, name: str, claims: str, release_version: str | None) -> None:
         task_dir = self.tasks / name
         task_dir.mkdir()
         body = f"# Task\n\n## Goal\nFix {claims}.\n"
@@ -140,7 +140,7 @@ def test_done_task_of_the_shipped_version_promotes_on_both_paths(tmp_path: Path,
 
 
 @pytest.mark.parametrize("written", [None, "none"], ids=["absent", "none"])
-def test_done_task_without_a_release_version_counts_for_nothing(tmp_path: Path, written: "str | None") -> None:
+def test_done_task_without_a_release_version_counts_for_nothing(tmp_path: Path, written: str | None) -> None:
     project = _Project(tmp_path)
     bundled = project.bug("BUG-9305-bundled.md")
     unbundled = project.bug("BUG-9306-unbundled.md")

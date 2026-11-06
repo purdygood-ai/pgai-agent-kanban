@@ -141,14 +141,14 @@ def test_empty_but_fresh_lock_file_is_contention_not_reaped(tmp_path: pathlib.Pa
             f"an empty lock file created this instant must be deferred to, not reaped.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "stale_reaped" not in result.stderr, (
-            f"no reap of any kind against a fresh provenance-less file.\nstderr: {result.stderr}"
-        )
+        assert (
+            "stale_reaped" not in result.stderr
+        ), f"no reap of any kind against a fresh provenance-less file.\nstderr: {result.stderr}"
         assert "lock.provenance.contended" in result.stderr, result.stderr
         assert "(no provenance recorded)" in result.stderr, result.stderr
-        assert "freshness window" in result.stderr, (
-            f"the contention narration must say why the file was not reaped.\nstderr: {result.stderr}"
-        )
+        assert (
+            "freshness window" in result.stderr
+        ), f"the contention narration must say why the file was not reaped.\nstderr: {result.stderr}"
         assert lock_file.exists(), "the fresh file was unlinked"
         assert lock_file.stat().st_ino == inode_before, "the fresh file was replaced"
         assert lock_file.stat().st_size == 0, "the fresh file was written into"
@@ -171,9 +171,9 @@ def test_empty_lock_file_older_than_the_freshness_window_is_still_reaped(
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "lock.provenance.stale_reaped.no_provenance" in result.stderr, result.stderr
-        assert f"{window}s freshness window" in result.stderr, (
-            f"the reap narration must name the window it applied.\nstderr: {result.stderr}"
-        )
+        assert (
+            f"{window}s freshness window" in result.stderr
+        ), f"the reap narration must name the window it applied.\nstderr: {result.stderr}"
         assert not lock_file.exists(), "the reaper's own acquisition must release cleanly"
         assert inode_before != 0
     finally:
@@ -229,13 +229,12 @@ def test_concurrent_reader_never_observes_an_empty_or_torn_lock_file(
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "PAIRS_DONE=40" in result.stdout
     assert seen == [], (
-        f"a concurrent reader observed a lock file that was empty or torn: {seen[:10]} "
-        f"({len(seen)} observations)"
+        f"a concurrent reader observed a lock file that was empty or torn: {seen[:10]} " f"({len(seen)} observations)"
     )
     assert not lock_file.exists(), "release must leave no lock file on disk"
-    assert sorted(p.name for p in lock_file.parent.iterdir()) == [], (
-        f"release must leave no trace, staging files included: {sorted(p.name for p in lock_file.parent.iterdir())}"
-    )
+    assert (
+        sorted(p.name for p in lock_file.parent.iterdir()) == []
+    ), f"release must leave no trace, staging files included: {sorted(p.name for p in lock_file.parent.iterdir())}"
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +298,13 @@ def test_injected_delay_race_never_reaps_a_held_lock_or_seats_two_holders(
             procs.append(
                 subprocess.Popen(
                     ["bash", "-c", _race_looper_script(lock_file, name, marker, violations, go)],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, cwd=str(_TEAM_DIR), env=dict(os.environ), start_new_session=True,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd=str(_TEAM_DIR),
+                    env=dict(os.environ),
+                    start_new_session=True,
                 )
             )
         go.touch()
@@ -317,21 +321,21 @@ def test_injected_delay_race_never_reaps_a_held_lock_or_seats_two_holders(
         f"two holders coexisted or a holder was not at the path:\n{violations.read_text()}\n"
         f"stdout:\n{combined_stdout}\nstderr:\n{combined_stderr}"
     )
-    assert "stale_reaped" not in combined_stderr, (
-        f"a held lock was reaped under the widened windows.\nstderr:\n{combined_stderr}"
-    )
-    assert "release_not_owner" not in combined_stderr, (
-        f"a releaser found its lock taken over -- a holder was displaced.\nstderr:\n{combined_stderr}"
-    )
+    assert (
+        "stale_reaped" not in combined_stderr
+    ), f"a held lock was reaped under the widened windows.\nstderr:\n{combined_stderr}"
+    assert (
+        "release_not_owner" not in combined_stderr
+    ), f"a releaser found its lock taken over -- a holder was displaced.\nstderr:\n{combined_stderr}"
     counts = dict(re.findall(r"^ACQUIRED=(\w+):(\d+)$", combined_stdout, re.M))
     assert set(counts) == {"alpha", "beta"}, combined_stdout
-    assert sum(int(v) for v in counts.values()) >= 2, (
-        f"both loopers must have run to completion: {counts}\nstderr:\n{combined_stderr}"
-    )
+    assert (
+        sum(int(v) for v in counts.values()) >= 2
+    ), f"both loopers must have run to completion: {counts}\nstderr:\n{combined_stderr}"
     assert not lock_file.exists(), "no lock file may survive the loopers"
-    assert sorted(p.name for p in lock_file.parent.iterdir()) == [], (
-        f"no staging litter may survive: {sorted(p.name for p in lock_file.parent.iterdir())}"
-    )
+    assert (
+        sorted(p.name for p in lock_file.parent.iterdir()) == []
+    ), f"no staging litter may survive: {sorted(p.name for p in lock_file.parent.iterdir())}"
 
 
 # ---------------------------------------------------------------------------
@@ -391,8 +395,12 @@ def test_flock_won_on_an_orphaned_inode_is_retried_against_the_current_path(
         """)
         waiter = subprocess.Popen(
             ["bash", "-c", waiter_script],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=str(_TEAM_DIR), env=dict(os.environ),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(_TEAM_DIR),
+            env=dict(os.environ),
         )
         try:
             _wait_for(opened_file)
@@ -408,12 +416,12 @@ def test_flock_won_on_an_orphaned_inode_is_retried_against_the_current_path(
 
     values = dict(re.findall(r"^(\w+)=(.*)$", stdout, re.M))
     assert values.get("RC") == "0", f"stdout:\n{stdout}\nstderr:\n{stderr}"
-    assert values["HELD_INO"] == values["PATH_INO"], (
-        f"the winner must hold the inode the path names.\nstdout:\n{stdout}\nstderr:\n{stderr}"
-    )
-    assert int(values["HELD_INO"]) != orphan_ino, (
-        f"the win on the released holder's orphaned inode must not have been granted.\nstdout:\n{stdout}"
-    )
+    assert (
+        values["HELD_INO"] == values["PATH_INO"]
+    ), f"the winner must hold the inode the path names.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    assert (
+        int(values["HELD_INO"]) != orphan_ino
+    ), f"the win on the released holder's orphaned inode must not have been granted.\nstdout:\n{stdout}"
     assert "RECORD:holder=second" in stdout, stdout
     assert "stale_reaped" not in stderr, f"nothing was stale; nothing may be reaped.\nstderr:\n{stderr}"
     assert values.get("AFTER") == "no", stdout

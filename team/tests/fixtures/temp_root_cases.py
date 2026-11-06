@@ -29,7 +29,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
-from typing import Optional, Union
 
 TABLE_PATH = pathlib.Path(__file__).with_name("temp_root_cases.json")
 
@@ -38,7 +37,7 @@ _TABLE = json.loads(TABLE_PATH.read_text(encoding="utf-8"))
 #: The last-resort root the table expects, as written in the table.
 TABLE_FALLBACK: str = _TABLE["fallback"]
 
-CfgSpec = Union[None, str, dict]
+CfgSpec = None | str | dict
 
 
 @dataclasses.dataclass(frozen=True)
@@ -47,13 +46,13 @@ class TempRootCase:
 
     id: str
     covers: str
-    override: Optional[str]
-    root_path: Optional[str]
-    kanban_root: Optional[str]
+    override: str | None
+    root_path: str | None
+    kanban_root: str | None
     board_cfg: CfgSpec
     install_cfg: CfgSpec
     expected: str
-    expected_ignoring_override: Optional[str] = None
+    expected_ignoring_override: str | None = None
     note: str = ""
     cwd_cfg: CfgSpec = None
 
@@ -78,7 +77,7 @@ class CaseSetup:
     board: pathlib.Path
     install: pathlib.Path
     env: dict
-    kanban_root: Optional[str]
+    kanban_root: str | None
     expected: str
     expected_ignoring_override: str
 

@@ -59,8 +59,7 @@ _CRONTAB = (
     "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
 )
 _WEEKLY_CRONTAB = (
-    "0 3 * * 4 $KANBAN_ROOT/scripts/wake-batch.sh --agent=overwatch\n"
-    "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
+    "0 3 * * 4 $KANBAN_ROOT/scripts/wake-batch.sh --agent=overwatch\n" "0 4 * * 0 $KANBAN_ROOT/scripts/cleanup.sh\n"
 )
 _NO_AGENT_CRONTAB = "# nothing scheduled\n*/5 * * * * /usr/bin/true\n"
 # Six minutes before coder's next */10 firing, 26 before pm's next */30.
@@ -123,7 +122,12 @@ def _run(tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_path_dirs=[pathlib.Path(sys.executable).parent])
     return subprocess.run(
         ["bash", str(_PP_RUN_OPS), _MODULE, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -163,8 +167,7 @@ def _multi_header(tmp_path: pathlib.Path, parser_source: str | None) -> subproce
     root = tmp_path / "root"
     (root / "tmp").mkdir(parents=True)
     (root / "VERSION").write_text("v1.0.0\n", encoding="utf-8")
-    (root / "projects.cfg").write_text("[project:one]\npriority = 1\n\n[project:two]\npriority = 2\n",
-                                       encoding="utf-8")
+    (root / "projects.cfg").write_text("[project:one]\npriority = 1\n\n[project:two]\npriority = 2\n", encoding="utf-8")
     lib = root / "pm-agent" / "lib"
     lib.mkdir(parents=True)
     if parser_source is None:
@@ -181,12 +184,22 @@ def _multi_header(tmp_path: pathlib.Path, parser_source: str | None) -> subproce
     env = build_scrubbed_env(
         home_dir=tmp_path / "home",
         extra_path_dirs=[stub_bin, pathlib.Path(sys.executable).parent],
-        extra_env={"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-                   "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"), "NO_COLOR": "1", "TERM": "dumb"},
+        extra_env={
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
+            "NO_COLOR": "1",
+            "TERM": "dumb",
+        },
     )
     return subprocess.run(
         ["bash", str(_SHOW_MULTI_SH), "--kanban-root", str(root), "--mode", "header"],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
+        check=False,
     )
 
 

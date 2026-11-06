@@ -44,7 +44,6 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import Optional
 
 __all__ = [
     "CacheMarkerResetError",
@@ -59,23 +58,23 @@ class CacheMarkerResetError(Exception):
     command prints, and the cache file is unchanged."""
 
 
-def reset_processed_marker_text(text: str, item_id: str) -> "tuple[str, int]":
+def reset_processed_marker_text(text: str, item_id: str) -> tuple[str, int]:
     """Return *text* with every ``- [x] <item_id>`` line reset to ``- [ ]``,
     and the number of lines reset.
 
     See the module docstring for the exact line shape matched.
     """
     entry_re = re.compile(
-        rf'^(\s*-\s+\[)x(\]\s+{re.escape(item_id)})(\s.*)?$',
+        rf"^(\s*-\s+\[)x(\]\s+{re.escape(item_id)})(\s.*)?$",
         re.M,
     )
     return entry_re.subn(
-        lambda m: m.group(1) + ' ' + m.group(2) + (m.group(3) if m.group(3) else ''),
+        lambda m: m.group(1) + " " + m.group(2) + (m.group(3) if m.group(3) else ""),
         text,
     )
 
 
-def reset_processed_marker(cache_file: "pathlib.Path | str", item_id: str) -> int:
+def reset_processed_marker(cache_file: pathlib.Path | str, item_id: str) -> int:
     """Reset *item_id*'s ``[x]`` lines in *cache_file* to ``[ ]`` and return
     how many were reset (at least 1).
 
@@ -91,9 +90,7 @@ def reset_processed_marker(cache_file: "pathlib.Path | str", item_id: str) -> in
 
     new_text, n = reset_processed_marker_text(text, item_id)
     if n == 0:
-        raise CacheMarkerResetError(
-            f"Could not find [x] entry for {item_id} in {cache_path}; no change made."
-        )
+        raise CacheMarkerResetError(f"Could not find [x] entry for {item_id} in {cache_path}; no change made.")
 
     try:
         cache_path.write_text(new_text, encoding="utf-8")
@@ -113,7 +110,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = _build_parser().parse_args(argv)
     try:

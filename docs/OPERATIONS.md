@@ -26,7 +26,7 @@ a one-line pointer to the other. That is the only permitted overlap.
 
 ## Filing a Document Brief
 
-A **document brief** is a requirements file that drives the `document` workflow defined in `team/workflows/document.yaml`. It is the operator's entry point for producing standalone documents — from short creative pieces to long-form structured documents (whitepapers, README sets, SOPs, runbooks) — through the same discovery pipeline that handles release and feature requirements.
+A **document brief** is a requirements file that drives the `document` workflow, the plugin at `team/workflows/document/` (its pipeline is `pipeline.yaml` there). It is the operator's entry point for producing standalone documents — from short creative pieces to long-form structured documents (whitepapers, README sets, SOPs, runbooks) — through the same discovery pipeline that handles release and feature requirements.
 
 Document briefs are operator-authored. They are not bundled from `bugs/` or `priority/` — they are dropped directly into the requirements directory, where the discovery pipeline picks them up at Step 3.
 
@@ -73,7 +73,7 @@ operator drops brief at projects/<name>/requirements/<vX.Y.Z>-<slug>.md
 discovery.sh STEP 3 scans requirements/, queues the lowest-version unprocessed file
         │
         ▼
-PM wakes, reads ## Workflow Type = document, loads team/workflows/document.yaml
+PM wakes, reads ## Workflow Type = document, loads team/workflows/document/pipeline.yaml
         │
         ▼
 PM materializes the pipeline:
@@ -163,10 +163,12 @@ The stops that remain are integrity invariants: going on would publish a tree th
 | Stop | Error key | HALT file |
 |---|---|---|
 | Pre-squash hook not executable, or exited non-zero (trigger 4) | `cm-release.trigger-4.pre-squash-hook-not-executable`, `cm-release.trigger-4.pre-squash-hook-failed` | yes |
+| Pre-squash hook runner could not start the hook; the hook did not run (trigger 4) | `cm-release.trigger-4.pre-squash-hook-runner-failed` | yes |
 | Squash pollution guard found stray paths (trigger 10). Only with `CM_SQUASH_STRICT_POLLUTION_GUARD=true`; otherwise it warns | `cm-release.trigger-10.pollution-guard-strict` | yes |
 | Fidelity gate: the RC and main trees differ after the squash (trigger 11) | `cm-release.trigger-11.fidelity-gate-divergence` | yes |
 | Pre-tag hook not executable | `cm-release.pre-tag-hook-not-executable` | yes |
 | Pre-tag hook exited non-zero | `cm-release.hook-failure.cm-release-pre-tag` | no |
+| Pre-tag hook runner could not start the hook; the hook did not run | `cm-release.hook-runner-failure.cm-release-pre-tag` | no |
 | Pre-tag VERSION gate: the committed `VERSION` is not the tag being cut | `cm-release.pre-tag-version-mismatch` | no |
 
 A stop without a HALT file exits 1 before the tag and returns main to its pre-release commit. The lane keeps running, the CM release task records the stop, and the inbox entry says to fix the cause and run the release again.
@@ -716,7 +718,7 @@ Two ways to confirm a project is actually halted.
 
 ```bash
 KANBAN_ROOT="$PGAI_AGENT_KANBAN_ROOT_PATH" \
-  bash -c 'source "$KANBAN_ROOT/team/scripts/lib/project_paths.sh"; \
+  bash -c 'source "$KANBAN_ROOT/scripts/lib/project_paths.sh"; \
     pp_project_halted "<name>" && echo "halted" || echo "running"'
 ```
 
@@ -1283,7 +1285,7 @@ Multiple bug classes traced back to the old design where `release-state.md` trie
 - Preserves `## Last Released` if present; otherwise leaves it absent so the next `team/scripts/cm/release.sh` Step 15 writes it on the first successful release.
 - Writes the canonical schema (`## Active RC`, `## RC Opened At`, `## RC Opened By Task`, `## Last Released`).
 
-The previous repo-level `team/release-state.md` has been removed entirely. The only `release-state.md` files in the system are project-scoped at `$KANBAN_ROOT/projects/<project-name>/release-state.md`. No manual file editing is required during upgrade.
+Every `release-state.md` file is project-scoped, at `$KANBAN_ROOT/projects/<project-name>/release-state.md`. No manual file editing is required during upgrade.
 
 ## CHANGELOG Disclosure Model
 
@@ -1463,7 +1465,7 @@ max_rows_per_project = 8
 Scripts call `read_ini` from `team/scripts/lib/ini_parser.sh` to retrieve values with a fallback default:
 
 ```bash
-source "$KANBAN_ROOT/team/scripts/lib/ini_parser.sh"
+source "$KANBAN_ROOT/scripts/lib/ini_parser.sh"
 val=$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard min_rows_per_column 13)
 ```
 
@@ -1479,6 +1481,9 @@ Operators most commonly tune five sections.
 | `max_rows_per_column` | `34` | Column height ceiling (your terminal/screen constraint) |
 | `min_rows_per_project` | `3` | Rows guaranteed to each project (readability floor) |
 | `max_rows_per_project` | `8` | Rows allocated to each project when space allows (visual ceiling) |
+| `operator_workbench_pct` | `40` | Width of window 1's workbench pane, a whole-number percent of the window width (0-99); `0` disables the pane. See [dashboard.md](dashboard.md), window 1 |
+| `operator_workbench_min_cols` | `160` | Narrow-window guard: window 1 shows no workbench while it is narrower than this many columns, checked when `create.sh` builds it and again whenever the window is resized (a narrower client attaching included); `0` turns the guard off. The workbench is also left out wherever a board column would get fewer than 15 columns beside it |
+| `operator_board_agents` | `merged` | Window 1's board columns: `merged` shows BUGS, PRIORITIES, REQUIREMENTS and one AGENTS column of every role's tasks; `split` shows the five role columns instead, as window 2 does. Window 2 ignores it. Read when `create.sh` builds the session. See [dashboard.md](dashboard.md), window 1 |
 
 The dashboard renderer applies a dynamic algorithm: as project count grows, per-project allocation steps down from `max_rows_per_project` toward `min_rows_per_project` to stay within `max_rows_per_column`. With few projects, `min_rows_per_column` enforces a minimum visual height. This replaces the old hardcoded `MIN_PER_PROJECT = 3` constant.
 
@@ -1994,7 +1999,7 @@ Three orientation facts are worth carrying here, because they are the ones an op
 
 - **Window 0 (`main`) is where the session drops you.** Framework version, clock and HALT state across the top; per-project progress in the middle; a live tail of the agent logs below; a per-project queues column pinned to the right quarter. If you watch one window while a release runs, watch this one.
 - **Window 3 (`attention`) answers "is anything waiting on me?"** A single pane listing tasks sitting in BLOCKED, each with the reason it recorded and its `## Next Recommended Step`. An empty pane is the healthy state.
-- **Window 1 (`operator`) is the board plus somewhere to type.** Top to bottom: window 2's eight-column board at the same widths, then a full-width command-line shell with the kanban environment already sourced, then window 2's legend bar. Run `scripts/dashboard/suggested-commands.sh` from that shell for a reminder of the common commands. This is the window to live in when your only terminal is an attach — over ssh, or inside a container.
+- **Window 1 (`operator`) is the board plus somewhere to type.** The board — BUGS, PRIORITIES, REQUIREMENTS and one AGENTS column of every role's tasks, or window 2's eight columns under `[dashboard] operator_board_agents = split` — with a command-line shell under it, a tall workbench shell on the far right for an assistant CLI or other long-running tool, and window 2's legend bar across the bottom. Both shells have the kanban environment already sourced, and the window opens on the command line. Run `scripts/dashboard/suggested-commands.sh` from the command line for a reminder of the common commands. This is the window to live in when your only terminal is an attach — over ssh, or inside a container.
 
 Navigate with `Ctrl-b` followed by the window number for windows 0 through 9, and `Ctrl-b '` then the number for windows 10 and above.
 
@@ -2029,13 +2034,13 @@ Use `kanban-status.sh` for a one-shot status view from any terminal — SSH sess
 
 ```bash
 # One-shot output (fits 80x24)
-$KANBAN_ROOT/team/scripts/kanban-status.sh
+$KANBAN_ROOT/scripts/kanban-status.sh --project <name>
 
 # Continuously refreshing view in any terminal
-watch -n 5 $KANBAN_ROOT/team/scripts/kanban-status.sh
+watch -n 5 $KANBAN_ROOT/scripts/kanban-status.sh --project <name>
 
 # Disable color output
-$KANBAN_ROOT/team/scripts/kanban-status.sh --no-color
+$KANBAN_ROOT/scripts/kanban-status.sh --project <name> --no-color
 ```
 
 Color output is automatically suppressed when `NO_COLOR` is set or `TERM=dumb`.
@@ -2613,19 +2618,27 @@ Compare against what this would cost without caching: `55,718 × input_per_1m / 
 
 ### Running cost-report.sh
 
-`cost-report.sh` lives at `team/scripts/cost-report.sh`. With no flags it produces a month-to-date report for the current project.
+`cost-report.sh` lives at `team/scripts/cost-report.sh`. With no scope flag it reports month-to-date. It always needs a project: `--project`, or `PGAI_PROJECT_NAME` when the flag is absent. With neither it exits 1.
 
-The scope flags are mutually exclusive — pick at most one. Other flags compose freely with the scope.
+Give at most one scope flag; `--since` and `--until` are the one pair that combines, into an explicit range. Any other two scope flags exit 1 with `conflicting scope flags`. The other flags compose freely with the scope.
 
 | Flag | Argument | Purpose |
 |---|---|---|
-| `--month` | `YYYY-MM` | Report on a specific calendar month. |
+| `--month` | `YYYY-MM` | Report on a specific calendar month. Without any scope flag: the current month to date. |
 | `--day` | `YYYY-MM-DD` | Report on a single day. |
-| `--rc` | `vX.Y.Z` | Report on a single RC. |
-| `--project` | `<name>` | Override `PGAI_PROJECT_NAME` (default: `pgai-agent-kanban`). |
-| `--csv` | (none) | Emit CSV instead of the human-readable block. |
+| `--rc` | `vX.Y.Z` | Report on a single RC. A version given without the leading `v` gets one. |
+| `--week` | `YYYY-Www`, `current`, or none | Report on an ISO week, Monday through Sunday. `current` or no argument: Monday through today. |
+| `--year` | `YYYY`, `current`, or none | Report on a calendar year. `current` or no argument: January 1 through today. |
+| `--since` | `YYYY-MM-DD` | Report from this date through today, or through `--until` when both are given. |
+| `--until` | `YYYY-MM-DD` | Report from the earliest available day through this date, or from `--since` when both are given. |
+| `--last` | `N` | Report on the N most recent days through today: `--last 1` is today only, `--last 7` is today and the six days before it. |
+| `--last-N-days` | `N` | Alias for `--last`. |
+| `--project` | `<name>` | The project to report on. Default: `PGAI_PROJECT_NAME`; there is no built-in default. |
+| `--csv` | (none) | Emit CSV instead of the human-readable block. Column order is stable. |
+| `--kanban-root` | `<path>` | Override `PGAI_AGENT_KANBAN_ROOT_PATH`. |
+| `-h`, `--help` | (none) | Print the usage text and exit. |
 
-Example invocations, one per flag:
+Example invocations:
 
 ```bash
 # Specific month
@@ -2637,7 +2650,14 @@ Example invocations, one per flag:
 # Single RC
 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --rc v0.23.22
 
-# Override project
+# ISO week, and the last seven days
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --week 2026-W19
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --last 7
+
+# Explicit date range
+"$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --since 2026-05-01 --until 2026-05-15
+
+# Name the project
 "$PGAI_AGENT_KANBAN_ROOT_PATH/scripts/cost-report.sh" --project pgai-chomp-man
 
 # CSV output for spreadsheet analysis
@@ -3119,6 +3139,16 @@ The two scripts run hooks with an identical environment. This is the **canonical
 
 Hook stdout and stderr are captured and prefixed with `[hook <name>]` in the release log. Non-zero exit blocks the release for pre-squash and pre-tag; for post-tag the failure is logged but does not block (the tag already exists, so aborting after it is fruitless).
 
+### Hook time limit
+
+Each hook runs in its own process group under `kanban.cfg [release] hook_timeout_seconds` (default `900`). In `ship-rc.sh` the same limit also bounds the step that resolves which hook a phase runs. When the limit passes:
+
+- the whole process group is stopped, including any daemon the hook forked: SIGTERM, then SIGKILL after 5 seconds;
+- a warning naming the limit and the key is printed;
+- the hook counts as failed with exit code `124`, so its phase takes the failed-hook path above. Pre-squash and pre-tag stop the release; post-tag logs a warning.
+
+The key is read from `kanban.cfg` only, never `project.cfg`. If it is absent or blank, the default applies. If it is not a positive whole number, a warning is printed and the default applies, so a hook never runs unbounded. When OVERWATCH runs a release, its own limit bounds that release, hooks included (`[overwatch] verb_timeout_seconds`, see [overwatch.md](overwatch.md), "Limits on every verb").
+
 ### Configuring hooks in project.cfg
 
 `project.cfg_example` carries commented `[hooks]` entries for all three phase-hook keys and all three `*_required` keys. See the file for inline documentation; the common patterns:
@@ -3129,11 +3159,21 @@ Hook stdout and stderr are captured and prefixed with `[hook <name>]` in the rel
 - **Kanban-side override.** Drop the hook at `$KANBAN_ROOT/projects/<name>/hooks/cm-release-<phase>.sh` when the hook should NOT ship with the managed repo (temporary, deployment-specific, or a testing override).
 - **Explicit path.** Set `cm_release_<phase>_hook` in `project.cfg [hooks]` to point at a script anywhere. Absolute paths are used as-is; relative paths resolve against `dev_tree_path`.
 
+### The skill staging directory
+
+Beside the kanban-side hooks directory, `$KANBAN_ROOT/projects/<name>/hooks/`, the kanban root holds the skill staging directory, `$KANBAN_ROOT/skills/<provider>/<name>/`, the source the Claude Code and Codex skill homes are installed from.
+
+- **Shipped skills are refreshed.** `install.sh` and `upgrade.sh` deposit the skills the kanban ships there, with the same overwrite rules as every other installed file: identical files skipped, a changed one overwritten only with `--force`.
+- **Your skills are never touched.** A skill you add there is never written, moved or deleted by install or upgrade, even with `--force`.
+- **Neither script writes a provider home by itself.** `scripts/install-skills.sh` copies the staged skills into the Claude Code and Codex skill homes; `--add-claude-skills` and `--add-codex-skills` on `install.sh` or `upgrade.sh` run it after the deposit.
+
+Flags, exit codes and how to add your own skill: [operator-commands.md, "install-skills"](operator-commands.md#install-skills--install-staged-skills-into-the-provider-cli-homes).
+
 ### The pre-squash HALT trigger, in context
 
 The pre-squash hook failure is trigger 4, one of the integrity stops in "CM HALT triggers" above. Two failure paths reach that trigger under this design:
 
-- The pre-squash hook resolved and ran, but exited non-zero. The release blocks; the operator inspects the `[hook cm-release-pre-squash]` log lines.
+- The pre-squash hook resolved and ran, but exited non-zero or ran past its time limit. The release blocks; the operator inspects the `[hook cm-release-pre-squash]` log lines.
 - No hook resolved at any tier and `cm_release_pre_squash_hook_required = true`. The release HALTs before the phase; the operator adds the missing hook or clears the required flag.
 
 Both paths land in the same BLOCKED CM task and the same operator-response procedure. The required-flag path makes lost hook wiring visible at the first release that misses it, rather than letting it drift silently across releases.
@@ -3187,26 +3227,19 @@ Steps 2 through 5 change exactly the four fields the status-writer tool manages 
 
 5. **Update `## Summary`** to briefly describe what was done and by whom (e.g., "Manually completed by human on 2026-04-27. Release script was run by hand.").
 
-6. **Update the queue marker.** Find the task's entry in the appropriate queue backlog file (e.g., `team/tasks/queues/cm_backlog.md`). Change the marker from `[B]` to `[x]`:
+6. **Update the queue marker.** Find the task's entry in its agent's queue file, `$KANBAN_ROOT/projects/<name>/tasks/queues/<agent>_backlog.md` (for a CM task, `cm_backlog.md`). Change the marker from `[B]` to `[x]`:
 
    Before:
    ```
-   [B] TASK-ID — short description
+   - [B] TASK-ID — short description
    ```
 
    After:
    ```
-   [x] TASK-ID — short description
+   - [x] TASK-ID — short description
    ```
 
-7. **Commit the changes** to the task's `status.md` and the queue backlog file together:
-
-   ```bash
-   git add team/tasks/queues/cm_backlog.md
-   git add team/tasks/<TASK-ID>/status.md
-   git commit -m "Mark <TASK-ID> DONE (manually completed by human)"
-   git push origin <branch>
-   ```
+7. **Nothing to commit.** The task folder, `$KANBAN_ROOT/projects/<name>/tasks/<TASK-ID>/`, and the queue file are kanban state under the kanban root, not files in a project repository. Saving them is the whole change; there is nothing to commit or push.
 
 ### Why this matters
 
@@ -3347,7 +3380,7 @@ The PM skip removes only PM's discovery from the contention. A holder that is ru
 
 ### When the wake's time budget stops a task
 
-Three `[wake]` ceilings in `kanban.cfg` bound a dispatch: `max_task_seconds` per task, `max_project_seconds` per project and `max_runtime_seconds` per batch. The watchdog is armed with the smallest of the per-task limit and the two remaining budgets. A kill at the full `max_task_seconds` blocks the task as a `per_task_timeout`. A kill below it is a **budget stop**: the wake ran out of time, the task did not overrun, so the wake returns the task to `BACKLOG` with `Needs Human: no` and logs:
+Three `[wake]` ceilings in `kanban.cfg` bound a dispatch: `max_task_seconds` per task, `max_project_seconds` per project and `max_runtime_seconds` per batch. The watchdog is armed with the smallest of the per-task limit and the two remaining budgets. A kill at the full `max_task_seconds` blocks the task as a `per_task_timeout`, unless the agent had already committed work on its feature branch and the task's Block Record `requeues` is below `[overwatch] requeue_budget`: then the wake records the timeout and one requeue on the Block Record, sets its `resume` to `branch` and returns the task to `BACKLOG` with `Needs Human: no`, so the next dispatch continues on that branch. Once the budget is spent, the next such timeout blocks. A kill below it is a **budget stop**: the wake ran out of time, the task did not overrun, so the wake returns the task to `BACKLOG` with `Needs Human: no` and logs:
 
 ```text
 task <TASK-ID>: stopped at the wake's remaining time budget (<N>s armed, below max_task_seconds=<M>s) -- returning it to BACKLOG; this is not a per-task timeout
@@ -3360,7 +3393,7 @@ The commits the stopped agent made are kept. The stop records resume mode `branc
 
 The `## Resume Mode` section:
 
-- **Who writes it:** the wake, on a budget stop. No agent writes it, and the status-writer tool leaves it as it finds it.
+- **Who writes it:** the wake, on a budget stop and when its stale-active sweep returns an orphaned task to `BACKLOG` keeping a feature branch that holds unmerged commits, and `reset.sh` when it keeps such a branch. No agent writes it, and the status-writer tool leaves it as it finds it.
 - **Who reads it:** the wake's worktree stage, at the task's next dispatch, and only when the task has no Block Record. A body of `branch` (first word, any case) attaches the existing feature branch at its tip; no section, or any other body, starts fresh from the source branch. A `status.md` whose section the stage cannot read counts as `branch`, the mode that never deletes a branch. If the feature branch no longer exists, `branch` creates it fresh and deletes nothing.
 - **A Block Record outranks it.** Once a block writes a record, the record's `resume` field decides and the section is ignored.
 - **Inert once the task is `DONE`.** Nothing removes the section, and it is read only at dispatch, so one left in a finished task's `status.md` does nothing and needs no clean-up.
@@ -3368,7 +3401,7 @@ The `## Resume Mode` section:
 When the next dispatch attaches the branch this way, the wake logs:
 
 ```text
-task <TASK-ID>: ## Resume Mode: branch (the wake's time budget stopped an earlier dispatch); an existing feature branch is attached unchanged
+task <TASK-ID>: ## Resume Mode: branch (a budget stop, a reset or the stale-active sweep kept the feature branch of an earlier dispatch); an existing feature branch is attached unchanged
 ```
 
 ## Provider Switch
@@ -3713,6 +3746,9 @@ find them with shell globs:
 |---|---|
 | Operator crontab | `$HOME/.crontab.before-install-YYYYMMDD-HHMMSS.bak` |
 | Provider role file | `~/.{provider}/agents/<NAME>.md.before-install-YYYYMMDD-HHMMSS.bak` |
+| Kanban root, before an upgrade | `$HOME/pgai-kanban-backup-YYYYMMDD-HHMMSS.tar.gz` (mode 600; includes `secrets`) |
+
+`upgrade.sh` writes the pre-upgrade tarball before it deposits anything; `upgrade.sh --no-backup` skips it, leaving no tarball to restore from. The upgrade procedure and the restore command are in [HOW_TO.md](../HOW_TO.md), section 10 ("Upgrade the live install").
 
 Examples of operator-side recovery:
 

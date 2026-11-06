@@ -48,6 +48,18 @@ Fixtures exercised:
       3 when absent), and a fixture setting it to 2 flags on the second
       cycle — demonstrated by actually driving two cycles, not asserted
       from the default alone.
+  (F) reconcile_stale_active keeps an orphaned task's feature branch when
+      it holds commits no other branch, tag or the dev tree's HEAD reaches:
+      the log names the branch, its tip and the commit count, resume mode
+      branch is recorded (## Resume Mode below the cap, the Block Record's
+      resume at it), and the next dispatch's worktree stage attaches the
+      branch at its old tip. A branch holding nothing unique is still
+      deleted and no resume mode is written. When the committed-work test
+      itself fails (the ops call stubbed through the environment to exit
+      non-zero) the branch is kept and the task's ## Summary names the exit
+      code and the branch tip, below the cap and at it. These cases source
+      the real stage files into a throwaway git repository and sandbox
+      kanban root.
 
 Naming: function names describe behavior under test, never bug IDs or task
 IDs (roles/TESTER.md "Test Authoring Guidelines", Anti-pattern 6).
@@ -60,7 +72,22 @@ import re
 import subprocess
 import textwrap
 
+import pytest
+
+from pgai_agent_kanban.overwatch.block_record import load_block_record
 from tests.fixtures.log_stub import make_log_stub_fragment
+from tests.unit.test_worktree_resume_branch import (
+    _FEATURE_BRANCH,
+    _LIB,
+    _RC_BRANCH,
+    _TASK_ID,
+    _TEAM_DIR,
+    Sandbox,
+    _assert_no_branch_delete_or_create,
+    _env,
+    _git,
+    _make_sandbox,
+)
 
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
@@ -223,7 +250,9 @@ def _script_header(
     temp_dir_export = f'export PGAI_AGENT_KANBAN_TEMP_DIR="{temp_dir}"' if temp_dir else ""
     backlog_export = f'BACKLOG="{backlog_file}"' if backlog_file else ""
     tasks_root_export = f'TASKS_ROOT="{tasks_root}"' if tasks_root else ""
-    kanban_root_export = f'export KANBAN_ROOT="{kanban_root}"' if kanban_root else "unset KANBAN_ROOT PGAI_AGENT_KANBAN_ROOT_PATH"
+    kanban_root_export = (
+        f'export KANBAN_ROOT="{kanban_root}"' if kanban_root else "unset KANBAN_ROOT PGAI_AGENT_KANBAN_ROOT_PATH"
+    )
     return textwrap.dedent(f"""\
         #!/usr/bin/env bash
         set -euo pipefail
@@ -345,14 +374,14 @@ def test_reconcile_stale_active_escalates_at_default_cap_after_consecutive_zero_
     assert observed_states == ["BACKLOG", "BACKLOG", "BLOCKED"], observed_states
 
     final_text = _read(status_file)
-    assert _field(final_text, "Needs Human").lower() == "yes", (
-        f"cycle 3 (at cap) must escalate to Needs Human=yes\n{final_text}"
-    )
+    assert (
+        _field(final_text, "Needs Human").lower() == "yes"
+    ), f"cycle 3 (at cap) must escalate to Needs Human=yes\n{final_text}"
     blockers = _field(final_text, "Blockers")
     assert "3" in blockers, f"Blockers should name the count (3)\n{blockers}"
-    assert re.search(r"\b3\b.*ceiling|ceiling.*\b3\b|\(3\)", blockers) or "3" in blockers, (
-        f"Blockers should name the ceiling too\n{blockers}"
-    )
+    assert (
+        re.search(r"\b3\b.*ceiling|ceiling.*\b3\b|\(3\)", blockers) or "3" in blockers
+    ), f"Blockers should name the ceiling too\n{blockers}"
     assert _zp_field(final_text, "limit") == "3", f"record should carry the ceiling in effect\n{final_text}"
 
     queue_text = _read(backlog_file)
@@ -402,9 +431,7 @@ def test_real_progress_resets_counter_and_third_cycle_is_not_flagged(tmp_path: p
     result = _run(reset_script)
     assert result.returncode == 0, f"reset failed\nstderr={result.stderr}"
     text_after_reset = _read(status_file)
-    assert _zp_field(text_after_reset, "count") in (None, "0"), (
-        f"reset must clear the count\n{text_after_reset}"
-    )
+    assert _zp_field(text_after_reset, "count") in (None, "0"), f"reset must clear the count\n{text_after_reset}"
 
     # Cycle 3: another zero-progress cycle. Task is picked up again
     # (WORKING/[A]) and orphaned/crashes the same way as cycle 1.
@@ -420,12 +447,12 @@ def test_real_progress_resets_counter_and_third_cycle_is_not_flagged(tmp_path: p
         "not merely failed to increment an extra time"
     )
     text_after_3 = _read(status_file)
-    assert _zp_field(text_after_3, "count") == "1", (
-        f"cycle 3 must read count=1 (reset then incremented once), not 2\n{text_after_3}"
-    )
-    assert _field(text_after_3, "Needs Human").lower() == "no", (
-        f"cycle 3 (count=1, well below default cap=3) must not escalate\n{text_after_3}"
-    )
+    assert (
+        _zp_field(text_after_3, "count") == "1"
+    ), f"cycle 3 must read count=1 (reset then incremented once), not 2\n{text_after_3}"
+    assert (
+        _field(text_after_3, "Needs Human").lower() == "no"
+    ), f"cycle 3 (count=1, well below default cap=3) must not escalate\n{text_after_3}"
 
 
 # ---------------------------------------------------------------------------
@@ -472,18 +499,18 @@ def test_backlog_promotion_preserves_zero_progress_record(tmp_path: pathlib.Path
     post_text = _read(status_file)
     assert _field(post_text, "State") == "BACKLOG", f"State should be BACKLOG after promotion\n{post_text}"
     # Blocked Reason IS reset -- that is expected, existing behavior.
-    assert _field(post_text, "Blocked Reason") == "none", (
-        f"Blocked Reason should be reset to none on promotion\n{post_text}"
-    )
+    assert (
+        _field(post_text, "Blocked Reason") == "none"
+    ), f"Blocked Reason should be reset to none on promotion\n{post_text}"
     # But the durable zero-progress record must survive, byte-for-byte on
     # the count.
     assert _zp_field(post_text, "count") == "3", (
         f"Durable ## Zero Progress record must survive BACKLOG promotion; "
         f"expected count=3, got {_zp_field(post_text, 'count')!r}\n{post_text}"
     )
-    assert _zp_field(post_text, "reason_code") == "stale_active_orphan", (
-        f"reason_code should survive promotion unchanged\n{post_text}"
-    )
+    assert (
+        _zp_field(post_text, "reason_code") == "stale_active_orphan"
+    ), f"reason_code should survive promotion unchanged\n{post_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -506,9 +533,7 @@ def test_clean_exit_with_unmoved_state_increments_counter_and_resets_below_cap(
     status_file = _build_status_file(tmp_path, task_id, state="WORKING")
     backlog_file = _build_backlog_file(tmp_path, task_id, marker="A")
     log_file = tmp_path / "wake.log"
-    agent_log = _write_agent_log(
-        tmp_path, "agent.log", "agent started\nturn ended, no state transition\n"
-    )
+    agent_log = _write_agent_log(tmp_path, "agent.log", "agent started\nturn ended, no state transition\n")
     header = _script_header(
         log_file,
         extra_functions=["handle_working_after_exit"],
@@ -617,3 +642,191 @@ def test_fixture_cap_of_two_flags_on_second_cycle_demonstrated_not_asserted(
     assert _field(text_2, "Needs Human").lower() == "yes"
     assert _zp_field(text_2, "count") == "2"
     assert _zp_field(text_2, "limit") == "2"
+
+
+# ---------------------------------------------------------------------------
+# (F) An orphaned task's feature branch: kept when it holds committed work no
+#     other ref reaches (and the next dispatch attaches it), deleted when it
+#     holds nothing unique. Runs the real sweep, the real
+#     wd_record_branch_resume and the real wd_setup_task_worktree /
+#     create_task_worktree against a throwaway repository and sandbox kanban
+#     root (the shared fixtures of test_worktree_resume_branch.py).
+# ---------------------------------------------------------------------------
+
+
+def _sandbox_queue(sb: Sandbox) -> pathlib.Path:
+    return sb.root / "projects" / "demo" / "tasks" / "queues" / "coder_backlog.md"
+
+
+def _orphaned_working_task(sb: Sandbox) -> None:
+    """The task as a dead dispatch left it: WORKING under [A], its worktree
+    still checked out on the feature branch."""
+    sb.status.write_text(_read(_build_status_file(sb.root / "status-template", _TASK_ID)), encoding="utf-8")
+    _sandbox_queue(sb).parent.mkdir(parents=True, exist_ok=True)
+    _sandbox_queue(sb).write_text(f"# coder backlog\n\n- [A] {_TASK_ID} — example task\n", encoding="utf-8")
+    _git(sb.repo, "worktree", "add", "-q", str(sb.worktree), _FEATURE_BRANCH)
+
+
+def _sweep_then_next_dispatch(
+    sb: Sandbox, *, cap: int = 3, redispatch: bool = True, failing_ops: tuple[str, int] | None = None
+) -> subprocess.CompletedProcess:
+    """Run reconcile_stale_active over the orphaned task (a dead-pid liveness
+    record), then, when *redispatch*, the next dispatch's worktree stage.
+    TEAM_ROOT under the sandbox makes the stage skip dev-tree parking.
+    *failing_ops* ``(verb, exit)`` makes that pgai_agent_kanban.ops verb
+    exit non-zero, through STUB_FAIL_OPS_VERB / STUB_FAIL_OPS_EXIT."""
+    script = textwrap.dedent(f"""\
+        set -uo pipefail
+        cd '{_TEAM_DIR}'
+        export LOG_FILE='{sb.root}/wake.log'
+        log() {{ echo "[test] wake: $*" | tee -a "$LOG_FILE" >&2; }}
+        export KANBAN_ROOT='{sb.root}' ZERO_PROGRESS_CAP={cap}
+        BACKLOG='{_sandbox_queue(sb)}'
+        TASKS_ROOT='{sb.task_dir.parent}'
+        source '{_LIB}/temp.sh'
+        source '{_LIB}/worktree.sh'
+        source '{_LIB}/pp_run_ops.sh'
+        source '{_LIB}/error_contract.sh'
+        source '{_LIB}/block_record.sh'
+        source '{_LIB}/lock_provenance.sh'
+        source '{_LIB}/overwatch_protocol.sh'
+        source '{_LIB}/wake_task_state.sh'
+        source '{_LIB}/wake_task_transition.sh'
+        source '{_LIB}/wake_task_budget.sh'
+        source '{_LIB}/wake_reconcile_sweeps.sh'
+        source '{_LIB}/wake_driver_task_setup.sh'
+        source '{_LIB}/wake_driver_worktree.sh'
+        if [[ -n "${{STUB_FAIL_OPS_VERB:-}}" ]]; then
+          eval "_real_pp_run_ops() $(declare -f pp_run_ops | tail -n +2)"
+          pp_run_ops() {{
+            if [[ "$1" == pgai_agent_kanban.ops && "${{2:-}}" == "$STUB_FAIL_OPS_VERB" ]]; then
+              echo "stub: ops $2 failed" >&2; return "$STUB_FAIL_OPS_EXIT"
+            fi
+            _real_pp_run_ops "$@"
+          }}
+        fi
+        task_id='{_TASK_ID}'; task_readme='{sb.task_dir}/README.md'; task_status='{sb.status}'
+        TEAM_ROOT='{sb.root}'; LAST_TASK_FINAL_STATE=""
+        SUBAGENT=coder; role=CODER; _CURRENT_PROJECT=demo
+        PP_dev_tree_path='{sb.repo}'
+        _task_feature_branch=""; _task_worktree_path=""; _task_workflow_type=""
+        _task_source_branch=""; _canonical_dev_tree_path='{sb.repo}'; _park_resting_branch=""; role_reminder=""
+        pp_prefix_branch() {{ echo "ai_$2"; }}
+        _update_readme_feature_branch() {{ :; }}
+        wf_load_plugin() {{ return 0; }}
+        wf_git_mode() {{ echo branch; }}
+        set -e
+        task_liveness_record "$task_id" claude 99999999 dispatch
+        reconcile_stale_active
+        printf 'SWEPT_BRANCH=[%s]\\n' "$(git -C '{sb.repo}' rev-parse --verify --quiet 'refs/heads/{_FEATURE_BRANCH}' || true)"
+        """)
+    if redispatch:
+        # The sweep's queue loop reads into task_id; the dispatch sets its own.
+        script += textwrap.dedent(f"""\
+            task_id='{_TASK_ID}'; task_status='{sb.status}'
+            wd_setup_task_worktree
+            printf 'FINAL=[%s]\\nPATH_OUT=[%s]\\n' "$LAST_TASK_FINAL_STATE" "$_task_worktree_path"
+            """)
+    # The trace records only the calls made by the code under test.
+    sb.trace.write_text("", encoding="utf-8")
+    env = _env(sb)
+    if failing_ops is not None:
+        env |= {"STUB_FAIL_OPS_VERB": failing_ops[0], "STUB_FAIL_OPS_EXIT": str(failing_ops[1])}
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=180, env=env)
+
+
+def _explain(result: subprocess.CompletedProcess) -> str:
+    return f"rc={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+
+
+def test_orphaned_task_branch_with_unique_commits_is_kept_and_attached_on_the_next_dispatch(
+    tmp_path: pathlib.Path,
+) -> None:
+    commits = 2
+    sb = _make_sandbox(tmp_path, feature_commits=commits)
+    _orphaned_working_task(sb)
+    tip = _git(sb.repo, "rev-parse", _FEATURE_BRANCH)
+    short_tip = _git(sb.repo, "rev-parse", "--short", _FEATURE_BRANCH)
+
+    result = _sweep_then_next_dispatch(sb)
+
+    assert result.returncode == 0, _explain(result)
+    # The sweep left the branch at its original tip ...
+    assert f"SWEPT_BRANCH=[{tip}]" in result.stdout, _explain(result)
+    # ... returned the task to BACKLOG with a branch resume recorded ...
+    text = _read(sb.status)
+    assert _field(text, "State") == "BACKLOG", text
+    assert _field(text, "Resume Mode") == "branch", text
+    assert load_block_record(sb.status) is None, f"a reset below the cap writes no Block Record:\n{text}"
+    assert _marker_for_task(_read(_sandbox_queue(sb)), _TASK_ID) == " "
+    # ... and logged the kept branch, its tip and the unique-commit count.
+    kept = [line for line in result.stderr.splitlines() if "keeping feature branch" in line]
+    assert len(kept) == 1, _explain(result)
+    assert _FEATURE_BRANCH in kept[0] and short_tip in kept[0] and f"{commits} commit(s)" in kept[0], kept[0]
+    # The next dispatch attaches the branch: worktree HEAD is the old tip.
+    assert "FINAL=[]" in result.stdout and f"PATH_OUT=[{sb.worktree}]" in result.stdout, _explain(result)
+    assert _git(sb.worktree, "rev-parse", "HEAD") == tip, "worktree HEAD is not the branch's old tip"
+    assert _git(sb.repo, "rev-list", "--count", f"{_RC_BRANCH}..{_FEATURE_BRANCH}") == str(commits)
+    _assert_no_branch_delete_or_create(sb)
+
+
+def test_orphaned_task_branch_with_unique_commits_is_kept_when_the_cap_escalates(tmp_path: pathlib.Path) -> None:
+    sb = _make_sandbox(tmp_path, feature_commits=1)
+    _orphaned_working_task(sb)
+    tip = _git(sb.repo, "rev-parse", _FEATURE_BRANCH)
+
+    result = _sweep_then_next_dispatch(sb, cap=1, redispatch=False)
+
+    assert result.returncode == 0, _explain(result)
+    assert f"SWEPT_BRANCH=[{tip}]" in result.stdout, _explain(result)
+    text = _read(sb.status)
+    assert _field(text, "State") == "BLOCKED" and _field(text, "Needs Human").lower() == "yes", text
+    # The escalation's Block Record carries the resume, so the dispatch after
+    # an operator returns the task to BACKLOG attaches the kept branch.
+    record = load_block_record(sb.status)
+    assert record is not None and record.resume == "branch", text
+    _assert_no_branch_delete_or_create(sb)
+
+
+def test_orphaned_task_branch_with_nothing_unique_is_deleted_with_no_resume_mode(tmp_path: pathlib.Path) -> None:
+    sb = _make_sandbox(tmp_path, feature_commits=2)
+    # The feature branch's commits are already on the source branch.
+    _git(sb.repo, "branch", "-f", _RC_BRANCH, _FEATURE_BRANCH)
+    _orphaned_working_task(sb)
+
+    result = _sweep_then_next_dispatch(sb, redispatch=False)
+
+    assert result.returncode == 0, _explain(result)
+    assert "SWEPT_BRANCH=[]" in result.stdout, _explain(result)
+    assert f"feature branch {_FEATURE_BRANCH} deleted" in result.stderr, _explain(result)
+    assert "keeping feature branch" not in result.stderr, _explain(result)
+    text = _read(sb.status)
+    assert _field(text, "State") == "BACKLOG", text
+    assert re.search(r"^##\s+Resume Mode", text, flags=re.M) is None, text
+    assert load_block_record(sb.status) is None, text
+    assert _marker_for_task(_read(_sandbox_queue(sb)), _TASK_ID) == " "
+
+
+@pytest.mark.parametrize(("cap", "state"), [(3, "BACKLOG"), (1, "BLOCKED")], ids=["below-cap", "at-cap"])
+def test_orphaned_task_branch_kept_on_a_failed_commit_check_names_exit_and_tip_in_summary(
+    tmp_path: pathlib.Path, cap: int, state: str
+) -> None:
+    sb = _make_sandbox(tmp_path, feature_commits=2)
+    _orphaned_working_task(sb)
+    tip = _git(sb.repo, "rev-parse", _FEATURE_BRANCH)
+    short_tip = _git(sb.repo, "rev-parse", "--short", _FEATURE_BRANCH)
+
+    result = _sweep_then_next_dispatch(sb, cap=cap, redispatch=False, failing_ops=("unmerged_branch_commits", 5))
+
+    assert result.returncode == 0, _explain(result)
+    assert f"SWEPT_BRANCH=[{tip}]" in result.stdout, _explain(result)
+    assert "could not check feature branch" in result.stderr and "(exit 5)" in result.stderr, _explain(result)
+    text = _read(sb.status)
+    assert _field(text, "State") == state, text
+    summary = _field(text, "Summary")
+    assert "unmerged_branch_commits" in summary and "exit 5" in summary, summary
+    assert f"{_FEATURE_BRANCH} at {short_tip}" in summary, summary
+    if state == "BACKLOG":
+        assert summary.startswith("Reset to BACKLOG by wake reconciliation"), summary
+        assert _field(text, "Resume Mode") == "branch", text
+    _assert_no_branch_delete_or_create(sb)

@@ -38,7 +38,6 @@ from tests.fixtures.golden_board import PROJECT_NAME, build_synthetic_board, tas
 from tests.fixtures.golden_comparator import assert_json_parity, strip_envelope
 
 
-
 def _parse_blocks(stdout: str) -> list[dict[str, str]]:
     """verdict-report.sh's blank-line-separated blocks; each line split on its first "="."""
     blocks = []
@@ -73,17 +72,21 @@ def _cli_json(blocks: list[dict[str, str]]) -> dict:
         posture["halt_event"] = posture_block["halt_event"]
     posture["pending_bundles"] = [
         {"name": b["name"], "status": b["status"]}
-        for b in blocks if b.get("kind") == "pending_bundle" and b.get("none") != "true"
+        for b in blocks
+        if b.get("kind") == "pending_bundle" and b.get("none") != "true"
     ]
     locks = [
         {
-            "path": b["path"], "provenance": b["provenance"],
+            "path": b["path"],
+            "provenance": b["provenance"],
             "stale_threshold_derivation": b["stale_threshold_derivation"],
-            "violation": b["violation"] == "true", "age_seconds": int(b["age_seconds"]),
+            "violation": b["violation"] == "true",
+            "age_seconds": int(b["age_seconds"]),
             "held_seconds": _int_or_none(b["held_seconds"]),
             "stale_threshold_seconds": int(b["stale_threshold_seconds"]),
         }
-        for b in blocks if b.get("kind") == "release_lock" and b.get("none") != "true"
+        for b in blocks
+        if b.get("kind") == "release_lock" and b.get("none") != "true"
     ]
     tails: dict[str, list] = {}
     for b in blocks:
@@ -147,9 +150,7 @@ def _seed_locks_and_queue_tail(board_root: pathlib.Path, project_dir: pathlib.Pa
     working_task_id = task_ids_by_state()["WORKING"]
     queues_dir = project_dir / "tasks" / "queues"
     queues_dir.mkdir(parents=True, exist_ok=True)
-    (queues_dir / "coder_backlog.md").write_text(
-        f"- [A] {working_task_id}\n", encoding="utf-8"
-    )
+    (queues_dir / "coder_backlog.md").write_text(f"- [A] {working_task_id}\n", encoding="utf-8")
     return working_task_id
 
 
@@ -204,9 +205,7 @@ def test_why_details_posture_locks_and_queue_tails_match_between_cli_and_rest(
     server_logs = tmp_path / "server_logs"
     server_logs.mkdir(parents=True, exist_ok=True)
     with api_server_fixture(server_logs, kanban_root=board_root) as handle:
-        body = _get_json(
-            f"http://127.0.0.1:{handle.port}/verdicts?project={PROJECT_NAME}&details=true"
-        )
+        body = _get_json(f"http://127.0.0.1:{handle.port}/verdicts?project={PROJECT_NAME}&details=true")
 
     rest_value = strip_envelope(body, envelope_keys=("warnings",))
 
@@ -217,9 +216,7 @@ def test_why_details_posture_locks_and_queue_tails_match_between_cli_and_rest(
     # test_golden_pair_harness.py's own verdict pair excludes
     # minutes_in_state for). held_seconds stays compared: it is null on
     # both sides for this fixture's record, which has no acquired_at.
-    assert_json_parity(
-        cli_value, rest_value, ignore_keys=("age_seconds",)
-    )
+    assert_json_parity(cli_value, rest_value, ignore_keys=("age_seconds",))
 
 
 def test_why_details_requires_project_over_rest_and_cli_alike(

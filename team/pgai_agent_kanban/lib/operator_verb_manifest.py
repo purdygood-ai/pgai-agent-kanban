@@ -57,7 +57,6 @@ from __future__ import annotations
 import pathlib
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Scripts that parse their own arguments by hand instead of declaring
@@ -92,9 +91,9 @@ class Verb:
 
     name: str
     status: str  # "active" | "planned"
-    script: Optional[str]  # relative to team/; None when planned
+    script: str | None  # relative to team/; None when planned
     flags: tuple[str, ...]  # declared flag vocabulary, in manifest order
-    mutates: Optional[bool]  # True/False; None when planned
+    mutates: bool | None  # True/False; None when planned
     idempotence: str  # "idempotent" | "non-idempotent" | "read-only" | "-"
     rest_method: str  # "GET" | "POST" | "ABSENT"
     rest_route: str  # route path, or "ABSENT"
@@ -110,7 +109,7 @@ class Verb:
     # on a planned row. None when the row omits the column entirely -- the
     # reader accepts such a row so a fixture written before the column
     # existed still loads; lint_operator_verb_manifest.py reports it.
-    impl: Optional[str] = None
+    impl: str | None = None
 
 
 IMPL_SHELL = "shell"
@@ -133,20 +132,20 @@ class Impl:
     """
 
     kind: str
-    target: Optional[str] = None
+    target: str | None = None
 
     @property
-    def module(self) -> Optional[str]:
+    def module(self) -> str | None:
         """Return the dotted module path before the target's last segment, or None when there is no target."""
         return self.target.rsplit(".", 1)[0] if self.target else None
 
     @property
-    def function(self) -> Optional[str]:
+    def function(self) -> str | None:
         """Return the target's last segment (the function name), or None when there is no target."""
         return self.target.rsplit(".", 1)[1] if self.target else None
 
 
-def parse_impl(value: Optional[str]) -> Impl:
+def parse_impl(value: str | None) -> Impl:
     """Parse one ``impl`` column value.
 
     Accepted forms: ``module:<dotted.function>`` (for example
@@ -167,13 +166,10 @@ def parse_impl(value: Optional[str]) -> Impl:
     if text == IMPL_PLANNED:
         return Impl("planned")
     if text.startswith(IMPL_MODULE_PREFIX):
-        target = text[len(IMPL_MODULE_PREFIX):].strip()
+        target = text[len(IMPL_MODULE_PREFIX) :].strip()
         if _DOTTED_FUNCTION_RE.match(target):
             return Impl("module", target)
-        raise ValueError(
-            f"impl {value!r} does not name a dotted module.function after "
-            f"'module:'; {accepted}"
-        )
+        raise ValueError(f"impl {value!r} does not name a dotted module.function after " f"'module:'; {accepted}")
     raise ValueError(f"impl {value!r} is not a recognised value; {accepted}")
 
 
@@ -206,7 +202,7 @@ def default_manifest_path() -> pathlib.Path:
     return team_dir / "config" / "operator_verbs.manifest"
 
 
-def _parse_bool_or_none(value: str) -> Optional[bool]:
+def _parse_bool_or_none(value: str) -> bool | None:
     if value == "-":
         return None
     if value == "yes":
@@ -222,7 +218,7 @@ def _parse_flags(value: str) -> tuple[str, ...]:
     return tuple(value.split("|"))
 
 
-def _parse_optional(value: str) -> Optional[str]:
+def _parse_optional(value: str) -> str | None:
     return None if value == "-" else value
 
 
@@ -248,9 +244,7 @@ def load_manifest(path: pathlib.Path | None = None) -> dict[str, Verb]:
 
     verbs: dict[str, Verb] = {}
 
-    for lineno, raw_line in enumerate(
-        manifest_path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for lineno, raw_line in enumerate(manifest_path.read_text(encoding="utf-8").splitlines(), start=1):
         fields = raw_line.split("\t")
         if fields[0] != "V":
             # Any other first field (blank line, comment line, stray text)
@@ -284,14 +278,11 @@ def load_manifest(path: pathlib.Path | None = None) -> dict[str, Verb]:
         ) = fields
 
         if name in verbs:
-            raise ManifestFormatError(
-                f"{manifest_path}:{lineno}: duplicate verb name {name!r}"
-            )
+            raise ManifestFormatError(f"{manifest_path}:{lineno}: duplicate verb name {name!r}")
 
         if status not in ("active", "planned"):
             raise ManifestFormatError(
-                f"{manifest_path}:{lineno}: status must be 'active' or "
-                f"'planned'; got {status!r}"
+                f"{manifest_path}:{lineno}: status must be 'active' or " f"'planned'; got {status!r}"
             )
 
         verbs[name] = Verb(
@@ -328,8 +319,7 @@ def get_verb(name: str, path: pathlib.Path | None = None) -> Verb:
         return verbs[name]
     except KeyError:
         raise KeyError(
-            f"operator verb manifest has no verb named {name!r} "
-            f"(declared verbs: {sorted(verbs)})"
+            f"operator verb manifest has no verb named {name!r} " f"(declared verbs: {sorted(verbs)})"
         ) from None
 
 
@@ -362,9 +352,7 @@ def extract_operator_valid_flags(script_path: pathlib.Path) -> list[str]:
 
     match = _OPERATOR_VALID_FLAGS_RE.search(source)
     if not match:
-        raise ValueError(
-            f"OPERATOR_VALID_FLAGS declaration not found in {script_path}"
-        )
+        raise ValueError(f"OPERATOR_VALID_FLAGS declaration not found in {script_path}")
 
     start = match.end()
     depth = 1

@@ -79,7 +79,7 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 import re
-from typing import Iterable, Optional, Sequence, Union
+from collections.abc import Iterable, Sequence
 
 from pgai_agent_kanban.discovery.items import bug_severity
 from pgai_agent_kanban.lib.bundle_items import parse_bundled_item_paths
@@ -105,7 +105,7 @@ __all__ = [
     "paths_match",
 ]
 
-PathLike = Union[str, pathlib.Path]
+PathLike = str | pathlib.Path
 
 #: The ``bundle_mixing`` value that lets a bug ride along.
 RIDE_ALONG_MIXING = "ride-along"
@@ -221,14 +221,14 @@ def _entry_key(entry: object) -> str:
     return ""
 
 
-def _read(path: pathlib.Path) -> Optional[str]:
+def _read(path: pathlib.Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
 
 
-def _mixing_findings(kanban_root: PathLike, project: str) -> tuple[list[Finding], Optional[int]]:
+def _mixing_findings(kanban_root: PathLike, project: str) -> tuple[list[Finding], int | None]:
     """Findings for the ``mixing`` rule, and the resolved ``ride_along_max``."""
     try:
         posture = resolve_defer_posture(kanban_root, project)
@@ -238,19 +238,26 @@ def _mixing_findings(kanban_root: PathLike, project: str) -> tuple[list[Finding]
     mixing = posture.bundle_mixing
     if mixing.value != RIDE_ALONG_MIXING:
         cfg = pathlib.Path(kanban_root) / "projects" / project / "project.cfg"
-        findings.append(Finding(
-            "mixing", "",
-            f"[release] bundle_mixing resolves to '{mixing.value}' (from {mixing.tier}), so no bug "
-            f"may ride along in a requirement RC; set bundle_mixing = {RIDE_ALONG_MIXING} under "
-            f"[release] in {cfg} to allow it, or drop ride_along from the plan",
-        ))
+        findings.append(
+            Finding(
+                "mixing",
+                "",
+                f"[release] bundle_mixing resolves to '{mixing.value}' (from {mixing.tier}), so no bug "
+                f"may ride along in a requirement RC; set bundle_mixing = {RIDE_ALONG_MIXING} under "
+                f"[release] in {cfg} to allow it, or drop ride_along from the plan",
+            )
+        )
     try:
         maximum = int(posture.ride_along_max.value)
     except ValueError:
         maximum = None
-        findings.append(Finding(
-            "count", "", f"[release] ride_along_max '{posture.ride_along_max.value}' is not a whole number",
-        ))
+        findings.append(
+            Finding(
+                "count",
+                "",
+                f"[release] ride_along_max '{posture.ride_along_max.value}' is not a whole number",
+            )
+        )
     return findings, maximum
 
 
@@ -259,7 +266,7 @@ def lint_ride_along(
     *,
     kanban_root: PathLike,
     project: str,
-    requirements_path: Optional[PathLike],
+    requirements_path: PathLike | None,
 ) -> LintResult:
     """Check a plan's ``ride_along`` value against the rules and preconditions.
 
@@ -283,23 +290,32 @@ def lint_ride_along(
     if entries is None or entries == []:
         return LintResult()
     if not isinstance(entries, list):
-        return LintResult(findings=(Finding(
-            "entry", "", f"ride_along must be a list of bug keys, not {type(entries).__name__}",
-        ),))
+        return LintResult(
+            findings=(
+                Finding(
+                    "entry",
+                    "",
+                    f"ride_along must be a list of bug keys, not {type(entries).__name__}",
+                ),
+            )
+        )
 
     findings, maximum = _mixing_findings(kanban_root, project)
 
-    requirement_text: Optional[str] = None
-    requirement: Optional[pathlib.Path] = None
+    requirement_text: str | None = None
+    requirement: pathlib.Path | None = None
     if requirements_path and str(requirements_path).strip().lower() != "none":
         requirement = pathlib.Path(requirements_path)
         requirement_text = _read(requirement)
     if requirement_text is None:
-        findings.append(Finding(
-            "requirement", "",
-            f"the plan's requirements file {requirement or '(none)'} cannot be read, so the "
-            f"file-overlap rule cannot be checked",
-        ))
+        findings.append(
+            Finding(
+                "requirement",
+                "",
+                f"the plan's requirements file {requirement or '(none)'} cannot be read, so the "
+                f"file-overlap rule cannot be checked",
+            )
+        )
     deliverables = file_tokens(read_section(requirement_text or "", "Deliverables") or "")
     already_listed = {pathlib.PurePath(p).name for p in parse_bundled_item_paths(requirement_text or "")}
 
@@ -332,10 +348,13 @@ def lint_ride_along(
         name = found.path.name
         state = canonical_state(found.state) or OPEN_STATE
         if state != OPEN_STATE and not (state == RUNNING_STATE and name in already_listed):
-            findings.append(Finding(
-                "status", name,
-                f"{name} has ## Status '{found.state.strip()}'; only an open bug can ride along",
-            ))
+            findings.append(
+                Finding(
+                    "status",
+                    name,
+                    f"{name} has ## Status '{found.state.strip()}'; only an open bug can ride along",
+                )
+            )
 
         try:
             severity = bug_severity(str(found.path))
@@ -344,32 +363,43 @@ def lint_ride_along(
             continue
         rank = severity_rank(severity.split()[0] if severity.split() else "")
         if rank is None:
-            findings.append(Finding(
-                "severity", name,
-                f"{name} has severity '{severity or '(none)'}', which is not one of "
-                f"low|medium|high|critical, so it cannot be shown to be below high",
-            ))
+            findings.append(
+                Finding(
+                    "severity",
+                    name,
+                    f"{name} has severity '{severity or '(none)'}', which is not one of "
+                    f"low|medium|high|critical, so it cannot be shown to be below high",
+                )
+            )
         elif rank >= _HIGH_RANK:
-            findings.append(Finding(
-                "severity", name, f"{name} is {severity.split()[0].lower()} severity; a high or critical bug never rides along",
-            ))
+            findings.append(
+                Finding(
+                    "severity",
+                    name,
+                    f"{name} is {severity.split()[0].lower()} severity; a high or critical bug never rides along",
+                )
+            )
 
         bug_text = _read(found.path) or ""
-        overlaps = sorted(
-            {d for d in deliverables for b in file_tokens(bug_text) if paths_match(d, b)}
-        )
+        overlaps = sorted({d for d in deliverables for b in file_tokens(bug_text) if paths_match(d, b)})
         if overlaps:
-            findings.append(Finding(
-                "file-overlap", name,
-                f"{name} names {', '.join(overlaps)}, which the requirement's ## Deliverables names",
-            ))
+            findings.append(
+                Finding(
+                    "file-overlap",
+                    name,
+                    f"{name} names {', '.join(overlaps)}, which the requirement's ## Deliverables names",
+                )
+            )
         accepted.append(RideAlongBug(key, found.path, severity))
 
     if maximum is not None and len(seen) > maximum:
-        findings.append(Finding(
-            "count", "",
-            f"ride_along lists {len(seen)} bugs; [release] ride_along_max allows {maximum}",
-        ))
+        findings.append(
+            Finding(
+                "count",
+                "",
+                f"ride_along lists {len(seen)} bugs; [release] ride_along_max allows {maximum}",
+            )
+        )
 
     if findings:
         return LintResult(findings=tuple(findings))

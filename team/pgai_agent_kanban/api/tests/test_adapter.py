@@ -15,10 +15,8 @@ All temp files use pytest's tmp_path fixture.  No bare /tmp paths.
 
 from __future__ import annotations
 
-import os
 import pathlib
 import stat
-import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -34,7 +32,6 @@ from pgai_agent_kanban.api.adapter import (
     shell_out,
     validate_required,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers: write a stub script to a tmp_path file and make it executable
@@ -117,7 +114,7 @@ def test_build_argv_mixed_bool_and_value_flags() -> None:
     flags = {
         "project": "myproj",
         "per_agent": True,
-        "file": None,      # should be omitted
+        "file": None,  # should be omitted
         "no_color": False,  # should be omitted
     }
 
@@ -225,7 +222,7 @@ def test_shell_out_flags_reach_script(tmp_path: pathlib.Path) -> None:
     # Write a stub that echoes its own $@ to stdout.
     stub_path = tmp_path / "echo_args.sh"
     stub_path.write_text(
-        "#!/usr/bin/env bash\necho \"$@\"\n",
+        '#!/usr/bin/env bash\necho "$@"\n',
         encoding="utf-8",
     )
     stub_path.chmod(stub_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)

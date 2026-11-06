@@ -48,7 +48,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Optional
 
 import pytest
 
@@ -110,8 +109,15 @@ def build_root(base: pathlib.Path) -> pathlib.Path:
     )
     (alpha / "metrics" / "rc").mkdir()
     (alpha / "metrics" / "rc" / "v2.49.0.json").write_text(
-        json.dumps({"rc": "v2.49.0", "wall_time_minutes": 95, "blocked_minutes": 12,
-                    "tasks": {"total": 6}, "tokens": {"total": {"input": 2_500, "output": 500}}}),
+        json.dumps(
+            {
+                "rc": "v2.49.0",
+                "wall_time_minutes": 95,
+                "blocked_minutes": 12,
+                "tasks": {"total": 6},
+                "tokens": {"total": {"input": 2_500, "output": 500}},
+            }
+        ),
         encoding="utf-8",
     )
     (root / "projects" / "gamma").mkdir(parents=True)
@@ -136,8 +142,12 @@ def run_pane(root: pathlib.Path, home: pathlib.Path) -> subprocess.CompletedProc
     as of RENDER_AT."""
     return subprocess.run(
         ["bash", str(_METRICS_SH), "--kanban-root", str(root), "--no-color", "--now", RENDER_AT],
-        capture_output=True, text=True, env=_env(root, home), cwd=str(root),
-        timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        env=_env(root, home),
+        cwd=str(root),
+        timeout=120,
+        check=False,
     )
 
 
@@ -145,16 +155,19 @@ def run_report(root: pathlib.Path, home: pathlib.Path, *args: str) -> subprocess
     """metrics-report.sh over *root* with *args*, rendered as of RENDER_AT."""
     return subprocess.run(
         ["bash", str(_METRICS_REPORT_SH), "--kanban-root", str(root), *args, "--now", RENDER_AT],
-        capture_output=True, text=True, env=_env(root, home), cwd=str(root),
-        timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        env=_env(root, home),
+        cwd=str(root),
+        timeout=120,
+        check=False,
     )
 
 
 def normalise_pane(stdout: str) -> str:
     """The pane's stdout with the build day and the Updated: time as
     placeholders."""
-    text = re.sub(r"^=== Today \(\d{4}-\d{2}-\d{2}\) ===$", "=== Today ({TODAY}) ===", stdout,
-                  count=1, flags=re.M)
+    text = re.sub(r"^=== Today \(\d{4}-\d{2}-\d{2}\) ===$", "=== Today ({TODAY}) ===", stdout, count=1, flags=re.M)
     return re.sub(r"^Updated: .*$", "Updated: {UPDATED}", text, count=1, flags=re.M)
 
 
@@ -170,7 +183,7 @@ def cli_outcome(root: pathlib.Path, result: subprocess.CompletedProcess) -> dict
 def _entry(lines: list[str], project: str) -> list[str]:
     """The project's name line and the two lines under it."""
     start = lines.index(f"  {project}")
-    return lines[start:start + 3]
+    return lines[start : start + 3]
 
 
 @pytest.fixture
@@ -214,7 +227,7 @@ def test_golden_pane_has_the_reliability_block_after_current_rc_within_70_column
 
 @pytest.mark.parametrize("content", [None, "{not json", "[]", '{"hands_off": {}, "clean": {}}'])
 def test_missing_or_malformed_file_renders_a_placeholder_and_exits_0(
-    root: pathlib.Path, home: pathlib.Path, content: Optional[str]
+    root: pathlib.Path, home: pathlib.Path, content: str | None
 ) -> None:
     target = root / "projects" / "beta" / "metrics" / "reliability.json"
     if content is None:
@@ -257,7 +270,7 @@ def test_cli_prints_the_lines_the_pane_prints_for_the_project(
     report = run_report(root, home, "--reliability", "--project", project)
     assert (pane.returncode, report.returncode) == (0, 0), _diagnostic(pane) + _diagnostic(report)
     pane_lines = pane.stdout.splitlines()
-    pane_entry = _entry(pane_lines[pane_lines.index("=== Reliability ==="):], project)
+    pane_entry = _entry(pane_lines[pane_lines.index("=== Reliability ===") :], project)
     assert report.stdout.splitlines() == pane_entry, _diagnostic(report)
 
 

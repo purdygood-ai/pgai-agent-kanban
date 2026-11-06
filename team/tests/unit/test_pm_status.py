@@ -36,10 +36,8 @@ try:
     )
 except ImportError:
     import sys
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
-    import pm_status as pm_status_mod  # type: ignore[no-redef]
+
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from pm_status import (  # type: ignore[no-redef]
         get_status_fields,
         is_queue_entry,
@@ -52,6 +50,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Helpers: build fixture files
 # ---------------------------------------------------------------------------
+
 
 def _write_status(directory: pathlib.Path, content: str) -> pathlib.Path:
     """Write a status.md file into directory and return its path."""
@@ -68,9 +67,7 @@ def _write_backlog(queues_dir: pathlib.Path, agent: str, content: str) -> pathli
     return p
 
 
-def _make_task_status(
-    tasks_dir: pathlib.Path, task_id: str, state: str
-) -> pathlib.Path:
+def _make_task_status(tasks_dir: pathlib.Path, task_id: str, state: str) -> pathlib.Path:
     """Create a tasks/<task_id>/status.md with the given State value."""
     task_dir = tasks_dir / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -95,11 +92,7 @@ def test_get_status_fields_parses_single_heading(tmp_path: pathlib.Path) -> None
 
 def test_get_status_fields_parses_multiple_headings(tmp_path: pathlib.Path) -> None:
     """get_status_fields parses all ## sections into a single dict."""
-    content = (
-        "## State\nDONE\n\n"
-        "## Summary\nWork completed successfully.\n\n"
-        "## Blockers\nnone\n"
-    )
+    content = "## State\nDONE\n\n" "## Summary\nWork completed successfully.\n\n" "## Blockers\nnone\n"
     status_file = _write_status(tmp_path, content)
     result = get_status_fields(status_file)
     assert result.get("State") == "DONE"

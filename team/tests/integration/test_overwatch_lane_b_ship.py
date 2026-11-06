@@ -48,7 +48,6 @@ import os
 import pathlib
 import shutil
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -85,15 +84,18 @@ def _init_git_repo_with_remote(repo_path: pathlib.Path, bare_remote: pathlib.Pat
     subprocess.run(["git", "init", "--bare", str(bare_remote)], capture_output=True, check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "init", "--initial-branch=main"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     (repo_path / "README.md").write_text("# Lane B ship test repo\n", encoding="utf-8")
@@ -101,19 +103,23 @@ def _init_git_repo_with_remote(repo_path: pathlib.Path, bare_remote: pathlib.Pat
     (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_path), "add", "README.md", "release-notes/PUBLISHED"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "Initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", "main"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -177,7 +183,9 @@ def _build_kanban_root(
     # despite that call site's "best effort" naming — still tripped
     # `set -e` and killed cm_halt() before it reached write_halt_file(),
     # so no HALT file was ever written under a partial copy.
-    shutil.copytree(_TEAM_DIR / "pgai_agent_kanban", root / "pgai_agent_kanban", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(
+        _TEAM_DIR / "pgai_agent_kanban", root / "pgai_agent_kanban", ignore=shutil.ignore_patterns("__pycache__")
+    )
 
     shutil.copytree(_TEAM_DIR / "scripts", root / "scripts")
     # config/default_palette.txt is a scripts/-sibling dependency (colorized
@@ -190,8 +198,14 @@ def _build_kanban_root(
 
 
 def _run_cm_script(
-    script_rel: pathlib.Path, args: list, kanban_root: pathlib.Path, project_name: str,
-    *, repo_root: Optional[pathlib.Path] = None, extra_env: Optional[dict] = None, timeout: int = 90,
+    script_rel: pathlib.Path,
+    args: list,
+    kanban_root: pathlib.Path,
+    project_name: str,
+    *,
+    repo_root: pathlib.Path | None = None,
+    extra_env: dict | None = None,
+    timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
@@ -208,13 +222,20 @@ def _run_cm_script(
     script_path = kanban_root / script_rel
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=base_env, cwd=str(kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=timeout,
     )
 
 
 def _git_local(repo_path: pathlib.Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo_path)] + list(args), capture_output=True, text=True, check=True,
+        ["git", "-C", str(repo_path)] + list(args),
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -222,14 +243,19 @@ def _git_local(repo_path: pathlib.Path, *args: str) -> str:
 def _git_tag_exists(repo_path: pathlib.Path, tag: str) -> bool:
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/tags/{tag}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
 
 def _commit_on_branch(
-    repo_path: pathlib.Path, branch: str, filename: str, content: str, message: str,
-    return_branch: Optional[str] = None,
+    repo_path: pathlib.Path,
+    branch: str,
+    filename: str,
+    content: str,
+    message: str,
+    return_branch: str | None = None,
 ) -> None:
     _git_local(repo_path, "checkout", branch)
     (repo_path / filename).write_text(content, encoding="utf-8")
@@ -240,7 +266,10 @@ def _commit_on_branch(
 
 
 def _build_tester_task(
-    kanban_root: pathlib.Path, project_name: str, task_id: str, release_version: str,
+    kanban_root: pathlib.Path,
+    project_name: str,
+    task_id: str,
+    release_version: str,
 ) -> pathlib.Path:
     """A DONE TESTER task whose report reads systemic_risk=high with no
     finding blocks: cm/release.sh's own ship-policy stage HALTs on trigger-2
@@ -271,15 +300,11 @@ def _build_tester_task(
     return task_dir
 
 
-def _write_intent_md(proj: pathlib.Path, declaration: Optional[str]) -> None:
+def _write_intent_md(proj: pathlib.Path, declaration: str | None) -> None:
     if declaration is None:
-        (proj / "INTENT.md").write_text(
-            "# INTENT\n\n## Entries\n\n<!-- no live entries -->\n", encoding="utf-8"
-        )
+        (proj / "INTENT.md").write_text("# INTENT\n\n## Entries\n\n<!-- no live entries -->\n", encoding="utf-8")
         return
-    (proj / "INTENT.md").write_text(
-        f"# INTENT\n\n## Entries\n- 2026-09-10: {declaration}\n", encoding="utf-8"
-    )
+    (proj / "INTENT.md").write_text(f"# INTENT\n\n## Entries\n- 2026-09-10: {declaration}\n", encoding="utf-8")
 
 
 def _release_state_text(kanban_root: pathlib.Path, project_name: str) -> str:
@@ -304,13 +329,17 @@ def _build_lane_b_fixture(tmp_path: pathlib.Path, project_name: str, version: st
     proj = kanban_root / "projects" / project_name
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT_REL, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_lane_b.txt", "lane b ship test feature content\n",
-        "feat: add feature for lane b ship test", return_branch="main",
+        repo_path,
+        rc_branch,
+        "feature_lane_b.txt",
+        "lane b ship test feature content\n",
+        "feat: add feature for lane b ship test",
+        return_branch="main",
     )
 
     tester_task_id = f"TESTER-20260910-{version[-1]}50-lane-b-high-risk"
@@ -322,9 +351,9 @@ def _build_lane_b_fixture(tmp_path: pathlib.Path, project_name: str, version: st
         f"stdout: {result_first.stdout}\nstderr: {result_first.stderr}"
     )
     combined_first = result_first.stdout + result_first.stderr
-    assert "cm-release.trigger-2.systemic-risk-high" in combined_first, (
-        f"Expected the unforced run to HALT on trigger-2.\noutput:\n{combined_first}"
-    )
+    assert (
+        "cm-release.trigger-2.systemic-risk-high" in combined_first
+    ), f"Expected the unforced run to HALT on trigger-2.\noutput:\n{combined_first}"
     halt_path = proj / "HALT"
     assert halt_path.is_file(), "Expected a project-scoped ship-policy HALT file after the unforced run."
 
@@ -337,7 +366,8 @@ def _build_lane_b_fixture(tmp_path: pathlib.Path, project_name: str, version: st
 
 
 def test_lane_b_matched_intent_force_ships_and_writes_both_records(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_name = "laneb_project"
     version = "v2.23.5"
@@ -363,15 +393,15 @@ def test_lane_b_matched_intent_force_ships_and_writes_both_records(
     assert not outcome.action_errors, outcome.action_errors
 
     release_state_text = _release_state_text(kanban_root, project_name)
-    assert "## Operator Override" in release_state_text, (
-        f"Expected an '## Operator Override' event.\n{release_state_text}"
-    )
-    assert declaration in release_state_text, (
-        f"Expected the INTENT.md entry's text verbatim as the Override reason.\n{release_state_text}"
-    )
-    assert "## OVERWATCH Decision" in release_state_text, (
-        f"Expected an '## OVERWATCH Decision' event.\n{release_state_text}"
-    )
+    assert (
+        "## Operator Override" in release_state_text
+    ), f"Expected an '## Operator Override' event.\n{release_state_text}"
+    assert (
+        declaration in release_state_text
+    ), f"Expected the INTENT.md entry's text verbatim as the Override reason.\n{release_state_text}"
+    assert (
+        "## OVERWATCH Decision" in release_state_text
+    ), f"Expected an '## OVERWATCH Decision' event.\n{release_state_text}"
     assert "Lane: B" in release_state_text
 
     assert not halt_path.exists(), "Expected the ship-policy HALT to be cleared after a successful Lane B ship."
@@ -384,7 +414,8 @@ def test_lane_b_matched_intent_force_ships_and_writes_both_records(
 
 
 def test_lane_b_unmatched_intent_classifies_lane_c_and_ships_nothing(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_name = "laneb_unmatched_project"
     version = "v2.23.6"
@@ -405,9 +436,9 @@ def test_lane_b_unmatched_intent_classifies_lane_c_and_ships_nothing(
     release_state_text = _release_state_text(kanban_root, project_name)
     assert "## OVERWATCH Decision" in release_state_text
     assert "Lane: C" in release_state_text
-    assert "## Operator Override" not in release_state_text, (
-        "No Operator Override event should exist — nothing was force-shipped."
-    )
+    assert (
+        "## Operator Override" not in release_state_text
+    ), "No Operator Override event should exist — nothing was force-shipped."
 
     assert halt_path.exists(), "The ship-policy HALT must remain — Lane C never clears it."
     assert not _git_tag_exists(repo_path, version), f"Release tag '{version}' must NOT exist for a Lane C block."
@@ -420,7 +451,8 @@ def test_lane_b_unmatched_intent_classifies_lane_c_and_ships_nothing(
 
 
 def test_lane_b_matched_intent_ships_nothing_when_overwatch_resolve_false(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_name = "laneb_resolve_off_project"
     version = "v2.23.7"
@@ -469,8 +501,11 @@ def test_release_sh_refuses_force_under_wake_context_without_lane_b_flag(
     release_state_before = _release_state_text(kanban_root, project_name)
 
     result = _run_cm_script(
-        _RELEASE_SCRIPT_REL, ["--force", "--reason", declaration],
-        kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT_REL,
+        ["--force", "--reason", declaration],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
         extra_env={"PGAI_AGENT_WAKE_ACTIVE": "1"},
     )
     assert result.returncode != 0, (
@@ -478,15 +513,15 @@ def test_release_sh_refuses_force_under_wake_context_without_lane_b_flag(
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "cm-release.operator-force.agent-wake-refused" in combined, (
-        f"Expected the surviving agent-wake-refused error key.\noutput:\n{combined}"
-    )
-    assert "remedy" in combined.lower() or "From an interactive operator shell" in combined, (
-        f"Expected a runnable remedy in the refusal output.\noutput:\n{combined}"
-    )
-    assert _release_state_text(kanban_root, project_name) == release_state_before, (
-        "release-state.md must be byte-identical after a refused --force invocation."
-    )
+    assert (
+        "cm-release.operator-force.agent-wake-refused" in combined
+    ), f"Expected the surviving agent-wake-refused error key.\noutput:\n{combined}"
+    assert (
+        "remedy" in combined.lower() or "From an interactive operator shell" in combined
+    ), f"Expected a runnable remedy in the refusal output.\noutput:\n{combined}"
+    assert (
+        _release_state_text(kanban_root, project_name) == release_state_before
+    ), "release-state.md must be byte-identical after a refused --force invocation."
     assert halt_path.exists()
     assert not _git_tag_exists(repo_path, version)
 
@@ -510,7 +545,9 @@ def test_release_sh_refuses_lane_b_flag_with_unmatched_reason(tmp_path: pathlib.
     result = _run_cm_script(
         _RELEASE_SCRIPT_REL,
         ["--force", "--reason", "a reason that matches nothing in INTENT.md", "--overwatch-lane-b-ship"],
-        kanban_root, project_name, repo_root=repo_path,
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
         extra_env={"PGAI_AGENT_WAKE_ACTIVE": "1"},
     )
     assert result.returncode != 0, (
@@ -518,12 +555,12 @@ def test_release_sh_refuses_lane_b_flag_with_unmatched_reason(tmp_path: pathlib.
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "cm-release.overwatch-lane-b.intent-not-matched" in combined, (
-        f"Expected the new overwatch-lane-b intent-not-matched error key.\noutput:\n{combined}"
-    )
-    assert _release_state_text(kanban_root, project_name) == release_state_before, (
-        "release-state.md must be byte-identical after a refused Lane B invocation."
-    )
+    assert (
+        "cm-release.overwatch-lane-b.intent-not-matched" in combined
+    ), f"Expected the new overwatch-lane-b intent-not-matched error key.\noutput:\n{combined}"
+    assert (
+        _release_state_text(kanban_root, project_name) == release_state_before
+    ), "release-state.md must be byte-identical after a refused Lane B invocation."
     assert halt_path.exists()
     assert not _git_tag_exists(repo_path, version)
 
@@ -545,7 +582,9 @@ def test_release_sh_admits_lane_b_flag_with_matched_reason_directly(tmp_path: pa
     result = _run_cm_script(
         _RELEASE_SCRIPT_REL,
         ["--force", "--reason", declaration, "--overwatch-lane-b-ship"],
-        kanban_root, project_name, repo_root=repo_path,
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
         extra_env={"PGAI_AGENT_WAKE_ACTIVE": "1"},
     )
     assert result.returncode == 0, (

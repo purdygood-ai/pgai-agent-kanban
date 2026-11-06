@@ -199,9 +199,7 @@ def test_fresh_install_seeds_claude_env_from_template(tmp_path: pathlib.Path) ->
     assert template.is_file(), f"claude-env_example was not deposited:\n{output}"
     assert live.is_file(), f"claude-env was not seeded:\n{output}"
     assert "Initialized: claude-env (from claude-env_example)" in output, output
-    assert live.read_bytes() == template.read_bytes(), (
-        "live claude-env does not derive from claude-env_example"
-    )
+    assert live.read_bytes() == template.read_bytes(), "live claude-env does not derive from claude-env_example"
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +222,7 @@ def test_upgrade_preserves_hand_edited_claude_env_byte_for_byte(
     kanban_root.mkdir()
 
     modified_content = (
-        "# operator hand-tuned this file after an afternoon of CLI audit\n"
-        "export PGAI_CLAUDE_CUSTOM_TUNING=1\n"
+        "# operator hand-tuned this file after an afternoon of CLI audit\n" "export PGAI_CLAUDE_CUSTOM_TUNING=1\n"
     )
     (kanban_root / "claude-env").write_text(modified_content, encoding="utf-8")
 
@@ -233,9 +230,9 @@ def test_upgrade_preserves_hand_edited_claude_env_byte_for_byte(
     output = _combined_output(result)
 
     assert result.returncode == 0, f"upgrade.sh failed:\n{output}"
-    assert (kanban_root / "claude-env").read_text(encoding="utf-8") == modified_content, (
-        "upgrade overwrote a hand-edited claude-env"
-    )
+    assert (kanban_root / "claude-env").read_text(
+        encoding="utf-8"
+    ) == modified_content, "upgrade overwrote a hand-edited claude-env"
     # claude-env is never passed through deposit_item (it is not part of the
     # team/docs/example item loops), so the per-item "Protected (preserved):
     # <label>" narration never fires for it specifically. Its protected
@@ -268,9 +265,7 @@ def test_upgrade_creates_claude_env_when_only_template_present(
     # Stand in for a stale, pre-ticket template already on disk. It gets
     # refreshed to the shipped version in the same run that creates the
     # live file from that refreshed template.
-    (kanban_root / "claude-env_example").write_text(
-        "# stale pre-ticket template\n", encoding="utf-8"
-    )
+    (kanban_root / "claude-env_example").write_text("# stale pre-ticket template\n", encoding="utf-8")
     assert not (kanban_root / "claude-env").exists()
 
     result = _run_upgrade_phase2(home=home, kanban_root=kanban_root)
@@ -307,21 +302,15 @@ def test_upgrade_twice_in_a_row_leaves_modified_claude_env_byte_identical(
     modified_content = "export PGAI_CLAUDE_CUSTOM_TUNING=twice-in-a-row\n"
     (kanban_root / "claude-env").write_text(modified_content, encoding="utf-8")
 
-    first = _run_upgrade_phase2(
-        home=home, kanban_root=kanban_root, stamp_version="v0.0.1-sandbox-test"
-    )
+    first = _run_upgrade_phase2(home=home, kanban_root=kanban_root, stamp_version="v0.0.1-sandbox-test")
     assert first.returncode == 0, f"first upgrade.sh run failed:\n{_combined_output(first)}"
     after_first = (kanban_root / "claude-env").read_text(encoding="utf-8")
     assert after_first == modified_content
 
-    second = _run_upgrade_phase2(
-        home=home, kanban_root=kanban_root, stamp_version="v0.0.2-sandbox-test"
-    )
+    second = _run_upgrade_phase2(home=home, kanban_root=kanban_root, stamp_version="v0.0.2-sandbox-test")
     assert second.returncode == 0, f"second upgrade.sh run failed:\n{_combined_output(second)}"
     after_second = (kanban_root / "claude-env").read_text(encoding="utf-8")
-    assert after_second == modified_content, (
-        "claude-env changed between the first and second upgrade.sh run"
-    )
+    assert after_second == modified_content, "claude-env changed between the first and second upgrade.sh run"
 
 
 # ---------------------------------------------------------------------------
@@ -358,10 +347,8 @@ def test_upgrade_refreshes_example_while_preserving_live_file(
     template_after = (kanban_root / "claude-env_example").read_bytes()
     live_after = (kanban_root / "claude-env").read_text(encoding="utf-8")
 
-    assert template_after == _REAL_CLAUDE_ENV_TEMPLATE.read_bytes(), (
-        "claude-env_example was not refreshed to the shipped version"
-    )
+    assert (
+        template_after == _REAL_CLAUDE_ENV_TEMPLATE.read_bytes()
+    ), "claude-env_example was not refreshed to the shipped version"
     assert template_after != stale_template.encode("utf-8")
-    assert live_after == modified_live, (
-        "live claude-env was overwritten even though only the template should refresh"
-    )
+    assert live_after == modified_live, "live claude-env was overwritten even though only the template should refresh"

@@ -81,9 +81,7 @@ def kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
         (proj / sub).mkdir(parents=True)
     (root / "logs").mkdir(parents=True)
 
-    (proj / "project.cfg").write_text(
-        f"[project]\nproject_name = {_PROJECT}\nbranch_prefix = ai_\n", encoding="utf-8"
-    )
+    (proj / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\nbranch_prefix = ai_\n", encoding="utf-8")
     (proj / "release-state.md").write_text(
         "# Release State\n\n"
         f"## Active RC\n{_VERSION}\n\n"
@@ -92,8 +90,7 @@ def kanban_root(tmp_path: pathlib.Path) -> pathlib.Path:
         encoding="utf-8",
     )
     (proj / "HALT").write_text(
-        "# HALT created by CM at 2099-01-01T00:00:00Z\n"
-        "# Reason: TESTER systemic_risk=high\n",
+        "# HALT created by CM at 2099-01-01T00:00:00Z\n" "# Reason: TESTER systemic_risk=high\n",
         encoding="utf-8",
     )
 
@@ -128,7 +125,7 @@ def _section(path: pathlib.Path, heading: str) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     for index, line in enumerate(lines):
         if line.strip() == f"## {heading}":
-            for value in lines[index + 1:]:
+            for value in lines[index + 1 :]:
                 if value.strip():
                     return value.strip()
     return ""
@@ -201,9 +198,7 @@ class TestFailedCancelRevertsNothing:
             assert _section(proj / "bugs" / f"{bug_id}.md", "Status") == "running", bug_id
         assert backlog.read_bytes() == backlog_before, "bug backlog markers must not be flipped"
 
-    def test_no_rc_task_is_moved_to_wont_do(
-        self, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_rc_task_is_moved_to_wont_do(self, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _install_stubs(monkeypatch, cancel_ok=False, output=_LOCKED_OUTPUT)
         proj = _project_dir(kanban_root)
 
@@ -212,9 +207,7 @@ class TestFailedCancelRevertsNothing:
         assert _section(proj / "tasks" / _CODER_TASK / "status.md", "State") == "WORKING"
         assert _section(proj / "tasks" / _CM_TASK / "status.md", "State") == "BLOCKED"
 
-    def test_ship_policy_halt_stays_in_place(
-        self, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_ship_policy_halt_stays_in_place(self, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _install_stubs(monkeypatch, cancel_ok=False, output=_LOCKED_OUTPUT)
 
         outcome = run_resolution_stage(_PROJECT, str(kanban_root))

@@ -125,7 +125,9 @@ def test_absent_blank_or_missing_cfg_takes_documented_defaults(tmp_path: pathlib
     root = _sandbox(tmp_path, cfg_text)
     result = _dry_run(tmp_path, root, "--project", _PROJECT)
     assert result.returncode == 0, _diag(result)
-    resolved = {k: _summary_value(result.stdout, k) for k in ("retention_days", "trivial_log_bytes", "trivial_log_hours")}
+    resolved = {
+        k: _summary_value(result.stdout, k) for k in ("retention_days", "trivial_log_bytes", "trivial_log_hours")
+    }
     assert resolved == {"retention_days": "30", "trivial_log_bytes": "1700", "trivial_log_hours": "6"}, _diag(result)
     assert _DEPRECATION not in result.stdout + result.stderr, _diag(result)
 

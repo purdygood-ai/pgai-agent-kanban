@@ -68,11 +68,17 @@
 #                                 (default: USR1 — must match the ignore
 #                                 trap lib/pane_readiness.sh installs)
 
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/pane_readiness.sh
 source "${SCRIPT_DIR}/lib/pane_readiness.sh"
 # shellcheck source=lib/cadence.sh
@@ -104,12 +110,6 @@ while [[ $# -gt 0 ]]; do
     --window)
       WINDOW_NAME="${2:-}"
       shift 2
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2
@@ -160,6 +160,13 @@ if [[ -z "$WINDOW_NAME" ]]; then
   IFS=$'\t' read -r WINDOW_TARGET WINDOW_NAME < <(
     tmux display-message -t "$SESSION_NAME" -p '#{window_id}	#{window_name}' 2>/dev/null || true
   ) || true
+  # The single read returns before the process substitution above has
+  # necessarily exited, and the script can exit on the very next line; an
+  # un-waited producer would outlive it and be left for PID 1 to reap --
+  # under a PID 1 that never reaps, one zombie per window switch. Waiting
+  # for it (`$!` names the process substitution) collects it here. Its
+  # status is irrelevant to the sender, so it never fails the script.
+  wait "$!" 2>/dev/null || true
 fi
 
 if [[ -z "$WINDOW_NAME" ]]; then

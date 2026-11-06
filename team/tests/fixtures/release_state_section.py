@@ -22,12 +22,11 @@ from __future__ import annotations
 
 import os
 import pathlib
-from typing import Optional, Union
 
 from pgai_agent_kanban.task_status import first_value_line, read_section
 
 
-def release_state_section_value(path: Union[str, "os.PathLike[str]"], heading: str) -> Optional[str]:
+def release_state_section_value(path: str | os.PathLike[str], heading: str) -> str | None:
     """Return the ``## <heading>`` field value of the release-state file at *path*.
 
     Returns:

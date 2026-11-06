@@ -109,6 +109,7 @@ import pytest
 from tests.unit.shell_harness import run_bash
 from tests.fixtures.binary_guard import require_binary
 from tests.fixtures.scrubbed_subprocess_env import build_scrubbed_env
+from tests.fixtures.upgrade_sandbox import seed_provider_home_rule
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +121,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="version-stamp-split")
+
 
 # ---------------------------------------------------------------------------
 # Paths to the real scripts under test
@@ -143,6 +145,8 @@ _REAL_VERSION_STAMP_SH = _LIB_DIR / "version_stamp.sh"
 _REAL_SUBAGENT_DEPLOY_SH = _LIB_DIR / "subagent_deploy.sh"
 _REAL_SCRIPT_COMMON_SH = _LIB_DIR / "script_common.sh"
 _REAL_CONFIG_LOADER_SH = _LIB_DIR / "config_loader.sh"
+_REAL_DEV_TREE_SH = _LIB_DIR / "dev_tree.sh"
+_REAL_PP_RUN_OPS_SH = _LIB_DIR / "pp_run_ops.sh"
 _REAL_SEMVER_SH = _LIB_DIR / "semver.sh"
 
 
@@ -260,9 +264,7 @@ def test_tag_exact_deposit_writes_clean_tag_to_VERSION(
         tmp_path,
         f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{repo!s}' '{kanban_root!s}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     version_file = kanban_root / "VERSION"
     detail_file = kanban_root / "VERSION_DETAIL"
@@ -270,18 +272,15 @@ def test_tag_exact_deposit_writes_clean_tag_to_VERSION(
     assert version_file.exists(), "VERSION was not written"
     stamped = version_file.read_text(encoding="utf-8").strip()
     assert stamped == tag, (
-        f"Tag-exact deposit: VERSION must equal the clean tag.\n"
-        f"Expected: {tag!r}\nGot: {stamped!r}"
+        f"Tag-exact deposit: VERSION must equal the clean tag.\n" f"Expected: {tag!r}\nGot: {stamped!r}"
     )
 
     assert detail_file.exists(), "VERSION_DETAIL was not written"
     detail = detail_file.read_text(encoding="utf-8").strip()
-    assert tag in detail, (
-        f"VERSION_DETAIL must carry the tag string; got: {detail!r}"
-    )
-    assert deposit_sha[:7] in detail or deposit_sha in detail, (
-        f"VERSION_DETAIL must carry the deposit SHA; got: {detail!r}"
-    )
+    assert tag in detail, f"VERSION_DETAIL must carry the tag string; got: {detail!r}"
+    assert (
+        deposit_sha[:7] in detail or deposit_sha in detail
+    ), f"VERSION_DETAIL must carry the deposit SHA; got: {detail!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -320,17 +319,14 @@ def test_tag_plus_one_deposit_writes_clean_tag_to_VERSION(
         f"describe={full_describe!r}, tag={base_tag!r}"
     )
     assert full_describe.startswith(base_tag + "-"), (
-        f"Fixture error: describe must start with base tag + '-'; "
-        f"describe={full_describe!r}"
+        f"Fixture error: describe must start with base tag + '-'; " f"describe={full_describe!r}"
     )
 
     result = run_bash(
         tmp_path,
         f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{repo!s}' '{kanban_root!s}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     version_file = kanban_root / "VERSION"
     detail_file = kanban_root / "VERSION_DETAIL"
@@ -347,23 +343,19 @@ def test_tag_plus_one_deposit_writes_clean_tag_to_VERSION(
         f"This is the split's whole purpose: VERSION shows ai_vX.Y.Z, "
         f"not ai_vX.Y.Z-1-g<sha>."
     )
-    assert "-g" not in stamped, (
-        f"VERSION must not contain a git commit suffix; got: {stamped!r}"
-    )
+    assert "-g" not in stamped, f"VERSION must not contain a git commit suffix; got: {stamped!r}"
 
     assert detail_file.exists(), "VERSION_DETAIL was not written"
     detail = detail_file.read_text(encoding="utf-8").strip()
 
     # VERSION_DETAIL must carry the full describe (with the suffix).
     assert full_describe in detail, (
-        f"VERSION_DETAIL must carry the full describe string.\n"
-        f"Expected to find: {full_describe!r}\nIn: {detail!r}"
+        f"VERSION_DETAIL must carry the full describe string.\n" f"Expected to find: {full_describe!r}\nIn: {detail!r}"
     )
 
     # VERSION_DETAIL must carry the deposit SHA.
     assert deposit_sha[:7] in detail or deposit_sha in detail, (
-        f"VERSION_DETAIL must carry the deposit SHA.\n"
-        f"SHA: {deposit_sha!r}\nVERSION_DETAIL: {detail!r}"
+        f"VERSION_DETAIL must carry the deposit SHA.\n" f"SHA: {deposit_sha!r}\nVERSION_DETAIL: {detail!r}"
     )
 
 
@@ -399,9 +391,7 @@ def test_stamp_version_override_writes_explicit_value_to_VERSION_unchanged(
         tmp_path,
         f"source {_VERSION_STAMP_SH!s} && stamp_version_files '{repo!s}' '{kanban_root!s}' '{explicit_stamp}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files (override) exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files (override) exited non-zero: {result.stderr}"
 
     version_file = kanban_root / "VERSION"
     detail_file = kanban_root / "VERSION_DETAIL"
@@ -511,10 +501,14 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
-        _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
         _REAL_SEMVER_SH,
     ]:
         if lib_src.exists():
@@ -526,12 +520,10 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
 
     # --- Kanban root: kanban.cfg pointing at dev_tree ---
     (kanban_root / "kanban.cfg").write_text(
-        textwrap.dedent(
-            f"""\
+        textwrap.dedent(f"""\
             [paths]
             dev_tree_path = {dev_tree}
-            """
-        ),
+            """),
         encoding="utf-8",
     )
 
@@ -553,10 +545,14 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
         _REAL_ARGPARSE_SH,
         _REAL_ENV_BOOTSTRAP_SH,
         _REAL_INI_PARSER_SH,
-        _REAL_PROJECT_PATHS_SH, _REAL_GIT_REMOTE_DEFAULT_SH,
+        _REAL_PROJECT_PATHS_SH,
+        _REAL_GIT_REMOTE_DEFAULT_SH,
         _REAL_ERROR_CONTRACT_SH,
         _REAL_TEMP_SH,
-        _REAL_SCRIPT_COMMON_SH, _REAL_CONFIG_LOADER_SH,
+        _REAL_SCRIPT_COMMON_SH,
+        _REAL_CONFIG_LOADER_SH,
+        _REAL_DEV_TREE_SH,
+        _REAL_PP_RUN_OPS_SH,
         _REAL_SEMVER_SH,
     ]:
         if lib_src.exists():
@@ -570,6 +566,7 @@ def _populate_upgrade_sandbox(kanban_root: pathlib.Path, dev_tree: pathlib.Path)
     # source it (required — the provider-agent deploy step fails loud if absent).
     if _REAL_SUBAGENT_DEPLOY_SH.exists():
         shutil.copy2(_REAL_SUBAGENT_DEPLOY_SH, dev_lib / _REAL_SUBAGENT_DEPLOY_SH.name)
+    seed_provider_home_rule(dev_tree / "team")
 
     # Copy the version.sh dashboard lib so get_latest_released_tag is available.
     _dash_lib_src = _SCRIPTS_DIR / "dashboard" / "lib" / "version.sh"
@@ -645,8 +642,7 @@ def test_divergence_advisory_still_prints_on_tag_plus_one_deposit(
     )
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
     combined = result.stdout + result.stderr
@@ -663,21 +659,15 @@ def test_divergence_advisory_still_prints_on_tag_plus_one_deposit(
     assert version_file.exists(), "VERSION was not written"
     stamped = version_file.read_text(encoding="utf-8").strip()
     assert stamped == "v1.0.0", (
-        f"VERSION must be the clean tag even on a tag+1 deposit.\n"
-        f"Expected: 'v1.0.0'\nGot: {stamped!r}"
+        f"VERSION must be the clean tag even on a tag+1 deposit.\n" f"Expected: 'v1.0.0'\nGot: {stamped!r}"
     )
-    assert "-g" not in stamped, (
-        f"VERSION must not contain a git commit suffix; got: {stamped!r}"
-    )
+    assert "-g" not in stamped, f"VERSION must not contain a git commit suffix; got: {stamped!r}"
 
     # VERSION_DETAIL must be written with the full describe.
     detail_file = kanban_root / "VERSION_DETAIL"
     assert detail_file.exists(), "VERSION_DETAIL was not written on a tag+1 deposit"
     detail = detail_file.read_text(encoding="utf-8").strip()
-    assert "v1.0.0-1-g" in detail, (
-        f"VERSION_DETAIL must carry the full describe string.\n"
-        f"Got: {detail!r}"
-    )
+    assert "v1.0.0-1-g" in detail, f"VERSION_DETAIL must carry the full describe string.\n" f"Got: {detail!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -717,9 +707,7 @@ def test_status_bar_renderer_shows_clean_version_from_VERSION_file(
 
     result = run_bash(
         tmp_path,
-        f"PGAI_AGENT_KANBAN_ROOT_PATH='{kanban_root!s}' "
-        f"PGAI_DEV_TREE_PATH='' "
-        f"bash {_STATUS_RIGHT_SH!s}",
+        f"PGAI_AGENT_KANBAN_ROOT_PATH='{kanban_root!s}' " f"PGAI_DEV_TREE_PATH='' " f"bash {_STATUS_RIGHT_SH!s}",
         extra_env={
             "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
             "PGAI_DEV_TREE_PATH": "",
@@ -740,8 +728,7 @@ def test_status_bar_renderer_shows_clean_version_from_VERSION_file(
 
     # Ensure no describe suffix leaked through.
     assert "-g" not in output.split(clean_version)[-1].split("\n")[0], (
-        f"status-right.sh output must not show a git describe suffix after the clean version.\n"
-        f"output: {output!r}"
+        f"status-right.sh output must not show a git describe suffix after the clean version.\n" f"output: {output!r}"
     )
 
 
@@ -836,22 +823,19 @@ def test_installed_tag_names_version_detail_from_a_detached_worktree(
 
     result = run_bash(
         tmp_path,
-        f"source {_VERSION_STAMP_SH!s} && "
-        f"stamp_version_files '{worktree!s}' '{kanban_root!s}' '' '' 'ai_v1.1.0'",
+        f"source {_VERSION_STAMP_SH!s} && " f"stamp_version_files '{worktree!s}' '{kanban_root!s}' '' '' 'ai_v1.1.0'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     detail_file = kanban_root / "VERSION_DETAIL"
     assert detail_file.exists(), "VERSION_DETAIL was not written for an installed tag"
     detail = detail_file.read_text(encoding="utf-8")
-    assert detail == f"ai_v1.1.0  deposit-sha={tag_sha}\n", (
-        f"VERSION_DETAIL must name the installed tag and its commit; got: {detail!r}"
-    )
-    assert (kanban_root / "VERSION").read_text(encoding="utf-8").strip() == "ai_v1.1.0", (
-        "with no committed VERSION, VERSION falls back to the installed tag"
-    )
+    assert (
+        detail == f"ai_v1.1.0  deposit-sha={tag_sha}\n"
+    ), f"VERSION_DETAIL must name the installed tag and its commit; got: {detail!r}"
+    assert (kanban_root / "VERSION").read_text(
+        encoding="utf-8"
+    ).strip() == "ai_v1.1.0", "with no committed VERSION, VERSION falls back to the installed tag"
 
 
 # ---------------------------------------------------------------------------
@@ -880,17 +864,14 @@ def test_plain_stamp_names_prefixed_release_tag_over_older_bare_tag(
 
     result = run_bash(
         tmp_path,
-        f"source {_VERSION_STAMP_SH!s} && "
-        f"stamp_version_files '{repo!s}' '{kanban_root!s}'",
+        f"source {_VERSION_STAMP_SH!s} && " f"stamp_version_files '{repo!s}' '{kanban_root!s}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     detail = (kanban_root / "VERSION_DETAIL").read_text(encoding="utf-8")
-    assert detail == f"ai_v1.1.0  deposit-sha={head_sha}\n", (
-        f"VERSION_DETAIL must name the prefixed tag at HEAD; got: {detail!r}"
-    )
+    assert (
+        detail == f"ai_v1.1.0  deposit-sha={head_sha}\n"
+    ), f"VERSION_DETAIL must name the prefixed tag at HEAD; got: {detail!r}"
 
 
 @pytest.mark.skipif(
@@ -913,17 +894,12 @@ def test_plain_stamp_past_a_prefixed_tag_describes_from_that_tag(
 
     result = run_bash(
         tmp_path,
-        f"source {_VERSION_STAMP_SH!s} && "
-        f"stamp_version_files '{repo!s}' '{kanban_root!s}'",
+        f"source {_VERSION_STAMP_SH!s} && " f"stamp_version_files '{repo!s}' '{kanban_root!s}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     detail = (kanban_root / "VERSION_DETAIL").read_text(encoding="utf-8")
-    assert detail.startswith("ai_v1.1.0-1-g"), (
-        f"VERSION_DETAIL must describe from the prefixed tag; got: {detail!r}"
-    )
+    assert detail.startswith("ai_v1.1.0-1-g"), f"VERSION_DETAIL must describe from the prefixed tag; got: {detail!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -959,15 +935,11 @@ def test_targeted_upgrade_call_shape_stamps_resolved_tag_from_worktree(
         f"source {_VERSION_STAMP_SH!s} && "
         f"stamp_version_files '{worktree!s}' '{kanban_root!s}' '' 'ai_' 'ai_v1.1.0'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
     detail_file = kanban_root / "VERSION_DETAIL"
     assert detail_file.exists(), "VERSION_DETAIL was not written from the worktree"
-    assert detail_file.read_text(encoding="utf-8") == (
-        f"ai_v1.1.0  deposit-sha={tag_sha}\n"
-    )
+    assert detail_file.read_text(encoding="utf-8") == (f"ai_v1.1.0  deposit-sha={tag_sha}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -1033,16 +1005,13 @@ def test_worktree_source_without_installed_tag_replaces_stale_version_detail(
 
     result = run_bash(
         tmp_path,
-        f"source {_VERSION_STAMP_SH!s} && "
-        f"stamp_version_files '{worktree!s}' '{kanban_root!s}' {call_args}",
+        f"source {_VERSION_STAMP_SH!s} && " f"stamp_version_files '{worktree!s}' '{kanban_root!s}' {call_args}",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
-    assert (kanban_root / "VERSION").read_text(encoding="utf-8") == "v1.1.0\n", (
-        "VERSION must be the worktree's committed VERSION, copied verbatim"
-    )
+    assert (kanban_root / "VERSION").read_text(
+        encoding="utf-8"
+    ) == "v1.1.0\n", "VERSION must be the worktree's committed VERSION, copied verbatim"
     detail_file = kanban_root / "VERSION_DETAIL"
     assert detail_file.exists(), "VERSION_DETAIL was not written from the worktree"
     detail = detail_file.read_text(encoding="utf-8")
@@ -1081,16 +1050,13 @@ def test_non_git_source_copies_version_and_removes_stale_version_detail(
 
     result = run_bash(
         tmp_path,
-        f"source {_VERSION_STAMP_SH!s} && "
-        f"stamp_version_files '{source!s}' '{kanban_root!s}' '' '' ''",
+        f"source {_VERSION_STAMP_SH!s} && " f"stamp_version_files '{source!s}' '{kanban_root!s}' '' '' ''",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files exited non-zero: {result.stderr}"
 
-    assert (kanban_root / "VERSION").read_text(encoding="utf-8") == "v1.1.0\n", (
-        "VERSION must be the source tree's committed VERSION, copied verbatim"
-    )
+    assert (kanban_root / "VERSION").read_text(
+        encoding="utf-8"
+    ) == "v1.1.0\n", "VERSION must be the source tree's committed VERSION, copied verbatim"
     detail_file = kanban_root / "VERSION_DETAIL"
     assert not detail_file.exists(), (
         f"A non-git source must leave no VERSION_DETAIL in the root.\n"
@@ -1142,16 +1108,13 @@ def test_stamp_version_override_removes_stale_version_detail(
     explicit_stamp = "v9.9.9"
     result = run_bash(
         tmp_path,
-        f"source {_VERSION_STAMP_SH!s} && "
-        f"stamp_version_files '{source!s}' '{kanban_root!s}' '{explicit_stamp}'",
+        f"source {_VERSION_STAMP_SH!s} && " f"stamp_version_files '{source!s}' '{kanban_root!s}' '{explicit_stamp}'",
     )
-    assert result.returncode == 0, (
-        f"stamp_version_files (override) exited non-zero: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stamp_version_files (override) exited non-zero: {result.stderr}"
 
-    assert (kanban_root / "VERSION").read_text(encoding="utf-8") == f"{explicit_stamp}\n", (
-        "--stamp-version override: VERSION must equal the explicit value exactly"
-    )
+    assert (kanban_root / "VERSION").read_text(
+        encoding="utf-8"
+    ) == f"{explicit_stamp}\n", "--stamp-version override: VERSION must equal the explicit value exactly"
     detail_file = kanban_root / "VERSION_DETAIL"
     assert not detail_file.exists(), (
         f"A --stamp-version deposit must leave no VERSION_DETAIL in the root; "
@@ -1168,9 +1131,7 @@ _SEEDED_ROOT_VERSION = "v2.35.2"
 _SEEDED_ROOT_DETAIL = "ai_v2.35.2  deposit-sha=old\n"
 
 
-def _build_non_git_upgrade_sandbox(
-    tmp_path: pathlib.Path, committed_version: str
-) -> dict[str, pathlib.Path]:
+def _build_non_git_upgrade_sandbox(tmp_path: pathlib.Path, committed_version: str) -> dict[str, pathlib.Path]:
     """Build an installed root and a dev tree that is not a git checkout.
 
     The dev tree is what an archive export of a checkout looks like: the
@@ -1262,8 +1223,7 @@ def test_upgrade_from_non_git_tree_writes_stamp_version_override(
     combined = result.stdout + result.stderr
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
     assert (kanban_root / "VERSION").read_text(encoding="utf-8") == "v9.9.9\n", (
         f"VERSION must hold the --stamp-version value from a tree with no .git; "
@@ -1276,8 +1236,7 @@ def test_upgrade_from_non_git_tree_writes_stamp_version_override(
         f"{detail_file.read_text(encoding='utf-8')!r}"
     )
     assert "VERSION updated" in combined, (
-        f"upgrade.sh must narrate the VERSION it wrote.\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh must narrate the VERSION it wrote.\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
 
 
@@ -1303,8 +1262,7 @@ def test_upgrade_from_non_git_tree_copies_committed_version_and_clears_stale_det
     combined = result.stdout + result.stderr
 
     assert result.returncode == 0, (
-        f"upgrade.sh failed (exit {result.returncode}).\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh failed (exit {result.returncode}).\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )
     assert (kanban_root / "VERSION").read_text(encoding="utf-8") == f"{committed_version}\n", (
         f"VERSION must be the dev tree's committed VERSION from a tree with no .git; "
@@ -1317,6 +1275,5 @@ def test_upgrade_from_non_git_tree_copies_committed_version_and_clears_stale_det
         f"{detail_file.read_text(encoding='utf-8')!r}"
     )
     assert "VERSION updated" in combined, (
-        f"upgrade.sh must narrate the VERSION it wrote.\n"
-        f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+        f"upgrade.sh must narrate the VERSION it wrote.\n" f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
     )

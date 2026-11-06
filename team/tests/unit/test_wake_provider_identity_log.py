@@ -76,8 +76,10 @@ import pytest
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, pytest's cwd when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
-_CLAUDE_SH = pathlib.Path("scripts/wake/claude.sh")
-_CODEX_SH = pathlib.Path("scripts/wake/codex.sh")
+# Both provider shims (scripts/wake/claude.sh, scripts/wake/codex.sh) source
+# the one shared entry body, lib/wake_entry.sh, which carries the block.
+_CLAUDE_SH = pathlib.Path("scripts/lib/wake_entry.sh")
+_CODEX_SH = pathlib.Path("scripts/lib/wake_entry.sh")
 
 _BLOCK_BEGIN = "# PROVIDER-IDENTITY-LOG-BEGIN"
 _BLOCK_END = "# PROVIDER-IDENTITY-LOG-END"
@@ -156,7 +158,7 @@ def _write_fake_cli(bin_dir: pathlib.Path, *, name: str, version_output: str) ->
     fake.write_text(
         "#!/usr/bin/env bash\n"
         'if [[ "$1" == "--version" ]]; then\n'
-        f'  echo {version_output!r}\n'
+        f"  echo {version_output!r}\n"
         "  exit 0\n"
         "fi\n"
         "exit 1\n",
@@ -201,24 +203,19 @@ def test_identity_block_runs_after_auth_mode_and_before_preflight(
     content = script_path.read_text(encoding="utf-8")
 
     assert _AUTH_MODE_LINE in content, (
-        f"{script_path}: pre-existing auth mode: line is missing or was "
-        "altered. It must remain unchanged."
+        f"{script_path}: pre-existing auth mode: line is missing or was " "altered. It must remain unchanged."
     )
-    assert _BLOCK_BEGIN in content and _BLOCK_END in content, (
-        f"{script_path}: PROVIDER-IDENTITY-LOG sentinel markers not found."
-    )
-    assert _PREFLIGHT_CALL in content, (
-        f"{script_path}: expected call to {_PREFLIGHT_CALL} not found."
-    )
+    assert (
+        _BLOCK_BEGIN in content and _BLOCK_END in content
+    ), f"{script_path}: PROVIDER-IDENTITY-LOG sentinel markers not found."
+    assert _PREFLIGHT_CALL in content, f"{script_path}: expected call to {_PREFLIGHT_CALL} not found."
 
     auth_pos = content.index(_AUTH_MODE_LINE)
     block_begin_pos = content.index(_BLOCK_BEGIN)
     block_end_pos = content.index(_BLOCK_END)
     preflight_pos = content.index(_PREFLIGHT_CALL)
 
-    assert auth_pos < block_begin_pos, (
-        f"{script_path}: identity block must appear after the auth mode: line."
-    )
+    assert auth_pos < block_begin_pos, f"{script_path}: identity block must appear after the auth mode: line."
     assert block_end_pos < preflight_pos, (
         f"{script_path}: identity block must appear before {_PREFLIGHT_CALL} "
         "(i.e. before task dispatch begins), so it fires on every firing "
@@ -251,12 +248,9 @@ def test_identity_block_declares_both_field_names(script_path: pathlib.Path) -> 
     env var (ANTHROPIC_API_KEY / OPENAI_API_KEY / any *_TOKEN / *_SECRET)."""
     block = _extract_identity_block(script_path)
     assert "provider CLI version:" in block, (
-        f"{script_path}: missing 'provider CLI version:' field in the "
-        "identity block."
+        f"{script_path}: missing 'provider CLI version:' field in the " "identity block."
     )
-    assert 'log "model:' in block, (
-        f"{script_path}: missing 'model:' field in the identity block."
-    )
+    assert 'log "model:' in block, f"{script_path}: missing 'model:' field in the identity block."
     for forbidden in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "_TOKEN", "_SECRET"):
         assert forbidden not in block, (
             f"{script_path}: identity block references {forbidden!r}, which "
@@ -282,12 +276,11 @@ def test_identity_block_logs_version_and_model_when_cli_present(
     result = _run_identity_block(block, tmp_path, bin_dir=bin_dir)
 
     assert result.returncode == 0, (
-        f"Identity block exited non-zero with CLI present:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"Identity block exited non-zero with CLI present:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert "LOG: provider CLI version: 1.2.3 (Fake CLI)" in result.stdout, (
-        f"Expected real version string in log output; got:\n{result.stdout}"
-    )
+    assert (
+        "LOG: provider CLI version: 1.2.3 (Fake CLI)" in result.stdout
+    ), f"Expected real version string in log output; got:\n{result.stdout}"
     assert "LOG: model: <provider CLI default>" in result.stdout, (
         f"Expected the provider-CLI-default fallback marker for the model "
         f"field with no PGAI_CODER_MODEL configured; got:\n{result.stdout}"
@@ -314,8 +307,7 @@ def test_identity_block_logs_configured_model_when_role_env_set(
 
     assert result.returncode == 0
     assert "LOG: model: claude-sonnet-5 (configured default" in result.stdout, (
-        f"Expected configured PGAI_CODER_MODEL value in log output; got:\n"
-        f"{result.stdout}"
+        f"Expected configured PGAI_CODER_MODEL value in log output; got:\n" f"{result.stdout}"
     )
 
 
@@ -325,9 +317,7 @@ def test_identity_block_logs_configured_model_when_role_env_set(
 
 
 @pytest.mark.parametrize("script_path", [_CLAUDE_SH, _CODEX_SH])
-def test_identity_block_logs_unknown_marker_when_cli_absent(
-    script_path: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_identity_block_logs_unknown_marker_when_cli_absent(script_path: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """With the provider binary absent from PATH, the block completes
     normally (never fails the wake) and the version field carries an
     explicit unknown marker rather than being blank or absent."""
@@ -346,8 +336,7 @@ def test_identity_block_logs_unknown_marker_when_cli_absent(
     )
     # The model field must still be logged even though the version query failed.
     assert "LOG: model:" in result.stdout, (
-        f"Expected the model field to still be logged when the version "
-        f"query fails; got:\n{result.stdout}"
+        f"Expected the model field to still be logged when the version " f"query fails; got:\n{result.stdout}"
     )
 
 
@@ -370,6 +359,5 @@ def test_identity_block_logs_unknown_marker_when_version_flag_unsupported(
 
     assert result.returncode == 0
     assert "LOG: provider CLI version: unknown" in result.stdout, (
-        f"Expected unknown marker when --version exits non-zero with no "
-        f"output; got:\n{result.stdout}"
+        f"Expected unknown marker when --version exits non-zero with no " f"output; got:\n{result.stdout}"
     )

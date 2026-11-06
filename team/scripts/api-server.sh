@@ -131,22 +131,22 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Source the framework temp-dir resolver so the log file is placed under
 # the configured temp root via pgai_temp_dir, without hardcoding a literal.
 # shellcheck source=lib/temp.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/temp.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/temp.sh"
 # shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
 # shellcheck source=lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/error_contract.sh"
 # pp_run_ops: the cwd-independent bridge to pgai_agent_kanban modules, used
 # for the port lookup below.  Sourced by absolute path so the helper can
 # locate its own tree whatever the caller's working directory; the port
 # refusal's remedy names this same path.
-_PP_RUN_OPS_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/pp_run_ops.sh"
+_PP_RUN_OPS_SH="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib/pp_run_ops.sh"
 # shellcheck source=lib/pp_run_ops.sh
 source "${_PP_RUN_OPS_SH}"
 
@@ -289,7 +289,7 @@ _LOGFILE="${_API_TEMP_DIR}/api-server.log"
 # resolves the other's.  The root goes FIRST on PYTHONPATH so it wins over
 # any entry the caller already had, and those entries are kept after it.
 # start launches python3 with this exported PYTHONPATH as-is.
-_PACKAGE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_PACKAGE_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 export PYTHONPATH="${_PACKAGE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # ---------------------------------------------------------------------------

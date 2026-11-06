@@ -108,7 +108,6 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Optional, Union
 
 # Started by file path (python3 .../overwatch/halt_provenance.py) the module
 # has no parent package and only its own directory on sys.path: put this
@@ -162,13 +161,15 @@ WRITER_OVERWATCH_RUNAWAY = "overwatch-runaway"
 WRITER_ZERO_PROGRESS_CAP = "zero-progress-cap"
 
 #: Writer names a ``# halt-writer:`` line may carry for the HALT to read as the chain's.
-CHAIN_WRITERS = frozenset({
-    WRITER_CM_RELEASE,
-    WRITER_HALT_AFTER_PROMOTION,
-    WRITER_OVERWATCH_REPAIR,
-    WRITER_OVERWATCH_RUNAWAY,
-    WRITER_ZERO_PROGRESS_CAP,
-})
+CHAIN_WRITERS = frozenset(
+    {
+        WRITER_CM_RELEASE,
+        WRITER_HALT_AFTER_PROMOTION,
+        WRITER_OVERWATCH_REPAIR,
+        WRITER_OVERWATCH_RUNAWAY,
+        WRITER_ZERO_PROGRESS_CAP,
+    }
+)
 
 #: The sentinel-writes ops whose record makes an empty HALT the chain's.
 _CHAIN_LOG_OPS = frozenset({"promote"})
@@ -183,7 +184,7 @@ _REASON_KEY = "halt-reason"
 _TRIGGER_KEY = "halt-trigger"
 
 
-def _key_line_re(key: str) -> "re.Pattern[str]":
+def _key_line_re(key: str) -> re.Pattern[str]:
     """``# <key>: <value>`` on a line of its own, liberal in spacing and case."""
     return re.compile(r"^[ \t]*#[ \t]*" + re.escape(key) + r"[ \t]*:[ \t]*(.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
 
@@ -199,9 +200,7 @@ _CM_ERROR_RE = _key_line_re("error")
 _CM_LEGACY_REASON_RE = _key_line_re("reason")
 
 # overwatch_write_repair_halt's creator marker.
-_REPAIR_MARKER_RE = re.compile(
-    r"^[ \t]*#[ \t]*overwatch-repair-halt[ \t]*:.*?\bfn=(\S+)", re.IGNORECASE | re.MULTILINE
-)
+_REPAIR_MARKER_RE = re.compile(r"^[ \t]*#[ \t]*overwatch-repair-halt[ \t]*:.*?\bfn=(\S+)", re.IGNORECASE | re.MULTILINE)
 
 # "trigger-5", "trigger 5", "trigger_10", "trigger-5b" -> the number with its suffix.
 _TRIGGER_NUMBER_RE = re.compile(r"\btrigger[ \t_-]*#?(\d+[a-z]?)(?![A-Za-z0-9])", re.IGNORECASE)
@@ -232,9 +231,9 @@ class HaltProvenance:
 
     path: str
     origin: str
-    writer: Optional[str]
-    reason: Optional[str]
-    trigger: Optional[str]
+    writer: str | None
+    reason: str | None
+    trigger: str | None
     source: str
     detail: str
     fleet_scope: bool = False
@@ -256,7 +255,7 @@ def _normalize_writer(value: str) -> str:
     return re.sub(r"[\s_.]+", "-", value.strip().lower()).strip("-")
 
 
-def _value(text: str, pattern: "re.Pattern[str]") -> Optional[str]:
+def _value(text: str, pattern: re.Pattern[str]) -> str | None:
     """The first non-empty value *pattern* captures in *text*, else None."""
     for match in pattern.finditer(text):
         value = match.group(1).strip()
@@ -265,7 +264,7 @@ def _value(text: str, pattern: "re.Pattern[str]") -> Optional[str]:
     return None
 
 
-def trigger_number(text: Optional[str]) -> Optional[str]:
+def trigger_number(text: str | None) -> str | None:
     """The CM trigger number *text* names, or None.
 
     Reads an error key (``cm-release.trigger-5.squash-conflict`` -> ``"5"``,
@@ -278,7 +277,7 @@ def trigger_number(text: Optional[str]) -> Optional[str]:
     return match.group(1).lower() if match else None
 
 
-def provenance_lines(writer: str, reason: str, trigger: Optional[str] = None) -> list:
+def provenance_lines(writer: str, reason: str, trigger: str | None = None) -> list:
     """The provenance block a chain HALT writer puts in its HALT body.
 
     Args:
@@ -310,7 +309,7 @@ def provenance_lines(writer: str, reason: str, trigger: Optional[str] = None) ->
     return lines
 
 
-def _installed_script(kanban_root: Union[str, "os.PathLike[str]"], script: str) -> str:
+def _installed_script(kanban_root: str | os.PathLike[str], script: str) -> str:
     """*script* as installed under *kanban_root* (``<root>/scripts/<script>``), shell-quoted.
 
     ``install.sh`` puts the operator scripts in ``<kanban root>/scripts/``;
@@ -319,7 +318,7 @@ def _installed_script(kanban_root: Union[str, "os.PathLike[str]"], script: str) 
     return shlex.quote(str(Path(kanban_root) / "scripts" / script))
 
 
-def installed_script_command(kanban_root: Union[str, "os.PathLike[str]"], script: str, *args: str) -> str:
+def installed_script_command(kanban_root: str | os.PathLike[str], script: str, *args: str) -> str:
     """The command that runs *script* as installed under *kanban_root*, runnable as printed.
 
     Names ``<kanban root>/scripts/<script>`` -- *script* is relative to
@@ -332,7 +331,7 @@ def installed_script_command(kanban_root: Union[str, "os.PathLike[str]"], script
     return " ".join([_installed_script(kanban_root, script), *(shlex.quote(str(arg)) for arg in args)])
 
 
-def halt_command(kanban_root: Union[str, "os.PathLike[str]"], project: str) -> str:
+def halt_command(kanban_root: str | os.PathLike[str], project: str) -> str:
     """The command that halts *project* alone, runnable as printed.
 
     Names the installed script under *kanban_root* --
@@ -342,7 +341,7 @@ def halt_command(kanban_root: Union[str, "os.PathLike[str]"], project: str) -> s
     return f"{_installed_script(kanban_root, 'halt.sh')} --project {shlex.quote(project)}"
 
 
-def halt_global_command(kanban_root: Union[str, "os.PathLike[str]"]) -> str:
+def halt_global_command(kanban_root: str | os.PathLike[str]) -> str:
     """The command that halts every project at once, runnable as printed.
 
     Names the installed script under *kanban_root* --
@@ -351,7 +350,7 @@ def halt_global_command(kanban_root: Union[str, "os.PathLike[str]"]) -> str:
     return _installed_script(kanban_root, "halt-global.sh")
 
 
-def unhalt_command(kanban_root: Union[str, "os.PathLike[str]"], project: str) -> str:
+def unhalt_command(kanban_root: str | os.PathLike[str], project: str) -> str:
     """The command that removes *project*'s HALT, runnable as printed.
 
     Names the installed script under *kanban_root* --
@@ -361,7 +360,7 @@ def unhalt_command(kanban_root: Union[str, "os.PathLike[str]"], project: str) ->
     return f"{_installed_script(kanban_root, 'unhalt.sh')} --project {shlex.quote(project)}"
 
 
-def unhalt_global_command(kanban_root: Union[str, "os.PathLike[str]"]) -> str:
+def unhalt_global_command(kanban_root: str | os.PathLike[str]) -> str:
     """The command that removes the fleet-scoped HALT, runnable as printed.
 
     Names the installed script under *kanban_root* --
@@ -370,7 +369,7 @@ def unhalt_global_command(kanban_root: Union[str, "os.PathLike[str]"]) -> str:
     return _installed_script(kanban_root, "unhalt-global.sh")
 
 
-def _from_body(text: str) -> Optional[tuple]:
+def _from_body(text: str) -> tuple | None:
     """``(writer, reason, trigger, source)`` the body names, or None when it
     carries no provenance this module recognizes."""
     writer = _value(text, _WRITER_RE)
@@ -397,23 +396,35 @@ def _from_log(halt: Path, root: Path, path_text: str, fleet: bool) -> HaltProven
     record = latest_sentinel_record(halt, kanban_root=root)
     if record is None:
         return HaltProvenance(
-            path_text, ORIGIN_OPERATOR, None, None, None, "no-record",
-            "the HALT is empty and the sentinel-writes log has no record for it, "
-            "so it is read as the operator's",
+            path_text,
+            ORIGIN_OPERATOR,
+            None,
+            None,
+            None,
+            "no-record",
+            "the HALT is empty and the sentinel-writes log has no record for it, " "so it is read as the operator's",
             fleet,
         )
     op = record.get("op", "").strip().lower() or None
     if op in _CHAIN_LOG_OPS and not fleet:
         if record_describes_sentinel(record, halt):
             return HaltProvenance(
-                path_text, ORIGIN_CHAIN, WRITER_HALT_AFTER_PROMOTION,
+                path_text,
+                ORIGIN_CHAIN,
+                WRITER_HALT_AFTER_PROMOTION,
                 "HALT-AFTER drain completed (recorded as promote in the sentinel-writes log)",
-                None, "sentinel-log",
+                None,
+                "sentinel-log",
                 "the HALT is empty and its latest sentinel-writes record is the HALT-AFTER promotion",
                 fleet,
             )
         return HaltProvenance(
-            path_text, ORIGIN_OPERATOR, op, None, None, "sentinel-log",
+            path_text,
+            ORIGIN_OPERATOR,
+            op,
+            None,
+            None,
+            "sentinel-log",
             "the latest sentinel-writes record names the promotion but describes other bytes "
             "than the HALT holds, so it is read as the operator's",
             fleet,
@@ -429,9 +440,9 @@ def _from_log(halt: Path, root: Path, path_text: str, fleet: bool) -> HaltProven
 
 
 def classify_halt(
-    halt_path: Union[str, "os.PathLike[str]"],
+    halt_path: str | os.PathLike[str],
     *,
-    kanban_root: Union[None, str, "os.PathLike[str]"] = None,
+    kanban_root: None | str | os.PathLike[str] = None,
 ) -> HaltProvenance:
     """Say whether the chain or an operator wrote the HALT at *halt_path*.
 
@@ -463,7 +474,12 @@ def classify_halt(
             raw = handle.read(_READ_CAP)
     except OSError as exc:
         return HaltProvenance(
-            path_text, ORIGIN_OPERATOR, None, None, None, "unreadable",
+            path_text,
+            ORIGIN_OPERATOR,
+            None,
+            None,
+            None,
+            "unreadable",
             f"the HALT cannot be read ({exc}), so it is read as the operator's",
             fleet,
         )
@@ -475,35 +491,56 @@ def classify_halt(
     found = _from_body(text)
     if found is None:
         return HaltProvenance(
-            path_text, ORIGIN_OPERATOR, None, None, None, "unrecognized-body",
+            path_text,
+            ORIGIN_OPERATOR,
+            None,
+            None,
+            None,
+            "unrecognized-body",
             "the HALT body names no chain writer, so it is read as the operator's",
             fleet,
         )
     writer, reason, trigger, source = found
     if fleet:
         return HaltProvenance(
-            path_text, ORIGIN_OPERATOR, writer, reason, trigger, source,
-            "the kanban root's own HALT is always the operator's", fleet,
+            path_text,
+            ORIGIN_OPERATOR,
+            writer,
+            reason,
+            trigger,
+            source,
+            "the kanban root's own HALT is always the operator's",
+            fleet,
         )
     if writer not in CHAIN_WRITERS:
         return HaltProvenance(
-            path_text, ORIGIN_OPERATOR, writer, reason, trigger, source,
-            f"the HALT body names writer {writer!r}, which is not a chain writer, "
-            "so it is read as the operator's",
+            path_text,
+            ORIGIN_OPERATOR,
+            writer,
+            reason,
+            trigger,
+            source,
+            f"the HALT body names writer {writer!r}, which is not a chain writer, " "so it is read as the operator's",
             fleet,
         )
     return HaltProvenance(
-        path_text, ORIGIN_CHAIN, writer, reason, trigger, source,
-        f"the HALT body names the chain writer {writer}", fleet,
+        path_text,
+        ORIGIN_CHAIN,
+        writer,
+        reason,
+        trigger,
+        source,
+        f"the HALT body names the chain writer {writer}",
+        fleet,
     )
 
 
-def _field(value: Optional[str]) -> str:
+def _field(value: str | None) -> str:
     """One tab-separated output field: ``-`` for no value, never a tab or newline."""
     return one_line(value) if value else "-"
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the CLI: ``classify HALT_PATH`` prints the HALT's provenance.
 
     Exit codes: 0 answered (including ``absent``); 2 usage error.
@@ -530,10 +567,17 @@ def main(argv: Optional[list] = None) -> int:
     if args.json:
         print(json.dumps(result.to_dict(), sort_keys=True))
     else:
-        print("\t".join([
-            result.origin, _field(result.writer), _field(result.reason),
-            _field(result.trigger), result.source,
-        ]))
+        print(
+            "\t".join(
+                [
+                    result.origin,
+                    _field(result.writer),
+                    _field(result.reason),
+                    _field(result.trigger),
+                    result.source,
+                ]
+            )
+        )
     return 0
 
 

@@ -27,6 +27,7 @@ Usage: run from the dev-tree root:
       <baseline-unit.json> <final-unit.json> \
       <baseline-integration.json> <final-integration.json>
 """
+
 import subprocess
 import difflib
 import json
@@ -45,7 +46,9 @@ FILES_MAP = {
 def git_show(commit, path):
     out = subprocess.run(
         ["git", "show", f"{commit}:{path}"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return out.stdout.splitlines()
 
@@ -87,7 +90,7 @@ def check_suite(label, baseline_commit, final_commit, baseline_json, final_json)
         f_br = {tuple(x) for x in final["files"][cov_key].get("executed_branches", [])}
         missing_br = sorted(b_br - f_br)
         unresolved_br = []
-        for (a, b) in missing_br:
+        for a, b in missing_br:
             ma, mb = map_line(a), map_line(b)
             if ma is None or mb is None or (ma, mb) not in f_br:
                 unresolved_br.append((a, b))
@@ -112,13 +115,17 @@ def main():
     clean_integration = check_suite("INTEGRATION", baseline_commit, final_commit, bi, fi)
     print()
     if clean_unit and clean_integration:
-        print("RESULT: All apparent per-file covered-line/branch-set diffs between "
-              "baseline and final are fully explained by line-number shift from the "
-              "provenance-sweep comment edits. Zero unresolved hits. No real coverage "
-              "regression exists.")
+        print(
+            "RESULT: All apparent per-file covered-line/branch-set diffs between "
+            "baseline and final are fully explained by line-number shift from the "
+            "provenance-sweep comment edits. Zero unresolved hits. No real coverage "
+            "regression exists."
+        )
         return 0
-    print("RESULT: One or more diffs did NOT resolve via line-number-shift mapping. "
-          "These require manual investigation as potential real regressions.")
+    print(
+        "RESULT: One or more diffs did NOT resolve via line-number-shift mapping. "
+        "These require manual investigation as potential real regressions."
+    )
     return 1
 
 

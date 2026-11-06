@@ -124,7 +124,8 @@ def _build(tmp_path: pathlib.Path):
         encoding="utf-8",
     )
     (project_root / "requirements" / f"{_VERSION}-bundle.md").write_text(
-        f"# {_VERSION} bundle\n\n## Status\nrunning\n", encoding="utf-8",
+        f"# {_VERSION} bundle\n\n## Status\nrunning\n",
+        encoding="utf-8",
     )
     writer = root / "pgai_agent_kanban" / "cm" / "write_rc_state.py"
     writer.parent.mkdir(parents=True)
@@ -183,7 +184,11 @@ def _add_remote(tmp_path: pathlib.Path, repo: pathlib.Path, shape: str) -> pathl
 
 
 def _finalize(
-    tmp_path: pathlib.Path, *, release_state_rc: int = 0, promote_rc: int = 0, pre_tag_divergence: bool = False,
+    tmp_path: pathlib.Path,
+    *,
+    release_state_rc: int = 0,
+    promote_rc: int = 0,
+    pre_tag_divergence: bool = False,
     remote: str = "",
 ):
     root, project_root, stage_dir, repo = _build(tmp_path)
@@ -196,23 +201,25 @@ def _finalize(
         _run("git", "commit", "-q", "-m", "later", cwd=repo)
         _run("git", "tag", _VERSION, "HEAD~1", cwd=repo)
     log = tmp_path / "stub.log"
-    script = "\n".join([
-        "set -euo pipefail",
-        "unset PGAI_PROJECT_ROOT PGAI_TASKS_DIR PGAI_PROJECT_NAME",
-        *(f"source {lib}" for lib in _REAL_LIBS),
-        f"source {_q(stage_dir / 'release_finalize.sh')}",
-        "git_step() { shift; \"$@\"; }",
-        "_noop_hook_step() { :; }",
-        "_cm_release_stamp_fixed_in() { echo STEP-16B-RAN; _CM_FIXED_IN_OUTCOME='Fixed In stamp stubbed'; }",
-        "_cm_release_archive_finished_items() { echo STEP-16C-RAN; }",
-        f"PROJECT_NAME={_q(_PROJECT)} ACTIVE_RC={_q(_VERSION)} REPO_ROOT={_q(repo)}",
-        f"MAIN_BRANCH=main RC_BRANCH=rc/{_VERSION} _CM_PROJECT_ROOT={_q(project_root)}",
-        "RELEASE_STATE=\"$_CM_PROJECT_ROOT/release-state.md\" PROJECT_HALT_FILE=\"$_CM_PROJECT_ROOT/HALT\"",
-        f"PROJECT_HOOKS_DIR=\"$_CM_PROJECT_ROOT/hooks\" _CM_PUSH_TO_REMOTE={'true' if remote else 'false'}"
-        " _CM_AUTORESOLVE_LOG=''",
-        f"_CLEAN_RELEASE_VERSION={_q(_VERSION)}",
-        "cm_release_finalize _noop_hook_step _noop_hook_step",
-    ])
+    script = "\n".join(
+        [
+            "set -euo pipefail",
+            "unset PGAI_PROJECT_ROOT PGAI_TASKS_DIR PGAI_PROJECT_NAME",
+            *(f"source {lib}" for lib in _REAL_LIBS),
+            f"source {_q(stage_dir / 'release_finalize.sh')}",
+            'git_step() { shift; "$@"; }',
+            "_noop_hook_step() { :; }",
+            "_cm_release_stamp_fixed_in() { echo STEP-16B-RAN; _CM_FIXED_IN_OUTCOME='Fixed In stamp stubbed'; }",
+            "_cm_release_archive_finished_items() { echo STEP-16C-RAN; }",
+            f"PROJECT_NAME={_q(_PROJECT)} ACTIVE_RC={_q(_VERSION)} REPO_ROOT={_q(repo)}",
+            f"MAIN_BRANCH=main RC_BRANCH=rc/{_VERSION} _CM_PROJECT_ROOT={_q(project_root)}",
+            'RELEASE_STATE="$_CM_PROJECT_ROOT/release-state.md" PROJECT_HALT_FILE="$_CM_PROJECT_ROOT/HALT"',
+            f"PROJECT_HOOKS_DIR=\"$_CM_PROJECT_ROOT/hooks\" _CM_PUSH_TO_REMOTE={'true' if remote else 'false'}"
+            " _CM_AUTORESOLVE_LOG=''",
+            f"_CLEAN_RELEASE_VERSION={_q(_VERSION)}",
+            "cm_release_finalize _noop_hook_step _noop_hook_step",
+        ]
+    )
     (tmp_path / "scratch").mkdir(exist_ok=True)
     env = {
         "KANBAN_ROOT": str(root),
@@ -305,8 +312,11 @@ def test_a_refused_push_after_the_tag_is_push_lag_not_a_halt(tmp_path, _git):
     assert "fixture remote: rejected" in result.stderr, _diag(result, calls)
     state = (project_root / "release-state.md").read_text(encoding="utf-8")
     assert state.count("## Push Lag Event") == 1, state
-    for lagging in ("main (push failed)", f"refs/tags/{_VERSION} (push failed)",
-                    f"rc/{_VERSION} (still on origin; deletion failed)"):
+    for lagging in (
+        "main (push failed)",
+        f"refs/tags/{_VERSION} (push failed)",
+        f"rc/{_VERSION} (still on origin; deletion failed)",
+    ):
         assert f"  - {lagging}" in state, state
     assert f"push-watchdog.sh --project {_PROJECT}" in state, state
     assert f"rc/{_VERSION} still on origin (its deletion was refused" in result.stdout, _diag(result, calls)

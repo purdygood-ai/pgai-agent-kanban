@@ -102,9 +102,7 @@ def _run(tmp_path: pathlib.Path, script: str, branch: str) -> subprocess.Complet
             "BRANCH": branch,
         },
     )
-    return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=120, check=False
-    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=120, check=False)
 
 
 def test_checked_out_branch_is_found_when_the_worktree_list_exceeds_the_pipe_buffer(

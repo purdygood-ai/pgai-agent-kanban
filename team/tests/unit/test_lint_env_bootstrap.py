@@ -65,7 +65,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import stat
 import subprocess
 import sys
@@ -76,13 +75,12 @@ import pytest
 
 from tests.fixtures.lint_findings import run_main
 
-
 # ---------------------------------------------------------------------------
 # Load lint_env_bootstrap.py as a module (mirrors pattern of sibling tests).
 # Path: team/tests/unit/ → team/ (three levels up)
 # ---------------------------------------------------------------------------
 _THIS_FILE = Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent    # team/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _LINT_SCRIPT = _SCRIPTS_DIR / "lint_env_bootstrap.py"
 
@@ -93,9 +91,7 @@ _REAL_DASHBOARD_DIR = _SCRIPTS_DIR / "dashboard"
 
 def _import_lint_module():
     """Import lint_env_bootstrap as a module via importlib (isolated, no sys.modules pollution)."""
-    spec = importlib.util.spec_from_file_location(
-        "lint_env_bootstrap", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_env_bootstrap", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -116,7 +112,6 @@ from tests.fixtures.fixture_missing_env_bootstrap_sh import (
 )
 from tests.fixtures.fixture_direct_env_read_py import PYTHON_VIOLATION_CONTENT
 
-
 # ---------------------------------------------------------------------------
 # Helpers: write synthetic scripts/
 # ---------------------------------------------------------------------------
@@ -126,9 +121,7 @@ def _write_sh(path: Path, content: str, *, executable: bool = True) -> Path:
     """Write a shell script at the given path with optional executable mode."""
     path.write_text(content, encoding="utf-8")
     if executable:
-        path.chmod(
-            stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
-        )
+        path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
     else:
         path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
     return path
@@ -172,13 +165,13 @@ def _make_minimal_team_dir(tmp_path: Path) -> Path:
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "env.py").write_text(
-        'import os\n'
-        'from pathlib import Path\n'
-        'def resolve_kanban_root() -> Path:\n'
+        "import os\n"
+        "from pathlib import Path\n"
+        "def resolve_kanban_root() -> Path:\n"
         '    raw = os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH", "").strip()\n'
-        '    if not raw:\n'
+        "    if not raw:\n"
         '        raise RuntimeError("PGAI_AGENT_KANBAN_ROOT_PATH not set")\n'
-        '    return Path(raw).resolve()\n',
+        "    return Path(raw).resolve()\n",
         encoding="utf-8",
     )
     return team
@@ -200,9 +193,8 @@ def test_bash_side_green_on_real_tree() -> None:
     # this is a live regression guard, not an isolated behavior a fixture
     # could stand in for.
     violations = _lint.check_bash_side(_REAL_SCRIPTS_DIR, verbose=False)
-    assert violations == [], (
-        f"Unexpected violations on the real tree:\n"
-        + "\n".join(f"  {v.path}: {v.message}" for v in violations)
+    assert violations == [], f"Unexpected violations on the real tree:\n" + "\n".join(
+        f"  {v.path}: {v.message}" for v in violations
     )
 
 
@@ -254,9 +246,9 @@ def test_bash_side_scratch_negative_violation_message_is_actionable(
 
     for v in violations:
         if v.path == fixture_sh:
-            assert "env_bootstrap.sh" in v.message or "wake_common.sh" in v.message, (
-                f"Violation message does not name the required preludes:\n{v.message!r}"
-            )
+            assert (
+                "env_bootstrap.sh" in v.message or "wake_common.sh" in v.message
+            ), f"Violation message does not name the required preludes:\n{v.message!r}"
             return
 
     pytest.fail("Fixture file not among reported violations.")
@@ -313,9 +305,7 @@ def test_bash_side_ordering_violation_message_names_lines(tmp_path: Path) -> Non
     for v in violations:
         if v.path == fixture_sh:
             # The message must reference line numbers (ordering context).
-            assert "line" in v.message.lower(), (
-                f"Ordering-violation message does not mention 'line':\n{v.message!r}"
-            )
+            assert "line" in v.message.lower(), f"Ordering-violation message does not mention 'line':\n{v.message!r}"
             return
 
     pytest.fail("Ordering-violation fixture not among reported violations.")
@@ -329,9 +319,7 @@ def test_source_precedes_first_usage_passes_correct_ordering() -> None:
         "KANBAN_ROOT=${PGAI_AGENT_KANBAN_ROOT_PATH}\n"
     )
     ok, src_line, use_line = _lint._source_precedes_first_usage(text)
-    assert ok is True, (
-        f"Expected correct ordering to be accepted; src={src_line}, use={use_line}"
-    )
+    assert ok is True, f"Expected correct ordering to be accepted; src={src_line}, use={use_line}"
 
 
 def test_source_precedes_first_usage_fails_reversed_ordering() -> None:
@@ -342,21 +330,13 @@ def test_source_precedes_first_usage_fails_reversed_ordering() -> None:
         'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
     )
     ok, src_line, use_line = _lint._source_precedes_first_usage(text)
-    assert ok is False, (
-        f"Expected reversed ordering to be rejected; src={src_line}, use={use_line}"
-    )
-    assert use_line < src_line, (
-        f"Expected use_line ({use_line}) < src_line ({src_line}) for reversed ordering"
-    )
+    assert ok is False, f"Expected reversed ordering to be rejected; src={src_line}, use={use_line}"
+    assert use_line < src_line, f"Expected use_line ({use_line}) < src_line ({src_line}) for reversed ordering"
 
 
 def test_source_precedes_first_usage_no_usage_is_ok() -> None:
     """_source_precedes_first_usage returns True when there is no usage of the var."""
-    text = (
-        "#!/usr/bin/env bash\n"
-        'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
-        "echo hello\n"
-    )
+    text = "#!/usr/bin/env bash\n" 'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n' "echo hello\n"
     ok, src_line, use_line = _lint._source_precedes_first_usage(text)
     assert ok is True, "Source with no usage should be accepted"
     assert use_line == 0, f"Expected use_line=0 (not found), got {use_line}"
@@ -410,11 +390,11 @@ def test_source_precedes_first_usage_heredoc_only_mention_is_not_flagged() -> No
 def test_heredoc_body_line_numbers_identifies_body_lines() -> None:
     """_heredoc_body_line_numbers returns the correct set of body line numbers."""
     lines = [
-        "#!/usr/bin/env bash",               # 1
-        "cat <<HELPTEXT",                     # 2  (opener — not in body)
-        "  some documentation text",          # 3  (body)
-        "HELPTEXT",                           # 4  (close-tag — not in body)
-        "echo done",                          # 5
+        "#!/usr/bin/env bash",  # 1
+        "cat <<HELPTEXT",  # 2  (opener — not in body)
+        "  some documentation text",  # 3  (body)
+        "HELPTEXT",  # 4  (close-tag — not in body)
+        "echo done",  # 5
     ]
     body = _lint._heredoc_body_line_numbers(lines)
     assert 3 in body, f"Line 3 (body) should be in heredoc_body; got {body}"
@@ -427,10 +407,10 @@ def test_heredoc_body_line_numbers_identifies_body_lines() -> None:
 def test_heredoc_body_line_numbers_quoted_delimiter() -> None:
     """_heredoc_body_line_numbers handles quoted heredoc delimiters (<<'TOKEN')."""
     lines = [
-        "cat <<'HELPTEXT'",    # 1  opener
-        "body line",           # 2  body
-        "HELPTEXT",            # 3  close-tag
-        "done",                # 4
+        "cat <<'HELPTEXT'",  # 1  opener
+        "body line",  # 2  body
+        "HELPTEXT",  # 3  close-tag
+        "done",  # 4
     ]
     body = _lint._heredoc_body_line_numbers(lines)
     assert 2 in body, "Body line inside <<'TOKEN'...TOKEN block must be identified"
@@ -531,9 +511,8 @@ def test_python_side_green_on_real_tree() -> None:
     # is a live regression guard, not an isolated behavior a fixture could
     # stand in for.
     violations = _lint.check_python_side(_TEAM_DIR, verbose=False)
-    assert violations == [], (
-        f"Unexpected Python violations on the real tree:\n"
-        + "\n".join(f"  {v.path}: {v.message}" for v in violations)
+    assert violations == [], f"Unexpected Python violations on the real tree:\n" + "\n".join(
+        f"  {v.path}: {v.message}" for v in violations
     )
 
 
@@ -585,12 +564,12 @@ def test_python_side_scratch_negative_message_names_the_var(
 
     for v in violations:
         if v.path == fixture_py:
-            assert "PGAI_AGENT_KANBAN_ROOT_PATH" in v.message, (
-                f"Violation message does not name the env var:\n{v.message!r}"
-            )
-            assert "resolve_kanban_root" in v.message or "pgai_agent_kanban.env" in v.message, (
-                f"Violation message does not name the canonical resolver:\n{v.message!r}"
-            )
+            assert (
+                "PGAI_AGENT_KANBAN_ROOT_PATH" in v.message
+            ), f"Violation message does not name the env var:\n{v.message!r}"
+            assert (
+                "resolve_kanban_root" in v.message or "pgai_agent_kanban.env" in v.message
+            ), f"Violation message does not name the canonical resolver:\n{v.message!r}"
             return
 
     pytest.fail("Fixture file not among reported violations.")
@@ -624,9 +603,9 @@ def test_bash_side_comment_only_reference_is_not_flagged(tmp_path: Path) -> None
     violations = _lint.check_bash_side(scripts, verbose=False)
 
     violation_paths = [v.path for v in violations]
-    assert comment_only_sh not in violation_paths, (
-        "Script with comment-only reference to the env var was incorrectly flagged."
-    )
+    assert (
+        comment_only_sh not in violation_paths
+    ), "Script with comment-only reference to the env var was incorrectly flagged."
 
 
 # ---------------------------------------------------------------------------
@@ -651,9 +630,7 @@ def test_bash_side_non_executable_is_exempt(tmp_path: Path) -> None:
     violations = _lint.check_bash_side(scripts, verbose=False)
 
     violation_paths = [v.path for v in violations]
-    assert nonexec_sh not in violation_paths, (
-        "Non-executable .sh file was incorrectly flagged by the bash-side check."
-    )
+    assert nonexec_sh not in violation_paths, "Non-executable .sh file was incorrectly flagged by the bash-side check."
 
 
 # ---------------------------------------------------------------------------
@@ -684,9 +661,7 @@ def test_bash_side_wake_common_is_accepted_equivalent(tmp_path: Path) -> None:
     violations = _lint.check_bash_side(scripts, verbose=False)
 
     violation_paths = [v.path for v in violations]
-    assert wake_sh not in violation_paths, (
-        "Script sourcing wake_common.sh was incorrectly flagged as a violation."
-    )
+    assert wake_sh not in violation_paths, "Script sourcing wake_common.sh was incorrectly flagged as a violation."
 
 
 # ---------------------------------------------------------------------------
@@ -705,9 +680,7 @@ def test_python_side_canonical_resolver_is_exempt(tmp_path: Path) -> None:
 
     violation_paths = [v.path for v in violations]
     env_py = team / "pgai_agent_kanban" / "env.py"
-    assert env_py not in violation_paths, (
-        "pgai_agent_kanban/env.py (the canonical resolver) was incorrectly flagged."
-    )
+    assert env_py not in violation_paths, "pgai_agent_kanban/env.py (the canonical resolver) was incorrectly flagged."
 
 
 # ---------------------------------------------------------------------------
@@ -736,12 +709,8 @@ def test_python_side_test_files_are_exempt(tmp_path: Path) -> None:
     violations = _lint.check_python_side(team, verbose=False)
 
     violation_paths = [v.path for v in violations]
-    assert test_py not in violation_paths, (
-        "test_*.py file in scripts/ was incorrectly flagged."
-    )
-    assert in_tests_py not in violation_paths, (
-        "File under tests/ directory was incorrectly flagged."
-    )
+    assert test_py not in violation_paths, "test_*.py file in scripts/ was incorrectly flagged."
+    assert in_tests_py not in violation_paths, "File under tests/ directory was incorrectly flagged."
 
 
 # ---------------------------------------------------------------------------
@@ -787,9 +756,7 @@ def test_main_records_bash_violation_and_returns_zero(tmp_path: Path) -> None:
     violation_sh = scripts / "violator.sh"
     _write_sh(violation_sh, BASH_VIOLATION_CONTENT, executable=True)
 
-    rc, findings = run_main(
-        _lint.main, ["--team-dir", str(team), "--bash-only"], tmp_path / "findings.json"
-    )
+    rc, findings = run_main(_lint.main, ["--team-dir", str(team), "--bash-only"], tmp_path / "findings.json")
     assert rc == 0, f"Expected main() to return 0 on a bash violation (quality class), got {rc}"
     assert len(findings) == 1, findings
     finding = findings[0]
@@ -804,9 +771,7 @@ def test_main_records_python_violation_and_returns_zero(tmp_path: Path) -> None:
     violation_py = team / "scripts" / "violator.py"
     _write_py(violation_py, PYTHON_VIOLATION_CONTENT)
 
-    rc, findings = run_main(
-        _lint.main, ["--team-dir", str(team), "--python-only"], tmp_path / "findings.json"
-    )
+    rc, findings = run_main(_lint.main, ["--team-dir", str(team), "--python-only"], tmp_path / "findings.json")
     assert rc == 0, f"Expected main() to return 0 on a python violation (quality class), got {rc}"
     assert [f["kind"] for f in findings] == ["python-direct-env-read"], findings
     assert findings[0]["file"].endswith("scripts/violator.py"), findings
@@ -826,16 +791,21 @@ def test_direct_run_prints_writes_and_exits_zero_and_the_remedy_clears_it(
     findings_path = tmp_path / "out" / "findings.json"
 
     proc = subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), "--team-dir", str(team), "--bash-only",
-         "--findings-file", str(findings_path)],
+        [
+            sys.executable,
+            str(_LINT_SCRIPT),
+            "--team-dir",
+            str(team),
+            "--bash-only",
+            "--findings-file",
+            str(findings_path),
+        ],
         capture_output=True,
         text=True,
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert f"[bash] {violation_sh}: references PGAI_AGENT_KANBAN_ROOT_PATH" in proc.stdout, (
-        proc.stdout
-    )
+    assert f"[bash] {violation_sh}: references PGAI_AGENT_KANBAN_ROOT_PATH" in proc.stdout, proc.stdout
     assert "error:   lint.env-bootstrap" in proc.stderr, proc.stderr
     findings = json.loads(findings_path.read_text(encoding="utf-8"))
     assert [f["kind"] for f in findings] == ["bash-missing-prelude"], findings
@@ -843,9 +813,7 @@ def test_direct_run_prints_writes_and_exits_zero_and_the_remedy_clears_it(
     remedy = subprocess.run(findings[0]["remedy"], shell=True, capture_output=True, text=True)
     assert remedy.returncode == 0, remedy.stdout + remedy.stderr
     assert '/../lib/env_bootstrap.sh"' in violation_sh.read_text(encoding="utf-8")
-    rc, after = run_main(
-        _lint.main, ["--team-dir", str(team), "--bash-only"], tmp_path / "after.json"
-    )
+    rc, after = run_main(_lint.main, ["--team-dir", str(team), "--bash-only"], tmp_path / "after.json")
     assert rc == 0 and after == [], after
 
 
@@ -878,9 +846,7 @@ def test_help_exits_zero() -> None:
         f"stdout: {result.stdout!r}\n"
         f"stderr: {result.stderr!r}"
     )
-    assert "lint_env_bootstrap" in result.stdout, (
-        "Expected 'lint_env_bootstrap' in --help output."
-    )
+    assert "lint_env_bootstrap" in result.stdout, "Expected 'lint_env_bootstrap' in --help output."
 
 
 # ---------------------------------------------------------------------------

@@ -32,7 +32,9 @@ _LINT = _TEAM_DIR / "scripts" / "lint_tracked_ignored.py"
 def _git(repo: pathlib.Path, *args: str) -> str:
     done = subprocess.run(
         ["git", "-C", str(repo), "-c", "user.email=fixture@example.com", "-c", "user.name=Fixture", *args],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert done.returncode == 0, done.stderr
     return done.stdout
@@ -61,7 +63,9 @@ def _lint(repo: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> tuple[subpr
     findings = tmp_path / "findings.json"
     done = subprocess.run(
         ["python3", str(_LINT), "--root", str(repo), "--findings-file", str(findings), *args],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     return done, json.loads(findings.read_text(encoding="utf-8"))
 

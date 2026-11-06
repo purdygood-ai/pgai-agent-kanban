@@ -118,9 +118,7 @@ def _run_guard(tmp_path: pathlib.Path, paths: list[str]) -> str:
     path_file.write_text("\n".join(paths) + "\n", encoding="utf-8")
     script = _GUARD_SNIPPET + f"\nrun_guard < {path_file!s}"
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"Guard snippet exited {result.returncode}; stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"Guard snippet exited {result.returncode}; stderr: {result.stderr!r}"
     return result.stdout.strip()
 
 
@@ -165,10 +163,7 @@ def test_template_source_in_templates_tree_is_not_flagged(
     pattern without a location-based exclusion.
     """
     output = _run_guard(tmp_path, paths)
-    assert output == "", (
-        f"Template source {template_kind} files should not be flagged; "
-        f"guard produced: {output!r}"
-    )
+    assert output == "", f"Template source {template_kind} files should not be flagged; " f"guard produced: {output!r}"
 
 
 def test_tester_priority_template_in_agent_templates_is_not_flagged(
@@ -178,8 +173,7 @@ def test_tester_priority_template_in_agent_templates_is_not_flagged(
     paths = ["team/templates/agent/TESTER-PRIORITY-TEMPLATE.md"]
     output = _run_guard(tmp_path, paths)
     assert output == "", (
-        "Agent template TESTER-PRIORITY-TEMPLATE.md should not be flagged; "
-        f"guard produced: {output!r}"
+        "Agent template TESTER-PRIORITY-TEMPLATE.md should not be flagged; " f"guard produced: {output!r}"
     )
 
 
@@ -199,10 +193,7 @@ def test_any_file_under_templates_tree_is_not_flagged(
         "team/templates/task/task-status/status.md",
     ]
     output = _run_guard(tmp_path, paths)
-    assert output == "", (
-        "All files under team/templates/ should be allowed through; "
-        f"guard produced: {output!r}"
-    )
+    assert output == "", "All files under team/templates/ should be allowed through; " f"guard produced: {output!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -228,8 +219,7 @@ def test_priority_file_outside_sanctioned_location_is_flagged(
     """
     output = _run_guard(tmp_path, [stray_path])
     assert "stray" in output, (
-        f"A PRIORITY-*.md in {location_description} should be flagged; "
-        f"guard produced: {output!r}"
+        f"A PRIORITY-*.md in {location_description} should be flagged; " f"guard produced: {output!r}"
     )
 
 
@@ -244,10 +234,7 @@ def test_correctly_placed_priority_file_is_not_flagged(
     """A PRIORITY-*.md in its sanctioned location passes silently."""
     paths = ["projects/my-project/priority/PRIORITY-0042-feature-x.md"]
     output = _run_guard(tmp_path, paths)
-    assert output == "", (
-        "A correctly-placed PRIORITY-*.md should not be flagged; "
-        f"guard produced: {output!r}"
-    )
+    assert output == "", "A correctly-placed PRIORITY-*.md should not be flagged; " f"guard produced: {output!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -281,21 +268,18 @@ def test_mixed_path_list_flags_only_strays(tmp_path: pathlib.Path) -> None:
     # Every stray must appear in the output
     for stray in stray_paths:
         assert any(stray in ln for ln in flagged_lines), (
-            f"Expected {stray!r} to be flagged but it was not; "
-            f"guard output:\n{output}"
+            f"Expected {stray!r} to be flagged but it was not; " f"guard output:\n{output}"
         )
 
     # Template source and clean paths must NOT appear in the output
     for safe in template_paths + clean_paths:
         assert not any(safe in ln for ln in flagged_lines), (
-            f"Expected {safe!r} to be allowed through but it was flagged; "
-            f"guard output:\n{output}"
+            f"Expected {safe!r} to be allowed through but it was flagged; " f"guard output:\n{output}"
         )
 
     # Exactly the stray paths should be flagged
     assert len(flagged_lines) == len(stray_paths), (
-        f"Expected exactly {len(stray_paths)} flagged path(s), "
-        f"got {len(flagged_lines)}; guard output:\n{output}"
+        f"Expected exactly {len(stray_paths)} flagged path(s), " f"got {len(flagged_lines)}; guard output:\n{output}"
     )
 
 

@@ -81,9 +81,7 @@ def _write_task(tasks_dir: Path, name: str, *, state: str, readme_body: str, rel
     version is evidence that an item's fix shipped."""
     task_dir = tasks_dir / name
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "README.md").write_text(
-        f"{readme_body}\n## Release Version\n{release_version}\n", encoding="utf-8"
-    )
+    (task_dir / "README.md").write_text(f"{readme_body}\n## Release Version\n{release_version}\n", encoding="utf-8")
     (task_dir / "status.md").write_text(f"## State\n{state}\n", encoding="utf-8")
 
 
@@ -107,6 +105,7 @@ def _write_bundle(req_dir: Path, name: str, item_paths: list[Path]) -> Path:
 # ---------------------------------------------------------------------------
 # Mixed bundle: one fixed item, one withdrawn item, one release.
 # ---------------------------------------------------------------------------
+
 
 def test_mixed_bundle_promotes_fixed_and_carries_withdrawn(tmp_path, capsys):
     tasks_dir = tmp_path / "tasks"
@@ -231,9 +230,7 @@ def test_priority_item_gated_by_the_same_done_reference_rule(tmp_path):
         [fixed_priority, unfixed_priority],
     )
 
-    result = _pbi.promote_bundle(
-        bundle_file, "v9.9.12", tasks_dir=tasks_dir, bugs_dir=priority_dir
-    )
+    result = _pbi.promote_bundle(bundle_file, "v9.9.12", tasks_dir=tasks_dir, bugs_dir=priority_dir)
 
     assert _status_of(fixed_priority) == "done"
     assert _status_of(unfixed_priority) == "running"
@@ -292,6 +289,7 @@ def test_rerun_after_carry_stays_idempotent(tmp_path):
 # A DONE README that names an item only to put it outside the task does not
 # claim it.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "negative_sentence",

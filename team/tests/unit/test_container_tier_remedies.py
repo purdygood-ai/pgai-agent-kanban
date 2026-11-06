@@ -86,9 +86,7 @@ class _Sandbox:
     def __init__(self, tmp_path: pathlib.Path) -> None:
         self.root = tmp_path / "kanban_root"
         (self.root / "projects" / _PROJECT).mkdir(parents=True)
-        (self.root / "projects.cfg").write_text(
-            f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\n", encoding="utf-8")
         self.temp = tmp_path / "pgai_tmp"
         self.temp.mkdir()
         self.home = tmp_path / "home"

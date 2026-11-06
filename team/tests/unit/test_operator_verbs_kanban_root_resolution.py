@@ -65,21 +65,16 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     sandbox = tmp_path / "root"
     project_dir = sandbox / "projects" / _PROJECT
     project_dir.mkdir(parents=True)
-    (sandbox / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8"
-    )
+    (sandbox / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8")
     (project_dir / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
     return sandbox
 
 
 def _snapshot(path: pathlib.Path) -> dict[str, bytes]:
-    return {
-        str(p.relative_to(path)): p.read_bytes() for p in sorted(path.rglob("*")) if p.is_file()
-    }
+    return {str(p.relative_to(path)): p.read_bytes() for p in sorted(path.rglob("*")) if p.is_file()}
 
 
 def _run(
@@ -133,19 +128,15 @@ def test_verb_with_only_canonical_root_name_succeeds_silently(
     argv = ["bash", str(_SCRIPTS_DIR / script), *args]
     before = _snapshot(root)
 
-    both = _run(
-        tmp_path, argv, {"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root)}
-    )
+    both = _run(tmp_path, argv, {"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root)})
     only_canonical = _run(tmp_path, argv, {"PGAI_AGENT_KANBAN_ROOT_PATH": str(root)})
 
     assert both.returncode == 0, f"baseline run with both root names failed:\n{_diagnostic(both)}"
     assert only_canonical.returncode == 0, (
-        f"{script} failed with only PGAI_AGENT_KANBAN_ROOT_PATH set:\n"
-        f"{_diagnostic(only_canonical)}"
+        f"{script} failed with only PGAI_AGENT_KANBAN_ROOT_PATH set:\n" f"{_diagnostic(only_canonical)}"
     )
     assert only_canonical.stderr == "", (
-        f"{script} wrote to stderr with only PGAI_AGENT_KANBAN_ROOT_PATH set:\n"
-        f"{_diagnostic(only_canonical)}"
+        f"{script} wrote to stderr with only PGAI_AGENT_KANBAN_ROOT_PATH set:\n" f"{_diagnostic(only_canonical)}"
     )
     assert only_canonical.stdout == both.stdout, (
         f"{script} printed different output with KANBAN_ROOT unset.\n"

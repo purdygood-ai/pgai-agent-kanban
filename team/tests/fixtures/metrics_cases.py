@@ -59,7 +59,8 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Any, Iterator, Optional
+from typing import Any
+from collections.abc import Iterator
 
 _TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 if str(_TEAM_DIR) not in sys.path:
@@ -82,10 +83,27 @@ PROJECTS = (("demo", 1), ("quiet", 2), ("fresh", 3))
 
 #: history.csv columns in the order metrics_csv_writer.py writes them.
 HISTORY_COLUMNS = (
-    "rc", "project", "workflow_type", "opened_at", "closed_at", "wall_time_minutes", "outcome",
-    "tasks_total", "tasks_pm", "tasks_coder", "tasks_writer", "tasks_tester", "tasks_cm",
-    "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens",
-    "cache_hit_rate_pct", "bugs_filed_during", "operator_waivers", "blocked_minutes",
+    "rc",
+    "project",
+    "workflow_type",
+    "opened_at",
+    "closed_at",
+    "wall_time_minutes",
+    "outcome",
+    "tasks_total",
+    "tasks_pm",
+    "tasks_coder",
+    "tasks_writer",
+    "tasks_tester",
+    "tasks_cm",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_hit_rate_pct",
+    "bugs_filed_during",
+    "operator_waivers",
+    "blocked_minutes",
 )
 
 _PRICING = {
@@ -93,12 +111,16 @@ _PRICING = {
         "claude": {
             "models": {
                 "claude-sonnet-4-6": {
-                    "input_per_1m": 3.0, "output_per_1m": 15.0,
-                    "cache_creation_per_1m": 3.75, "cache_read_per_1m": 0.3,
+                    "input_per_1m": 3.0,
+                    "output_per_1m": 15.0,
+                    "cache_creation_per_1m": 3.75,
+                    "cache_read_per_1m": 0.3,
                 },
                 "claude-opus-4-8": {
-                    "input_per_1m": 5.0, "output_per_1m": 25.0,
-                    "cache_creation_per_1m": 6.25, "cache_read_per_1m": 0.5,
+                    "input_per_1m": 5.0,
+                    "output_per_1m": 25.0,
+                    "cache_creation_per_1m": 6.25,
+                    "cache_read_per_1m": 0.5,
                 },
             }
         },
@@ -143,8 +165,12 @@ def _agent(i: int, o: int, cost: float, inv: int) -> dict:
 
 def _model(i: int, o: int, cc: int, cr: int, cost: float, inv: int, **category: float) -> dict:
     entry = {
-        "input": i, "output": o, "cache_creation_tokens": cc, "cache_read_tokens": cr,
-        "cost_usd": cost, "invocations": inv,
+        "input": i,
+        "output": o,
+        "cache_creation_tokens": cc,
+        "cache_read_tokens": cr,
+        "cost_usd": cost,
+        "invocations": inv,
     }
     entry.update(category)
     return entry
@@ -155,18 +181,28 @@ def _daily_rollups() -> dict[str, Any]:
     return {
         "2026-04-20.json": _day(
             {
-                "input_tokens": 120_000, "output_tokens": 30_000, "cache_creation_tokens": 8_000,
-                "cache_read_tokens": 400_000, "cost_usd": 3.4, "invocations": 6,
-                "input_cost_usd": 1.8, "cache_creation_cost_usd": 0.15,
-                "cache_read_cost_usd": 0.6, "output_cost_usd": 0.85,
+                "input_tokens": 120_000,
+                "output_tokens": 30_000,
+                "cache_creation_tokens": 8_000,
+                "cache_read_tokens": 400_000,
+                "cost_usd": 3.4,
+                "invocations": 6,
+                "input_cost_usd": 1.8,
+                "cache_creation_cost_usd": 0.15,
+                "cache_read_cost_usd": 0.6,
+                "output_cost_usd": 0.85,
             },
             {"coder": _agent(120_000, 30_000, 3.4, 6)},
             {"claude-opus-4-7": _model(120_000, 30_000, 8_000, 400_000, 3.4, 6)},
         ),
         "2026-05-01.json": _day(
             {
-                "input_tokens": 50_000, "output_tokens": 12_000, "cache_creation_tokens": 4_000,
-                "cache_read_tokens": 900_000, "cost_usd": 12.75, "invocations": 14,
+                "input_tokens": 50_000,
+                "output_tokens": 12_000,
+                "cache_creation_tokens": 4_000,
+                "cache_read_tokens": 900_000,
+                "cost_usd": 12.75,
+                "invocations": 14,
             },
             {"pm": _agent(10_000, 2_000, 1.25, 2), "Coder": _agent(40_000, 10_000, 11.5, 12)},
             {
@@ -176,8 +212,12 @@ def _daily_rollups() -> dict[str, Any]:
         ),
         "2026-05-03.json": _day(
             {
-                "input_tokens": 75_000, "output_tokens": 20_500, "cache_creation_tokens": 6_000,
-                "cache_read_tokens": 2_500_000, "cost_usd": 431.204, "invocations": 41,
+                "input_tokens": 75_000,
+                "output_tokens": 20_500,
+                "cache_creation_tokens": 6_000,
+                "cache_read_tokens": 2_500_000,
+                "cost_usd": 431.204,
+                "invocations": 41,
             },
             {
                 "coder": _agent(60_000, 18_000, 402.004, 33),
@@ -188,16 +228,24 @@ def _daily_rollups() -> dict[str, Any]:
         ),
         "2026-05-10.json": _day(
             {
-                "input_tokens": 9_000, "output_tokens": 1_000, "cache_creation_tokens": 0,
-                "cache_read_tokens": 0, "cost_usd": 0.9, "invocations": 3,
+                "input_tokens": 9_000,
+                "output_tokens": 1_000,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "cost_usd": 0.9,
+                "invocations": 3,
             },
             {"cm": _agent(9_000, 1_000, 0.9, 3)},
             {"gpt-5-codex": _model(9_000, 1_000, 0, 0, 0.9, 3)},
         ),
         "2026-05-11.json": _day(
             {
-                "input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0,
-                "cache_read_tokens": 0, "cost_usd": 0, "invocations": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+                "cost_usd": 0,
+                "invocations": 0,
             },
             {},
             {},
@@ -211,30 +259,57 @@ def _rc_rollups() -> dict[str, dict]:
 
     def _task(agent: str, model: str, i: int, o: int, cc: int, cr: int, cost: float, inv: int, **cat) -> dict:
         entry = {
-            "agent": agent, "model": model, "input": i, "output": o,
-            "cache_creation_tokens": cc, "cache_read_tokens": cr, "cost_usd": cost, "invocations": inv,
+            "agent": agent,
+            "model": model,
+            "input": i,
+            "output": o,
+            "cache_creation_tokens": cc,
+            "cache_read_tokens": cr,
+            "cost_usd": cost,
+            "invocations": inv,
         }
         entry.update(cat)
         return entry
 
     return {
         "v1.1.0": {
-            "version": "v1.1.0", "shipped_at": "2026-04-21T09:30:00Z",
+            "version": "v1.1.0",
+            "shipped_at": "2026-04-21T09:30:00Z",
             "totals": {
-                "input_tokens": 120_000, "output_tokens": 30_000, "cache_read_tokens": 400_000,
-                "cost_usd": 3.4, "invocations": 6, "tasks": 2,
+                "input_tokens": 120_000,
+                "output_tokens": 30_000,
+                "cache_read_tokens": 400_000,
+                "cost_usd": 3.4,
+                "invocations": 6,
+                "tasks": 2,
             },
             "tasks": [
-                _task("coder", "claude-opus-4-7", 120_000, 30_000, 8_000, 400_000, 3.4, 6,
-                      input_cost_usd=1.8, cache_creation_cost_usd=0.15,
-                      cache_read_cost_usd=0.6, output_cost_usd=0.85),
+                _task(
+                    "coder",
+                    "claude-opus-4-7",
+                    120_000,
+                    30_000,
+                    8_000,
+                    400_000,
+                    3.4,
+                    6,
+                    input_cost_usd=1.8,
+                    cache_creation_cost_usd=0.15,
+                    cache_read_cost_usd=0.6,
+                    output_cost_usd=0.85,
+                ),
             ],
         },
         "v1.2.0": {
-            "version": "v1.2.0", "shipped_at": "2026-05-03T10:00:00Z",
+            "version": "v1.2.0",
+            "shipped_at": "2026-05-03T10:00:00Z",
             "totals": {
-                "input_tokens": 125_000, "output_tokens": 32_500, "cache_read_tokens": 3_400_000,
-                "cost_usd": 443.954, "invocations": 55, "tasks": 5,
+                "input_tokens": 125_000,
+                "output_tokens": 32_500,
+                "cache_read_tokens": 3_400_000,
+                "cost_usd": 443.954,
+                "invocations": 55,
+                "tasks": 5,
             },
             "tasks": [
                 _task("pm", "claude-sonnet-4-6", 10_000, 2_000, 1_000, 100_000, 1.25, 2),
@@ -243,14 +318,19 @@ def _rc_rollups() -> dict[str, dict]:
             ],
         },
         "v1.3.0": {
-            "version": "v1.3.0", "shipped_at": "",
+            "version": "v1.3.0",
+            "shipped_at": "",
             "totals": {
-                "input_tokens": 8_000, "output_tokens": 900, "cache_read_tokens": 0,
-                "cost_usd": 0.0, "invocations": 1,
+                "input_tokens": 8_000,
+                "output_tokens": 900,
+                "cache_read_tokens": 0,
+                "cost_usd": 0.0,
+                "invocations": 1,
             },
             "tasks": [
-                _task("pm", "claude-sonnet-4-6", 8_000, 900, 0, 0, 0.0, 1,
-                      input_cost_usd=0.024, output_cost_usd=0.0135),
+                _task(
+                    "pm", "claude-sonnet-4-6", 8_000, 900, 0, 0, 0.0, 1, input_cost_usd=0.024, output_cost_usd=0.0135
+                ),
             ],
         },
     }
@@ -260,16 +340,46 @@ def _history_rows() -> list[dict[str, str]]:
     base = {c: "" for c in HISTORY_COLUMNS}
     rows = []
     for values in (
-        {"rc": "v1.0.0", "project": "demo", "tasks_total": "3", "input_tokens": "1000",
-         "output_tokens": "500", "cache_read_tokens": "0", "cache_write_tokens": "0"},
-        {"rc": "v1.1.0", "project": "demo", "wall_time_minutes": "95", "tasks_total": "2",
-         "input_tokens": "120000", "output_tokens": "30000", "cache_read_tokens": "400000",
-         "cache_write_tokens": "8000", "blocked_minutes": "0"},
-        {"rc": "v1.2.0", "project": "demo", "wall_time_minutes": "120.5", "tasks_total": "5",
-         "input_tokens": "1234567", "output_tokens": "32500", "cache_read_tokens": "3400000",
-         "cache_write_tokens": "10000", "blocked_minutes": "45"},
-        {"rc": "v0.9.0", "project": "other", "wall_time_minutes": "10", "tasks_total": "1",
-         "input_tokens": "10", "output_tokens": "5", "blocked_minutes": "1234"},
+        {
+            "rc": "v1.0.0",
+            "project": "demo",
+            "tasks_total": "3",
+            "input_tokens": "1000",
+            "output_tokens": "500",
+            "cache_read_tokens": "0",
+            "cache_write_tokens": "0",
+        },
+        {
+            "rc": "v1.1.0",
+            "project": "demo",
+            "wall_time_minutes": "95",
+            "tasks_total": "2",
+            "input_tokens": "120000",
+            "output_tokens": "30000",
+            "cache_read_tokens": "400000",
+            "cache_write_tokens": "8000",
+            "blocked_minutes": "0",
+        },
+        {
+            "rc": "v1.2.0",
+            "project": "demo",
+            "wall_time_minutes": "120.5",
+            "tasks_total": "5",
+            "input_tokens": "1234567",
+            "output_tokens": "32500",
+            "cache_read_tokens": "3400000",
+            "cache_write_tokens": "10000",
+            "blocked_minutes": "45",
+        },
+        {
+            "rc": "v0.9.0",
+            "project": "other",
+            "wall_time_minutes": "10",
+            "tasks_total": "1",
+            "input_tokens": "10",
+            "output_tokens": "5",
+            "blocked_minutes": "1234",
+        },
     ):
         row = dict(base)
         row.update(values)
@@ -288,13 +398,35 @@ def _metrics_rollups() -> dict[str, dict]:
     """The demo project's metrics/rc files: v1.10.0 sorts last by version, not by name."""
     out: dict[str, dict] = {}
     for version, agents in (
-        ("v1.9.0", {"coder": AgentLoad(tasks=2, input=1_000, output=200, cache_read=5_000, cache_write=300,
-                                       wall_seconds=1_800, wall_task_count=2)}),
-        ("v1.10.0", {
-            "coder": AgentLoad(tasks=3, input=2_500_000, output=41_000, cache_read=900_000, cache_write=12_000,
-                               wall_seconds=5_400, wall_task_count=3),
-            "pm": AgentLoad(tasks=1, input=4_000, output=900),
-        }),
+        (
+            "v1.9.0",
+            {
+                "coder": AgentLoad(
+                    tasks=2,
+                    input=1_000,
+                    output=200,
+                    cache_read=5_000,
+                    cache_write=300,
+                    wall_seconds=1_800,
+                    wall_task_count=2,
+                )
+            },
+        ),
+        (
+            "v1.10.0",
+            {
+                "coder": AgentLoad(
+                    tasks=3,
+                    input=2_500_000,
+                    output=41_000,
+                    cache_read=900_000,
+                    cache_write=12_000,
+                    wall_seconds=5_400,
+                    wall_task_count=3,
+                ),
+                "pm": AgentLoad(tasks=1, input=4_000, output=900),
+            },
+        ),
     ):
         payload = rollup_payload(RcSeed(version, "shipped", agents))
         payload["project"] = "demo"
@@ -307,7 +439,7 @@ def _metrics_rollups() -> dict[str, dict]:
     return out
 
 
-def build_usage_tree(root: pathlib.Path, today: Optional[datetime.date] = None) -> pathlib.Path:
+def build_usage_tree(root: pathlib.Path, today: datetime.date | None = None) -> pathlib.Path:
     """Lay out the fixture kanban root under *root* and return it.
 
     *today* names the daily roll-up the costs pane reads (default: the
@@ -326,9 +458,7 @@ def build_usage_tree(root: pathlib.Path, today: Optional[datetime.date] = None) 
 
     demo = root / "projects" / "demo"
     (demo / "tasks").mkdir(parents=True, exist_ok=True)
-    (demo / "project.cfg").write_text(
-        f"[project]\nproject_name = demo\ndev_tree_path = {dev_tree}\n", encoding="utf-8"
-    )
+    (demo / "project.cfg").write_text(f"[project]\nproject_name = demo\ndev_tree_path = {dev_tree}\n", encoding="utf-8")
     (demo / "release-state.md").write_text(
         "# Release State\n\n## Active RC\nv1.3.0\n\n## RC Opened At\n2026-05-20T00:00:00Z\n\n"
         "## RC Opened By Task\nCM-open\n\n## Last Released\nv1.2.0\n",
@@ -347,11 +477,19 @@ def build_usage_tree(root: pathlib.Path, today: Optional[datetime.date] = None) 
             {"input_tokens": 3_000, "output_tokens": 700, "cost_usd": 1.2, "invocations": 2},
             {"coder": _agent(3_000, 700, 1.2, 2)},
             {
-                "claude-sonnet-4-6": _model(2_000, 500, 1_000, 40_000, 0.9, 1,
-                                            input_cost_usd=0.006, cache_creation_cost_usd=0.00375,
-                                            cache_read_cost_usd=0.012, output_cost_usd=0.0075),
-                "mystery-model": _model(1_000, 200, 0, 0, 0.3, 1,
-                                        input_cost_usd=1234.5, output_cost_usd=0.25),
+                "claude-sonnet-4-6": _model(
+                    2_000,
+                    500,
+                    1_000,
+                    40_000,
+                    0.9,
+                    1,
+                    input_cost_usd=0.006,
+                    cache_creation_cost_usd=0.00375,
+                    cache_read_cost_usd=0.012,
+                    output_cost_usd=0.0075,
+                ),
+                "mystery-model": _model(1_000, 200, 0, 0, 0.3, 1, input_cost_usd=1234.5, output_cost_usd=0.25),
             },
         ),
     )
@@ -397,8 +535,18 @@ CLI_CASES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     ("cost year empty", "cost-report", ("--project", "demo", "--year", "2025"), {}),
     ("cost csv month", "cost-report", ("--project", "demo", "--month", "2026-05", "--csv"), {}),
     ("cost csv rc", "cost-report", ("--csv", "--project", "demo", "--rc", "v1.2.0"), {}),
-    ("cost csv range", "cost-report", ("--project", "demo", "--since", "2026-05-02", "--until", "2026-05-03", "--csv"), {}),
-    ("cost kanban root flag", "cost-report", ("--kanban-root", "{ROOT}", "--project", "demo", "--day", "2026-05-01"), {}),
+    (
+        "cost csv range",
+        "cost-report",
+        ("--project", "demo", "--since", "2026-05-02", "--until", "2026-05-03", "--csv"),
+        {},
+    ),
+    (
+        "cost kanban root flag",
+        "cost-report",
+        ("--kanban-root", "{ROOT}", "--project", "demo", "--day", "2026-05-01"),
+        {},
+    ),
     ("cost conflict", "cost-report", ("--project", "demo", "--month", "2026-05", "--day", "2026-05-01"), {}),
     ("cost no project", "cost-report", ("--month", "2026-05"), {}),
     ("cost unknown project", "cost-report", ("--project", "nope", "--month", "2026-05"), {}),
@@ -428,7 +576,12 @@ CLI_CASES: tuple[tuple[str, str, tuple[str, ...], dict[str, str]], ...] = (
     ("show per agent color", "show-metrics", ("--per-agent",), {"PGAI_PROJECT_NAME": "demo", "TERM": "xterm"}),
     ("show per agent no rollups", "show-metrics", ("--per-agent", "--project", "quiet"), {}),
     ("show per agent no project", "show-metrics", ("--per-agent",), {}),
-    ("show history csv", "show-metrics", ("--history-csv", "{ROOT}/projects/demo/metrics/history.csv", "--project", "demo", "--last", "1"), {"TERM": "xterm"}),
+    (
+        "show history csv",
+        "show-metrics",
+        ("--history-csv", "{ROOT}/projects/demo/metrics/history.csv", "--project", "demo", "--last", "1"),
+        {"TERM": "xterm"},
+    ),
     ("show history csv missing", "show-metrics", ("--history-csv", "{ROOT}/nope.csv", "--project", "demo"), {}),
     ("show history csv no project", "show-metrics", ("--history-csv", "{ROOT}/projects/demo/metrics/history.csv"), {}),
     ("show kanban root flag", "show-metrics", ("--kanban-root", "{ROOT}", "--project", "demo", "--no-color"), {}),
@@ -472,7 +625,7 @@ def cli_label(case: tuple) -> str:
 _UPDATED_RE = re.compile(r"updated \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
 
 
-def normalise(text: str, root: pathlib.Path, today: datetime.date, script: Optional[pathlib.Path] = None) -> str:
+def normalise(text: str, root: pathlib.Path, today: datetime.date, script: pathlib.Path | None = None) -> str:
     """Replace the run-specific parts of *text* with placeholders."""
     if script is not None:
         text = text.replace(str(script), "<SCRIPT>")
@@ -523,7 +676,10 @@ def run_cli_case(case: tuple, root: pathlib.Path, work: pathlib.Path, today: dat
 @contextlib.contextmanager
 def rest_environment(root: pathlib.Path) -> Iterator[None]:
     """Point this process at *root* for the duration of a request."""
-    saved = {k: os.environ.get(k) for k in ("PGAI_AGENT_KANBAN_ROOT_PATH", "KANBAN_ROOT", "PGAI_PROJECT_NAME", "NO_COLOR", "TERM")}
+    saved = {
+        k: os.environ.get(k)
+        for k in ("PGAI_AGENT_KANBAN_ROOT_PATH", "KANBAN_ROOT", "PGAI_PROJECT_NAME", "NO_COLOR", "TERM")
+    }
     os.environ["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(root)
     os.environ["KANBAN_ROOT"] = str(root)
     for name in ("PGAI_PROJECT_NAME", "NO_COLOR"):

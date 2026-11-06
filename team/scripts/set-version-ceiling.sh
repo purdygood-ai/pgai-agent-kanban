@@ -51,7 +51,7 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve KANBAN_ROOT
@@ -67,7 +67,7 @@ fi
 # ---------------------------------------------------------------------------
 # Source shared argument parser
 # ---------------------------------------------------------------------------
-_SVC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SVC_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=lib/operator_args.sh
 source "${_SVC_SCRIPT_DIR}/lib/operator_args.sh"
 # shellcheck source=lib/project_paths.sh

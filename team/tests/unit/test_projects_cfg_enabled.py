@@ -114,9 +114,12 @@ def test_python_and_bash_agree_on_the_enabled_rule(tmp_path, capsys, line, enabl
     assert ini.project_enabled(root, "beta") is True
     py_warnings = capsys.readouterr().err.count("WARNING: enabled for 'alpha'")
 
-    proc = _bash(root, f"source '{_PROJECTS_LIB}'\n"
-                       "projects_cfg_enabled alpha && echo ALPHA=enabled || echo ALPHA=disabled\n"
-                       "projects_cfg_enabled beta && echo BETA=enabled || echo BETA=disabled\n")
+    proc = _bash(
+        root,
+        f"source '{_PROJECTS_LIB}'\n"
+        "projects_cfg_enabled alpha && echo ALPHA=enabled || echo ALPHA=disabled\n"
+        "projects_cfg_enabled beta && echo BETA=enabled || echo BETA=disabled\n",
+    )
     assert proc.returncode == 0, proc.stderr
     assert f"ALPHA={'enabled' if enabled else 'disabled'}" in proc.stdout, proc.stdout
     assert "BETA=enabled" in proc.stdout, proc.stdout
@@ -138,8 +141,7 @@ def test_unrecognised_value_warns_once_per_process(tmp_path, capsys):
 
     for _ in range(3):
         assert ini.project_enabled(root, "alpha") is True
-    proc = _bash(root, f"source '{_PROJECTS_LIB}'\n"
-                       "for i in 1 2 3; do projects_cfg_enabled alpha; done; echo DONE\n")
+    proc = _bash(root, f"source '{_PROJECTS_LIB}'\n" "for i in 1 2 3; do projects_cfg_enabled alpha; done; echo DONE\n")
 
     assert capsys.readouterr().err.count("WARNING: enabled for 'alpha' is 'no'") == 1
     assert proc.stderr.count("WARNING: enabled for 'alpha' is 'no'") == 1, proc.stderr
@@ -156,12 +158,15 @@ def test_skip_line_names_the_project_and_the_setting(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("line", "idle_disabled"), [
-    ("enabled=false", True),
-    ("enabled= False ", True),
-    ("enabled=no", False),
-    ("", False),
-])
+@pytest.mark.parametrize(
+    ("line", "idle_disabled"),
+    [
+        ("enabled=false", True),
+        ("enabled= False ", True),
+        ("enabled=no", False),
+        ("", False),
+    ],
+)
 def test_why_reports_disabled_exactly_when_the_loops_skip(tmp_path, line, idle_disabled):
     root = _root(tmp_path, line)
 
@@ -210,7 +215,11 @@ def test_pm_discovery_loop_runs_for_the_enabled_project_only(tmp_path):
 
     proc = subprocess.run(
         ["bash", str(root / "scripts" / "pm-agent.sh"), "--auto"],
-        cwd=str(root), env=_env(root), capture_output=True, text=True, timeout=180,
+        cwd=str(root),
+        env=_env(root),
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
 
     out = proc.stdout + proc.stderr

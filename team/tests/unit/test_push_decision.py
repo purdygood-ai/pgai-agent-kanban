@@ -40,7 +40,7 @@ def _kanban(
     root: pathlib.Path,
     *,
     registered: bool = True,
-    cfg: "str | None" = "[project]\ndev_tree_path = /srv/dev/sample\n",
+    cfg: str | None = "[project]\ndev_tree_path = /srv/dev/sample\n",
     cfg_name: str = "project.cfg",
     projects_cfg: bool = True,
 ) -> pathlib.Path:
@@ -145,9 +145,7 @@ def test_unreadable_projects_cfg_is_unresolved(tmp_path):
     assert "cannot be read as INI" in decision.status_line
 
 
-def test_project_cfg_without_dev_tree_path_is_unresolved_despite_inherited_dev_tree(
-    tmp_path, monkeypatch
-):
+def test_project_cfg_without_dev_tree_path_is_unresolved_despite_inherited_dev_tree(tmp_path, monkeypatch):
     monkeypatch.setenv("PGAI_DEV_TREE_PATH", str(tmp_path / "inherited-dev-tree"))
     root = _kanban(tmp_path / "k", cfg="[project]\nproject_name = sample-project\n")
     decision = pd.resolve_push_decision(root, _PROJECT)
@@ -204,7 +202,7 @@ def test_cli_help_exits_zero():
 # ---------------------------------------------------------------------------
 
 
-def _wrapper(tmp_path: pathlib.Path, root: "pathlib.Path | None", body: str):
+def _wrapper(tmp_path: pathlib.Path, root: pathlib.Path | None, body: str):
     env = {"KANBAN_ROOT": str(root)} if root is not None else {}
     unset = "" if root is not None else "unset KANBAN_ROOT\n"
     script = f"set -euo pipefail\n{unset}source {_WRAPPER}\n{body}\n"
@@ -213,8 +211,7 @@ def _wrapper(tmp_path: pathlib.Path, root: "pathlib.Path | None", body: str):
 
 def _show() -> str:
     return (
-        'printf "%s|%s|%s|%s\\n" "$PP_PUSH_DECISION" "$PP_PUSH_DEV_TREE" '
-        '"$PP_PUSH_MISSING" "$PP_PUSH_STATUS_LINE"'
+        'printf "%s|%s|%s|%s\\n" "$PP_PUSH_DECISION" "$PP_PUSH_DEV_TREE" ' '"$PP_PUSH_MISSING" "$PP_PUSH_STATUS_LINE"'
     )
 
 

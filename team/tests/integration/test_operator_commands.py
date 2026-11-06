@@ -44,7 +44,6 @@ import pathlib
 import re
 import subprocess
 import time
-from typing import Optional
 
 import pytest
 
@@ -58,7 +57,7 @@ import pytest
 #                            └── team/
 #                                └── <dev-tree-root>
 # ---------------------------------------------------------------------------
-_TEAM_DIR = pathlib.Path(__file__).parent.parent.parent   # team/
+_TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 
 _SHOW_SCRIPT = _SCRIPTS_DIR / "show.sh"
@@ -80,7 +79,7 @@ _INTAKE_SCRIPT = _SCRIPTS_DIR / "intake.sh"
 
 def _operator_env(
     kanban_root: pathlib.Path,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
 ) -> dict:
     """Build the environment an operator bash script runs under in these tests.
 
@@ -104,9 +103,7 @@ def _operator_env(
     existing_pythonpath = base_env.get("PYTHONPATH", "")
     team_dir_str = str(_TEAM_DIR)
     if team_dir_str not in existing_pythonpath.split(os.pathsep):
-        base_env["PYTHONPATH"] = (
-            team_dir_str + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
-        )
+        base_env["PYTHONPATH"] = team_dir_str + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
     # Prevent live install from leaking through env-var lookup.
     base_env.pop("PGAI_DEV_TREE_PATH", None)
     if extra_env:
@@ -119,7 +116,7 @@ def _run_operator(
     args: list[str],
     kanban_root: pathlib.Path,
     *,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
     timeout: int = 30,
 ) -> subprocess.CompletedProcess:
     """Run an operator bash script against a temporary kanban tree.
@@ -222,10 +219,7 @@ def _build_task_folder(
     (task_dir / "logs").mkdir(parents=True, exist_ok=True)
 
     (task_dir / "README.md").write_text(
-        f"# {task_id}\n\n"
-        f"## Role\nCODER\n\n"
-        f"## Task ID\n{task_id}\n\n"
-        f"## Goal\nIntegration test task.\n",
+        f"# {task_id}\n\n" f"## Role\nCODER\n\n" f"## Task ID\n{task_id}\n\n" f"## Goal\nIntegration test task.\n",
         encoding="utf-8",
     )
 
@@ -242,10 +236,7 @@ def _build_task_folder(
 
     # Add a queue marker to the appropriate agent backlog.
     agent_prefix = task_id.split("-")[0].lower()
-    backlog_file = (
-        kanban_root / "projects" / project_name / "tasks" / "queues"
-        / f"{agent_prefix}_backlog.md"
-    )
+    backlog_file = kanban_root / "projects" / project_name / "tasks" / "queues" / f"{agent_prefix}_backlog.md"
     if backlog_file.exists():
         existing = backlog_file.read_text(encoding="utf-8")
         backlog_file.write_text(
@@ -281,15 +272,11 @@ def _build_bug_file(
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     # Add a marker to bug_backlog.md.
-    bug_backlog = (
-        kanban_root / "projects" / project_name / "tasks" / "queues" / "bug_backlog.md"
-    )
+    bug_backlog = kanban_root / "projects" / project_name / "tasks" / "queues" / "bug_backlog.md"
     if bug_backlog.exists():
         key = f"{bug_id}-{slug}"
         existing = bug_backlog.read_text(encoding="utf-8")
@@ -318,10 +305,7 @@ def _read_backlog_marker(
     Returns the marker character, or "" if the line is not found.
     """
     agent_prefix = task_id.split("-")[0].lower()
-    backlog_file = (
-        kanban_root / "projects" / project_name / "tasks" / "queues"
-        / f"{agent_prefix}_backlog.md"
-    )
+    backlog_file = kanban_root / "projects" / project_name / "tasks" / "queues" / f"{agent_prefix}_backlog.md"
     if not backlog_file.exists():
         return ""
     text = backlog_file.read_text(encoding="utf-8")
@@ -339,9 +323,7 @@ def _read_bug_backlog_marker(
     bug_key: str,
 ) -> str:
     """Return the marker character for bug_key in bug_backlog.md."""
-    backlog_file = (
-        kanban_root / "projects" / project_name / "tasks" / "queues" / "bug_backlog.md"
-    )
+    backlog_file = kanban_root / "projects" / project_name / "tasks" / "queues" / "bug_backlog.md"
     if not backlog_file.exists():
         return ""
     text = backlog_file.read_text(encoding="utf-8")
@@ -361,9 +343,7 @@ def _read_bug_backlog_marker(
 class TestShowCommand:
     """show.sh emits task or intake item content to stdout without mutating state."""
 
-    def test_show_emits_task_status_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_emits_task_status_file(self, two_project_root: pathlib.Path) -> None:
         """show.sh --file status emits the task's status.md content to stdout.
 
         The status.md content must appear verbatim on stdout.  show.sh must
@@ -380,20 +360,14 @@ class TestShowCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"show.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert "BACKLOG" in result.stdout, (
-            f"Expected task state 'BACKLOG' in show output.\nstdout: {result.stdout}"
-        )
+        assert result.returncode == 0, f"show.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "BACKLOG" in result.stdout, f"Expected task state 'BACKLOG' in show output.\nstdout: {result.stdout}"
         # File must not have been mutated by show.
-        assert (task_dir / "status.md").read_text(encoding="utf-8") == original_content, (
-            "show.sh must not modify status.md (read-only command)."
-        )
+        assert (task_dir / "status.md").read_text(
+            encoding="utf-8"
+        ) == original_content, "show.sh must not modify status.md (read-only command)."
 
-    def test_show_emits_task_readme_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_emits_task_readme_file(self, two_project_root: pathlib.Path) -> None:
         """show.sh --file readme emits the task's README.md content to stdout.
 
         Passing --file readme must switch to the README.md rather than the
@@ -410,25 +384,21 @@ class TestShowCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"show.sh --file readme exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert task_id in result.stdout, (
-            f"Expected task_id {task_id!r} to appear in README output.\nstdout: {result.stdout}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"show.sh --file readme exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (
+            task_id in result.stdout
+        ), f"Expected task_id {task_id!r} to appear in README output.\nstdout: {result.stdout}"
 
-    def test_show_emits_bug_intake_content(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_emits_bug_intake_content(self, two_project_root: pathlib.Path) -> None:
         """show.sh emits bug intake file content when the key identifies a bug.
 
         When the key resolves to a bug intake item rather than a task, show.sh
         must emit the bug file's content directly (no --file selection needed).
         """
         root = two_project_root
-        bug_file = _build_bug_file(
-            root, "project-a", bug_id="BUG-0100", slug="show-intake-test"
-        )
+        bug_file = _build_bug_file(root, "project-a", bug_id="BUG-0100", slug="show-intake-test")
 
         result = _run_operator(
             _SHOW_SCRIPT,
@@ -436,18 +406,16 @@ class TestShowCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"show.sh for intake key exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert "BUG-0100" in result.stdout, (
-            f"Expected the intake item's bug identifier to appear in show output.\nstdout: {result.stdout}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"show.sh for intake key exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (
+            "BUG-0100" in result.stdout
+        ), f"Expected the intake item's bug identifier to appear in show output.\nstdout: {result.stdout}"
         # Bug file must not have been mutated.
         assert bug_file.exists(), "show.sh must not delete the bug file."
 
-    def test_show_returns_not_found_for_unknown_key(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_returns_not_found_for_unknown_key(self, two_project_root: pathlib.Path) -> None:
         """show.sh exits with code 3 when the key is not found in the project.
 
         A key that does not match any task, bug, priority, or requirement must
@@ -480,9 +448,7 @@ class TestShowReadmeCommand:
     instead of emitting their document.
     """
 
-    def test_show_readme_emits_task_readme_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_readme_emits_task_readme_file(self, two_project_root: pathlib.Path) -> None:
         """show-readme.sh prints the task's README.md verbatim to stdout.
 
         Output must match the on-disk README.md byte-for-byte, and the file
@@ -499,20 +465,18 @@ class TestShowReadmeCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"show-readme.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"show-readme.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert result.stdout == original_readme, (
             "show-readme.sh output did not match tasks/<key>/README.md byte-for-byte.\n"
             f"stdout: {result.stdout!r}\nexpected: {original_readme!r}"
         )
-        assert (task_dir / "README.md").read_text(encoding="utf-8") == original_readme, (
-            "show-readme.sh must not modify README.md (read-only command)."
-        )
+        assert (task_dir / "README.md").read_text(
+            encoding="utf-8"
+        ) == original_readme, "show-readme.sh must not modify README.md (read-only command)."
 
-    def test_show_readme_resolves_prefix_key(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_readme_resolves_prefix_key(self, two_project_root: pathlib.Path) -> None:
         """show-readme.sh resolves a prefix key the same way show.sh does.
 
         A shortened key (agent+date+seq) that unambiguously matches one task
@@ -532,17 +496,14 @@ class TestShowReadmeCommand:
         )
 
         assert result.returncode == 0, (
-            f"show-readme.sh exited non-zero for prefix key.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"show-readme.sh exited non-zero for prefix key.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert result.stdout == original_readme, (
             "show-readme.sh prefix resolution did not emit the matching task's README.md.\n"
             f"stdout: {result.stdout!r}\nexpected: {original_readme!r}"
         )
 
-    def test_show_readme_refuses_ledger_key(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_readme_refuses_ledger_key(self, two_project_root: pathlib.Path) -> None:
         """show-readme.sh refuses a bug (ledger) key with a prescriptive message.
 
         Task keys only: a bug/priority/requirement key must not be emitted.
@@ -550,9 +511,7 @@ class TestShowReadmeCommand:
         key and directing the operator to show.sh, and exits non-zero.
         """
         root = two_project_root
-        _build_bug_file(
-            root, "project-a", bug_id="BUG-0101", slug="show-readme-refusal-test"
-        )
+        _build_bug_file(root, "project-a", bug_id="BUG-0101", slug="show-readme-refusal-test")
         bug_key = "BUG-0101-show-readme-refusal-test"
 
         result = _run_operator(
@@ -562,24 +521,17 @@ class TestShowReadmeCommand:
         )
 
         assert result.returncode != 0, (
-            f"show-readme.sh must exit non-zero for a ledger key.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"show-readme.sh must exit non-zero for a ledger key.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert bug_key in result.stderr, (
-            f"Expected the refusal message to name the key {bug_key!r}.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the refusal message to name the key {bug_key!r}.\n" f"stderr: {result.stderr}"
         )
         assert "show.sh" in result.stderr, (
-            "Expected the refusal message to direct the operator to show.sh.\n"
-            f"stderr: {result.stderr}"
+            "Expected the refusal message to direct the operator to show.sh.\n" f"stderr: {result.stderr}"
         )
-        assert result.stdout == "", (
-            f"show-readme.sh must not emit bug content on refusal.\nstdout: {result.stdout}"
-        )
+        assert result.stdout == "", f"show-readme.sh must not emit bug content on refusal.\nstdout: {result.stdout}"
 
-    def test_show_readme_returns_not_found_for_unknown_key(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_readme_returns_not_found_for_unknown_key(self, two_project_root: pathlib.Path) -> None:
         """show-readme.sh exits with the same not-found shape as show.sh.
 
         A key that does not match any task, bug, priority, or requirement
@@ -598,20 +550,16 @@ class TestShowReadmeCommand:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_show_readme_help_exits_zero(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_show_readme_help_exits_zero(self, two_project_root: pathlib.Path) -> None:
         """show-readme.sh --help prints usage and exits 0 without requiring flags."""
         root = two_project_root
 
         result = _run_operator(_SHOW_README_SCRIPT, ["--help"], root)
 
-        assert result.returncode == 0, (
-            f"show-readme.sh --help must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert "Usage:" in result.stdout, (
-            f"Expected a Usage: line in --help output.\nstdout: {result.stdout}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"show-readme.sh --help must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert "Usage:" in result.stdout, f"Expected a Usage: line in --help output.\nstdout: {result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -622,9 +570,7 @@ class TestShowReadmeCommand:
 class TestResetCommand:
     """reset.sh restores tasks and intake items to a re-pickable state."""
 
-    def test_reset_sets_task_state_to_backlog(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_reset_sets_task_state_to_backlog(self, two_project_root: pathlib.Path) -> None:
         """reset.sh on a DONE task writes State=BACKLOG to status.md.
 
         The fundamental reset guarantee: after reset, the task is in BACKLOG
@@ -640,17 +586,13 @@ class TestResetCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"reset.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"reset.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert _read_status_state(task_dir) == "BACKLOG", (
             f"Expected status.md ## State to be BACKLOG after reset.\n"
             f"Actual content:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
         )
 
-    def test_reset_flips_queue_marker_to_open(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_reset_flips_queue_marker_to_open(self, two_project_root: pathlib.Path) -> None:
         """reset.sh flips the agent queue marker from [x] to [ ] in the backlog file.
 
         Queue-marker sync: after a reset, the backlog marker for the task must
@@ -661,9 +603,7 @@ class TestResetCommand:
         _build_task_folder(root, "project-a", task_id, state="DONE")
 
         # Pre-condition: mark the backlog marker as [x] to simulate a prior close.
-        backlog_file = (
-            root / "projects" / "project-a" / "tasks" / "queues" / "coder_backlog.md"
-        )
+        backlog_file = root / "projects" / "project-a" / "tasks" / "queues" / "coder_backlog.md"
         if backlog_file.exists():
             text = backlog_file.read_text(encoding="utf-8")
             text = text.replace(f"- [ ] {task_id}", f"- [x] {task_id}")
@@ -675,18 +615,14 @@ class TestResetCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"reset.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"reset.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "" or marker == " ", (
             f"Expected backlog marker to be open (space or empty) after reset, got: {marker!r}.\n"
             f"backlog content:\n{backlog_file.read_text(encoding='utf-8')}"
         )
 
-    def test_reset_refuses_task_in_working_state(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_reset_refuses_task_in_working_state(self, two_project_root: pathlib.Path) -> None:
         """reset.sh refuses to reset a task whose state is WORKING (exit code 2).
 
         A task in WORKING state may be actively held by an agent.  reset.sh
@@ -707,13 +643,9 @@ class TestResetCommand:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         # State must be unchanged.
-        assert _read_status_state(task_dir) == "WORKING", (
-            "reset.sh must not modify a task in WORKING state."
-        )
+        assert _read_status_state(task_dir) == "WORKING", "reset.sh must not modify a task in WORKING state."
 
-    def test_reset_bug_intake_item_to_open(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_reset_bug_intake_item_to_open(self, two_project_root: pathlib.Path) -> None:
         """reset.sh resets a bug intake item's ## Status to 'open'.
 
         Bug intake items can also be reset (e.g., after being mistakenly marked
@@ -721,7 +653,10 @@ class TestResetCommand:
         """
         root = two_project_root
         bug_file = _build_bug_file(
-            root, "project-a", bug_id="BUG-0110", slug="reset-intake-test",
+            root,
+            "project-a",
+            bug_id="BUG-0110",
+            slug="reset-intake-test",
             status="running",
         )
 
@@ -731,18 +666,15 @@ class TestResetCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"reset.sh on intake item exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"reset.sh on intake item exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         bug_text = bug_file.read_text(encoding="utf-8")
         assert "open" in bug_text.lower(), (
-            f"Expected bug file ## Status to be 'open' after reset.\n"
-            f"Actual content:\n{bug_text}"
+            f"Expected bug file ## Status to be 'open' after reset.\n" f"Actual content:\n{bug_text}"
         )
 
-    def test_reset_bug_intake_marker_flips_to_open(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_reset_bug_intake_marker_flips_to_open(self, two_project_root: pathlib.Path) -> None:
         """reset.sh flips a bug backlog marker from [x] to [ ] after resetting the intake item.
 
         Queue-marker sync for intake: resetting a bug item must update
@@ -755,9 +687,7 @@ class TestResetCommand:
         bug_key = f"{bug_id}-{slug}"
 
         # Pre-condition: mark the bug backlog entry as [x].
-        bug_backlog = (
-            root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md"
-        )
+        bug_backlog = root / "projects" / "project-a" / "tasks" / "queues" / "bug_backlog.md"
         if bug_backlog.exists():
             text = bug_backlog.read_text(encoding="utf-8")
             text = text.replace(f"- [ ] {bug_key}", f"- [x] {bug_key}")
@@ -769,9 +699,9 @@ class TestResetCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"reset.sh on intake item exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"reset.sh on intake item exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         marker = _read_bug_backlog_marker(root, "project-a", bug_key)
         assert marker == "" or marker == " ", (
             f"Expected bug backlog marker to be open after reset, got: {marker!r}.\n"
@@ -787,9 +717,7 @@ class TestResetCommand:
 class TestCloseCommand:
     """close.sh marks tasks and intake items with a terminal state and syncs the queue marker."""
 
-    def test_close_sets_task_state_to_done(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_sets_task_state_to_done(self, two_project_root: pathlib.Path) -> None:
         """close.sh sets a task's ## State to DONE in status.md.
 
         For agent tasks, close.sh always writes DONE to ## State (the --state
@@ -805,17 +733,13 @@ class TestCloseCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"close.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"close.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert _read_status_state(task_dir) == "DONE", (
             f"Expected status.md ## State to be DONE after close.\n"
             f"Actual content:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
         )
 
-    def test_close_flips_task_queue_marker_to_done(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_flips_task_queue_marker_to_done(self, two_project_root: pathlib.Path) -> None:
         """close.sh flips the task's queue marker to [x] in the agent backlog file.
 
         Queue-marker sync is the critical cross-file consistency property.
@@ -831,27 +755,21 @@ class TestCloseCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"close.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"close.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "x", (
             f"Expected backlog marker to be [x] after close, got: {marker!r}.\n"
             f"coder_backlog.md:\n{(root / 'projects' / 'project-a' / 'tasks' / 'queues' / 'coder_backlog.md').read_text(encoding='utf-8')}"
         )
 
-    def test_close_bug_intake_item_with_state_done(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_bug_intake_item_with_state_done(self, two_project_root: pathlib.Path) -> None:
         """close.sh --state done sets a bug file's ## Status to 'done'.
 
         Closing an intake bug item with the default state (done) must update
         the file's ## Status field and flip the bug backlog marker.
         """
         root = two_project_root
-        bug_file = _build_bug_file(
-            root, "project-a", bug_id="BUG-0120", slug="close-done-test"
-        )
+        bug_file = _build_bug_file(root, "project-a", bug_id="BUG-0120", slug="close-done-test")
         bug_key = "BUG-0120-close-done-test"
 
         result = _run_operator(
@@ -860,18 +778,15 @@ class TestCloseCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"close.sh on intake bug exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"close.sh on intake bug exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         bug_text = bug_file.read_text(encoding="utf-8")
         assert "done" in bug_text.lower(), (
-            f"Expected bug file ## Status to contain 'done' after close.\n"
-            f"Actual:\n{bug_text}"
+            f"Expected bug file ## Status to contain 'done' after close.\n" f"Actual:\n{bug_text}"
         )
 
-    def test_close_bug_intake_flips_backlog_marker_to_x(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_bug_intake_flips_backlog_marker_to_x(self, two_project_root: pathlib.Path) -> None:
         """close.sh flips a bug backlog marker to [x] when closing the bug intake item.
 
         Queue-marker sync for intake: both the file's ## Status and the
@@ -889,18 +804,16 @@ class TestCloseCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"close.sh on intake exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"close.sh on intake exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         marker = _read_bug_backlog_marker(root, "project-a", bug_key)
         assert marker == "x", (
             f"Expected bug backlog marker to be [x] after close, got: {marker!r}.\n"
             f"bug_backlog.md:\n{(root / 'projects' / 'project-a' / 'tasks' / 'queues' / 'bug_backlog.md').read_text(encoding='utf-8')}"
         )
 
-    def test_close_reports_key_not_found_for_missing_task(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_reports_key_not_found_for_missing_task(self, two_project_root: pathlib.Path) -> None:
         """close.sh exits with code 3 when the key is not found in the project.
 
         Attempting to close a non-existent task must result in exit code 3 and
@@ -919,9 +832,7 @@ class TestCloseCommand:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_close_refuses_retired_superseded_state_and_writes_nothing(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_refuses_retired_superseded_state_and_writes_nothing(self, two_project_root: pathlib.Path) -> None:
         """close.sh --state superseded exits 1 with a dual-channel refusal whose
         remedy closes the item as wont-do; the bug file and its marker are
         untouched."""
@@ -947,9 +858,7 @@ class TestCloseCommand:
         assert bug_file.read_text(encoding="utf-8") == before
         assert _read_bug_backlog_marker(root, "project-a", bug_key) == marker_before
 
-    def test_close_with_state_wont_do_still_closes_an_intake_item(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_close_with_state_wont_do_still_closes_an_intake_item(self, two_project_root: pathlib.Path) -> None:
         """wont-do, one of the two closed states, still closes a bug."""
         root = two_project_root
         bug_file = _build_bug_file(root, "project-a", bug_id="BUG-0131", slug="close-wont-do")
@@ -998,9 +907,7 @@ class TestCloseCommand:
 class TestWontdoCommand:
     """wontdo.sh marks tasks as WONT-DO and syncs the queue marker."""
 
-    def test_wontdo_sets_task_state_to_wont_do(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_wontdo_sets_task_state_to_wont_do(self, two_project_root: pathlib.Path) -> None:
         """wontdo.sh writes WONT-DO to the task's ## State in status.md.
 
         WONT-DO is the retire-without-working terminal state.  After wontdo,
@@ -1016,18 +923,14 @@ class TestWontdoCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"wontdo.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"wontdo.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         actual_state = _read_status_state(task_dir)
         assert actual_state == "WONT-DO", (
             f"Expected ## State to be WONT-DO after wontdo.sh; got {actual_state!r}.\n"
             f"status.md:\n{(task_dir / 'status.md').read_text(encoding='utf-8')}"
         )
 
-    def test_wontdo_flips_queue_marker_to_x(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_wontdo_flips_queue_marker_to_x(self, two_project_root: pathlib.Path) -> None:
         """wontdo.sh flips the task's queue marker to [x] in the agent backlog file.
 
         Queue-marker sync: a WONT-DO task must be marked [x] in coder_backlog.md,
@@ -1043,18 +946,14 @@ class TestWontdoCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"wontdo.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"wontdo.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         marker = _read_backlog_marker(root, "project-a", task_id)
         assert marker == "x", (
             f"Expected backlog marker [x] after wontdo; got: {marker!r}.\n"
             f"coder_backlog.md:\n{(root / 'projects' / 'project-a' / 'tasks' / 'queues' / 'coder_backlog.md').read_text(encoding='utf-8')}"
         )
 
-    def test_wontdo_stdout_confirms_operation(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_wontdo_stdout_confirms_operation(self, two_project_root: pathlib.Path) -> None:
         """wontdo.sh prints a confirmation message to stdout on success.
 
         The confirmation message must reference the task ID so operators
@@ -1071,9 +970,9 @@ class TestWontdoCommand:
         )
 
         assert result.returncode == 0
-        assert task_id in result.stdout or "WONT-DO" in result.stdout.upper(), (
-            f"Expected task ID or 'WONT-DO' in stdout.\nstdout: {result.stdout}"
-        )
+        assert (
+            task_id in result.stdout or "WONT-DO" in result.stdout.upper()
+        ), f"Expected task ID or 'WONT-DO' in stdout.\nstdout: {result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -1084,9 +983,7 @@ class TestWontdoCommand:
 class TestDeleteCommand:
     """delete.sh removes task directories and intake items after terminal-state guard check."""
 
-    def test_delete_removes_done_task_directory(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_delete_removes_done_task_directory(self, two_project_root: pathlib.Path) -> None:
         """delete.sh removes a DONE task's directory from the tasks/ tree.
 
         After deletion, the task directory must no longer exist.  This is the
@@ -1103,17 +1000,13 @@ class TestDeleteCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"delete.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"delete.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert not task_dir.exists(), (
             f"Expected task directory to be removed after delete, but it still exists at {task_dir}.\n"
             f"stdout: {result.stdout}"
         )
 
-    def test_delete_guard_refuses_backlog_task(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_delete_guard_refuses_backlog_task(self, two_project_root: pathlib.Path) -> None:
         """delete.sh refuses to delete a BACKLOG task without --force (exit code 2).
 
         The terminal-state guard protects tasks that are not yet finished.
@@ -1134,13 +1027,9 @@ class TestDeleteCommand:
             f"Expected exit code 2 (guard refused) for BACKLOG task; got {result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert task_dir.exists(), (
-            "Task directory must not be deleted when the guard refuses."
-        )
+        assert task_dir.exists(), "Task directory must not be deleted when the guard refuses."
 
-    def test_delete_with_force_removes_non_terminal_task(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_delete_with_force_removes_non_terminal_task(self, two_project_root: pathlib.Path) -> None:
         """delete.sh --force removes a BACKLOG task, bypassing the terminal-state guard.
 
         --force is the operator escape hatch for deleting work regardless of
@@ -1157,16 +1046,12 @@ class TestDeleteCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"delete.sh --force exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert not task_dir.exists(), (
-            "Task directory must be removed when --force is used, even for BACKLOG state."
-        )
+        assert (
+            result.returncode == 0
+        ), f"delete.sh --force exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert not task_dir.exists(), "Task directory must be removed when --force is used, even for BACKLOG state."
 
-    def test_delete_dry_run_reports_without_removing(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_delete_dry_run_reports_without_removing(self, two_project_root: pathlib.Path) -> None:
         """delete.sh --dry-run reports the target path without removing it.
 
         --dry-run must print what would be deleted and exit 0 without modifying
@@ -1182,15 +1067,13 @@ class TestDeleteCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"delete.sh --dry-run exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert task_id in result.stdout or str(task_dir) in result.stdout, (
-            f"Expected task ID or path in dry-run output.\nstdout: {result.stdout}"
-        )
-        assert task_dir.exists(), (
-            "Task directory must NOT be removed after --dry-run."
-        )
+        assert (
+            result.returncode == 0
+        ), f"delete.sh --dry-run exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (
+            task_id in result.stdout or str(task_dir) in result.stdout
+        ), f"Expected task ID or path in dry-run output.\nstdout: {result.stdout}"
+        assert task_dir.exists(), "Task directory must NOT be removed after --dry-run."
 
 
 # ---------------------------------------------------------------------------
@@ -1201,9 +1084,7 @@ class TestDeleteCommand:
 class TestHaltCommand:
     """halt.sh creates the per-project HALT sentinel file."""
 
-    def test_halt_creates_project_halt_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_creates_project_halt_file(self, two_project_root: pathlib.Path) -> None:
         """halt.sh creates a HALT file in the project directory.
 
         The HALT file at projects/<name>/HALT is the per-project halt signal
@@ -1219,17 +1100,12 @@ class TestHaltCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"halt.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"halt.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert halt_file.exists(), (
-            f"Expected HALT file to be created at {halt_file}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected HALT file to be created at {halt_file}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_halt_is_idempotent(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_is_idempotent(self, two_project_root: pathlib.Path) -> None:
         """A second halt.sh invocation on an already-halted project exits 0 cleanly.
 
         Idempotency prevents spurious errors in automated pipelines that may
@@ -1248,16 +1124,14 @@ class TestHaltCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"Second halt.sh invocation exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
-        assert (root / "projects" / "project-a" / "HALT").exists(), (
-            "HALT file must still exist after a second halt invocation."
-        )
+        assert (
+            result.returncode == 0
+        ), f"Second halt.sh invocation exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert (
+            root / "projects" / "project-a" / "HALT"
+        ).exists(), "HALT file must still exist after a second halt invocation."
 
-    def test_halt_only_affects_targeted_project(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_only_affects_targeted_project(self, two_project_root: pathlib.Path) -> None:
         """halt.sh creates HALT only in the specified project's directory.
 
         Per-project HALT must be scoped: halting project-a must not create a
@@ -1272,15 +1146,11 @@ class TestHaltCommand:
         )
 
         assert result.returncode == 0
-        assert (root / "projects" / "project-a" / "HALT").exists(), (
-            "HALT file must be created in project-a."
-        )
-        assert not (root / "projects" / "project-b" / "HALT").exists(), (
-            "HALT must not be created in project-b when only project-a is halted."
-        )
-        assert not (root / "HALT").exists(), (
-            "Per-project halt must not create a global HALT at the kanban root."
-        )
+        assert (root / "projects" / "project-a" / "HALT").exists(), "HALT file must be created in project-a."
+        assert not (
+            root / "projects" / "project-b" / "HALT"
+        ).exists(), "HALT must not be created in project-b when only project-a is halted."
+        assert not (root / "HALT").exists(), "Per-project halt must not create a global HALT at the kanban root."
 
 
 # ---------------------------------------------------------------------------
@@ -1291,9 +1161,7 @@ class TestHaltCommand:
 class TestHaltGlobalCommand:
     """halt-global.sh creates the global HALT sentinel at the kanban root."""
 
-    def test_halt_global_creates_root_halt_file(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_global_creates_root_halt_file(self, two_project_root: pathlib.Path) -> None:
         """halt-global.sh creates HALT at the kanban root, blocking all projects.
 
         The global HALT file at <kanban_root>/HALT stops all projects' pipelines
@@ -1309,17 +1177,14 @@ class TestHaltGlobalCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"halt-global.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"halt-global.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert global_halt.exists(), (
-            f"Expected global HALT file at {global_halt}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected global HALT file at {global_halt}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_halt_global_is_idempotent(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_global_is_idempotent(self, two_project_root: pathlib.Path) -> None:
         """A second halt-global.sh invocation exits 0 when global HALT already exists.
 
         The global HALT is a toggle — calling it twice must not error.
@@ -1337,16 +1202,11 @@ class TestHaltGlobalCommand:
         )
 
         assert result.returncode == 0, (
-            f"Second halt-global.sh invocation exited non-zero.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Second halt-global.sh invocation exited non-zero.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert (root / "HALT").exists(), (
-            "Global HALT file must still exist after a second invocation."
-        )
+        assert (root / "HALT").exists(), "Global HALT file must still exist after a second invocation."
 
-    def test_halt_global_does_not_create_per_project_halt(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_halt_global_does_not_create_per_project_halt(self, two_project_root: pathlib.Path) -> None:
         """halt-global.sh creates only the root-level HALT, not per-project HALT files.
 
         Global HALT and per-project HALT are separate mechanisms.  halt-global
@@ -1362,12 +1222,12 @@ class TestHaltGlobalCommand:
 
         assert result.returncode == 0
         assert (root / "HALT").exists(), "Global HALT must be created at root."
-        assert not (root / "projects" / "project-a" / "HALT").exists(), (
-            "halt-global must not create a per-project HALT in project-a."
-        )
-        assert not (root / "projects" / "project-b" / "HALT").exists(), (
-            "halt-global must not create a per-project HALT in project-b."
-        )
+        assert not (
+            root / "projects" / "project-a" / "HALT"
+        ).exists(), "halt-global must not create a per-project HALT in project-a."
+        assert not (
+            root / "projects" / "project-b" / "HALT"
+        ).exists(), "halt-global must not create a per-project HALT in project-b."
 
 
 # ---------------------------------------------------------------------------
@@ -1390,9 +1250,7 @@ class TestIntakeCommand:
         # Create the staged file outside the kanban root (as an operator would).
         staged_file = tmp_path / "BUG-0200-intake-routing-test.md"
         staged_file.write_text(
-            "# BUG-0200: intake-routing-test\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nRouting test via intake.sh.\n",
+            "# BUG-0200: intake-routing-test\n\n" "## Status\nopen\n\n" "## Summary\nRouting test via intake.sh.\n",
             encoding="utf-8",
         )
 
@@ -1404,9 +1262,7 @@ class TestIntakeCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"intake.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"intake.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         deposited = root / "projects" / "project-a" / "bugs" / "BUG-0200-intake-routing-test.md"
         assert deposited.exists(), (
             f"Expected deposited file at {deposited}.\n"
@@ -1425,9 +1281,7 @@ class TestIntakeCommand:
         root = two_project_root
         staged_file = tmp_path / "PRIORITY-0010-intake-priority-test.md"
         staged_file.write_text(
-            "# PRIORITY-0010: intake-priority-test\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nPriority routing test.\n",
+            "# PRIORITY-0010: intake-priority-test\n\n" "## Status\nopen\n\n" "## Summary\nPriority routing test.\n",
             encoding="utf-8",
         )
 
@@ -1439,14 +1293,11 @@ class TestIntakeCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"intake.sh for priority file exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"intake.sh for priority file exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         deposited = root / "projects" / "project-a" / "priority" / "PRIORITY-0010-intake-priority-test.md"
-        assert deposited.exists(), (
-            f"Expected deposited file at {deposited}.\n"
-            f"stdout: {result.stdout}"
-        )
+        assert deposited.exists(), f"Expected deposited file at {deposited}.\n" f"stdout: {result.stdout}"
 
     def test_intake_refuses_unrecognized_filename_prefix(
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
@@ -1489,9 +1340,7 @@ class TestIntakeCommand:
 
         # Pre-create the target file.
         existing_content = "# PRIORITY-0201: already-exists\n\n## Status\nopen\n"
-        (priority_dir / "PRIORITY-0201-already-exists.md").write_text(
-            existing_content, encoding="utf-8"
-        )
+        (priority_dir / "PRIORITY-0201-already-exists.md").write_text(existing_content, encoding="utf-8")
 
         # Attempt to deposit another file with the same name.
         staged_file = tmp_path / "PRIORITY-0201-already-exists.md"
@@ -1512,9 +1361,7 @@ class TestIntakeCommand:
         )
         # Existing file must be unchanged.
         actual_content = (priority_dir / "PRIORITY-0201-already-exists.md").read_text(encoding="utf-8")
-        assert actual_content == existing_content, (
-            "intake.sh must not overwrite an existing file."
-        )
+        assert actual_content == existing_content, "intake.sh must not overwrite an existing file."
 
     def test_intake_concurrent_depositors_of_one_basename_keep_first_landed_file(
         self, two_project_root: pathlib.Path, tmp_path: pathlib.Path
@@ -1618,15 +1465,11 @@ class TestIntakeCommand:
             f"depositor A should be refused with exit 3 (no clobber); got {proc_a.returncode}.\n"
             f"stdout: {out_a}\nstderr: {err_a}"
         )
-        assert "no clobber" in err_a, (
-            f"depositor A's refusal must name the no-clobber contract.\nstderr: {err_a}"
-        )
-        assert (priority_dir / basename).read_text(encoding="utf-8") == content_b, (
-            "the first file to land (depositor B's) must survive intact"
-        )
-        leftovers = sorted(
-            n for n in os.listdir(priority_dir) if n.startswith(".deposit_intake_tmp_")
-        )
+        assert "no clobber" in err_a, f"depositor A's refusal must name the no-clobber contract.\nstderr: {err_a}"
+        assert (priority_dir / basename).read_text(
+            encoding="utf-8"
+        ) == content_b, "the first file to land (depositor B's) must survive intact"
+        leftovers = sorted(n for n in os.listdir(priority_dir) if n.startswith(".deposit_intake_tmp_"))
         assert leftovers == [], f"deposit temp files left behind: {leftovers}"
 
     def test_intake_prints_deposited_path_on_success(
@@ -1651,13 +1494,11 @@ class TestIntakeCommand:
             root,
         )
 
-        assert result.returncode == 0, (
-            f"intake.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"intake.sh exited non-zero.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         # The output must reference the deposited filename so operators can verify routing.
-        assert "BUG-0202-intake-path-output.md" in result.stdout, (
-            f"Expected deposited filename in stdout.\nstdout: {result.stdout}"
-        )
+        assert (
+            "BUG-0202-intake-path-output.md" in result.stdout
+        ), f"Expected deposited filename in stdout.\nstdout: {result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -1722,9 +1563,7 @@ class TestCloseShForeignCwd:
         both task-close and intake-close succeed when cwd is not the kanban root.
         """
         root = two_project_root
-        bug_file = _build_bug_file(
-            root, "project-a", bug_id="BUG-0130", slug="close-foreign-cwd-intake"
-        )
+        bug_file = _build_bug_file(root, "project-a", bug_id="BUG-0130", slug="close-foreign-cwd-intake")
         bug_key = "BUG-0130-close-foreign-cwd-intake"
 
         foreign_cwd = tmp_path / "foreign_cwd_intake"
@@ -1743,8 +1582,7 @@ class TestCloseShForeignCwd:
         )
         bug_text = bug_file.read_text(encoding="utf-8")
         assert "done" in bug_text.lower(), (
-            f"Expected bug file ## Status to contain 'done' after close.\n"
-            f"Actual:\n{bug_text}"
+            f"Expected bug file ## Status to contain 'done' after close.\n" f"Actual:\n{bug_text}"
         )
 
 
@@ -1854,18 +1692,14 @@ class TestHaltUnhaltGlobalScrubbedEnv:
         foreign_cwd.mkdir(parents=True, exist_ok=True)
 
         # First call — creates HALT.
-        first = _run_operator_scrubbed_foreign_cwd(
-            _HALT_GLOBAL_SCRIPT, [], root, foreign_cwd
-        )
-        assert first.returncode == 0, (
-            f"First halt-global.sh call failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
-        )
+        first = _run_operator_scrubbed_foreign_cwd(_HALT_GLOBAL_SCRIPT, [], root, foreign_cwd)
+        assert (
+            first.returncode == 0
+        ), f"First halt-global.sh call failed.\nstdout: {first.stdout}\nstderr: {first.stderr}"
         assert (root / "HALT").exists(), "HALT must exist after first call."
 
         # Second call — must exit 0 (idempotent).
-        second = _run_operator_scrubbed_foreign_cwd(
-            _HALT_GLOBAL_SCRIPT, [], root, foreign_cwd
-        )
+        second = _run_operator_scrubbed_foreign_cwd(_HALT_GLOBAL_SCRIPT, [], root, foreign_cwd)
         assert second.returncode == 0, (
             f"Second halt-global.sh call under scrubbed env exited non-zero.\n"
             f"stdout: {second.stdout}\nstderr: {second.stderr}"
@@ -1887,9 +1721,7 @@ class TestHaltUnhaltGlobalScrubbedEnv:
         foreign_cwd = tmp_path / "unhalt_idempotent_cwd"
         foreign_cwd.mkdir(parents=True, exist_ok=True)
 
-        result = _run_operator_scrubbed_foreign_cwd(
-            _UNHALT_GLOBAL_SCRIPT, [], root, foreign_cwd
-        )
+        result = _run_operator_scrubbed_foreign_cwd(_UNHALT_GLOBAL_SCRIPT, [], root, foreign_cwd)
 
         assert result.returncode == 0, (
             f"unhalt-global.sh exited non-zero when no HALT existed (expected idempotent 0).\n"

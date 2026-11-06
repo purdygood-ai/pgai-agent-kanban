@@ -33,7 +33,6 @@ import subprocess
 import sys
 import textwrap
 
-import pytest
 
 from pgai_agent_kanban.cm.changelog_writer import (
     load_published_manifest,
@@ -47,8 +46,8 @@ from pgai_agent_kanban.cm.changelog_writer import (
 _THIS_FILE = pathlib.Path(__file__).resolve()
 # tests/unit/test_cm_release_changelog_path.py
 # three levels up: unit/ → tests/ → team/
-_TEAM_DIR = _THIS_FILE.parent.parent.parent       # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                  # project root
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project root
 # Step 11b was extracted from cm/release.sh into this lib stage file by the
 # v2.9.20-engine-decomposition; this constant follows the move.
 _CM_RELEASE_SCRIPT = _TEAM_DIR / "scripts" / "lib" / "cm" / "release_notes.sh"
@@ -172,7 +171,8 @@ def _subprocess_writer_output(
     result = subprocess.run(
         [
             sys.executable,
-            "-m", "pgai_agent_kanban.cm.changelog_writer",
+            "-m",
+            "pgai_agent_kanban.cm.changelog_writer",
             str(repo_root),
             str(bugs_dir),
         ],
@@ -204,9 +204,7 @@ class TestCmReleaseShellInvocationForm:
         assertion fails immediately.  The regression gate is the presence of the
         pp_run_ops helper call in the CHANGELOG-update section of the script.
         """
-        assert _CM_RELEASE_SCRIPT.exists(), (
-            f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
-        )
+        assert _CM_RELEASE_SCRIPT.exists(), f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
         source = _CM_RELEASE_SCRIPT.read_text(encoding="utf-8")
 
         assert "pp_run_ops pgai_agent_kanban.cm.changelog_writer" in source, (
@@ -226,9 +224,7 @@ class TestCmReleaseShellInvocationForm:
         dependent) and diverged from the freshness gate. The presence of this pattern
         in the CHANGELOG-writing block indicates a reversion.
         """
-        assert _CM_RELEASE_SCRIPT.exists(), (
-            f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
-        )
+        assert _CM_RELEASE_SCRIPT.exists(), f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
         source = _CM_RELEASE_SCRIPT.read_text(encoding="utf-8")
 
         # Extract the Step 11b block (between "Step 11b" and "Step 11c")
@@ -293,9 +289,7 @@ class TestChangelogWriterDeterminism:
         output = _subprocess_writer_output(repo_root, bugs_dir)
 
         assert len(output) > 0, "changelog_writer produced empty output for a minimal fixture."
-        assert b"# Changelog" in output, (
-            "changelog_writer output does not contain the expected '# Changelog' header."
-        )
+        assert b"# Changelog" in output, "changelog_writer output does not contain the expected '# Changelog' header."
 
 
 # ---------------------------------------------------------------------------
@@ -313,9 +307,7 @@ class TestSubprocessVsDirectCallEquivalence:
     the output could diverge from what the freshness gate expects.
     """
 
-    def test_subprocess_and_direct_call_produce_identical_output(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_subprocess_and_direct_call_produce_identical_output(self, tmp_path: pathlib.Path) -> None:
         """Subprocess and direct Python regenerate() on the same fixture are byte-identical.
 
         Runs the writer via subprocess (replicating the cm-release.sh invocation) and via
@@ -350,9 +342,7 @@ class TestSubprocessVsDirectCallEquivalence:
             "_main() function in changelog_writer.py applies any transformation not in regenerate()."
         )
 
-    def test_fixture_with_empty_bugs_dir_is_hermetic(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_fixture_with_empty_bugs_dir_is_hermetic(self, tmp_path: pathlib.Path) -> None:
         """Fixture with empty bugs dir produces deterministic output independent of live state.
 
         Verifies that the test does not accidentally import the live bugs directory.
@@ -361,7 +351,7 @@ class TestSubprocessVsDirectCallEquivalence:
         repo_root, bugs_dir = _build_fixture(
             tmp_path,
             versions_newest_first=["v1.0.0"],
-            published_versions=[],   # no published versions → no Known Issues
+            published_versions=[],  # no published versions → no Known Issues
         )
 
         output = _subprocess_writer_output(repo_root, bugs_dir)

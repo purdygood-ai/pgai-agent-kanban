@@ -57,7 +57,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
 from tests.unit.shell_harness import run_bash
 
@@ -73,9 +72,7 @@ _GATE_SCRIPT = _SCRIPTS_DIR / "lint_skip_bug_gate.sh"
 
 
 def _import_scan_module():
-    spec = importlib.util.spec_from_file_location(
-        "skip_bug_citation_scan_under_test", _SCAN_MODULE_PATH
-    )
+    spec = importlib.util.spec_from_file_location("skip_bug_citation_scan_under_test", _SCAN_MODULE_PATH)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_SCAN_MODULE_PATH}")
     mod = importlib.util.module_from_spec(spec)
@@ -93,11 +90,7 @@ _scan = _import_scan_module()
 # ---------------------------------------------------------------------------
 
 PLAIN_SKIP_SOURCE = (
-    "import pytest\n"
-    "\n"
-    "\n"
-    "def test_plain_skip_citation():\n"
-    '    pytest.skip("BUG-1234 pending fix")\n'
+    "import pytest\n" "\n" "\n" "def test_plain_skip_citation():\n" '    pytest.skip("BUG-1234 pending fix")\n'
 )
 
 INLINE_CONDITIONAL_SKIP_SOURCE = (
@@ -147,8 +140,7 @@ DOCSTRING_MENTION_SOURCE = (
 # NOT a citation: an ordinary string assignment (sample test data), never
 # executed as a skip, whose text happens to contain "reason=BUG-NNNN".
 SAMPLE_DATA_MENTION_SOURCE = (
-    'SAMPLE_CONFIG_LINE = "reason=BUG-1239 unrelated sample payload, '
-    'never executed as a skip"\n'
+    'SAMPLE_CONFIG_LINE = "reason=BUG-1239 unrelated sample payload, ' 'never executed as a skip"\n'
 )
 
 
@@ -164,9 +156,7 @@ def test_scan_source_catches_plain_skip_citation():
 
 
 def test_scan_source_catches_inline_conditional_skip_citation():
-    findings = _scan.scan_source(
-        Path("inline_conditional_skip.py"), INLINE_CONDITIONAL_SKIP_SOURCE, "citation"
-    )
+    findings = _scan.scan_source(Path("inline_conditional_skip.py"), INLINE_CONDITIONAL_SKIP_SOURCE, "citation")
     assert len(findings) == 1
     assert "BUG-1235" in findings[0].snippet
 
@@ -175,25 +165,19 @@ def test_scan_source_catches_multiline_skip_continuation_citation():
     """Catches a citation on
     a continuation line the line-oriented grep's character class could not
     cross into."""
-    findings = _scan.scan_source(
-        Path("multiline_skip.py"), MULTILINE_SKIP_SOURCE, "citation"
-    )
+    findings = _scan.scan_source(Path("multiline_skip.py"), MULTILINE_SKIP_SOURCE, "citation")
     assert len(findings) == 1
     assert "BUG-1236" in findings[0].snippet
 
 
 def test_scan_source_catches_skipif_decorator_citation():
-    findings = _scan.scan_source(
-        Path("skipif_decorator.py"), SKIPIF_DECORATOR_SOURCE, "citation"
-    )
+    findings = _scan.scan_source(Path("skipif_decorator.py"), SKIPIF_DECORATOR_SOURCE, "citation")
     assert len(findings) == 1
     assert "BUG-1237" in findings[0].snippet
 
 
 def test_scan_source_does_not_flag_docstring_mention_as_citation():
-    findings = _scan.scan_source(
-        Path("docstring_mention.py"), DOCSTRING_MENTION_SOURCE, "citation"
-    )
+    findings = _scan.scan_source(Path("docstring_mention.py"), DOCSTRING_MENTION_SOURCE, "citation")
     assert findings == []
 
 
@@ -202,16 +186,12 @@ def test_scan_source_does_not_flag_docstring_mention_as_placeholder():
     line-oriented placeholder pattern (skip.*BUG-[A-Za-z]) because "skip"
     and "BUG-Z..." shared a line; the structural scan never examines this
     text at all because it is not a skip statement's argument list."""
-    findings = _scan.scan_source(
-        Path("docstring_mention.py"), DOCSTRING_MENTION_SOURCE, "placeholder"
-    )
+    findings = _scan.scan_source(Path("docstring_mention.py"), DOCSTRING_MENTION_SOURCE, "placeholder")
     assert findings == []
 
 
 def test_scan_source_does_not_flag_sample_data_mention_as_citation():
-    findings = _scan.scan_source(
-        Path("sample_data_mention.py"), SAMPLE_DATA_MENTION_SOURCE, "citation"
-    )
+    findings = _scan.scan_source(Path("sample_data_mention.py"), SAMPLE_DATA_MENTION_SOURCE, "citation")
     assert findings == []
 
 
@@ -223,19 +203,11 @@ def test_scan_source_does_not_flag_sample_data_mention_as_citation():
 def _write_corpus(tests_dir: Path) -> None:
     tests_dir.mkdir(parents=True, exist_ok=True)
     (tests_dir / "plain_skip.py").write_text(PLAIN_SKIP_SOURCE, encoding="utf-8")
-    (tests_dir / "inline_conditional_skip.py").write_text(
-        INLINE_CONDITIONAL_SKIP_SOURCE, encoding="utf-8"
-    )
+    (tests_dir / "inline_conditional_skip.py").write_text(INLINE_CONDITIONAL_SKIP_SOURCE, encoding="utf-8")
     (tests_dir / "multiline_skip.py").write_text(MULTILINE_SKIP_SOURCE, encoding="utf-8")
-    (tests_dir / "skipif_decorator.py").write_text(
-        SKIPIF_DECORATOR_SOURCE, encoding="utf-8"
-    )
-    (tests_dir / "docstring_mention.py").write_text(
-        DOCSTRING_MENTION_SOURCE, encoding="utf-8"
-    )
-    (tests_dir / "sample_data_mention.py").write_text(
-        SAMPLE_DATA_MENTION_SOURCE, encoding="utf-8"
-    )
+    (tests_dir / "skipif_decorator.py").write_text(SKIPIF_DECORATOR_SOURCE, encoding="utf-8")
+    (tests_dir / "docstring_mention.py").write_text(DOCSTRING_MENTION_SOURCE, encoding="utf-8")
+    (tests_dir / "sample_data_mention.py").write_text(SAMPLE_DATA_MENTION_SOURCE, encoding="utf-8")
 
 
 def _write_matching_bugs_dir(bugs_dir: Path) -> None:
@@ -315,11 +287,7 @@ PLACEHOLDER_SKIP_SOURCE = (
 # A skip citing a bug ID no bugs/ file carries (another project's ID, as the
 # report corpus quotes them).
 UNFILED_CITATION_SOURCE = (
-    "import pytest\n"
-    "\n"
-    "\n"
-    "def test_unfiled_citation():\n"
-    '    pytest.skip("BUG-1299 pending fix")\n'
+    "import pytest\n" "\n" "\n" "def test_unfiled_citation():\n" '    pytest.skip("BUG-1299 pending fix")\n'
 )
 
 
@@ -364,9 +332,7 @@ def test_gate_script_is_ok_when_only_report_fixtures_quote_skip_shapes(tmp_path:
     bugs_dir = tmp_path / "bugs"
     bugs_dir.mkdir(parents=True)
     (tests_dir / "unit").mkdir(parents=True)
-    (tests_dir / "unit" / "test_clean.py").write_text(
-        "def test_clean():\n    assert True\n", encoding="utf-8"
-    )
+    (tests_dir / "unit" / "test_clean.py").write_text("def test_clean():\n    assert True\n", encoding="utf-8")
     _plant_in_report_fixtures(tests_dir, PLACEHOLDER_SKIP_SOURCE + UNFILED_CITATION_SOURCE)
 
     result = run_bash(
@@ -410,8 +376,7 @@ def test_gate_script_missing_tests_dir_is_one_finding_and_exits_zero(tmp_path: P
 
     result = run_bash(
         tmp_path,
-        f"bash {_GATE_SCRIPT} --tests-dir {missing} --bugs-dir {bugs_dir} "
-        f"--findings-file {findings_file}",
+        f"bash {_GATE_SCRIPT} --tests-dir {missing} --bugs-dir {bugs_dir} " f"--findings-file {findings_file}",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
@@ -429,8 +394,7 @@ def test_gate_script_tree_walk_writes_each_unfiled_citation_as_a_finding(tmp_pat
 
     result = run_bash(
         tmp_path,
-        f"bash {_GATE_SCRIPT} --tests-dir {tests_dir} --bugs-dir {bugs_dir} "
-        f"--findings-file {findings_file}",
+        f"bash {_GATE_SCRIPT} --tests-dir {tests_dir} --bugs-dir {bugs_dir} " f"--findings-file {findings_file}",
     )
 
     assert result.returncode == 0, result.stdout + result.stderr

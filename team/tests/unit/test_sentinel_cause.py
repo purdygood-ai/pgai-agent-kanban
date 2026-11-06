@@ -64,14 +64,22 @@ def _digest_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "absent"
 
 
-def _log_line(path: Path, op: str, epoch: int, sha256: "str | None" = None) -> str:
+def _log_line(path: Path, op: str, epoch: int, sha256: str | None = None) -> str:
     """One record line in the writer's own field order; *sha256* defaults to
     the digest of *path* as it is now, as the writer records it."""
-    time = dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat(timespec="seconds")
+    time = dt.datetime.fromtimestamp(epoch, dt.UTC).isoformat(timespec="seconds")
     values = {
-        "time": time, "epoch": str(epoch), "op": op, "path": str(path),
-        "sha256": _digest_of(path) if sha256 is None else sha256, "entry": "python3 -m pgai_agent_kanban.ops " + op,
-        "pid": "4242", "ppid": "4240", "parent": "bash halt.sh", "user": "op", "test": "-",
+        "time": time,
+        "epoch": str(epoch),
+        "op": op,
+        "path": str(path),
+        "sha256": _digest_of(path) if sha256 is None else sha256,
+        "entry": "python3 -m pgai_agent_kanban.ops " + op,
+        "pid": "4242",
+        "ppid": "4240",
+        "parent": "bash halt.sh",
+        "user": "op",
+        "test": "-",
     }
     return "\t".join(f"{name}={values[name]}" for name in FIELDS) + "\n"
 
@@ -145,8 +153,8 @@ def test_time_asked_about_accepts_iso_string_and_datetime(tmp_path: Path) -> Non
     root = _kanban_root(tmp_path)
     halt = _project_halt(root)
     _write_log(root, _log_line(halt, "halt", _EPOCH_LATE))
-    before = dt.datetime.fromtimestamp(_EPOCH_EARLY, dt.timezone.utc)
-    after = dt.datetime.fromtimestamp(_EPOCH_LATE, dt.timezone.utc)
+    before = dt.datetime.fromtimestamp(_EPOCH_EARLY, dt.UTC)
+    after = dt.datetime.fromtimestamp(_EPOCH_LATE, dt.UTC)
 
     assert sentinel_cause(halt, before.isoformat(), kanban_root=root) == CAUSE_CHAIN
     assert sentinel_cause(halt, after.isoformat(), kanban_root=root) == CAUSE_OPERATOR

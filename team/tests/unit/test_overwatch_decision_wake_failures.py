@@ -41,7 +41,7 @@ from pgai_agent_kanban.overwatch.block_record import write_block_record
 from pgai_agent_kanban.task_status import section_value, set_or_append_section
 
 _PROJECT = "wake-proj"
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _PAST = "2026-01-01T11:00:00+00:00"
 _PLACEHOLDER = re.compile(r"<[^<>\s]+>")
 
@@ -53,8 +53,13 @@ class Root:
         self.root = tmp_path / "kanban"
         self.project = self.root / "projects" / _PROJECT
         self.queue = self.project / "tasks" / "queues" / "coder_backlog.md"
-        for d in (self.project / "overwatch" / "backups", self.queue.parent, self.root / "locks",
-                  self.root / "tmp", self.root / "logs"):
+        for d in (
+            self.project / "overwatch" / "backups",
+            self.queue.parent,
+            self.root / "locks",
+            self.root / "tmp",
+            self.root / "logs",
+        ):
             d.mkdir(parents=True, exist_ok=True)
         self.queue.write_text("# CODER Backlog\n\n## Queue\n\n", encoding="utf-8")
         (self.project / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8")
@@ -94,8 +99,14 @@ class Root:
 @pytest.fixture()
 def kanban(tmp_path, monkeypatch) -> Root:
     root = Root(tmp_path)
-    for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME", "HALT_OVERWATCH",
-                 "OVERWATCH_FIRING_TIMESTAMP", "OVERWATCH_LOCK_WAIT_SECONDS"):
+    for name in (
+        "PGAI_TASKS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_PROJECT_NAME",
+        "HALT_OVERWATCH",
+        "OVERWATCH_FIRING_TIMESTAMP",
+        "OVERWATCH_LOCK_WAIT_SECONDS",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KANBAN_ROOT", str(root.root))
     monkeypatch.setenv("PGAI_AGENT_KANBAN_ROOT_PATH", str(root.root))

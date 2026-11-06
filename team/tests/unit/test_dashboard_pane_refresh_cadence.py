@@ -66,9 +66,7 @@ _REAL_CREATE_SH = _TEAM_DIR / "scripts" / "dashboard" / "create.sh"
 
 
 def _import_lint_module():
-    spec = importlib.util.spec_from_file_location(
-        "lint_pane_refresh_cadence", _LINT_SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("lint_pane_refresh_cadence", _LINT_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load spec from {_LINT_SCRIPT}")
     mod = importlib.util.module_from_spec(spec)
@@ -114,12 +112,10 @@ def test_check_mode_passes_against_checked_in_tree() -> None:
 
 _WRAPPED_STATUS_ASSIGNMENT = (
     'SCHED_STATUS_CMD="${SCRIPT_DIR}/cadence-loop.sh --interval '
-    '${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/status-band.sh --kanban-root '
+    "${REFRESH_INTERVAL} -- ${SCRIPT_DIR}/status-band.sh --kanban-root "
     '${KANBAN_ROOT}"'
 )
-_BARE_STATUS_ASSIGNMENT = (
-    'SCHED_STATUS_CMD="${SCRIPT_DIR}/status-band.sh --kanban-root ${KANBAN_ROOT}"'
-)
+_BARE_STATUS_ASSIGNMENT = 'SCHED_STATUS_CMD="${SCRIPT_DIR}/status-band.sh --kanban-root ${KANBAN_ROOT}"'
 
 
 def test_seeded_bare_renderer_pane_is_caught_and_clears_on_revert(
@@ -183,9 +179,7 @@ def test_seeded_bare_renderer_pane_is_caught_and_clears_on_revert(
 def test_every_schedule_band_pane_is_loop_wrapped(pane_target: str, cmd_var: str) -> None:
     text = _REAL_CREATE_SH.read_text(encoding="utf-8")
     send_calls = dict(_lint._SEND_KEYS_RE.findall(text))
-    assert pane_target in send_calls, (
-        f"no dashboard_send_armed_keys call found for {pane_target!r}"
-    )
+    assert pane_target in send_calls, f"no dashboard_send_armed_keys call found for {pane_target!r}"
     assert send_calls[pane_target] == f"${{{cmd_var}}}", (
         f"{pane_target} is no longer dispatched via ${{{cmd_var}}} -- update "
         f"this test's literal if the variable was intentionally renamed"
@@ -209,9 +203,7 @@ def test_schedule_band_panes_keep_their_own_renderer() -> None:
         ("SCHED_STATUS_CMD", "status-band.sh"),
         ("SCHED_EVENT_CMD", "event-band.sh"),
     ):
-        assert renderer in assignments[cmd_var], (
-            f"{cmd_var} no longer invokes {renderer}: {assignments[cmd_var]!r}"
-        )
+        assert renderer in assignments[cmd_var], f"{cmd_var} no longer invokes {renderer}: {assignments[cmd_var]!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +232,10 @@ def test_log_stream_panes_run_under_cadence_loop_stream_not_the_registry() -> No
     assignments = dict(_lint._ASSIGNMENT_RE.findall(text))
     for cmd_var in ("LOGS_PANE_CMD", "LOGS_WIN_CMD", "_DRILL_LOGS_CMD"):
         assert "cadence-loop.sh --stream" in assignments[cmd_var], assignments[cmd_var]
-    assert "debug-logs.sh" in text and "cadence-loop.sh --stream --interval ${REFRESH_INTERVAL} -- env PGAI_VERBOSE_MODE" in text
+    assert (
+        "debug-logs.sh" in text
+        and "cadence-loop.sh --stream --interval ${REFRESH_INTERVAL} -- env PGAI_VERBOSE_MODE" in text
+    )
     for pane in ("main.1", "logs", "debug-logs.0", "terminal.0", "${_DRILL_WIN}.1"):
         assert pane not in allowlist, f"{pane} is a stream pane and must not be registered exempt"
 
@@ -251,9 +246,7 @@ def test_removing_registration_makes_the_pane_a_violation(tmp_path: Path) -> Non
     # CENSUS-EXEMPT-PANES block, leaving every other exemption (and the
     # marker pair itself) intact.
     lines = original_text.splitlines(keepends=True)
-    filtered = [
-        line for line in lines if line.strip() not in ("#   terminal.1",)
-    ]
+    filtered = [line for line in lines if line.strip() not in ("#   terminal.1",)]
     assert len(filtered) == len(lines) - 1, (
         "expected to remove exactly one line ('#   terminal.1') -- update this "
         "test's literal if the registry's formatting changed"
@@ -366,7 +359,7 @@ def test_checked_in_census_declares_every_pane_paused_when_hidden() -> None:
 def test_pane_without_a_declaration_is_reported(tmp_path: Path) -> None:
     def drop_first_c(lines: list[str]) -> list[str]:
         index = next(i for i, line in enumerate(lines) if line.startswith("C\t"))
-        return lines[:index] + lines[index + 1:]
+        return lines[:index] + lines[index + 1 :]
 
     result = _run_with_census(_census_variant(tmp_path, drop_first_c))
     assert result.returncode == 1, result.stdout + result.stderr
@@ -393,10 +386,7 @@ def test_one_always_on_status_surface_in_window_zero_is_accepted(tmp_path: Path)
 
 def test_unknown_declaration_and_cadence_are_reported(tmp_path: Path) -> None:
     def bad_values(lines: list[str]) -> list[str]:
-        return [
-            line.replace("C\t5\t-\t0\t10\tpause", "C\t5\t-\t0\tsometimes\tslow")
-            for line in lines
-        ]
+        return [line.replace("C\t5\t-\t0\t10\tpause", "C\t5\t-\t0\tsometimes\tslow") for line in lines]
 
     result = _run_with_census(_census_variant(tmp_path, bad_values))
     assert result.returncode == 1, result.stdout + result.stderr

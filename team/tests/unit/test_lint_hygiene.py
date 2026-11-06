@@ -236,15 +236,24 @@ def _run(
     ``--classes``; otherwise every registered class runs."""
     findings_path = findings_file or (tmp_path / "findings.json")
     argv = [
-        "--code-dirs", str(code_dir or _empty_dir(tmp_path, "empty_code")),
-        "--test-tree-dirs", str(test_tree_dir or _empty_dir(tmp_path, "empty_test_tree")),
-        "--prose-dirs", str(prose_dir or _empty_dir(tmp_path, "empty_prose")),
-        "--docs-dirs", str(docs_dir or _empty_dir(tmp_path, "empty_docs")),
-        "--config-dirs", str(config_dir or _empty_dir(tmp_path, "empty_config")),
-        "--text-dirs", str(text_dir or _empty_dir(tmp_path, "empty_text")),
-        "--repo-root", str(tmp_path),
-        "--sidecar", str(sidecar or (tmp_path / "sidecar.json")),
-        "--findings-file", str(findings_path),
+        "--code-dirs",
+        str(code_dir or _empty_dir(tmp_path, "empty_code")),
+        "--test-tree-dirs",
+        str(test_tree_dir or _empty_dir(tmp_path, "empty_test_tree")),
+        "--prose-dirs",
+        str(prose_dir or _empty_dir(tmp_path, "empty_prose")),
+        "--docs-dirs",
+        str(docs_dir or _empty_dir(tmp_path, "empty_docs")),
+        "--config-dirs",
+        str(config_dir or _empty_dir(tmp_path, "empty_config")),
+        "--text-dirs",
+        str(text_dir or _empty_dir(tmp_path, "empty_text")),
+        "--repo-root",
+        str(tmp_path),
+        "--sidecar",
+        str(sidecar or (tmp_path / "sidecar.json")),
+        "--findings-file",
+        str(findings_path),
     ]
     if classes is not None:
         argv += ["--classes", *classes]
@@ -310,10 +319,26 @@ _PATTERN_CASES = [
     ("BUG-ID", "# This references BUG-0042 directly in a comment.", "# e.g. BUG-0042 shows the expected key format."),
     ("task-ID", "# Filed as CODER-20260101-001 for tracking.", "# e.g. CODER-20260101-001 is the task-ID format."),
     ("PRIORITY-ID", "# Addressed by PRIORITY-0004 in this change.", "# e.g. PRIORITY-0004 is the format."),
-    ("version-bundle", "# See v1.0.0-priority-bundle for background.", "# e.g. v1.0.0-priority-bundle is the bundle-name format."),
-    ("requirement-Goal", "# See requirements v2.0.0 Goal 4 for design rationale.", "# e.g. v2.0.0 Goal 4 shows the citation format."),
-    ("unshipped-requirements-path", "# See requirements/v2.0.0-notes.md for details.", "# e.g. requirements/v2.0.0-notes.md is the path format."),
-    ("bare-release-slug", "# See v2.9.20-engine-decomposition for background.", "# e.g. v2.9.20-engine-decomposition is the slug format."),
+    (
+        "version-bundle",
+        "# See v1.0.0-priority-bundle for background.",
+        "# e.g. v1.0.0-priority-bundle is the bundle-name format.",
+    ),
+    (
+        "requirement-Goal",
+        "# See requirements v2.0.0 Goal 4 for design rationale.",
+        "# e.g. v2.0.0 Goal 4 shows the citation format.",
+    ),
+    (
+        "unshipped-requirements-path",
+        "# See requirements/v2.0.0-notes.md for details.",
+        "# e.g. requirements/v2.0.0-notes.md is the path format.",
+    ),
+    (
+        "bare-release-slug",
+        "# See v2.9.20-engine-decomposition for background.",
+        "# e.g. v2.9.20-engine-decomposition is the slug format.",
+    ),
 ]
 
 
@@ -410,15 +435,33 @@ def test_short_form_task_id_bound_excludes_overlong_digit_runs(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 
 _ANCHOR_CASES = [
-    ("version-bundle", 'slug = "pkg.v1.0.0-priority-bundle"  # embedded, not a citation', "# See v1.0.0-priority-bundle for background."),
-    ("requirement-Goal", 'slug = "notes.v2.0.0 Goal 4 appendix"  # embedded, not a citation', "# See v2.0.0 Goal 4 for design rationale."),
-    ("unshipped-requirements-path", 'slug = "cfg.requirements/v2.0.0-notes.md"  # embedded, not a citation', "# See requirements/v2.0.0-notes.md for details."),
-    ("bare-release-slug", 'slug = "pkg.v2.16.0-widget-name"  # embedded, not a citation', "# See v2.16.0-widget-name for background."),
+    (
+        "version-bundle",
+        'slug = "pkg.v1.0.0-priority-bundle"  # embedded, not a citation',
+        "# See v1.0.0-priority-bundle for background.",
+    ),
+    (
+        "requirement-Goal",
+        'slug = "notes.v2.0.0 Goal 4 appendix"  # embedded, not a citation',
+        "# See v2.0.0 Goal 4 for design rationale.",
+    ),
+    (
+        "unshipped-requirements-path",
+        'slug = "cfg.requirements/v2.0.0-notes.md"  # embedded, not a citation',
+        "# See requirements/v2.0.0-notes.md for details.",
+    ),
+    (
+        "bare-release-slug",
+        'slug = "pkg.v2.16.0-widget-name"  # embedded, not a citation',
+        "# See v2.16.0-widget-name for background.",
+    ),
 ]
 
 
 @pytest.mark.parametrize("label,embedded_line,genuine_line", _ANCHOR_CASES, ids=[c[0] for c in _ANCHOR_CASES])
-def test_version_matcher_anchored_against_embedding(tmp_path: Path, label: str, embedded_line: str, genuine_line: str) -> None:
+def test_version_matcher_anchored_against_embedding(
+    tmp_path: Path, label: str, embedded_line: str, genuine_line: str
+) -> None:
     embedded_dir = _empty_dir(tmp_path, f"embedded_{label}")
     _write(embedded_dir, "fixture.py", f"def f():\n    {embedded_line}\n    return 1\n")
     result, findings = _run(tmp_path, code_dir=embedded_dir)
@@ -452,15 +495,17 @@ def test_sidecar_entry_suppresses_matching_finding(tmp_path: Path) -> None:
 
     content_hash = _lint._line_fingerprint(flagged_line)
     sidecar.write_text(
-        json.dumps([
-            {
-                "file": "code/dirty.py",
-                "class": "provenance",
-                "content_hash": content_hash,
-                "line_hint": 2,
-                "justification": "retained intentionally for this test",
-            }
-        ]),
+        json.dumps(
+            [
+                {
+                    "file": "code/dirty.py",
+                    "class": "provenance",
+                    "content_hash": content_hash,
+                    "line_hint": 2,
+                    "justification": "retained intentionally for this test",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -476,10 +521,17 @@ def test_sidecar_entry_stops_matching_after_line_edited(tmp_path: Path) -> None:
     sidecar = tmp_path / "sidecar.json"
     content_hash = _lint._line_fingerprint(original)
     sidecar.write_text(
-        json.dumps([{
-            "file": "code/dirty.py", "class": "provenance", "content_hash": content_hash,
-            "line_hint": 2, "justification": "retained intentionally for this test",
-        }]),
+        json.dumps(
+            [
+                {
+                    "file": "code/dirty.py",
+                    "class": "provenance",
+                    "content_hash": content_hash,
+                    "line_hint": 2,
+                    "justification": "retained intentionally for this test",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     result, findings = _run(tmp_path, code_dir=code_dir, sidecar=sidecar)
@@ -509,10 +561,17 @@ def test_blank_justification_is_reported_as_a_finding_not_an_abort(tmp_path: Pat
     _write(code_dir, "dirty.py", "def foo():\n    # This references BUG-0042 directly in a comment.\n    return 1\n")
     sidecar = tmp_path / "sidecar.json"
     sidecar.write_text(
-        json.dumps([{
-            "file": "code/dirty.py", "class": "provenance", "content_hash": "deadbeef0000",
-            "line_hint": 2, "justification": "   ",
-        }]),
+        json.dumps(
+            [
+                {
+                    "file": "code/dirty.py",
+                    "class": "provenance",
+                    "content_hash": "deadbeef0000",
+                    "line_hint": 2,
+                    "justification": "   ",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -543,25 +602,33 @@ def test_malformed_sidecar_honours_no_suppression_from_itself(tmp_path: Path) ->
     sidecar = tmp_path / "sidecar.json"
     content_hash = _lint._line_fingerprint(flagged_line)
     sidecar.write_text(
-        json.dumps([
-            {
-                "file": "code/dirty.py", "class": "provenance", "content_hash": content_hash,
-                "line_hint": 2, "justification": "would suppress the finding if the sidecar loaded",
-            },
-            {
-                "file": "code/other.py", "class": "provenance", "content_hash": "deadbeef0000",
-                "line_hint": 1, "justification": "",
-            },
-        ]),
+        json.dumps(
+            [
+                {
+                    "file": "code/dirty.py",
+                    "class": "provenance",
+                    "content_hash": content_hash,
+                    "line_hint": 2,
+                    "justification": "would suppress the finding if the sidecar loaded",
+                },
+                {
+                    "file": "code/other.py",
+                    "class": "provenance",
+                    "content_hash": "deadbeef0000",
+                    "line_hint": 1,
+                    "justification": "",
+                },
+            ]
+        ),
         encoding="utf-8",
     )
 
     result, findings = _run(tmp_path, code_dir=code_dir, sidecar=sidecar)
 
     assert result == 0
-    assert any(f["class"] == "provenance" for f in findings), (
-        "a suppression from a sidecar that also fails to load must not be honoured"
-    )
+    assert any(
+        f["class"] == "provenance" for f in findings
+    ), "a suppression from a sidecar that also fails to load must not be honoured"
     _sidecar_finding(findings)
 
 
@@ -678,11 +745,19 @@ def test_add_suppression_appends_and_then_suppresses(tmp_path: Path) -> None:
     result, findings = _run(tmp_path, code_dir=code_dir, sidecar=sidecar)
     assert len(findings) == 1
 
-    exit_code = _lint.main([
-        "--add-suppression", "code/dirty.py", "2", "provenance", "test justification",
-        "--repo-root", str(tmp_path),
-        "--sidecar", str(sidecar),
-    ])
+    exit_code = _lint.main(
+        [
+            "--add-suppression",
+            "code/dirty.py",
+            "2",
+            "provenance",
+            "test justification",
+            "--repo-root",
+            str(tmp_path),
+            "--sidecar",
+            str(sidecar),
+        ]
+    )
     assert exit_code == 0
 
     entries = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -701,11 +776,19 @@ def test_add_suppression_rejects_out_of_range_line(tmp_path: Path) -> None:
     _write(code_dir, "dirty.py", "def foo():\n    return 1\n")
     sidecar = tmp_path / "sidecar.json"
 
-    exit_code = _lint.main([
-        "--add-suppression", "code/dirty.py", "99", "provenance", "test justification",
-        "--repo-root", str(tmp_path),
-        "--sidecar", str(sidecar),
-    ])
+    exit_code = _lint.main(
+        [
+            "--add-suppression",
+            "code/dirty.py",
+            "99",
+            "provenance",
+            "test justification",
+            "--repo-root",
+            str(tmp_path),
+            "--sidecar",
+            str(sidecar),
+        ]
+    )
     assert exit_code == 2
     assert not sidecar.exists()
 
@@ -752,9 +835,7 @@ def test_test_tree_surface_exempts_data_value_but_flags_comment_citation(tmp_pat
     _write(
         test_tree_dir,
         "test_comment.py",
-        "def test_thing():\n"
-        "    # This test exists because of BUG-0002 filed earlier.\n"
-        "    assert True\n",
+        "def test_thing():\n" "    # This test exists because of BUG-0002 filed earlier.\n" "    assert True\n",
     )
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
     assert len(findings) == 1
@@ -770,9 +851,7 @@ def test_test_tree_surface_flags_bug_shaped_token_in_assert_message(tmp_path: Pa
     _write(
         test_tree_dir,
         "test_assert_message.py",
-        "def test_thing():\n"
-        "    x = 1\n"
-        '    assert x == 1, "this failure relates to BUG-0003 historically"\n',
+        "def test_thing():\n" "    x = 1\n" '    assert x == 1, "this failure relates to BUG-0003 historically"\n',
     )
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
     assert result == 0
@@ -810,15 +889,12 @@ def test_test_tree_surface_assert_condition_data_stays_exempt_even_with_message(
     _write(
         test_tree_dir,
         "test_condition_data.py",
-        "def test_thing():\n"
-        "    bug_id = \"BUG-0005\"\n"
-        "    assert bug_id == \"BUG-0005\", \"mismatch\"\n",
+        "def test_thing():\n" '    bug_id = "BUG-0005"\n' '    assert bug_id == "BUG-0005", "mismatch"\n',
     )
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
     assert result == 0
     assert findings == [], (
-        "a bug-shaped value used as literal test data in the assert's own "
-        f"condition must stay exempt: {findings}"
+        "a bug-shaped value used as literal test data in the assert's own " f"condition must stay exempt: {findings}"
     )
 
 
@@ -903,8 +979,7 @@ def test_version_shaped_token_as_subject_under_test_is_not_flagged(tmp_path: Pat
     _write(
         test_tree_dir,
         "test_version_comparator.py",
-        "def test_compares_v2_16_0_against_v2_15_4_correctly():\n"
-        '    assert compare("v2.16.0", "v2.15.4") == 1\n',
+        "def test_compares_v2_16_0_against_v2_15_4_correctly():\n" '    assert compare("v2.16.0", "v2.15.4") == 1\n',
     )
 
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
@@ -951,8 +1026,7 @@ def test_version_prefixed_module_reappearing_in_file_is_not_flagged(tmp_path: Pa
     _write(
         test_tree_dir,
         "test_v1_0_0_changelog_entry.py",
-        "def test_entry():\n"
-        '    assert "v1.0.0" in regenerate_changelog()\n',
+        "def test_entry():\n" '    assert "v1.0.0" in regenerate_changelog()\n',
     )
 
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
@@ -975,12 +1049,19 @@ def test_version_named_test_file_suppression_uses_the_files_own_line_one(tmp_pat
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir, sidecar=sidecar)
     assert len(findings) == 1
 
-    exit_code = _lint.main([
-        "--add-suppression", "team_tests/test_v2_16_0_fix.py", "1", "version-named-test",
-        "test justification",
-        "--repo-root", str(tmp_path),
-        "--sidecar", str(sidecar),
-    ])
+    exit_code = _lint.main(
+        [
+            "--add-suppression",
+            "team_tests/test_v2_16_0_fix.py",
+            "1",
+            "version-named-test",
+            "test justification",
+            "--repo-root",
+            str(tmp_path),
+            "--sidecar",
+            str(sidecar),
+        ]
+    )
     assert exit_code == 0
 
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir, sidecar=sidecar)
@@ -1075,8 +1156,7 @@ def test_general_comment_with_no_checkable_claim_is_not_a_candidate(tmp_path: Pa
 
     assert result == 0
     assert findings == [], (
-        "a comment naming a count that is not an argument/parameter count "
-        f"must not be flagged: {findings}"
+        "a comment naming a count that is not an argument/parameter count " f"must not be flagged: {findings}"
     )
 
 
@@ -1117,9 +1197,7 @@ def test_config_surface_flags_a_planted_task_id_in_a_census_file(tmp_path: Path)
     _write(
         config_dir,
         "dashboard_windows.census",
-        "# Header comment.\n"
-        "# Planted for coverage: CODER-20260101-002.\n"
-        "W\tqueues\t0\t0\t80\t24\n",
+        "# Header comment.\n" "# Planted for coverage: CODER-20260101-002.\n" "W\tqueues\t0\t0\t80\t24\n",
     )
 
     result, findings = _run(tmp_path, config_dir=config_dir)
@@ -1200,9 +1278,7 @@ def test_tests_dir_nested_under_code_surface_is_routed_not_dropped(tmp_path: Pat
     _write(
         nested_tests_dir,
         "test_comment.py",
-        "def test_thing():\n"
-        "    # This test exists because of BUG-0007 filed earlier.\n"
-        "    assert True\n",
+        "def test_thing():\n" "    # This test exists because of BUG-0007 filed earlier.\n" "    assert True\n",
     )
 
     result, findings = _run(tmp_path, code_dir=code_dir)
@@ -1262,16 +1338,13 @@ def test_extensionless_shebang_executable_under_code_surface_is_collected(tmp_pa
     _write_executable(
         code_dir,
         "git",
-        "#!/usr/bin/env bash\n"
-        "# This shim exists because of BUG-0366 filed earlier.\n"
-        "exec /usr/bin/git \"$@\"\n",
+        "#!/usr/bin/env bash\n" "# This shim exists because of BUG-0366 filed earlier.\n" 'exec /usr/bin/git "$@"\n',
     )
 
     result, findings = _run(tmp_path, code_dir=code_dir)
     assert result == 0
     assert [f["label"] for f in findings] == ["BUG-ID"], (
-        f"an executable extensionless shebang script must be scanned like any other "
-        f"code-surface file: {findings}"
+        f"an executable extensionless shebang script must be scanned like any other " f"code-surface file: {findings}"
     )
     assert findings[0]["file"].endswith("/git") or findings[0]["file"] == "git"
 
@@ -1290,9 +1363,7 @@ def test_extensionless_non_shebang_data_file_is_not_collected(tmp_path: Path) ->
 
     result, findings = _run(tmp_path, code_dir=code_dir)
     assert result == 0
-    assert findings == [], (
-        f"a non-shebang extensionless file must stay unscanned even when executable: {findings}"
-    )
+    assert findings == [], f"a non-shebang extensionless file must stay unscanned even when executable: {findings}"
 
 
 def test_extensionless_shebang_file_without_executable_bit_is_not_collected(tmp_path: Path) -> None:
@@ -1309,9 +1380,7 @@ def test_extensionless_shebang_file_without_executable_bit_is_not_collected(tmp_
 
     result, findings = _run(tmp_path, code_dir=code_dir)
     assert result == 0
-    assert findings == [], (
-        f"a shebang file with no executable bit must stay unscanned: {findings}"
-    )
+    assert findings == [], f"a shebang file with no executable bit must stay unscanned: {findings}"
 
 
 def test_fixtures_directory_module_is_scanned_on_test_tree_surface(tmp_path: Path) -> None:
@@ -1324,9 +1393,7 @@ def test_fixtures_directory_module_is_scanned_on_test_tree_surface(tmp_path: Pat
     _write(
         fixtures_dir,
         "shared_helper.py",
-        "def helper():\n"
-        "    # Written this way because of BUG-0366 filed earlier.\n"
-        "    return True\n",
+        "def helper():\n" "    # Written this way because of BUG-0366 filed earlier.\n" "    return True\n",
     )
 
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
@@ -1355,8 +1422,7 @@ def test_fixtures_top_level_synthetic_file_stays_excluded_by_name(tmp_path: Path
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
     assert result == 0
     assert findings == [], (
-        f"a whitelisted synthetic-corpus basename must stay excluded from every "
-        f"surface: {findings}"
+        f"a whitelisted synthetic-corpus basename must stay excluded from every " f"surface: {findings}"
     )
 
 
@@ -1372,9 +1438,7 @@ def test_own_basename_is_no_longer_whole_file_excluded(tmp_path: Path) -> None:
     _write(
         code_dir,
         "lint_hygiene.py",
-        "def helper():\n"
-        "    # Written this way because of BUG-0042 filed earlier.\n"
-        "    return True\n",
+        "def helper():\n" "    # Written this way because of BUG-0042 filed earlier.\n" "    return True\n",
     )
 
     result, findings = _run(tmp_path, code_dir=code_dir)
@@ -1397,16 +1461,12 @@ def test_other_whitelisted_basenames_stay_excluded_on_code_surface(tmp_path: Pat
     _write(
         code_dir,
         "test_lint_hygiene.py",
-        "def helper():\n"
-        "    # Written this way because of BUG-0042 filed earlier.\n"
-        "    return True\n",
+        "def helper():\n" "    # Written this way because of BUG-0042 filed earlier.\n" "    return True\n",
     )
 
     result, findings = _run(tmp_path, code_dir=code_dir)
     assert result == 0
-    assert findings == [], (
-        f"test_lint_hygiene.py must stay whitelisted by name: {findings}"
-    )
+    assert findings == [], f"test_lint_hygiene.py must stay whitelisted by name: {findings}"
 
 
 def test_fixtures_synthetic_corpus_subdirectory_stays_excluded_by_name(tmp_path: Path) -> None:
@@ -1419,17 +1479,12 @@ def test_fixtures_synthetic_corpus_subdirectory_stays_excluded_by_name(tmp_path:
     _write(
         corpus_dir,
         "test_seeded_container_invocation.py",
-        "# Deliberate fixture for BUG-0366-shaped detection.\n"
-        "def test_thing():\n"
-        "    assert True\n",
+        "# Deliberate fixture for BUG-0366-shaped detection.\n" "def test_thing():\n" "    assert True\n",
     )
 
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir)
     assert result == 0
-    assert findings == [], (
-        f"a named synthetic-corpus subdirectory under fixtures/ must stay excluded: "
-        f"{findings}"
-    )
+    assert findings == [], f"a named synthetic-corpus subdirectory under fixtures/ must stay excluded: " f"{findings}"
 
 
 # ---------------------------------------------------------------------------
@@ -1485,9 +1540,9 @@ def test_docs_surface_enforces_every_subtree_alike(tmp_path: Path, subdir: str) 
 
     result, findings = _run(tmp_path, docs_dir=docs_dir)
     assert result == 0
-    assert [f["label"] for f in findings] == ["BUG-ID"], (
-        f"a BUG-ID under docs/{subdir}/ must be flagged like any other docs file: {findings}"
-    )
+    assert [f["label"] for f in findings] == [
+        "BUG-ID"
+    ], f"a BUG-ID under docs/{subdir}/ must be flagged like any other docs file: {findings}"
     assert findings[0]["file"] == f"docs/{subdir}/example-record.md"
 
 
@@ -1521,7 +1576,7 @@ def test_test_tree_surface_does_not_read_comment_shaped_string_literal_content(t
         test_tree_dir,
         "test_probe_fixture.py",
         "def build_fixture():\n"
-        '    PROBE = (\n'
+        "    PROBE = (\n"
         '        "# kanban.cfg -- BUG-9999 render-path fixture\\n"\n'
         "    )\n"
         "    return PROBE\n",
@@ -1552,12 +1607,18 @@ def _run_default_surfaces(tmp_path: Path, *extra: str) -> tuple[int, list[dict]]
     docker/, team/config/, and the repo-root *.md / *_example files."""
     findings_path = tmp_path / "default_surfaces_findings.json"
     argv = [
-        "--code-dirs", str(_empty_dir(tmp_path, "empty_code")),
-        "--test-tree-dirs", str(_empty_dir(tmp_path, "empty_test_tree")),
-        "--classes", "provenance",
-        "--repo-root", str(tmp_path),
-        "--sidecar", str(tmp_path / "sidecar.json"),
-        "--findings-file", str(findings_path),
+        "--code-dirs",
+        str(_empty_dir(tmp_path, "empty_code")),
+        "--test-tree-dirs",
+        str(_empty_dir(tmp_path, "empty_test_tree")),
+        "--classes",
+        "provenance",
+        "--repo-root",
+        str(tmp_path),
+        "--sidecar",
+        str(tmp_path / "sidecar.json"),
+        "--findings-file",
+        str(findings_path),
         *extra,
     ]
     result = _lint.main(argv)
@@ -1592,9 +1653,7 @@ _VERSION_HISTORY_SHAPES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "shape,text,token", _VERSION_HISTORY_SHAPES, ids=[c[0] for c in _VERSION_HISTORY_SHAPES]
-)
+@pytest.mark.parametrize("shape,text,token", _VERSION_HISTORY_SHAPES, ids=[c[0] for c in _VERSION_HISTORY_SHAPES])
 def test_version_history_shape_flagged_in_code_comment(tmp_path: Path, shape: str, text: str, token: str) -> None:
     code_dir = _empty_dir(tmp_path, f"code_{shape}")
     _write(code_dir, "fixture.py", f"def f():\n    # {text}\n    return 1\n")
@@ -1608,9 +1667,7 @@ def test_version_history_shape_flagged_in_code_comment(tmp_path: Path, shape: st
     assert findings[0]["line"] == 2
 
 
-@pytest.mark.parametrize(
-    "shape,text,token", _VERSION_HISTORY_SHAPES, ids=[c[0] for c in _VERSION_HISTORY_SHAPES]
-)
+@pytest.mark.parametrize("shape,text,token", _VERSION_HISTORY_SHAPES, ids=[c[0] for c in _VERSION_HISTORY_SHAPES])
 def test_version_history_shape_flagged_on_docs_line(tmp_path: Path, shape: str, text: str, token: str) -> None:
     docs_dir = _empty_dir(tmp_path, f"docs_{shape}")
     _write(docs_dir, "guide.md", f"# Guide\n\n{text}\n")
@@ -1770,9 +1827,7 @@ def test_nested_example_files_are_scanned_tree_wide(tmp_path: Path) -> None:
     _write(tmp_path / "team" / "templates" / "install", "crontab.example", "# since v1.4.0 cadence\n")
     _write(tmp_path / "team" / "tests" / "fixtures", "seed_example", "# since v1.2.3 cadence\n")
     _write(tmp_path / "release-notes", "notes.example", "# since v1.2.3 cadence\n")
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "add", "team/HALT.example"], check=True, capture_output=True
-    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "team/HALT.example"], check=True, capture_output=True)
 
     result, findings = _run_default_surfaces(tmp_path)
 
@@ -1880,9 +1935,7 @@ def test_test_tree_example_marked_identifier_stays_exempt(tmp_path: Path) -> Non
     _write(
         test_tree_dir,
         "test_key_format.py",
-        "def test_key_format():\n"
-        "    # e.g. BUG-0042 shows the expected key format.\n"
-        "    assert True\n",
+        "def test_key_format():\n" "    # e.g. BUG-0042 shows the expected key format.\n" "    assert True\n",
     )
 
     result, findings = _run(tmp_path, test_tree_dir=test_tree_dir, classes=["provenance"])
@@ -1897,14 +1950,15 @@ def test_help_says_provenance_flags_identifiers_and_not_wording() -> None:
     checked, and lists no phrasing examples."""
     proc = subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--help"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
     assert proc.returncode == 0, proc.stderr
     help_text = " ".join(proc.stdout.split())
     assert (
-        "provenance: flags bug, priority, task and requirement IDs and versions cited as history"
-        in help_text
+        "provenance: flags bug, priority, task and requirement IDs and versions cited as history" in help_text
     ), help_text
     assert help_text.count("wording is not checked") >= 2, help_text
     for phrase in ("this ticket", "before this fix", "Required Output (c)", "exercises the fix"):

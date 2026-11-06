@@ -173,8 +173,7 @@ def missing_fixed_in_lines(bugs_dir: pathlib.Path) -> list[str]:
     except OSError:
         return []
     return [
-        f"Done bug without ## Fixed In: {name} "
-        "(back-fill with restamp-fixed-in.sh and the release that closed it)"
+        f"Done bug without ## Fixed In: {name} " "(back-fill with restamp-fixed-in.sh and the release that closed it)"
         for name in names
     ]
 
@@ -190,9 +189,7 @@ def write_fixed_in(bug_path: pathlib.Path, version: str) -> bool:
     text = bug_path.read_text(encoding="utf-8")
     match = _FIXED_IN_SECTION_RE.search(text)
     if match is None:
-        bug_path.write_text(
-            text.rstrip("\n") + f"\n\n## Fixed In\n{version}\n", encoding="utf-8"
-        )
+        bug_path.write_text(text.rstrip("\n") + f"\n\n## Fixed In\n{version}\n", encoding="utf-8")
         return True
 
     body = match.group(2)
@@ -238,14 +235,12 @@ def replace_fixed_in(bug_path: pathlib.Path, old_version: str, new_version: str)
         return False
 
     at = match.start(2) + start
-    new_text = text[:at] + new_version + text[at + len(old_version):]
+    new_text = text[:at] + new_version + text[at + len(old_version) :]
     bug_path.write_text(new_text, encoding="utf-8")
     return True
 
 
-def stamp_fixed_in(
-    bugs_dir: pathlib.Path, version: str, bug_names: list[str]
-) -> WritebackResult:
+def stamp_fixed_in(bugs_dir: pathlib.Path, version: str, bug_names: list[str]) -> WritebackResult:
     """Stamp ## Fixed In: *version* on the named bugs that are now done.
 
     *bug_names* are bare file names inside *bugs_dir* (any directory part is

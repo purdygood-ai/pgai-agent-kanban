@@ -74,9 +74,7 @@ def _require_git() -> None:
 
 
 def _run_git(repo_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(repo_path), *args], capture_output=True, text=True, check=True
-    )
+    return subprocess.run(["git", "-C", str(repo_path), *args], capture_output=True, text=True, check=True)
 
 
 def _init_git_repo_with_direct_commit(repo_path: pathlib.Path, main_branch: str, rc_branch: str) -> None:
@@ -88,7 +86,8 @@ def _init_git_repo_with_direct_commit(repo_path: pathlib.Path, main_branch: str,
     repo_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "init", f"--initial-branch={main_branch}", str(repo_path)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     _run_git(repo_path, "config", "--local", "user.email", "test@pgai.local")
     _run_git(repo_path, "config", "--local", "user.name", "PGAI Test")
@@ -156,12 +155,20 @@ def _run_create_project(
     base_env.pop("PGAI_AGENT_ROLE", None)
     return subprocess.run(
         [
-            "bash", str(_CREATE_PROJECT_SCRIPT),
-            "--project", project_name,
-            "--workflow-type", "release",
-            "--dev-tree", str(dev_tree_path),
+            "bash",
+            str(_CREATE_PROJECT_SCRIPT),
+            "--project",
+            project_name,
+            "--workflow-type",
+            "release",
+            "--dev-tree",
+            str(dev_tree_path),
         ],
-        capture_output=True, text=True, env=base_env, cwd=str(kanban_root), timeout=60,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=60,
     )
 
 
@@ -172,7 +179,11 @@ def _run_migration(kanban_root: pathlib.Path, project_name: str) -> subprocess.C
     env.pop("PGAI_DEV_TREE_PATH", None)
     return subprocess.run(
         ["bash", str(_MIGRATION_SCRIPT), "--project", project_name],
-        capture_output=True, text=True, env=env, cwd=str(kanban_root), timeout=30,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(kanban_root),
+        timeout=30,
     )
 
 
@@ -206,7 +217,9 @@ def _write_bug(bugs_dir: pathlib.Path, bug_id: str, status: str = "assigned") ->
     return path
 
 
-def _write_bundle(requirements_dir: pathlib.Path, version: str, bug_basename: str, bugs_dir: pathlib.Path) -> pathlib.Path:
+def _write_bundle(
+    requirements_dir: pathlib.Path, version: str, bug_basename: str, bugs_dir: pathlib.Path
+) -> pathlib.Path:
     bundle_path = requirements_dir / f"{version}-bugfix-bundle-20260910.md"
     bundle_path.write_text(
         f"# Requirements: {version} — BUG bundle\n\n"
@@ -268,18 +281,25 @@ def _attach_fix_rewrite(kanban_root: pathlib.Path, project_name: str, bug_id: st
     result = subprocess.run(
         [
             str(script),
-            "--project", project_name,
-            "--kanban-root", str(kanban_root),
-            "--bug-id", short_id,
-            "--forbidden-approach", "Inverting the column-count comparison operator.",
-            "--correct-direction", "Compare using the original comparison direction.",
-            "--ground-truth-ref", "the bug's own original ## Fix section, applied verbatim in this RC's bundle",
+            "--project",
+            project_name,
+            "--kanban-root",
+            str(kanban_root),
+            "--bug-id",
+            short_id,
+            "--forbidden-approach",
+            "Inverting the column-count comparison operator.",
+            "--correct-direction",
+            "Compare using the original comparison direction.",
+            "--ground-truth-ref",
+            "the bug's own original ## Fix section, applied verbatim in this RC's bundle",
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert result.returncode == 0, (
-        f"overwatch-attach-fix-rewrite.sh failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"overwatch-attach-fix-rewrite.sh failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
 
 def _establish_drill_environment(monkeypatch: pytest.MonkeyPatch, fixture_temp_root: pathlib.Path) -> None:
@@ -305,7 +325,9 @@ def _establish_drill_environment(monkeypatch: pytest.MonkeyPatch, fixture_temp_r
     monkeypatch.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(fixture_temp_root))
 
 
-def _overlay_lane_a_block(proj: pathlib.Path, version: str, bug_id: str, *, kanban_root: pathlib.Path, project_name: str) -> pathlib.Path:
+def _overlay_lane_a_block(
+    proj: pathlib.Path, version: str, bug_id: str, *, kanban_root: pathlib.Path, project_name: str
+) -> pathlib.Path:
     """Lay a Lane-A-shaped HALTed block on top of an already-scaffolded
     project (fresh create-project.sh output, or a migrated legacy cfg).
     Returns the HALT file path."""
@@ -369,8 +391,7 @@ def _stage_pushes_locally(cfg_path: pathlib.Path) -> None:
     text = cfg_path.read_text(encoding="utf-8")
     matches = _LIVE_PUSH_TO_REMOTE_TRUE.findall(text)
     assert len(matches) == 1, (
-        f"expected exactly one live 'push_to_remote = true' line in {cfg_path}, "
-        f"found {len(matches)}:\n{text}"
+        f"expected exactly one live 'push_to_remote = true' line in {cfg_path}, " f"found {len(matches)}:\n{text}"
     )
     cfg_path.write_text(
         _LIVE_PUSH_TO_REMOTE_TRUE.sub("push_to_remote = false", text, count=1),
@@ -400,8 +421,7 @@ def _flip_overwatch_resolve_true(cfg_path: pathlib.Path) -> None:
     rather than silently leaving the key false."""
     text = cfg_path.read_text(encoding="utf-8")
     assert "# overwatch_resolve = false" in text, (
-        f"expected the seeded commented form '# overwatch_resolve = false' in {cfg_path}, "
-        f"found:\n{text}"
+        f"expected the seeded commented form '# overwatch_resolve = false' in {cfg_path}, " f"found:\n{text}"
     )
     cfg_path.write_text(
         text.replace("# overwatch_resolve = false", "overwatch_resolve = true"),
@@ -429,24 +449,24 @@ class TestFreshCreateProjectGatesResolution:
 
         kanban_root = _build_minimal_kanban_root(tmp_path)
         create_result = _run_create_project(kanban_root, project_name, repo_path, pgai_tests_temp_dir)
-        assert create_result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {create_result.stdout}\nstderr: {create_result.stderr}"
-        )
+        assert (
+            create_result.returncode == 0
+        ), f"create-project.sh failed.\nstdout: {create_result.stdout}\nstderr: {create_result.stderr}"
 
         proj = kanban_root / "projects" / project_name
         cfg_path = proj / "project.cfg"
         cfg_before = cfg_path.read_text(encoding="utf-8")
-        assert "# overwatch_resolve = false" in cfg_before, (
-            f"expected create-project.sh's seeded commented key in {cfg_path}:\n{cfg_before}"
-        )
-        assert "\noverwatch_resolve = " not in cfg_before, (
-            "the freshly generated cfg must not carry a live overwatch_resolve value"
-        )
+        assert (
+            "# overwatch_resolve = false" in cfg_before
+        ), f"expected create-project.sh's seeded commented key in {cfg_path}:\n{cfg_before}"
+        assert (
+            "\noverwatch_resolve = " not in cfg_before
+        ), "the freshly generated cfg must not carry a live overwatch_resolve value"
         intent_path = proj / "INTENT.md"
         assert intent_path.is_file()
-        assert _live_intent_entry_lines(intent_path.read_text(encoding="utf-8")) == [], (
-            "freshly seeded INTENT.md must carry zero live dated entries"
-        )
+        assert (
+            _live_intent_entry_lines(intent_path.read_text(encoding="utf-8")) == []
+        ), "freshly seeded INTENT.md must carry zero live dated entries"
         _stage_pushes_locally(cfg_path)
 
         _establish_drill_environment(monkeypatch, pgai_tests_temp_dir)
@@ -522,17 +542,13 @@ class TestMigratedCfgGatesResolution:
         proj = kanban_root / "projects" / project_name
         proj.mkdir(parents=True, exist_ok=True)
         cfg_path = proj / "project.cfg"
-        cfg_path.write_text(
-            _LEGACY_CFG_TEMPLATE.format(name=project_name, dev_tree=repo_path), encoding="utf-8"
-        )
-        (kanban_root / "projects.cfg").write_text(
-            f"[project:{project_name}]\npriority=1\n", encoding="utf-8"
-        )
+        cfg_path.write_text(_LEGACY_CFG_TEMPLATE.format(name=project_name, dev_tree=repo_path), encoding="utf-8")
+        (kanban_root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\n", encoding="utf-8")
 
         migration_result = _run_migration(kanban_root, project_name)
-        assert migration_result.returncode == 0, (
-            f"migration failed.\nstdout: {migration_result.stdout}\nstderr: {migration_result.stderr}"
-        )
+        assert (
+            migration_result.returncode == 0
+        ), f"migration failed.\nstdout: {migration_result.stdout}\nstderr: {migration_result.stderr}"
         cfg_after_migration = cfg_path.read_text(encoding="utf-8")
         assert "# overwatch_resolve = false" in cfg_after_migration
         assert "\noverwatch_resolve = " not in cfg_after_migration

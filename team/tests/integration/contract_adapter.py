@@ -90,7 +90,7 @@ import os
 import pathlib
 import subprocess
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 # ---------------------------------------------------------------------------
 # Result type — shared by all adapters.
@@ -169,7 +169,7 @@ class CliAdapter:
         args: Sequence[str],
         kanban_root: pathlib.Path,
         *,
-        extra_env: Optional[dict] = None,
+        extra_env: dict | None = None,
         timeout: int = 30,
     ) -> OperationResult:
         """Run *operation* against *kanban_root* and return the result.
@@ -194,10 +194,7 @@ class CliAdapter:
             subprocess.TimeoutExpired: If the subprocess exceeds *timeout*.
         """
         if operation not in _CLI_SCRIPT_MAP:
-            raise ValueError(
-                f"Unknown operation {operation!r}. "
-                f"Valid operations: {sorted(_CLI_SCRIPT_MAP)}"
-            )
+            raise ValueError(f"Unknown operation {operation!r}. " f"Valid operations: {sorted(_CLI_SCRIPT_MAP)}")
         script = _CLI_SCRIPT_MAP[operation]
 
         base_env = dict(os.environ)
@@ -208,10 +205,7 @@ class CliAdapter:
         existing_pp = base_env.get("PYTHONPATH", "")
         team_dir_str = str(_TEAM_DIR)
         if team_dir_str not in existing_pp.split(os.pathsep):
-            base_env["PYTHONPATH"] = (
-                team_dir_str
-                + (os.pathsep + existing_pp if existing_pp else "")
-            )
+            base_env["PYTHONPATH"] = team_dir_str + (os.pathsep + existing_pp if existing_pp else "")
 
         # Prevent the live-install dev-tree path from leaking into the subprocess.
         base_env.pop("PGAI_DEV_TREE_PATH", None)

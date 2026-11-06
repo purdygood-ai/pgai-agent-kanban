@@ -44,7 +44,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import pytest
 
@@ -70,7 +70,7 @@ _METRICS_SH = _TEAM_DIR / "scripts" / "dashboard" / "metrics.sh"
 PANE_GOLDEN = _TEAM_DIR / "tests" / "fixtures" / "golden" / "metrics_pane_bug_split.txt"
 
 RENDER_AT = "2026-10-18T12:00:00+00:00"
-_NOW = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 10, 18, 12, 0, tzinfo=UTC)
 _TODAY = "2026-10-18"
 
 RESET, BOLD, DIM, CYAN = "\033[0m", "\033[1m", "\033[2m", "\033[0;36m"
@@ -94,7 +94,8 @@ def _write_bugs(bugs_dir: pathlib.Path, bugs: dict[str, tuple[str, str]]) -> Non
     bugs_dir.mkdir(parents=True, exist_ok=True)
     for stem, (status, severity) in bugs.items():
         (bugs_dir / f"{stem}.md").write_text(
-            f"# {stem}\n\n## Status\n{status}\n\n**Severity:** {severity}\n", encoding="utf-8")
+            f"# {stem}\n\n## Status\n{status}\n\n**Severity:** {severity}\n", encoding="utf-8"
+        )
 
 
 def build_root(base: pathlib.Path) -> pathlib.Path:
@@ -127,23 +128,26 @@ def run_pane(root: pathlib.Path, home: pathlib.Path) -> subprocess.CompletedProc
     )
     return subprocess.run(
         ["bash", str(_METRICS_SH), "--kanban-root", str(root), "--no-color", "--now", RENDER_AT],
-        capture_output=True, text=True, env=env, cwd=str(root), timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(root),
+        timeout=120,
+        check=False,
     )
 
 
 def normalise_pane(stdout: str) -> str:
     """The pane's stdout with the build day and the Updated: time as
     placeholders."""
-    text = re.sub(r"^=== Today \(\d{4}-\d{2}-\d{2}\) ===$", "=== Today ({TODAY}) ===", stdout,
-                  count=1, flags=re.M)
+    text = re.sub(r"^=== Today \(\d{4}-\d{2}-\d{2}\) ===$", "=== Today ({TODAY}) ===", stdout, count=1, flags=re.M)
     return re.sub(r"^Updated: .*$", "Updated: {UPDATED}", text, count=1, flags=re.M)
 
 
 def _descriptors(root: pathlib.Path, *names: str) -> str:
-    return json.dumps([
-        {"name": name, "bugs_dir": str(root / "projects" / name / "bugs"), "kanban_root": str(root)}
-        for name in names
-    ])
+    return json.dumps(
+        [{"name": name, "bugs_dir": str(root / "projects" / name / "bugs"), "kanban_root": str(root)} for name in names]
+    )
 
 
 def _bug_lines(root: pathlib.Path, *names: str, escapes: tuple[str, ...] = ()) -> list[str]:
@@ -187,7 +191,7 @@ def test_golden_pane_splits_alpha_two_three_one_after_reliability() -> None:
     lines = PANE_GOLDEN.read_text(encoding="utf-8").splitlines()
     start = lines.index("=== Bugs ===")
     assert lines.index("=== Reliability ===") < start < lines.index("Updated: {UPDATED}")
-    assert lines[start:start + 5] == [
+    assert lines[start : start + 5] == [
         "=== Bugs ===",
         "",
         "  alpha",
@@ -204,8 +208,7 @@ def test_golden_pane_splits_alpha_two_three_one_after_reliability() -> None:
 
 
 def test_deferral_off_counts_no_bug_as_deferred(root: pathlib.Path) -> None:
-    (root / "projects" / "alpha" / "project.cfg").write_text("[release]\ndeferred_bugs = false\n",
-                                                            encoding="utf-8")
+    (root / "projects" / "alpha" / "project.cfg").write_text("[release]\ndeferred_bugs = false\n", encoding="utf-8")
     split, resolved = project_bug_split(str(root / "projects" / "alpha" / "bugs"), str(root), "alpha")
     assert (split, resolved) == (BugStatusSplit(open=5, deferred=0, needs_operator=1), True)
     assert "    5 open / 0 deferred / 1 needs-operator" in _bug_lines(root, "alpha")
@@ -223,7 +226,8 @@ def test_a_campaign_file_defers_at_low(root: pathlib.Path) -> None:
 
 def test_a_posture_that_refuses_defers_nothing_and_says_so(root: pathlib.Path) -> None:
     (root / "projects" / "alpha" / "project.cfg").write_text(
-        "[release]\ndeferred_bugs = true\ndeferred_bug_level = critical\n", encoding="utf-8")
+        "[release]\ndeferred_bugs = true\ndeferred_bug_level = critical\n", encoding="utf-8"
+    )
     split, resolved = project_bug_split(str(root / "projects" / "alpha" / "bugs"), str(root), "alpha")
     assert (split.deferred, resolved) == (0, False)
     assert f"    5 open / 0 deferred / 1 needs-operator  {POSTURE_UNREADABLE_NOTE}" in _bug_lines(root, "alpha")
@@ -258,8 +262,10 @@ def test_colour_wraps_the_header_and_project_name(root: pathlib.Path) -> None:
 
 
 def test_bug_line_formats_thousands() -> None:
-    assert bug_line(BugStatusSplit(open=1234, deferred=0, needs_operator=2)) == \
-        "1,234 open / 0 deferred / 2 needs-operator"
+    assert (
+        bug_line(BugStatusSplit(open=1234, deferred=0, needs_operator=2))
+        == "1,234 open / 0 deferred / 2 needs-operator"
+    )
 
 
 # ---------------------------------------------------------------------------

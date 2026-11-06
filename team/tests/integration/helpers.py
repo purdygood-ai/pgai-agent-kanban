@@ -32,7 +32,7 @@ import os
 import pathlib
 import subprocess
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 
 @dataclass
@@ -56,8 +56,8 @@ def run_entrypoint(
     cmd: Sequence[str],
     kanban_root: pathlib.Path,
     *,
-    extra_env: Optional[dict] = None,
-    cwd: Optional[pathlib.Path] = None,
+    extra_env: dict | None = None,
+    cwd: pathlib.Path | None = None,
     timeout: int = 60,
 ) -> EntrypointResult:
     """Run a kanban entrypoint subprocess against a real temporary kanban tree.

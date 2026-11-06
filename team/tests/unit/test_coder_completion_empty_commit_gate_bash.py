@@ -61,6 +61,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="coder-completion-empty-commit-gate-bash")
 
+
 _WAKE_TASK_STATE_LIB = pathlib.Path("scripts/lib/wake_task_state.sh")
 _WAKE_LIFECYCLE_LIB = pathlib.Path("scripts/lib/wake_lifecycle.sh")
 
@@ -95,9 +96,7 @@ def _extract_functions_snippet(func_names: list[str]) -> str:
     """)
 
 
-def _script_header(
-    log_file: pathlib.Path, lint_dir: pathlib.Path = _REAL_REPO_TEAM_SCRIPTS_DIR
-) -> str:
+def _script_header(log_file: pathlib.Path, lint_dir: pathlib.Path = _REAL_REPO_TEAM_SCRIPTS_DIR) -> str:
     """Bash preamble defining the real gate; *lint_dir* is where it finds
     lint_rc_empty_commits.py (REPO_TEAM_DIR), the real scripts/ by default."""
     funcs = ["normalize_status_file", "set_state", "set_block", "coder_writer_completion_gate"]
@@ -244,9 +243,7 @@ def _build_repo(
 def test_empty_commit_on_feature_branch_refuses_done_claim(tmp_path: pathlib.Path) -> None:
     task_id = "CODER-20260101-201-fixture-empty"
     source_branch = "ai_rc/v9.9.9"
-    _dev_tree, feature_branch, worktree_path = _build_repo(
-        tmp_path, task_id, source_branch, plant_empty_commit=True
-    )
+    _dev_tree, feature_branch, worktree_path = _build_repo(tmp_path, task_id, source_branch, plant_empty_commit=True)
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
 
@@ -270,12 +267,12 @@ def test_empty_commit_on_feature_branch_refuses_done_claim(tmp_path: pathlib.Pat
     assert feature_branch in blockers, f"remedy must name the feature branch\n{blockers}"
     assert "empty" in blockers.lower(), f"remedy must state the empty-commit failure\n{blockers}"
     assert _field(status_text, "Needs Human").lower() == "yes"
-    assert "error:   wake.completion-gate.empty-commit" in blockers, (
-        f"Blockers must carry the house-shape error key\n{blockers}"
-    )
-    assert "message: " in blockers and "remedy:  " in blockers, (
-        f"Blockers must carry the house-shape message/remedy fields\n{blockers}"
-    )
+    assert (
+        "error:   wake.completion-gate.empty-commit" in blockers
+    ), f"Blockers must carry the house-shape error key\n{blockers}"
+    assert (
+        "message: " in blockers and "remedy:  " in blockers
+    ), f"Blockers must carry the house-shape message/remedy fields\n{blockers}"
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +283,7 @@ def test_empty_commit_on_feature_branch_refuses_done_claim(tmp_path: pathlib.Pat
 def test_no_empty_commits_accepts_done_claim(tmp_path: pathlib.Path) -> None:
     task_id = "CODER-20260101-202-fixture-clean"
     source_branch = "ai_rc/v9.9.9"
-    _dev_tree, feature_branch, worktree_path = _build_repo(
-        tmp_path, task_id, source_branch, plant_empty_commit=False
-    )
+    _dev_tree, feature_branch, worktree_path = _build_repo(tmp_path, task_id, source_branch, plant_empty_commit=False)
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
 
@@ -302,8 +297,7 @@ def test_no_empty_commits_accepts_done_claim(tmp_path: pathlib.Path) -> None:
     result = _run(script)
     assert result.returncode == 0, f"gate call should not error\nstdout={result.stdout}\nstderr={result.stderr}"
     assert "RESULT=[DONE]" in result.stdout, (
-        f"ordinary work with no empty commits must not be refused\n"
-        f"stdout={result.stdout}\nstderr={result.stderr}"
+        f"ordinary work with no empty commits must not be refused\n" f"stdout={result.stdout}\nstderr={result.stderr}"
     )
     assert _field(_read(status_file), "State") == "DONE"
 
@@ -319,9 +313,7 @@ def test_empty_commit_check_skips_when_source_branch_advanced_since(
 ) -> None:
     task_id = "CODER-20260101-203-fixture-advanced"
     source_branch = "ai_rc/v9.9.9"
-    _dev_tree, feature_branch, worktree_path = _build_repo(
-        tmp_path, task_id, source_branch, plant_empty_commit=True
-    )
+    _dev_tree, feature_branch, worktree_path = _build_repo(tmp_path, task_id, source_branch, plant_empty_commit=True)
 
     # A second, unrelated commit lands directly on source_branch after this
     # task's own merge -- source_branch's tip is no longer this task's own
@@ -349,9 +341,9 @@ def test_empty_commit_check_skips_when_source_branch_advanced_since(
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
     log_text = log_file.read_text(encoding="utf-8")
-    assert "empty-commit check skipped" in log_text, (
-        f"the skip must be narrated via log(), not silent\nlog:\n{log_text}"
-    )
+    assert (
+        "empty-commit check skipped" in log_text
+    ), f"the skip must be narrated via log(), not silent\nlog:\n{log_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -362,16 +354,16 @@ def test_empty_commit_check_skips_when_source_branch_advanced_since(
 def test_lint_exits_0_and_prints_the_key_the_gate_refuses_on(tmp_path: pathlib.Path) -> None:
     task_id = "CODER-20260101-204-fixture-key"
     source_branch = "ai_rc/v9.9.9"
-    _dev_tree, feature_branch, worktree_path = _build_repo(
-        tmp_path, task_id, source_branch, plant_empty_commit=True
-    )
+    _dev_tree, feature_branch, worktree_path = _build_repo(tmp_path, task_id, source_branch, plant_empty_commit=True)
 
     result = subprocess.run(
         [
             "python3",
             str(_REAL_REPO_TEAM_SCRIPTS_DIR / "lint_rc_empty_commits.py"),
-            "--repo", str(worktree_path),
-            "--range", f"{source_branch}^..{feature_branch}",
+            "--repo",
+            str(worktree_path),
+            "--range",
+            f"{source_branch}^..{feature_branch}",
         ],
         capture_output=True,
         text=True,
@@ -391,9 +383,7 @@ def _stub_lint_dir(tmp_path: pathlib.Path, body: str) -> pathlib.Path:
     """A scripts/ stand-in whose lint_rc_empty_commits.py runs *body*."""
     stub_dir = tmp_path / "stub-scripts"
     stub_dir.mkdir()
-    (stub_dir / "lint_rc_empty_commits.py").write_text(
-        "import sys\n" + body + "\n", encoding="utf-8"
-    )
+    (stub_dir / "lint_rc_empty_commits.py").write_text("import sys\n" + body + "\n", encoding="utf-8")
     return stub_dir
 
 
@@ -410,9 +400,7 @@ def test_lint_that_could_not_run_or_found_nothing_passes(
 ) -> None:
     task_id = f"CODER-20260101-205-fixture-{label}"
     source_branch = "ai_rc/v9.9.9"
-    _dev_tree, feature_branch, worktree_path = _build_repo(
-        tmp_path, task_id, source_branch, plant_empty_commit=True
-    )
+    _dev_tree, feature_branch, worktree_path = _build_repo(tmp_path, task_id, source_branch, plant_empty_commit=True)
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
     stub_dir = _stub_lint_dir(tmp_path, body)

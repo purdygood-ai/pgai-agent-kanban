@@ -33,9 +33,13 @@
 # _disc_git_tag_exists) are shared primitives, not private helpers of
 # _disc_chain_idle alone:
 #   - _disc_get_release_field is called directly by
-#     team/scripts/pm-agent.sh, team/scripts/wake/claude.sh, and
-#     team/scripts/wake/codex.sh (all of which source discovery.sh, which in
-#     turn sources this file), in addition to being used internally here by
+#     team/scripts/pm-agent.sh (which sources discovery.sh, which in turn
+#     sources this file); by team/scripts/lib/discovery_step_requirements.sh
+#     (a sibling stage discovery.sh sources after this file); and by
+#     team/scripts/lib/wake_blocked_ledger.sh and
+#     team/scripts/lib/wake_driver_discovery.sh (wake stages that find it
+#     already defined because wake_bootstrap.sh sources discovery.sh before
+#     them), in addition to being used internally here by
 #     _disc_active_rc_blocks and _disc_chain_idle.
 #   - _disc_active_rc_blocks and _disc_check_ceiling_and_log are called
 #     directly by discovery_step_bugs and discovery_step_priority in

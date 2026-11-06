@@ -33,7 +33,6 @@ import pathlib
 import subprocess
 import sys
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Import with installed-package / direct-checkout fallback
@@ -41,16 +40,14 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Paths for the end-to-end (real entry point) tests
 # ---------------------------------------------------------------------------
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                          # dev tree root (parent of team/)
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # dev tree root (parent of team/)
 _MATERIALIZE_SCRIPT = _TEAM_DIR / "pm-agent" / "pm_materialize.py"
 
 
@@ -59,8 +56,7 @@ _MATERIALIZE_SCRIPT = _TEAM_DIR / "pm-agent" / "pm_materialize.py"
 # ---------------------------------------------------------------------------
 
 
-def _task(task_id, role, slug, synthetic=False, cm_operation=None,
-          prereqs=None, title=None):
+def _task(task_id, role, slug, synthetic=False, cm_operation=None, prereqs=None, title=None):
     """Build a minimal already-ID-assigned task dict for dedupe unit tests."""
     t = {
         "task_id": task_id,
@@ -89,9 +85,7 @@ def test_closer_purpose_key_identifies_tester_verify() -> None:
     """A non-doc-review TESTER-role task is the tester-verify purpose when the
     materialization emits CM release-lifecycle bookends (the default)."""
     assert pm._closer_purpose_key({"role": "TESTER", "slug": "verify"}) == "tester-verify"
-    assert pm._closer_purpose_key(
-        {"role": "TESTER", "slug": "verify"}, emit_cm_bookends=True
-    ) == "tester-verify"
+    assert pm._closer_purpose_key({"role": "TESTER", "slug": "verify"}, emit_cm_bookends=True) == "tester-verify"
 
 
 def test_closer_purpose_key_tester_falls_through_without_cm_bookends() -> None:
@@ -102,49 +96,33 @@ def test_closer_purpose_key_tester_falls_through_without_cm_bookends() -> None:
     same materialization, so the closer bucket must not claim them — they
     fall through to the generic (role, slug) worker-dedup path instead.
     """
-    assert pm._closer_purpose_key(
-        {"role": "TESTER", "slug": "verify-the-implementation"}, emit_cm_bookends=False
-    ) is None
-    assert pm._closer_purpose_key(
-        {"role": "TESTER", "slug": "verify-and-report"}, emit_cm_bookends=False
-    ) is None
+    assert (
+        pm._closer_purpose_key({"role": "TESTER", "slug": "verify-the-implementation"}, emit_cm_bookends=False) is None
+    )
+    assert pm._closer_purpose_key({"role": "TESTER", "slug": "verify-and-report"}, emit_cm_bookends=False) is None
 
 
 def test_closer_purpose_key_excludes_doc_review_tester_tasks() -> None:
     """A document-workflow TESTER-review task is not a tester-verify closer."""
-    assert pm._closer_purpose_key(
-        {"role": "TESTER", "slug": "review", "_doc_review": True}
-    ) is None
+    assert pm._closer_purpose_key({"role": "TESTER", "slug": "review", "_doc_review": True}) is None
 
 
 def test_closer_purpose_key_uses_cm_operation_when_present() -> None:
     """Synthetic CM tasks are classified via the authoritative cm_operation field."""
-    assert pm._closer_purpose_key(
-        {"role": "CM", "slug": "anything", "cm_operation": "open-rc"}
-    ) == "cm-open-rc"
-    assert pm._closer_purpose_key(
-        {"role": "CM", "slug": "anything", "cm_operation": "release"}
-    ) == "cm-release"
+    assert pm._closer_purpose_key({"role": "CM", "slug": "anything", "cm_operation": "open-rc"}) == "cm-open-rc"
+    assert pm._closer_purpose_key({"role": "CM", "slug": "anything", "cm_operation": "release"}) == "cm-release"
 
 
 def test_closer_purpose_key_falls_back_to_slug_keywords_for_cm_tasks() -> None:
     """A model-emitted CM task with no cm_operation is classified by slug keywords."""
-    assert pm._closer_purpose_key(
-        {"role": "CM", "slug": "open-the-rc-branch-again"}
-    ) == "cm-open-rc"
-    assert pm._closer_purpose_key(
-        {"role": "CM", "slug": "cut-the-release-again"}
-    ) == "cm-release"
+    assert pm._closer_purpose_key({"role": "CM", "slug": "open-the-rc-branch-again"}) == "cm-open-rc"
+    assert pm._closer_purpose_key({"role": "CM", "slug": "cut-the-release-again"}) == "cm-release"
 
 
 def test_closer_purpose_key_does_not_match_document_cm_operations() -> None:
     """Document-workflow open_doc/finalize CM tasks are not release chain closers."""
-    assert pm._closer_purpose_key(
-        {"role": "CM", "slug": "open-doc-v1", "cm_operation": "open_doc"}
-    ) is None
-    assert pm._closer_purpose_key(
-        {"role": "CM", "slug": "finalize-v1", "cm_operation": "finalize"}
-    ) is None
+    assert pm._closer_purpose_key({"role": "CM", "slug": "open-doc-v1", "cm_operation": "open_doc"}) is None
+    assert pm._closer_purpose_key({"role": "CM", "slug": "finalize-v1", "cm_operation": "finalize"}) is None
 
 
 def test_dedupe_keeps_synthetic_bookend_over_model_emitted_lookalike() -> None:
@@ -167,9 +145,12 @@ def test_dedupe_keeps_synthetic_bookend_over_model_emitted_lookalike() -> None:
 
     kept, narrations, count = pm.dedupe_materialization_tasks(tasks)
 
-    assert [t["task_id"] for t in kept] == ["CM-1", "CODER-1", "TESTER-1", "CM-2"], (
-        "Only the synthetic chain closers and the real work task must survive"
-    )
+    assert [t["task_id"] for t in kept] == [
+        "CM-1",
+        "CODER-1",
+        "TESTER-1",
+        "CM-2",
+    ], "Only the synthetic chain closers and the real work task must survive"
     assert count == 3
     assert len(narrations) == 3
     for narration in narrations:
@@ -185,9 +166,7 @@ def test_dedupe_narration_names_both_the_duplicate_and_the_survivor() -> None:
     ]
     _, narrations, count = pm.dedupe_materialization_tasks(tasks)
     assert count == 1
-    assert narrations == [
-        "dedupe: skipped duplicate open-the-rc-branch-again (matches CM-1)"
-    ]
+    assert narrations == ["dedupe: skipped duplicate open-the-rc-branch-again (matches CM-1)"]
 
 
 def test_dedupe_worker_task_near_duplicate_slug_is_skipped() -> None:
@@ -238,8 +217,7 @@ def test_dedupe_rewrites_prerequisite_ids_pointing_at_skipped_duplicates() -> No
     kept, _, _ = pm.dedupe_materialization_tasks(tasks)
     coder_task = next(t for t in kept if t["task_id"] == "CODER-1")
     assert coder_task["prerequisite_ids"] == ["CM-1"], (
-        "prerequisite_ids referencing a skipped duplicate must be remapped "
-        "to the surviving task's task_id"
+        "prerequisite_ids referencing a skipped duplicate must be remapped " "to the surviving task's task_id"
     )
 
 
@@ -257,9 +235,7 @@ def test_dedupe_distinct_slug_tester_tasks_both_survive_without_cm_bookends() ->
         _task("TESTER-1", "TESTER", "verify-the-implementation"),
         _task("TESTER-2", "TESTER", "verify-and-report", synthetic=True),
     ]
-    kept, narrations, count = pm.dedupe_materialization_tasks(
-        tasks, emit_cm_bookends=False
-    )
+    kept, narrations, count = pm.dedupe_materialization_tasks(tasks, emit_cm_bookends=False)
     assert [t["task_id"] for t in kept] == ["TESTER-1", "TESTER-2"]
     assert count == 0
     assert narrations == []
@@ -275,14 +251,10 @@ def test_dedupe_same_slug_tester_reemission_still_collapses_without_cm_bookends(
         _task("TESTER-1", "TESTER", "verify-the-implementation"),
         _task("TESTER-2", "TESTER", "Verify The Implementation"),  # normalizes identically
     ]
-    kept, narrations, count = pm.dedupe_materialization_tasks(
-        tasks, emit_cm_bookends=False
-    )
+    kept, narrations, count = pm.dedupe_materialization_tasks(tasks, emit_cm_bookends=False)
     assert [t["task_id"] for t in kept] == ["TESTER-1"]
     assert count == 1
-    assert narrations == [
-        "dedupe: skipped duplicate Verify The Implementation (matches TESTER-1)"
-    ]
+    assert narrations == ["dedupe: skipped duplicate Verify The Implementation (matches TESTER-1)"]
 
 
 def test_dedupe_tester_verify_still_collapses_to_one_with_cm_bookends() -> None:
@@ -296,14 +268,10 @@ def test_dedupe_tester_verify_still_collapses_to_one_with_cm_bookends() -> None:
         _task("TESTER-1", "TESTER", "verify-v1", synthetic=True),
         _task("TESTER-2", "TESTER", "verify-release-again"),  # distinct slug, same purpose
     ]
-    kept, narrations, count = pm.dedupe_materialization_tasks(
-        tasks, emit_cm_bookends=True
-    )
+    kept, narrations, count = pm.dedupe_materialization_tasks(tasks, emit_cm_bookends=True)
     assert [t["task_id"] for t in kept] == ["TESTER-1"]
     assert count == 1
-    assert narrations == [
-        "dedupe: skipped duplicate verify-release-again (matches TESTER-1)"
-    ]
+    assert narrations == ["dedupe: skipped duplicate verify-release-again (matches TESTER-1)"]
 
 
 def test_dedupe_cm_buckets_unaffected_by_emit_cm_bookends_flag() -> None:
@@ -394,19 +362,31 @@ def _run_materialize(plan: dict, team_root: pathlib.Path, tmp_path: pathlib.Path
     env = dict(os.environ)
     env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(_DEV_TREE_ROOT)
     for _dangerous_var in (
-        "PGAI_PROJECT_ROOT", "PGAI_DEV_TREE_PATH", "PGAI_TASKS_DIR",
-        "PGAI_REQUIREMENTS_DIR", "PGAI_PRIORITY_DIR", "PGAI_ARCHIVE_DIR",
-        "PGAI_BRIEFS_DIR", "PGAI_LOGS_DIR",
+        "PGAI_PROJECT_ROOT",
+        "PGAI_DEV_TREE_PATH",
+        "PGAI_TASKS_DIR",
+        "PGAI_REQUIREMENTS_DIR",
+        "PGAI_PRIORITY_DIR",
+        "PGAI_ARCHIVE_DIR",
+        "PGAI_BRIEFS_DIR",
+        "PGAI_LOGS_DIR",
     ):
         env.pop(_dangerous_var, None)
 
     result = subprocess.run(
         [
-            sys.executable, str(_MATERIALIZE_SCRIPT), str(plan_path),
-            "--team-root", str(team_root),
-            "--owner", "CLAUDE",
+            sys.executable,
+            str(_MATERIALIZE_SCRIPT),
+            str(plan_path),
+            "--team-root",
+            str(team_root),
+            "--owner",
+            "CLAUDE",
         ],
-        capture_output=True, text=True, env=env, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
     )
     return result
 
@@ -415,10 +395,7 @@ def _task_ids_by_role(tasks_root: pathlib.Path, role: str) -> list:
     """Return sorted task_id strings for folders under tasks_root matching role."""
     if not tasks_root.is_dir():
         return []
-    return sorted(
-        d.name for d in tasks_root.iterdir()
-        if d.is_dir() and d.name.upper().startswith(f"{role.upper()}-")
-    )
+    return sorted(d.name for d in tasks_root.iterdir() if d.is_dir() and d.name.upper().startswith(f"{role.upper()}-"))
 
 
 def test_real_entry_point_dedupes_doubled_chain_closers_and_worker_tasks(
@@ -458,9 +435,7 @@ def test_real_entry_point_dedupes_doubled_chain_closers_and_worker_tasks(
     }
 
     result = _run_materialize(plan, team_root, tmp_path)
-    assert result.returncode == 0, (
-        f"Materialization failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Materialization failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
 
     stderr = result.stderr
     assert "Dedupe: 4 duplicate task(s) skipped" in stderr, stderr
@@ -483,9 +458,9 @@ def test_real_entry_point_dedupes_doubled_chain_closers_and_worker_tasks(
             continue
         lines = [l for l in backlog_path.read_text().splitlines() if l.strip()]
         ids_in_queue = [l.split()[-1] for l in lines]
-        assert len(ids_in_queue) == len(set(ids_in_queue)), (
-            f"{backlog_name} contains duplicate task IDs: {ids_in_queue}"
-        )
+        assert len(ids_in_queue) == len(
+            set(ids_in_queue)
+        ), f"{backlog_name} contains duplicate task IDs: {ids_in_queue}"
 
 
 def test_real_entry_point_golden_path_reports_zero_dedupe(
@@ -514,9 +489,7 @@ def test_real_entry_point_golden_path_reports_zero_dedupe(
     }
 
     result = _run_materialize(plan, team_root, tmp_path)
-    assert result.returncode == 0, (
-        f"Materialization failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Materialization failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
 
     stderr = result.stderr
     assert "Dedupe: 0 duplicate task(s) skipped" in stderr, stderr
@@ -561,9 +534,7 @@ def test_real_entry_point_testing_only_workflow_materializes_two_distinct_tester
     }
 
     result = _run_materialize(plan, team_root, tmp_path)
-    assert result.returncode == 0, (
-        f"Materialization failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Materialization failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
 
     stderr = result.stderr
     assert "Dedupe: 0 duplicate task(s) skipped" in stderr, stderr

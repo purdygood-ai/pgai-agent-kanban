@@ -153,16 +153,22 @@ _VALIDATED_CASES = [
     ("invalid", {"project.cfg": "[project]\nbranch_prefix = zz/\n"}, _REFUSED),
     ("invalid-space", {"project.cfg": "[project]\nbranch_prefix = zz _\n"}, _REFUSED),
     ("wrong-section", {"project.cfg": "[other]\nbranch_prefix = zz_\n[project]\ndev_tree_path = /srv/dev\n"}, ""),
-    ("earlier-section-ignored", {"project.cfg": "[other]\nbranch_prefix = zz_\n[project]\nbranch_prefix = ai_\n"},
-     "ai_"),
+    (
+        "earlier-section-ignored",
+        {"project.cfg": "[other]\nbranch_prefix = zz_\n[project]\nbranch_prefix = ai_\n"},
+        "ai_",
+    ),
     ("duplicate-key-first-wins", {"project.cfg": "[project]\nbranch_prefix = ai_\nbranch_prefix = bb_\n"}, "ai_"),
     ("commented-and-case", {"project.cfg": "[project]\n# branch_prefix = cm_\nBranch_Prefix = up_\n"}, ""),
     ("sectionless-project-cfg", {"project.cfg": "branch_prefix = ai_\n"}, ""),
     ("legacy-section", {"PROJECT.cfg": "[project]\nbranch_prefix = lg_\n"}, "lg_"),
     ("legacy-bare", {"PROJECT.cfg": 'dev_tree_path=/srv/dev\nbranch_prefix="lg_"\n'}, "lg_"),
     ("legacy-bare-single-quoted", {"PROJECT.cfg": "branch_prefix='lg_'\n"}, "lg_"),
-    ("project-cfg-wins-even-blank",
-     {"project.cfg": "[project]\nbranch_prefix =\n", "PROJECT.cfg": "[project]\nbranch_prefix = lg_\n"}, ""),
+    (
+        "project-cfg-wins-even-blank",
+        {"project.cfg": "[project]\nbranch_prefix =\n", "PROJECT.cfg": "[project]\nbranch_prefix = lg_\n"},
+        "",
+    ),
     ("no-file", {}, ""),
 ]
 
@@ -175,8 +181,9 @@ def _validated_readings(project_root: pathlib.Path) -> dict:
         "ini_branch_prefix_from_cfg(str)": lambda: branch_prefix.ini_branch_prefix_from_cfg(str(cfg) if cfg else None),
         "bare_branch_prefix_from_cfg": lambda: branch_prefix.bare_branch_prefix_from_cfg(cfg),
         "ini_branch_prefix_for_project_root": lambda: branch_prefix.ini_branch_prefix_for_project_root(project_root),
-        "ini_branch_prefix_for_project_root(str)":
-            lambda: branch_prefix.ini_branch_prefix_for_project_root(str(project_root)),
+        "ini_branch_prefix_for_project_root(str)": lambda: branch_prefix.ini_branch_prefix_for_project_root(
+            str(project_root)
+        ),
     }
     answers = {}
     for name, read in readers.items():
@@ -195,8 +202,11 @@ def test_validated_entry_points_answer_as_pp_branch_prefix(tmp_path: pathlib.Pat
 
     if expected is _REFUSED:
         assert bash.stdout == "rc=1\n", bash.stderr
-        refusals = {name: answer for name, answer in answers.items()
-                    if isinstance(answer, branch_prefix.InvalidBranchPrefixError)}
+        refusals = {
+            name: answer
+            for name, answer in answers.items()
+            if isinstance(answer, branch_prefix.InvalidBranchPrefixError)
+        }
         assert refusals.keys() == answers.keys(), answers
         for refusal in refusals.values():
             # The same refusal text bash's validate_branch_prefix prints, naming the same value.
@@ -281,8 +291,16 @@ def test_name_based_readers_default_without_a_kanban_root(monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize(
     ("value", "accepted"),
-    [("", True), ("ai_", True), ("Team-9_", True), ("zz/", False), ("'zz_'", False), ("zz_  # note", False),
-     ("a.b", False), ("zz_\n", False)],
+    [
+        ("", True),
+        ("ai_", True),
+        ("Team-9_", True),
+        ("zz/", False),
+        ("'zz_'", False),
+        ("zz_  # note", False),
+        ("a.b", False),
+        ("zz_\n", False),
+    ],
     ids=["empty", "ai", "mixed", "slash", "single-quoted", "inline-comment", "dot", "trailing-newline"],
 )
 def test_validate_branch_prefix_accepts_what_bash_accepts(value: str, accepted: bool) -> None:

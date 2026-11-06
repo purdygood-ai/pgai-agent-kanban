@@ -64,18 +64,24 @@ import pathlib
 
 # Version ordering: ``ge`` compares two normalized X.Y.Z strings numerically.
 from pgai_agent_kanban.lib.semver import ge as _semver_ge
+
 # status.md sections are read through the one status.md reader.
 from pgai_agent_kanban.task_status import section_value
+
 # release-state.md fields are read through the one release-state reader. The
 # raw (non-validating) form is used: a missing file, heading or value reads as
 # "none", and an "rc/"-prefixed Active RC is accepted and normalised below.
 from pgai_agent_kanban.cm.read_state_field import read_state_field
+
 # The capture rewrite records who changed the sentinel, so a gated suite's
 # sentinel-leak check does not blame the suite for it.
 from pgai_agent_kanban.lib.sentinel_provenance import (
     kanban_root_for_scope,
     record_sentinel_write,
 )
+
+# The capture rewrite goes through the one HALT-AFTER writer (atomic).
+from pgai_agent_kanban.halt_after.sentinel import write_halt_after
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +108,7 @@ def _normalize_version(version_str: str) -> str:
     if s and s[0] in ("v", "V"):
         s = s[1:]
     return s
+
 
 _HALT_AFTER_FILENAME = "HALT-AFTER"
 
@@ -137,13 +144,8 @@ def _has_working_role(project_root: pathlib.Path, role: str) -> bool:
             continue
 
         fields = _parse_status_md(text)
-        if (
-            fields["State"].upper() == "WORKING"
-            and fields["Role"].upper() == role_upper
-        ):
-            logger.debug(
-                "drain: found WORKING %s task at %s", role, status_path
-            )
+        if fields["State"].upper() == "WORKING" and fields["Role"].upper() == role_upper:
+            logger.debug("drain: found WORKING %s task at %s", role, status_path)
             return True
 
     return False
@@ -187,10 +189,7 @@ def _has_pending_role(project_root: pathlib.Path, role: str) -> bool:
             continue
 
         fields = _parse_status_md(text)
-        if (
-            fields["State"].upper() in _PENDING_STATES
-            and fields["Role"].upper() == role_upper
-        ):
+        if fields["State"].upper() in _PENDING_STATES and fields["Role"].upper() == role_upper:
             logger.debug(
                 "drain: found pending (%s) %s task at %s",
                 fields["State"],
@@ -232,13 +231,9 @@ def _has_in_flight_pm(project_root: pathlib.Path) -> bool:
             continue
 
         fields = _parse_status_md(text)
-        if (
-            fields["State"].upper() in _PM_IN_FLIGHT_STATES
-            and fields["Role"].upper() == "PM"
-        ):
+        if fields["State"].upper() in _PM_IN_FLIGHT_STATES and fields["Role"].upper() == "PM":
             logger.debug(
-                "drain: found in-flight PM task (State=%s) at %s; "
-                "per-agent drain blocked",
+                "drain: found in-flight PM task (State=%s) at %s; " "per-agent drain blocked",
                 fields["State"],
                 status_path,
             )
@@ -296,11 +291,7 @@ def check_drain(
     project_root = pathlib.Path(project_root)
     # Use release_state_root for release-state.md lookups when provided;
     # otherwise fall back to project_root (backward-compatible default).
-    _release_state_dir = (
-        pathlib.Path(release_state_root)
-        if release_state_root is not None
-        else project_root
-    )
+    _release_state_dir = pathlib.Path(release_state_root) if release_state_root is not None else project_root
 
     if event == "rc" or event.startswith("rc:"):
         # release-state.md may live at a different path than the HALT-AFTER
@@ -360,10 +351,7 @@ def check_drain(
             # invokes promote() -- see rc_gate.py's module docstring for
             # why a second, independent promote() call here would double
             # up the audit-entry append once the gate also promotes.
-            logger.info(
-                "drain.check_drain rc (bare): active_rc=none — "
-                "no RC in flight; drain condition satisfied"
-            )
+            logger.info("drain.check_drain rc (bare): active_rc=none — " "no RC in flight; drain condition satisfied")
             return True
 
         # An RC is in flight — capture it by rewriting the HALT-AFTER file
@@ -373,18 +361,13 @@ def check_drain(
             version_tag = version_tag[3:]
 
         halt_after_path = project_root / _HALT_AFTER_FILENAME
-        new_content = f"rc:{version_tag}\n"
+        new_token = f"rc:{version_tag}"
         try:
-            old_content = halt_after_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            old_content = None
-        try:
-            halt_after_path.write_text(new_content, encoding="utf-8")
+            changed = write_halt_after(project_root, new_token)
             logger.info(
-                "drain.check_drain rc (bare): captured arm-time version %r; "
-                "rewrote HALT-AFTER to %r",
+                "drain.check_drain rc (bare): captured arm-time version %r; " "rewrote HALT-AFTER to %r",
                 version_tag,
-                new_content.strip(),
+                new_token,
             )
         except OSError as exc:
             logger.warning(
@@ -393,7 +376,7 @@ def check_drain(
                 exc,
             )
         else:
-            if old_content != new_content:
+            if changed:
                 # Never raises: a record that cannot be appended is a
                 # stderr warning, and the capture above already stands.
                 record_sentinel_write(
@@ -416,8 +399,7 @@ def check_drain(
         pm_in_flight = _has_in_flight_pm(project_root)
         drained = not still_working and not has_pending and not pm_in_flight
         logger.debug(
-            "drain.check_drain %s: still_working=%s has_pending=%s "
-            "pm_in_flight=%s drained=%s",
+            "drain.check_drain %s: still_working=%s has_pending=%s " "pm_in_flight=%s drained=%s",
             event,
             still_working,
             has_pending,
@@ -427,6 +409,5 @@ def check_drain(
         return drained
 
     raise ValueError(
-        f"check_drain: unsupported event token {event!r}. "
-        f"Supported: rc, rc:vX.Y.Z, pm, coder, writer, tester, cm."
+        f"check_drain: unsupported event token {event!r}. " f"Supported: rc, rc:vX.Y.Z, pm, coder, writer, tester, cm."
     )

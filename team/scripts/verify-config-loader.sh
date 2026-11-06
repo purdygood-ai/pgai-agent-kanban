@@ -49,7 +49,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Locate this script and source shared helpers
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 _INI_SH="${_SCRIPT_DIR}/lib/ini_parser.sh"
 _LOADER_SH="${_SCRIPT_DIR}/lib/config_loader.sh"
@@ -98,26 +98,11 @@ _CFG_EXAMPLE="${_REPO_ROOT}/kanban.cfg_example"
 # Counters and helpers
 # ---------------------------------------------------------------------------
 VERBOSE=false
-PASS_COUNT=0
-FAIL_COUNT=0
-
-if [[ -t 1 ]]; then
-    C_RED=$'\033[0;31m'
-    C_GREEN=$'\033[0;32m'
-    C_RESET=$'\033[0m'
-else
-    C_RED="" C_GREEN="" C_RESET=""
-fi
-
-pass() {
-    echo "${C_GREEN}PASS${C_RESET}: $*"
-    (( PASS_COUNT++ )) || true
-}
-
-fail() {
-    echo "${C_RED}FAIL${C_RESET}: $*"
-    (( FAIL_COUNT++ )) || true
-}
+# PASS_COUNT / FAIL_COUNT, the C_* colours and pass / fail / warn
+# (lib/verify_harness.sh).
+# shellcheck source=lib/verify_harness.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/verify_harness.sh"
+verify_harness_init
 
 verbose() {
     [[ "$VERBOSE" == "true" ]] && echo "  [detail] $*" || true

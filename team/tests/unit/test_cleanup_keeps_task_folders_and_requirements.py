@@ -46,11 +46,7 @@ def _diagnostic(result) -> str:
 
 def _tree(root: pathlib.Path) -> dict[str, bytes]:
     """Every file under *root*, relative, mapped to its bytes."""
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def _backdate(path: pathlib.Path) -> None:
@@ -156,8 +152,13 @@ def test_dry_run_narrates_no_task_folder_deletion_or_requirements_archival(tmp_p
 
     assert result.returncode == 0, _diagnostic(result)
     assert _tree(root / "projects") == before, _diagnostic(result)
-    for absent in ("delete task folder", "archive standard requirement", "archive priority requirement",
-                   "requirements archived", "task_folders_deleted"):
+    for absent in (
+        "delete task folder",
+        "archive standard requirement",
+        "archive priority requirement",
+        "requirements archived",
+        "task_folders_deleted",
+    ):
         assert absent not in result.stdout, f"{absent!r} narrated:\n{_diagnostic(result)}"
     created = [line for line in result.stdout.splitlines() if "would create directory" in line]
     assert not any("requirements" in line for line in created), _diagnostic(result)

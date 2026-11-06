@@ -29,11 +29,10 @@ Exit codes:
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import NamedTuple
 
 # Run by file path (``python3 .../agent_timing.py``) or loaded from a file
@@ -49,7 +48,6 @@ if not __package__:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
 from pgai_agent_kanban.lib.timeutil import try_parse_iso  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Log line pattern
@@ -262,6 +260,7 @@ def resolve_logs_dir() -> pathlib.Path:
     which reads PGAI_AGENT_KANBAN_ROOT_PATH and fails loud if unset or empty.
     """
     from pgai_agent_kanban.env import resolve_kanban_root
+
     return resolve_kanban_root() / "logs"
 
 
@@ -306,7 +305,7 @@ def main() -> None:
             sys.exit(1)
 
     # --- Time window ---
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     if all_time:
         cutoff: datetime | None = None
         window_label = "all time"

@@ -43,7 +43,6 @@ import os
 import pathlib
 import re
 import sys
-from typing import Optional
 
 # Run by file path (``python3 .../bundle_family.py``, as cm/open-rc.sh does)
 # or loaded from a file outside its package, this module has no parent
@@ -66,7 +65,7 @@ _BUNDLED_ITEMS_HEADING = "Bundled Items"
 _ITEM_PATH_RE = re.compile(r"\(`([^`]+)`\)")
 
 
-def find_bundle_file(requirements_dir: str, version: str) -> Optional[str]:
+def find_bundle_file(requirements_dir: str, version: str) -> str | None:
     """Locate the requirements bundle file for *version*.
 
     Mirrors the glob convention CM.md documents ("The RC's bundle file...
@@ -96,7 +95,7 @@ def parse_bundled_item_basenames(bundle_path: str) -> list:
     the "operator-authored requirements, no cargo to track" case.
     """
     try:
-        text = open(bundle_path, "r", encoding="utf-8").read()
+        text = open(bundle_path, encoding="utf-8").read()
     except OSError:
         return []
 
@@ -109,7 +108,7 @@ def parse_bundled_item_basenames(bundle_path: str) -> list:
     return basenames
 
 
-def compute_family_key(basenames: list) -> Optional[str]:
+def compute_family_key(basenames: list) -> str | None:
     """Compute a deterministic family key from a cargo set.
 
     The key is "family-" + the first 16 hex characters of the sha256 digest
@@ -126,7 +125,7 @@ def compute_family_key(basenames: list) -> Optional[str]:
     return f"family-{digest[:16]}"
 
 
-def _iter_state_records(state_dir: str, exclude_path: Optional[str] = None):
+def _iter_state_records(state_dir: str, exclude_path: str | None = None):
     """Yield (path, record) for every readable JSON file directly under
     state_dir and state_dir/history, skipping exclude_path.
 
@@ -148,7 +147,7 @@ def _iter_state_records(state_dir: str, exclude_path: Optional[str] = None):
             if exclude_norm and os.path.normpath(path) == exclude_norm:
                 continue
             try:
-                record = json.loads(open(path, "r", encoding="utf-8").read())
+                record = json.loads(open(path, encoding="utf-8").read())
             except (OSError, json.JSONDecodeError):
                 continue
             if isinstance(record, dict):
@@ -156,10 +155,10 @@ def _iter_state_records(state_dir: str, exclude_path: Optional[str] = None):
 
 
 def compute_next_attempt(
-    family_key: Optional[str],
+    family_key: str | None,
     state_dir: str,
     *,
-    exclude_path: Optional[str] = None,
+    exclude_path: str | None = None,
 ):
     """Compute the next attempt number and prior-attempt history for a family.
 

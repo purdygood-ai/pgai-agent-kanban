@@ -61,13 +61,9 @@ _RUNNERS = [_RUN_UNIT_SH, _RUN_INTEGRATION_SH]
 _INTEGER_EXPORT_RE = re.compile(
     r'^\s*_config_loader_export_wake_integer\s+"\$cfg"\s+\w+\s+([A-Z][A-Z0-9_]*)\b', re.MULTILINE
 )
-_PLAIN_EXPORT_RE = re.compile(
-    r'^\s*export\s+([A-Z][A-Z0-9_]*)="\$\{\1:-\$\(read_ini\s+"\$cfg"\s+wake\s', re.MULTILINE
-)
+_PLAIN_EXPORT_RE = re.compile(r'^\s*export\s+([A-Z][A-Z0-9_]*)="\$\{\1:-\$\(read_ini\s+"\$cfg"\s+wake\s', re.MULTILINE)
 
-_SCRUB_RE = re.compile(
-    r'^[ \t]*unset\s+"\$\{CONFIG_LOADER_WAKE_ENV_NAMES\[@\]\}"[ \t]*$', re.MULTILINE
-)
+_SCRUB_RE = re.compile(r'^[ \t]*unset\s+"\$\{CONFIG_LOADER_WAKE_ENV_NAMES\[@\]\}"[ \t]*$', re.MULTILINE)
 _REPLAY_REGISTER_RE = re.compile(
     r'^[ \t]*GATED_RUNNER_REPLAY_ENV_NAMES\+=\(\s*"\$\{CONFIG_LOADER_WAKE_ENV_NAMES\[@\]\}"\s*\)[ \t]*$',
     re.MULTILINE,
@@ -80,9 +76,7 @@ _PYTEST_INVOCATION_RE = re.compile(
 
 
 def _bash(script: str, env: dict, timeout: int = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=timeout
-    )
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env, timeout=timeout)
 
 
 def _env_without_wake_names() -> dict:
@@ -167,9 +161,7 @@ def test_load_config_exports_every_listed_name(tmp_path: pathlib.Path) -> None:
     )
     result = _bash(script, _env_without_wake_names())
     assert result.returncode == 0, result.stderr
-    not_exported = [
-        line for line in result.stdout.splitlines() if not re.match(r"^declare -\S*x\S* ", line)
-    ]
+    not_exported = [line for line in result.stdout.splitlines() if not re.match(r"^declare -\S*x\S* ", line)]
     assert not not_exported, f"listed but not exported by load_config: {not_exported}"
 
 
@@ -183,11 +175,10 @@ def _runner_statements(script: pathlib.Path) -> tuple[re.Match, re.Match]:
     scrub = _SCRUB_RE.search(text)
     register = _REPLAY_REGISTER_RE.search(text)
     assert scrub is not None, (
-        f'{script.name} must carry `unset "${{CONFIG_LOADER_WAKE_ENV_NAMES[@]}}"` '
-        "ahead of its pytest launch"
+        f'{script.name} must carry `unset "${{CONFIG_LOADER_WAKE_ENV_NAMES[@]}}"` ' "ahead of its pytest launch"
     )
     assert register is not None, (
-        f'{script.name} must register the wake names in the replay family with '
+        f"{script.name} must register the wake names in the replay family with "
         '`GATED_RUNNER_REPLAY_ENV_NAMES+=("${CONFIG_LOADER_WAKE_ENV_NAMES[@]}")`'
     )
     return scrub, register
@@ -237,14 +228,10 @@ def test_runner_scrub_clears_every_wake_name_and_replay_keeps_them_absent(
     )
     assert stage1.returncode == 0, f"stdout:\n{stage1.stdout}\nstderr:\n{stage1.stderr}"
     seen_line, replay_command = stage1.stdout.split("\n", 1)
-    assert json.loads(seen_line) == [], (
-        f"{script.name}'s scrub left these wake names visible to pytest: {seen_line}"
-    )
+    assert json.loads(seen_line) == [], f"{script.name}'s scrub left these wake names visible to pytest: {seen_line}"
     replay_command = replay_command.strip()
     for name in WAKE_TUNABLE_ENV_NAMES:
-        assert f"-u {name}" in replay_command, (
-            f"replay command must force {name} absent; got: {replay_command}"
-        )
+        assert f"-u {name}" in replay_command, f"replay command must force {name} absent; got: {replay_command}"
 
     stage2 = _bash(replay_command, _env_exporting_every_wake_name())
     assert stage2.returncode == 0, f"command: {replay_command}\nstderr:\n{stage2.stderr}"

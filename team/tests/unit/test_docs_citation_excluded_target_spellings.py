@@ -65,11 +65,7 @@ _MANIFEST_TEXT = (
     f"{_DELIVERED_PAGE}\n"
 )
 
-_SEED_TEXT = (
-    "# Fixture governance root\n"
-    "\n"
-    f"Start with docs/{_DELIVERED_PAGE} for the walkthrough.\n"
-)
+_SEED_TEXT = "# Fixture governance root\n" "\n" f"Start with docs/{_DELIVERED_PAGE} for the walkthrough.\n"
 
 _GUIDE_HEADER = "# Guide\n\nDelivered fixture page.\n"
 
@@ -81,15 +77,9 @@ def _build_repo(tmp_path: Path, guide_body: str, seed_extra: str = "") -> Path:
     repo_root = tmp_path / "repo"
     (repo_root / "team" / "config").mkdir(parents=True)
     (repo_root / "docs").mkdir()
-    (repo_root / "team" / "README.md").write_text(
-        _SEED_TEXT + seed_extra, encoding="utf-8"
-    )
-    (repo_root / "team" / "config" / "docs-manifest.txt").write_text(
-        _MANIFEST_TEXT, encoding="utf-8"
-    )
-    (repo_root / "docs" / _DELIVERED_PAGE).write_text(
-        _GUIDE_HEADER + guide_body, encoding="utf-8"
-    )
+    (repo_root / "team" / "README.md").write_text(_SEED_TEXT + seed_extra, encoding="utf-8")
+    (repo_root / "team" / "config" / "docs-manifest.txt").write_text(_MANIFEST_TEXT, encoding="utf-8")
+    (repo_root / "docs" / _DELIVERED_PAGE).write_text(_GUIDE_HEADER + guide_body, encoding="utf-8")
     for checkout_only in (_EXCLUDED_PAGE, _OTHER_EXCLUDED_PAGE):
         (repo_root / "docs" / checkout_only).write_text(
             f"# {checkout_only}\n\nRepository checkout only.\n", encoding="utf-8"
@@ -103,8 +93,7 @@ def _line_of(path: Path, needle: str) -> int:
     lines = path.read_text(encoding="utf-8").splitlines()
     matches = [i + 1 for i, line in enumerate(lines) if needle in line]
     assert len(matches) == 1, (
-        f"Expected exactly one line in {path} containing {needle!r}; "
-        f"found {len(matches)}: {matches}"
+        f"Expected exactly one line in {path} containing {needle!r}; " f"found {len(matches)}: {matches}"
     )
     return matches[0]
 
@@ -140,9 +129,7 @@ def _installed_root_findings(repo_root: Path, tmp_path: Path) -> set[tuple[str, 
     install_root = tmp_path / "installed"
     (install_root / "docs").mkdir(parents=True)
     shutil.copy2(repo_root / "team" / "README.md", install_root / "README.md")
-    shutil.copy2(
-        repo_root / "docs" / _DELIVERED_PAGE, install_root / "docs" / _DELIVERED_PAGE
-    )
+    shutil.copy2(repo_root / "docs" / _DELIVERED_PAGE, install_root / "docs" / _DELIVERED_PAGE)
     report = find_unreachable_on_installed_root(install_root)
     assert report.citations_checked > 0, report.describe()
     return {(f.source, f.line, f.cited) for f in report.findings}
@@ -170,9 +157,7 @@ def _checker_findings(output: str) -> set[tuple[str, int, str]]:
 def test_prefixed_citation_of_excluded_target_in_delivered_page_fails(
     tmp_path: Path,
 ) -> None:
-    repo_root = _build_repo(
-        tmp_path, f"Per-pane detail is in {_EXCLUDED_CITED}.\n"
-    )
+    repo_root = _build_repo(tmp_path, f"Per-pane detail is in {_EXCLUDED_CITED}.\n")
     citing_line = _line_of(repo_root / "docs" / _DELIVERED_PAGE, _EXCLUDED_CITED)
 
     result = _run_checker(repo_root, tmp_path)
@@ -190,12 +175,9 @@ def test_prefixed_citation_of_excluded_target_in_delivered_page_fails(
     # no bare manifest line naming it is offered to add.
     offered_manifest_lines = {line.strip() for line in result.stdout.splitlines()}
     assert _EXCLUDED_PAGE not in offered_manifest_lines, (
-        "The remedy offered a recorded exclusion as a manifest line to add."
-        f"\nstdout:\n{result.stdout}"
+        "The remedy offered a recorded exclusion as a manifest line to add." f"\nstdout:\n{result.stdout}"
     )
-    assert _checker_findings(result.stdout) == _installed_root_findings(
-        repo_root, tmp_path
-    )
+    assert _checker_findings(result.stdout) == _installed_root_findings(repo_root, tmp_path)
 
 
 def test_prefixed_citation_of_excluded_target_in_governance_seed_fails(
@@ -211,13 +193,10 @@ def test_prefixed_citation_of_excluded_target_in_governance_seed_fails(
     result = _run_checker(repo_root, tmp_path)
 
     assert result.returncode == 1, (
-        f"Expected exit 1; got {result.returncode}.\nstdout:\n{result.stdout}"
-        f"\nstderr:\n{result.stderr}"
+        f"Expected exit 1; got {result.returncode}.\nstdout:\n{result.stdout}" f"\nstderr:\n{result.stderr}"
     )
     expected = f"team/README.md:{citing_line} cites '{_EXCLUDED_CITED}'"
-    assert expected in result.stdout, (
-        f"Expected {expected!r} in the output.\nstdout:\n{result.stdout}"
-    )
+    assert expected in result.stdout, f"Expected {expected!r} in the output.\nstdout:\n{result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -276,12 +255,10 @@ def test_prefixed_citation_after_relaxed_mention_of_same_target_is_reported(
     result = _run_checker(repo_root, tmp_path)
 
     assert result.returncode == 1, (
-        f"Expected exit 1; got {result.returncode}.\nstdout:\n{result.stdout}"
-        f"\nstderr:\n{result.stderr}"
+        f"Expected exit 1; got {result.returncode}.\nstdout:\n{result.stdout}" f"\nstderr:\n{result.stderr}"
     )
     findings = _checker_findings(result.stdout)
     assert findings == {(f"docs/{_DELIVERED_PAGE}", citing_line, _EXCLUDED_CITED)}, (
-        f"Expected exactly the prefixed citation on line {citing_line}; got "
-        f"{findings}.\nstdout:\n{result.stdout}"
+        f"Expected exactly the prefixed citation on line {citing_line}; got " f"{findings}.\nstdout:\n{result.stdout}"
     )
     assert findings == _installed_root_findings(repo_root, tmp_path)

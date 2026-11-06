@@ -60,7 +60,6 @@ import os
 import pathlib
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths (relative to this file: team/tests/unit/ -> team/ -> repo root)
@@ -78,7 +77,9 @@ def _env(kanban_root: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def _run(script: pathlib.Path, args: list[str], kanban_root: pathlib.Path, timeout: int = 15) -> subprocess.CompletedProcess:
+def _run(
+    script: pathlib.Path, args: list[str], kanban_root: pathlib.Path, timeout: int = 15
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(script), *args],
         capture_output=True,

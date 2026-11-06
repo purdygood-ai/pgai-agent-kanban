@@ -33,6 +33,7 @@ import re
 import pytest
 
 from pgai_agent_kanban.cm.ship_policy_report_inputs import finding_dimensions, report_values
+
 # Imported as a module: a bare TesterReport name here would be collected by
 # pytest as a test class.
 from pgai_agent_kanban.reports import tester_report
@@ -112,7 +113,9 @@ def test_readers_print_the_recorded_output_for_each_corpus_report(tmp_path, repo
     golden = _report_from_golden(report.name)
     golden_dims = " ".join(finding_dimensions(golden))
     golden_values = [f"{key}={value}" for key, value in report_values(golden).items()]
-    origin = "its golden (listed in differential.md)" if report.name in _DIFFERENTIAL_REPORTS else "the pre-parser readers"
+    origin = (
+        "its golden (listed in differential.md)" if report.name in _DIFFERENTIAL_REPORTS else "the pre-parser readers"
+    )
 
     assert golden_dims == expected["dims"], f"{report.name}: golden projection differs from {origin}"
     assert golden_values == expected["values"], f"{report.name}: golden projection differs from {origin}"
@@ -189,15 +192,15 @@ def _decide_like_step_4d(tmp_path: pathlib.Path, report: pathlib.Path):
     return run_bash(
         tmp_path,
         f"source {_LIB} && "
-        "declare -A v && while IFS= read -r line; do v[\"${line%%=*}\"]=\"${line#*=}\"; done "
+        'declare -A v && while IFS= read -r line; do v["${line%%=*}"]="${line#*=}"; done '
         f"< <(read_ship_policy_report_values '{report}' 2>/dev/null) && "
         f"read -r reg integ < <(read_ship_policy_finding_dimensions '{report}' 2>/dev/null) && "
-        "echo \"recommendation=${v[recommendation]}\" && "
-        "echo \"systemic_risk=${v[systemic_risk]}\" && "
-        "echo \"has_large_fix_effort=${v[has_large_fix_effort]}\" && "
-        "echo \"dims=$reg $integ\" && "
-        "echo \"decision=$(cm_ship_policy done \"${v[systemic_risk]}\" \"${v[recommendation]}\" "
-        "\"${v[has_large_fix_effort]}\" yes \"$reg\" \"$integ\")\"",
+        'echo "recommendation=${v[recommendation]}" && '
+        'echo "systemic_risk=${v[systemic_risk]}" && '
+        'echo "has_large_fix_effort=${v[has_large_fix_effort]}" && '
+        'echo "dims=$reg $integ" && '
+        'echo "decision=$(cm_ship_policy done "${v[systemic_risk]}" "${v[recommendation]}" '
+        '"${v[has_large_fix_effort]}" yes "$reg" "$integ")"',
     )
 
 
@@ -247,7 +250,7 @@ def _report(recommendation_raw=None, systemic_risk_raw=None, findings=()):
 def test_systemic_risk_none_is_a_matrix_token_and_anything_else_unrecognised_is_unparseable(
     systemic_risk_raw, expected
 ):
-    """"none" is a systemic-risk token the matrix has a row for (not-high),
+    """ "none" is a systemic-risk token the matrix has a row for (not-high),
     so a value line that leads with it reads none, never unparseable."""
     values = report_values(_report("PASS", systemic_risk_raw))
     assert values["systemic_risk"] == expected

@@ -44,12 +44,7 @@ import subprocess
 import sys
 import textwrap
 
-import pytest
 
-from pgai_agent_kanban.cm.changelog_writer import (
-    load_published_manifest,
-    regenerate,
-)
 
 # ---------------------------------------------------------------------------
 # Path constants
@@ -58,8 +53,8 @@ from pgai_agent_kanban.cm.changelog_writer import (
 _THIS_FILE = pathlib.Path(__file__).resolve()
 # team/tests/unit/test_cm_release_step11b_divergence.py
 # Three levels up: unit/ -> tests/ -> team/
-_TEAM_DIR = _THIS_FILE.parent.parent.parent       # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                  # project root
+_TEAM_DIR = _THIS_FILE.parent.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project root
 # Step 11b was extracted from cm/release.sh into this lib stage file by the
 # v2.9.20-engine-decomposition (see team/scripts/lib/cm/release_notes.sh's own
 # header doc); this constant follows the move so the structural assertions
@@ -153,7 +148,8 @@ def _writer_output(repo_root: pathlib.Path, bugs_dir: pathlib.Path) -> bytes:
     result = subprocess.run(
         [
             sys.executable,
-            "-m", "pgai_agent_kanban.cm.changelog_writer",
+            "-m",
+            "pgai_agent_kanban.cm.changelog_writer",
             str(repo_root),
             str(bugs_dir),
         ],
@@ -184,9 +180,7 @@ class TestStep11bGuardStructure:
         a fresh changelog_writer render.  ``cmp -s`` is the silent comparison
         tool used by the fixed guard.
         """
-        assert _CM_RELEASE_SCRIPT.exists(), (
-            f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
-        )
+        assert _CM_RELEASE_SCRIPT.exists(), f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
         source = _CM_RELEASE_SCRIPT.read_text(encoding="utf-8")
         step11b_start = source.find("Step 11b")
         step11c_start = source.find("Step 11c")
@@ -210,9 +204,7 @@ class TestStep11bGuardStructure:
         section satisfies it while diverging from the canonical writer output.
         The fixed guard compares bytes; the old grep pattern must be gone.
         """
-        assert _CM_RELEASE_SCRIPT.exists(), (
-            f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
-        )
+        assert _CM_RELEASE_SCRIPT.exists(), f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
         source = _CM_RELEASE_SCRIPT.read_text(encoding="utf-8")
         step11b_start = source.find("Step 11b")
         step11c_start = source.find("Step 11c")
@@ -241,9 +233,7 @@ class TestStep11bGuardStructure:
         ensures that a defective changelog_writer cannot ship internal identifiers
         to main.
         """
-        assert _CM_RELEASE_SCRIPT.exists(), (
-            f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
-        )
+        assert _CM_RELEASE_SCRIPT.exists(), f"cm-release.sh not found at expected location: {_CM_RELEASE_SCRIPT}"
         source = _CM_RELEASE_SCRIPT.read_text(encoding="utf-8")
         step11b_start = source.find("Step 11b")
         step11c_start = source.find("Step 11c")
@@ -251,7 +241,7 @@ class TestStep11bGuardStructure:
         assert step11c_start != -1, "Step 11c marker not found in cm-release.sh"
         step11b_block = source[step11b_start:step11c_start]
 
-        assert 'BUG-[0-9]' in step11b_block, (
+        assert "BUG-[0-9]" in step11b_block, (
             "Step 11b does not contain a post-regeneration BUG-[0-9] safety pass.\n"
             "After writing the regenerated CHANGELOG.md, the script must grep for "
             "``BUG-[0-9]`` tokens and exit non-zero if any survive.  "
@@ -276,9 +266,7 @@ class TestStep11bDivergencePath:
     skipping it.
     """
 
-    def test_writer_authored_content_diverges_from_canonical_render(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_writer_authored_content_diverges_from_canonical_render(self, tmp_path: pathlib.Path) -> None:
         """Hand-authored CHANGELOG.md is byte-different from changelog_writer output.
 
         Builds a hermetic fixture, runs changelog_writer to get the canonical
@@ -339,9 +327,7 @@ class TestStep11bDivergencePath:
             "internal identifier that changelog_writer would strip."
         )
 
-    def test_canonical_writer_output_has_no_bug_tokens(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_canonical_writer_output_has_no_bug_tokens(self, tmp_path: pathlib.Path) -> None:
         """changelog_writer produces no BUG-[0-9] tokens even with bug files in the ledger.
 
         Confirms the writer's internal safety pass strips internal identifiers.
@@ -374,9 +360,7 @@ class TestStep11bIdenticalPath:
     comparison exits 0 (meaning no regeneration is needed).
     """
 
-    def test_identical_bytes_means_no_regeneration_needed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_identical_bytes_means_no_regeneration_needed(self, tmp_path: pathlib.Path) -> None:
         """cmp -s exits 0 when the canonical writer output is written as CHANGELOG.md.
 
         Builds a hermetic fixture, generates canonical bytes, writes them as
@@ -396,6 +380,7 @@ class TestStep11bIdenticalPath:
 
         # cmp -s must exit 0 — the guard would skip regeneration.
         import subprocess as _sp
+
         result = _sp.run(
             ["cmp", "-s", str(changelog_path), str(buf_path)],
             capture_output=True,
@@ -406,9 +391,7 @@ class TestStep11bIdenticalPath:
             "the checked-in CHANGELOG.md is already canonical."
         )
 
-    def test_divergent_bytes_means_regeneration_needed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_divergent_bytes_means_regeneration_needed(self, tmp_path: pathlib.Path) -> None:
         """cmp -s exits non-zero when the checked-in CHANGELOG.md diverges from canonical.
 
         Builds a hermetic fixture, generates canonical bytes, writes a modified
@@ -420,7 +403,7 @@ class TestStep11bIdenticalPath:
         canonical_bytes = _writer_output(repo_root, bugs_dir)
 
         # Write a divergent CHANGELOG.md (simulates WRITER-authored content).
-        divergent_content = "# Changelog\n\n## v1.1.0 - WRITER-authored section\n\n**BUG-0068** mentioned here.\n".encode("utf-8")
+        divergent_content = b"# Changelog\n\n## v1.1.0 - WRITER-authored section\n\n**BUG-0068** mentioned here.\n"
         changelog_path = repo_root / "CHANGELOG.md"
         changelog_path.write_bytes(divergent_content)
 
@@ -430,6 +413,7 @@ class TestStep11bIdenticalPath:
 
         # cmp -s must exit non-zero — the guard would trigger regeneration.
         import subprocess as _sp
+
         result = _sp.run(
             ["cmp", "-s", str(changelog_path), str(buf_path)],
             capture_output=True,

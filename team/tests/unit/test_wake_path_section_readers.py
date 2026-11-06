@@ -155,9 +155,10 @@ def test_prerequisite_with_empty_state_reads_empty_state(tmp_path: pathlib.Path)
     readme = f"# Task\n\n## Prerequisites\n- {_TASK_ID}\n\n## Notes\nx\n"
     status = "## Task\nx\n\n## State\n\n## Summary\nDONE\n\n## Blockers\nnone\n"
     result = _run_prereqs(tmp_path, readme, {_TASK_ID: status})
-    assert result.stdout.splitlines() == [f"{_TASK_ID}:", "rc=1"], (
-        "an empty prerequisite ## State is unsatisfied and reads empty, never the next section\n" + _explain(result)
-    )
+    assert result.stdout.splitlines() == [
+        f"{_TASK_ID}:",
+        "rc=1",
+    ], "an empty prerequisite ## State is unsatisfied and reads empty, never the next section\n" + _explain(result)
 
 
 @pytest.mark.parametrize(
@@ -258,9 +259,19 @@ printf '[%s] rc=%s' "$value" "$?"
         (None, "Active RC", "[] rc=1"),
     ],
     ids=[
-        "empty", "empty-next-heading-directly", "empty-trailing-space-and-blank-lines", "empty-last-section",
-        "populated", "populated-last", "leading-blank-lines", "crlf", "last-released",
-        "retired-heading-is-not-the-field", "absent-heading", "same-named-subheading", "missing-file",
+        "empty",
+        "empty-next-heading-directly",
+        "empty-trailing-space-and-blank-lines",
+        "empty-last-section",
+        "populated",
+        "populated-last",
+        "leading-blank-lines",
+        "crlf",
+        "last-released",
+        "retired-heading-is-not-the-field",
+        "absent-heading",
+        "same-named-subheading",
+        "missing-file",
     ],
 )
 def test_release_state_field_readers(
@@ -271,7 +282,9 @@ def test_release_state_field_readers(
 
 
 @pytest.mark.parametrize(("fn", "lib"), _RELEASE_FIELD_READERS, ids=[f for f, _ in _RELEASE_FIELD_READERS])
-def test_release_state_field_readers_print_nothing_on_failure(tmp_path: pathlib.Path, fn: str, lib: pathlib.Path) -> None:
+def test_release_state_field_readers_print_nothing_on_failure(
+    tmp_path: pathlib.Path, fn: str, lib: pathlib.Path
+) -> None:
     """A caller's "|| echo none" fallback must capture exactly "none"."""
     path = tmp_path / "release-state.md"
     path.write_text("## Other\nvalue\n", encoding="utf-8")

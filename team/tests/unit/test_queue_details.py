@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pathlib
 
-import pytest
 
 from pgai_agent_kanban.dashboard.queue_details import (
     AGENT_ORDER,
@@ -22,7 +21,7 @@ from pgai_agent_kanban.dashboard.queue_details import (
 )
 
 
-def _write_task(tasks_root: pathlib.Path, task_id: str, state: str, role: "str | None") -> None:
+def _write_task(tasks_root: pathlib.Path, task_id: str, state: str, role: str | None) -> None:
     task_dir = tasks_root / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
     (task_dir / "status.md").write_text(f"## State\n{state}\n", encoding="utf-8")
@@ -59,12 +58,7 @@ class TestResolveQueueDetails:
 
         working_ids = {e["task_id"] for e in result["coder"]["WORKING"]}
         assert working_ids == {"CODER-20260101-003-working-task"}
-        all_ids = {
-            e["task_id"]
-            for agent in AGENT_ORDER
-            for state in STATE_ORDER
-            for e in result[agent][state]
-        }
+        all_ids = {e["task_id"] for agent in AGENT_ORDER for state in STATE_ORDER for e in result[agent][state]}
         assert "CODER-20260101-001-done-task" not in all_ids
         assert "CODER-20260101-002-wontdo-task" not in all_ids
 
@@ -80,9 +74,7 @@ class TestResolveQueueDetails:
         # from the task ID prefix.
         assert result["unknown"]["BACKLOG"][0]["task_id"] == "CODER-20260101-002-no-readme"
 
-    def test_active_task_with_no_queue_entry_warns_no_queue_entry(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_active_task_with_no_queue_entry_warns_no_queue_entry(self, tmp_path: pathlib.Path) -> None:
         tasks_root = tmp_path / "tasks"
         _write_task(tasks_root, "CODER-20260101-001-orphan", "WORKING", "CODER")
 
@@ -91,9 +83,7 @@ class TestResolveQueueDetails:
         entry = result["coder"]["WORKING"][0]
         assert entry == {"task_id": "CODER-20260101-001-orphan", "warning": "no_queue_entry"}
 
-    def test_queue_marker_and_status_state_agreeing_carries_no_warning(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_queue_marker_and_status_state_agreeing_carries_no_warning(self, tmp_path: pathlib.Path) -> None:
         tasks_root = tmp_path / "tasks"
         queues_dir = tmp_path / "queues"
         _write_task(tasks_root, "CODER-20260101-001-clean", "WORKING", "CODER")
@@ -104,9 +94,7 @@ class TestResolveQueueDetails:
         entry = result["coder"]["WORKING"][0]
         assert entry == {"task_id": "CODER-20260101-001-clean", "warning": None}
 
-    def test_queue_marker_status_disagreement_warns_marker_mismatch(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_queue_marker_status_disagreement_warns_marker_mismatch(self, tmp_path: pathlib.Path) -> None:
         tasks_root = tmp_path / "tasks"
         queues_dir = tmp_path / "queues"
         # Queue says BLOCKED ("B"), status.md says WORKING -- a real disagreement.
@@ -118,9 +106,7 @@ class TestResolveQueueDetails:
         entry = result["coder"]["WORKING"][0]
         assert entry == {"task_id": "CODER-20260101-001-mismatch", "warning": "marker_mismatch"}
 
-    def test_done_queue_marker_with_still_active_status_warns_marker_mismatch(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_done_queue_marker_with_still_active_status_warns_marker_mismatch(self, tmp_path: pathlib.Path) -> None:
         tasks_root = tmp_path / "tasks"
         queues_dir = tmp_path / "queues"
         _write_task(tasks_root, "CODER-20260101-001-stale-done", "WORKING", "CODER")
@@ -131,9 +117,7 @@ class TestResolveQueueDetails:
         entry = result["coder"]["WORKING"][0]
         assert entry["warning"] == "marker_mismatch"
 
-    def test_queue_entry_with_no_task_folder_warns_folder_missing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_queue_entry_with_no_task_folder_warns_folder_missing(self, tmp_path: pathlib.Path) -> None:
         tasks_root = tmp_path / "tasks"
         queues_dir = tmp_path / "queues"
         tasks_root.mkdir(parents=True, exist_ok=True)
@@ -144,9 +128,7 @@ class TestResolveQueueDetails:
         entry = result["coder"]["BACKLOG"][0]
         assert entry == {"task_id": "CODER-20260101-001-ghost", "warning": "folder_missing"}
 
-    def test_unrecognized_state_is_never_guessed_into_a_canonical_bucket(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unrecognized_state_is_never_guessed_into_a_canonical_bucket(self, tmp_path: pathlib.Path) -> None:
         tasks_root = tmp_path / "tasks"
         _write_task(tasks_root, "CODER-20260101-001-typo", "WROKING", "CODER")
 
@@ -155,9 +137,7 @@ class TestResolveQueueDetails:
         entry = result["coder"]["BACKLOG"][0]
         assert entry == {"task_id": "CODER-20260101-001-typo", "warning": "unknown_state:WROKING"}
 
-    def test_none_queues_dir_treats_every_active_task_as_unreconciled(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_none_queues_dir_treats_every_active_task_as_unreconciled(self, tmp_path: pathlib.Path) -> None:
         """queues_dir=None (no reconciliation data available) means every
         active task warns no_queue_entry -- never silently "no warning"."""
         tasks_root = tmp_path / "tasks"

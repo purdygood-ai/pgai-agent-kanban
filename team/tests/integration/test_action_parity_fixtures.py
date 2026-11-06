@@ -58,7 +58,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from typing import Generator, Iterator
+from collections.abc import Generator, Iterator
 
 import pytest
 
@@ -242,8 +242,11 @@ def _sentinel_paths(board: pathlib.Path) -> list[pathlib.Path]:
     """Every HALT / HALT-AFTER / DEFER-LOW-BUGS present at the board root or
     under any of its projects."""
     found: list[pathlib.Path] = []
-    roots = [board] + sorted(p for p in (board / "projects").glob("*") if p.is_dir()) \
-        if (board / "projects").is_dir() else [board]
+    roots = (
+        [board] + sorted(p for p in (board / "projects").glob("*") if p.is_dir())
+        if (board / "projects").is_dir()
+        else [board]
+    )
     for scope in roots:
         for name in SENTINEL_BASENAMES:
             candidate = scope / name
@@ -316,8 +319,7 @@ def _run_effect_case(
     before_cli = _snapshot(cli_board)
     cli = _run_cli(cli_board, case.script, case.cli_args(cli_board), tmp_path / "cli_tmp")
     assert cli.returncode == 0, (
-        f"{case.script} exited {cli.returncode} on the CLI board\n"
-        f"stdout: {cli.stdout}\nstderr: {cli.stderr}"
+        f"{case.script} exited {cli.returncode} on the CLI board\n" f"stdout: {cli.stdout}\nstderr: {cli.stderr}"
     )
     cli_effect = _effect(before_cli, _snapshot(cli_board), cli_board)
 
@@ -333,8 +335,7 @@ def _run_effect_case(
     assert cli_effect, f"{case.script} changed nothing on the CLI board -- the comparison would be vacuous"
     for rel in case.expect_changed:
         assert rel in cli_effect, (
-            f"expected {case.script} to create/change/remove {rel!r}; the CLI change set was "
-            f"{sorted(cli_effect)}"
+            f"expected {case.script} to create/change/remove {rel!r}; the CLI change set was " f"{sorted(cli_effect)}"
         )
 
     # --- The parity assertion: same files, same content, same removals ---
@@ -389,9 +390,10 @@ def test_global_halt_verbs_and_sentinel_cleanup_leave_an_ambient_root_halt_untou
     monkeypatch.setenv("PGAI_PROJECT_NAME", _AMBIENT_PROJECT_NAME)
 
     cases = {c.verb: c for c in _EFFECT_CASES if c.verb in ("halt-global", "unhalt-global")}
-    assert set(cases) == {"halt-global", "unhalt-global"}, (
-        f"the ledger no longer carries both fleet-HALT effect cases: {sorted(cases)}"
-    )
+    assert set(cases) == {
+        "halt-global",
+        "unhalt-global",
+    }, f"the ledger no longer carries both fleet-HALT effect cases: {sorted(cases)}"
 
     for verb in ("halt-global", "unhalt-global"):
         scratch = tmp_path / verb
@@ -409,8 +411,7 @@ def test_global_halt_verbs_and_sentinel_cleanup_leave_an_ambient_root_halt_untou
         "a fixture resolved that root instead of its synthetic board"
     )
     assert _sentinel_paths(ambient_root) == [ambient_halt], (
-        f"sentinels appeared on the ambient root beside the operator's HALT: "
-        f"{_sentinel_paths(ambient_root)}"
+        f"sentinels appeared on the ambient root beside the operator's HALT: " f"{_sentinel_paths(ambient_root)}"
     )
 
 
@@ -430,7 +431,8 @@ def test_halt_after_until_arms_byte_identical_sentinel_content_over_rest_and_cli
     assert not cli_sentinel.exists() and not rest_sentinel.exists()
 
     cli = _run_cli(
-        cli_board, "halt-after.sh",
+        cli_board,
+        "halt-after.sh",
         ["--project", PROJECT_NAME, "--until", PARITY_UNTIL_VERSION],
         tmp_path / "cli_tmp",
     )
@@ -446,10 +448,10 @@ def test_halt_after_until_arms_byte_identical_sentinel_content_over_rest_and_cli
     assert cli_sentinel.is_file(), "the CLI did not arm HALT-AFTER"
     assert rest_sentinel.is_file(), "the REST route answered 200 but armed no HALT-AFTER"
     cli_bytes = cli_sentinel.read_bytes()
-    assert cli_bytes == rest_sentinel.read_bytes(), (
-        f"HALT-AFTER content differs: CLI={cli_bytes!r} REST={rest_sentinel.read_bytes()!r}"
-    )
-    assert cli_bytes == f"rc:{PARITY_UNTIL_VERSION}\n".encode("utf-8")
+    assert (
+        cli_bytes == rest_sentinel.read_bytes()
+    ), f"HALT-AFTER content differs: CLI={cli_bytes!r} REST={rest_sentinel.read_bytes()!r}"
+    assert cli_bytes == f"rc:{PARITY_UNTIL_VERSION}\n".encode()
 
 
 # ---------------------------------------------------------------------------
@@ -530,9 +532,7 @@ def test_rest_action_refuses_a_malformed_parameter_like_its_cli_twin(
 
     before = _snapshot(board)
     cli = _run_cli(board, case.script, case.cli_args(board), tmp_path / "cli_tmp")
-    assert cli.returncode != 0, (
-        f"{case.script} accepted the malformed input {case.cli_args(board)!r}:\n{cli.stdout}"
-    )
+    assert cli.returncode != 0, f"{case.script} accepted the malformed input {case.cli_args(board)!r}:\n{cli.stdout}"
     assert _effect(before, _snapshot(board), board) == {}, "the CLI refusal wrote to the board"
 
     with _rest_server(board, tmp_path, monkeypatch) as handle:
@@ -558,12 +558,12 @@ def test_rest_action_refuses_a_malformed_parameter_like_its_cli_twin(
         assert body["exit_code"] == cli.returncode, (case.note, body, cli.stderr)
         assert body["stderr"] == cli.stderr, f"REST stderr differs from the CLI's ({case.note})"
         assert body["stdout"] == cli.stdout
-        assert {"error", "message", "remedy"} <= set(body), (
-            f"POST {case.rest_route} refused without top-level error/message/remedy: {body}"
-        )
-        assert body["message"] == cli.stderr.strip(), (
-            "a route that lifts plain stderr to 'message' must carry exactly that text"
-        )
+        assert {"error", "message", "remedy"} <= set(
+            body
+        ), f"POST {case.rest_route} refused without top-level error/message/remedy: {body}"
+        assert (
+            body["message"] == cli.stderr.strip()
+        ), "a route that lifts plain stderr to 'message' must carry exactly that text"
         assert body["error"] and body["remedy"], body
         return
 
@@ -575,9 +575,9 @@ def test_rest_action_refuses_a_malformed_parameter_like_its_cli_twin(
         # Every action route lifts the script's triple to top-level keys
         # (DualChannelShellEnvelope): those keys ARE the REST refusal. A
         # triple present only inside stderr is the drift this asserts against.
-        assert {"error", "message", "remedy"} <= set(body), (
-            f"POST {case.rest_route} refused without top-level error/message/remedy: {body}"
-        )
+        assert {"error", "message", "remedy"} <= set(
+            body
+        ), f"POST {case.rest_route} refused without top-level error/message/remedy: {body}"
         rest_triple = {k: body[k] for k in ("error", "message", "remedy")}
         assert body["stderr"] == cli.stderr, "REST stderr must match the CLI byte-for-byte"
         assert body["exit_code"] == cli.returncode, (body, cli.returncode)
@@ -595,9 +595,7 @@ def test_every_census_action_verb_has_an_effect_or_refusal_parity_case() -> None
     named by at least one ledger case, and no case names a verb the census
     does not carry -- the same two facts the parity gate reports, asserted
     here so a pytest run alone also fails loudly on a missing fixture."""
-    census_actions = {
-        v.name for v in load_manifest().values() if v.status == "active" and v.verb_class == "action"
-    }
+    census_actions = {v.name for v in load_manifest().values() if v.status == "active" and v.verb_class == "action"}
     covered = verbs_with_a_case()
     missing = sorted(census_actions - covered)
     unknown = sorted(covered - census_actions)

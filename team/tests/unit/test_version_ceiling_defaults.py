@@ -49,7 +49,7 @@ def _project(root: pathlib.Path) -> pathlib.Path:
     return root / "projects" / _PROJECT
 
 
-def _set_versioning(root: pathlib.Path, body: "str | None") -> pathlib.Path:
+def _set_versioning(root: pathlib.Path, body: str | None) -> pathlib.Path:
     """Rewrite project-a's project.cfg with *body* as its [versioning] lines
     (None drops the section entirely). Returns the cfg path."""
     cfg = _project(root) / "project.cfg"
@@ -80,8 +80,7 @@ def _run(root: pathlib.Path, tmp_path: pathlib.Path, body: str):
         "source scripts/lib/temp.sh\n"
         "source scripts/lib/semver.sh\n"
         "source scripts/lib/project_paths.sh\n"
-        "source scripts/lib/discovery.sh\n"
-        + body
+        "source scripts/lib/discovery.sh\n" + body
     )
     env = build_scrubbed_env(
         home_dir=tmp_path,
@@ -162,10 +161,12 @@ def test_read_ceiling_reads_a_legacy_bare_key_file(tmp_path: pathlib.Path) -> No
 def test_cli_prints_a_default_and_refuses_an_unknown_key(tmp_path: pathlib.Path) -> None:
     env = build_scrubbed_env(home_dir=tmp_path, extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     argv = [sys.executable, "-m", "pgai_agent_kanban.lib.version_ceiling"]
-    good = subprocess.run(argv + ["default", "max_minor"], capture_output=True, text=True,
-                          env=env, cwd=tmp_path, timeout=60)
-    bad = subprocess.run(argv + ["default", "max_build"], capture_output=True, text=True,
-                         env=env, cwd=tmp_path, timeout=60)
+    good = subprocess.run(
+        argv + ["default", "max_minor"], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60
+    )
+    bad = subprocess.run(
+        argv + ["default", "max_build"], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60
+    )
     assert (good.returncode, good.stdout) == (0, "13\n")
     assert bad.returncode == 2 and "max_build" in bad.stderr and "max_major" in bad.stderr
 
@@ -175,9 +176,9 @@ def test_cli_prints_a_default_and_refuses_an_unknown_key(tmp_path: pathlib.Path)
 # ---------------------------------------------------------------------------
 
 _ACCESSORS = (
-    'for f in pp_max_patch pp_max_minor pp_max_major; do\n'
+    "for f in pp_max_patch pp_max_minor pp_max_major; do\n"
     '  if v="$($f project-a)"; then echo "$f=[$v]"; else echo "$f FAILED"; fi\n'
-    'done\n'
+    "done\n"
 )
 
 
@@ -199,21 +200,26 @@ def test_absent_and_empty_keys_read_as_the_defaults(two_project_root, tmp_path) 
 def test_none_reads_as_no_ceiling_and_quotes_are_stripped(two_project_root, tmp_path) -> None:
     _set_versioning(two_project_root, 'max_patch = "5"\nmax_minor = None\nmax_major = none\n')
     result = _run(
-        two_project_root, tmp_path,
-        _ACCESSORS + 'pp_version_within_ceiling project-a v9.99.5 && echo WITHIN\n',
+        two_project_root,
+        tmp_path,
+        _ACCESSORS + "pp_version_within_ceiling project-a v9.99.5 && echo WITHIN\n",
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "pp_max_patch=[5]", "pp_max_minor=[]", "pp_max_major=[]", "WITHIN",
+        "pp_max_patch=[5]",
+        "pp_max_minor=[]",
+        "pp_max_major=[]",
+        "WITHIN",
     ]
 
 
 def test_version_within_ceiling_applies_the_default_major_zero(two_project_root, tmp_path) -> None:
     _set_versioning(two_project_root, "max_patch = 21\nmax_minor = 13\n")
     result = _run(
-        two_project_root, tmp_path,
-        'pp_version_within_ceiling project-a v0.13.21 && echo V0-WITHIN\n'
-        'pp_version_within_ceiling project-a v1.0.0 || echo V1-EXCEEDS\n',
+        two_project_root,
+        tmp_path,
+        "pp_version_within_ceiling project-a v0.13.21 && echo V0-WITHIN\n"
+        "pp_version_within_ceiling project-a v1.0.0 || echo V1-EXCEEDS\n",
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["V0-WITHIN", "V1-EXCEEDS"]
@@ -238,7 +244,8 @@ def test_absent_max_major_blocks_v1_in_the_bash_discovery_path(two_project_root,
     req = _add_v1_requirement(two_project_root)
 
     result = _run(
-        two_project_root, tmp_path,
+        two_project_root,
+        tmp_path,
         'discovery_run_pipeline project-a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n',
     )
 
@@ -259,8 +266,14 @@ def test_absent_max_major_blocks_v1_in_eligibility_py(tmp_path: pathlib.Path) ->
 
     env = build_scrubbed_env(home_dir=tmp_path, extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     for args in ([str(req_dir), "v0.0.0"], [str(req_dir), "v0.0.0", "", "", "", "semver"]):
-        cli = subprocess.run([sys.executable, "-m", "pgai_agent_kanban.discovery.eligibility", *args],
-                             capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60)
+        cli = subprocess.run(
+            [sys.executable, "-m", "pgai_agent_kanban.discovery.eligibility", *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            timeout=60,
+        )
         assert (cli.returncode, cli.stdout) == (0, blocked + "\n"), cli.stderr
 
 
@@ -270,7 +283,11 @@ def test_eligibility_py_refuses_a_malformed_ceiling_argument(tmp_path: pathlib.P
     env = build_scrubbed_env(home_dir=tmp_path, extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     cli = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.discovery.eligibility", str(req_dir), "v0.0.0", "", "O"],
-        capture_output=True, text=True, env=env, cwd=tmp_path, timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        timeout=60,
     )
     assert cli.returncode == 2
     assert len(_lines_naming(cli.stderr, "max_major", "O")) == 1, cli.stderr
@@ -281,7 +298,8 @@ def test_max_major_none_makes_v1_eligible(two_project_root, tmp_path) -> None:
     req = _add_v1_requirement(two_project_root)
 
     result = _run(
-        two_project_root, tmp_path,
+        two_project_root,
+        tmp_path,
         'req_dir="$(pp_requirements_dir project-a)"\n'
         '_disc_list_all_eligible_requirements "$req_dir" v0.0.0 '
         '"$(pp_max_minor project-a)" "$(pp_max_major project-a)" "$(pp_max_patch project-a)" semver\n',
@@ -295,8 +313,9 @@ def test_max_major_none_makes_v1_eligible(two_project_root, tmp_path) -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        pytest.param('discovery_run_pipeline project-a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n',
-                     id="pipeline"),
+        pytest.param(
+            'discovery_run_pipeline project-a\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n', id="pipeline"
+        ),
         pytest.param('discovery_step_requirements project-a || echo "STEP_RC=$?"\n', id="step-3-direct"),
     ],
 )
@@ -326,7 +345,8 @@ def test_malformed_max_major_queues_nothing_and_narrates_one_line(two_project_ro
 def test_malformed_ceiling_blocks_the_auto_version_check(two_project_root, tmp_path) -> None:
     _set_versioning(two_project_root, "max_patch = x\n")
     result = _run(
-        two_project_root, tmp_path,
+        two_project_root,
+        tmp_path,
         '_disc_check_ceiling_and_log project-a v0.0.1 test || echo "CHECK_RC=$?"\n',
     )
     assert result.returncode == 0, result.stderr

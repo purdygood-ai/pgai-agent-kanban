@@ -62,8 +62,9 @@ def _bugs_dir(tmp_path: pathlib.Path, project: str = _PROJECT) -> pathlib.Path:
 
 def _bug(bugs_dir: pathlib.Path, name: str, status: str = "open", symptom: str = "synthetic") -> pathlib.Path:
     path = bugs_dir / name
-    path.write_text(f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\n{symptom}\n",
-                    encoding="utf-8")
+    path.write_text(
+        f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\n{symptom}\n", encoding="utf-8"
+    )
     return path
 
 
@@ -79,8 +80,14 @@ def _env(root: pathlib.Path) -> dict[str, str]:
 
 
 def _run(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, "-m", _MODULE, *args], capture_output=True, text=True,
-                          env=_env(root), cwd=str(root), timeout=60)
+    return subprocess.run(
+        [sys.executable, "-m", _MODULE, *args],
+        capture_output=True,
+        text=True,
+        env=_env(root),
+        cwd=str(root),
+        timeout=60,
+    )
 
 
 def _tree_bytes(path: pathlib.Path) -> dict[str, bytes]:
@@ -92,8 +99,10 @@ def _ids(bugs) -> list[str]:
 
 
 def _pairs(bugs_dir: pathlib.Path) -> set[tuple[str, str, str]]:
-    return {(bug.bug_id, match.bug.bug_id, match.rule)
-            for bug, match in same_defect_matches(list(iter_live_bugs(str(bugs_dir))))}
+    return {
+        (bug.bug_id, match.bug.bug_id, match.rule)
+        for bug, match in same_defect_matches(list(iter_live_bugs(str(bugs_dir))))
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +129,17 @@ def test_a_citation_matches_one_way_only(tmp_path) -> None:
     assert _pairs(bugs) == {("BUG-9202", "BUG-9201", "cites")}
 
 
-@pytest.mark.parametrize("symptom", [
-    "Fails as BUG-9201 did before it.",
-    "See also BUG-9201.",
-    "This is not the same defect as BUG-9201.",
-    "Same defect as BUG-9202 -- this very bug.",
-    "Related: BUG-9201 is still open, but this is a different defect.",
-], ids=["passing-mention", "see-also", "negated", "self-citation", "status-remark"])
+@pytest.mark.parametrize(
+    "symptom",
+    [
+        "Fails as BUG-9201 did before it.",
+        "See also BUG-9201.",
+        "This is not the same defect as BUG-9201.",
+        "Same defect as BUG-9202 -- this very bug.",
+        "Related: BUG-9201 is still open, but this is a different defect.",
+    ],
+    ids=["passing-mention", "see-also", "negated", "self-citation", "status-remark"],
+)
 def test_a_passing_mention_negation_or_self_citation_matches_nothing(tmp_path, symptom) -> None:
     bugs = tmp_path / "bugs"
     bugs.mkdir()
@@ -268,14 +281,17 @@ def test_close_flips_the_backlog_marker_of_each_closed_bug(tmp_path) -> None:
     _bug(bugs, "BUG-9201-lock-leak.md")
     _bug(bugs, "BUG-9202-lock-leak-again.md")
     backlog = bugs.parent / "tasks" / "queues" / "bug_backlog.md"
-    backlog.write_text("# Bug Backlog\n\n## Queue\n\n- [ ] BUG-9201-lock-leak\n- [ ] BUG-9202-lock-leak-again\n",
-                       encoding="utf-8")
+    backlog.write_text(
+        "# Bug Backlog\n\n## Queue\n\n- [ ] BUG-9201-lock-leak\n- [ ] BUG-9202-lock-leak-again\n", encoding="utf-8"
+    )
 
     result = _run(root, "close", str(bugs))
 
     assert result.returncode == 0, result.stderr
     assert backlog.read_text(encoding="utf-8").splitlines()[-2:] == [
-        "- [ ] BUG-9201-lock-leak", "- [x] BUG-9202-lock-leak-again"]
+        "- [ ] BUG-9201-lock-leak",
+        "- [x] BUG-9202-lock-leak-again",
+    ]
 
 
 def test_close_outside_a_projects_layout_warns_and_writes_nothing(tmp_path) -> None:

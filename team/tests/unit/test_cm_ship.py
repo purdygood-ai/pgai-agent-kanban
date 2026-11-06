@@ -44,7 +44,6 @@ from __future__ import annotations
 import pathlib
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -70,7 +69,7 @@ _OPENED_BY = "## RC Opened By Task\nCM-20260101-000-open\n\n"
 class FakeGit:
     """Stands in for ``cancel._run_git``: every call succeeds unless named in *fail*, and is recorded."""
 
-    def __init__(self, fail: Optional[str] = None) -> None:
+    def __init__(self, fail: str | None = None) -> None:
         self.fail = fail
         self.calls: list[tuple[str, ...]] = []
 
@@ -87,7 +86,8 @@ class FakeGit:
 
     def origin_calls(self) -> list[tuple[str, ...]]:
         return [
-            call for call in self.calls
+            call
+            for call in self.calls
             if call[0] in ("fetch", "push", "ls-remote") or any(arg.startswith("origin/") for arg in call)
         ]
 
@@ -116,9 +116,9 @@ def no_hooks(monkeypatch: pytest.MonkeyPatch) -> list:
 def _seed(
     tmp_path: pathlib.Path,
     *,
-    push: Optional[str] = None,
+    push: str | None = None,
     prefix: str = "",
-    state: Optional[str] = _STATE.format(active=_VERSION, opened_by=_OPENED_BY),
+    state: str | None = _STATE.format(active=_VERSION, opened_by=_OPENED_BY),
 ) -> OpsContext:
     """A kanban root with one project in the middle of RC _VERSION."""
     root = tmp_path / "root"
@@ -153,8 +153,10 @@ def _ship(ctx: OpsContext, project: str = _PROJECT, version: str = _VERSION, **k
 def test_malformed_version_refuses_before_any_process(tmp_path: pathlib.Path) -> None:
     ctx = _seed(tmp_path)
     with pytest.MonkeyPatch.context() as mp:
+
         def _forbidden(*args, **kwargs):
             raise AssertionError(f"no process may start: {args!r}")
+
         mp.setattr(subprocess, "run", _forbidden)
         mp.setattr(subprocess, "Popen", _forbidden)
         result, out, err = _ship(ctx, version="2.1")
@@ -232,7 +234,7 @@ def test_local_only_project_sends_nothing_to_origin(
 
 @pytest.mark.parametrize("push", [None, "true", "False", ""], ids=["absent", "true", "capitalised", "blank"])
 def test_any_other_policy_ships_through_origin(
-    tmp_path: pathlib.Path, fake_git: FakeGit, no_hooks: list, push: Optional[str]
+    tmp_path: pathlib.Path, fake_git: FakeGit, no_hooks: list, push: str | None
 ) -> None:
     ctx = _seed(tmp_path, push=push)
     outcome, out, _err = _ship(ctx)
@@ -261,8 +263,13 @@ _SKIP = "skipped-unresolved-project"
 )
 @pytest.mark.parametrize("via", ["environment", "repo-root"])
 def test_an_unresolved_project_ships_locally_without_contacting_a_remote(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, fake_git: FakeGit, no_hooks: list,
-    shape: str, token: str, via: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_git: FakeGit,
+    no_hooks: list,
+    shape: str,
+    token: str,
+    via: str,
 ) -> None:
     """Neither PGAI_DEV_TREE_PATH nor a repository override makes a project pushable."""
     ctx = _seed(tmp_path, push="true")
@@ -368,7 +375,7 @@ def test_already_reset_file_is_left_as_written(tmp_path: pathlib.Path, fake_git:
     assert ctx.release_state_path(_PROJECT).read_text(encoding="utf-8") == text
 
 
-def _state(active: str, last_released: Optional[str]) -> str:
+def _state(active: str, last_released: str | None) -> str:
     text = f"# Release State\n\n## Active RC\n{active}\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n"
     if last_released is not None:
         text += f"\n## Last Released\n{last_released}\n"
@@ -376,9 +383,7 @@ def _state(active: str, last_released: Optional[str]) -> str:
 
 
 @pytest.mark.parametrize("before", ["v1.0.0", "none", None, "v1.0.9"])
-def test_reset_raises_last_released_to_the_shipped_version(
-    tmp_path: pathlib.Path, before: Optional[str]
-) -> None:
+def test_reset_raises_last_released_to_the_shipped_version(tmp_path: pathlib.Path, before: str | None) -> None:
     path = tmp_path / "release-state.md"
     path.write_text(_state("v1.1.0", before), encoding="utf-8")
     out: list[str] = []
@@ -491,7 +496,7 @@ def test_failed_reset_is_a_warning_and_the_ship_completes(
 # ---------------------------------------------------------------------------
 
 
-def _release(ctx: OpsContext, repo: pathlib.Path) -> "ship._Release":
+def _release(ctx: OpsContext, repo: pathlib.Path) -> ship._Release:
     return ship._Release(ctx, _PROJECT, _VERSION, str(repo), _RC, ctx.project_root(_PROJECT))
 
 
@@ -522,7 +527,7 @@ def test_hook_output_is_prefixed_line_by_line_and_runs_in_the_repository(tmp_pat
 
 def test_hook_without_an_interpreter_line_runs_as_a_bash_script(tmp_path: pathlib.Path) -> None:
     ctx = _seed(tmp_path)
-    hook = _hook(tmp_path / "hooks" / "plain.sh", "echo \"bash=${BASH_VERSION:+yes}\"\nexit 3\n", shebang=False)
+    hook = _hook(tmp_path / "hooks" / "plain.sh", 'echo "bash=${BASH_VERSION:+yes}"\nexit 3\n', shebang=False)
     out: list[str] = []
     code = ship._run_hook(_release(ctx, tmp_path / "repo"), "cm-release-pre-tag", hook, out.append, out.append)
     assert code == 3

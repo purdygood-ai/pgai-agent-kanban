@@ -56,9 +56,9 @@ def _run_writer_calls(tmp_path: pathlib.Path, status_file: pathlib.Path, calls: 
         source "{_WAKE_TASK_STATE_LIB}"
     """) + "\n".join(calls) + "\n"
     proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
-    assert proc.returncode == 0, (
-        f"writer calls must succeed on {status_file}\nstdout={proc.stdout}\nstderr={proc.stderr}"
-    )
+    assert (
+        proc.returncode == 0
+    ), f"writer calls must succeed on {status_file}\nstdout={proc.stdout}\nstderr={proc.stderr}"
 
 
 def _status(tmp_path: pathlib.Path, text: str) -> pathlib.Path:
@@ -99,18 +99,16 @@ def test_set_block_on_last_section_keeps_file_end_unchanged(tmp_path: pathlib.Pa
 def test_writer_keeps_absent_blank_line_absent(tmp_path: pathlib.Path, call: str) -> None:
     status_file = _status(tmp_path, "## State\nBACKLOG\n## Summary\nx\n")
     _run_writer_calls(tmp_path, status_file, [call.format(f=status_file)] * 3)
-    assert status_file.read_text(encoding="utf-8") == "## State\nDONE\n## Summary\nx\n", (
-        "a section followed directly by the next heading must stay that way"
-    )
+    assert (
+        status_file.read_text(encoding="utf-8") == "## State\nDONE\n## Summary\nx\n"
+    ), "a section followed directly by the next heading must stay that way"
 
 
 # --- Empty target body -------------------------------------------------------
 
 
 def test_set_block_fills_empty_section_and_keeps_following_sections(tmp_path: pathlib.Path) -> None:
-    status_file = _status(
-        tmp_path, "## State\nBACKLOG\n\n## Summary\n\n## Blockers\nnone\n\n## Needs Human\nno\n"
-    )
+    status_file = _status(tmp_path, "## State\nBACKLOG\n\n## Summary\n\n## Blockers\nnone\n\n## Needs Human\nno\n")
     _run_writer_calls(tmp_path, status_file, [f'set_block "{status_file}" Summary "new summary"'] * 3)
     assert status_file.read_text(encoding="utf-8") == (
         "## State\nBACKLOG\n\n## Summary\nnew summary\n\n## Blockers\nnone\n\n## Needs Human\nno\n"
@@ -134,9 +132,7 @@ def test_set_state_fills_empty_state_and_keeps_following_sections(tmp_path: path
     ],
     ids=["no-blank-line-before-next-heading", "empty-last-section", "empty-last-section-no-newline"],
 )
-def test_set_state_fills_empty_state_in_other_shapes(
-    tmp_path: pathlib.Path, fixture: str, expected: str
-) -> None:
+def test_set_state_fills_empty_state_in_other_shapes(tmp_path: pathlib.Path, fixture: str, expected: str) -> None:
     status_file = _status(tmp_path, fixture)
     _run_writer_calls(tmp_path, status_file, [f'set_state "{status_file}" DONE'] * 2)
     assert status_file.read_text(encoding="utf-8") == expected
@@ -154,8 +150,7 @@ def test_promote_waiting_fills_empty_sections_and_keeps_the_rest(tmp_path: pathl
     (tmp_path / "coder_backlog.md").write_text("- [W] CODER-20260101-001-demo\n", encoding="utf-8")
     status_file = _status(
         tmp_path,
-        "## State\nWAITING\n\n## Summary\n\n## Blockers\n\n## Needs Human\nno\n\n"
-        "## Next Recommended Step\ngo\n",
+        "## State\nWAITING\n\n## Summary\n\n## Blockers\n\n## Needs Human\nno\n\n" "## Next Recommended Step\ngo\n",
     )
     _run_writer_calls(tmp_path, status_file, [f'promote_waiting_to_backlog CODER-20260101-001-demo "{status_file}"'])
     assert status_file.read_text(encoding="utf-8") == (

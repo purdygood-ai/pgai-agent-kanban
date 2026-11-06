@@ -43,27 +43,20 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
-# Color helpers
+# Colour table and status-line logger (info/warn, lib/script_common.sh);
+# this script's check results print through pass / fail / note, which carry
+# their own PASS / FAIL / NOTE heads.
 # ---------------------------------------------------------------------------
-if [[ -t 1 ]]; then
-  C_RED=$'\033[0;31m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BLUE=$'\033[0;34m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-else
-  C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_BOLD=""; C_RESET=""
-fi
+# shellcheck source=lib/script_common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
+script_log_init verify-install-policy --labelled
 
-info()  { echo "${C_BLUE}[verify-install-policy]${C_RESET} $*"; }
-ok()    { echo "${C_GREEN}[verify-install-policy] PASS${C_RESET} $*"; }
-fail()  { echo "${C_RED}[verify-install-policy] FAIL${C_RESET} $*"; }
-warn()  { echo "${C_YELLOW}[verify-install-policy]${C_RESET} WARNING: $*"; }
-note()  { echo "${C_YELLOW}[verify-install-policy]${C_RESET} NOTE: $*"; }
+pass()  { log_line "$C_GREEN" "[${SCRIPT_LOG_TAG}] PASS" " $*"; }
+fail()  { log_line "$C_RED" "[${SCRIPT_LOG_TAG}] FAIL" " $*"; }
+note()  { log_line "$C_YELLOW" "[${SCRIPT_LOG_TAG}]" " NOTE: $*"; }
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -71,9 +64,6 @@ note()  { echo "${C_YELLOW}[verify-install-policy]${C_RESET} NOTE: $*"; }
 SIMULATE_FRESH=false
 CHECK_ONLY=false
 VERBOSE=false
-
-# shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
 
 # Usage text as data (per lib/script_common.sh's documented convention).
 # This script's usage intentionally prints to stderr on every path (--help's
@@ -123,7 +113,7 @@ fi
 # ---------------------------------------------------------------------------
 # Locate install.sh (must be sibling of team/ directory)
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 INSTALL_SH="$(cd "$SCRIPT_DIR/../.." && pwd)/install.sh"
 
 # Source temp.sh for resolver helpers (include guard in temp.sh prevents double-load).
@@ -147,7 +137,7 @@ fi
 _PASS=0
 _FAIL=0
 
-_check_pass() { (( _PASS++ )) || true; ok "$1"; }
+_check_pass() { (( _PASS++ )) || true; pass "$1"; }
 _check_fail() { (( _FAIL++ )) || true; fail "$1"; }
 
 # ---------------------------------------------------------------------------
@@ -552,7 +542,7 @@ fi
 echo ""
 
 if [[ "$_FAIL" -eq 0 ]]; then
-  ok "All install policy checks passed."
+  pass "All install policy checks passed."
   exit 0
 else
   fail "$_FAIL check(s) failed. Review output above for details."

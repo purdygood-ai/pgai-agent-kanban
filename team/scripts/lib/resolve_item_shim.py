@@ -23,6 +23,7 @@ Exit codes:
        warning emitted to stderr
     3  not found
 """
+
 from __future__ import annotations
 
 import os

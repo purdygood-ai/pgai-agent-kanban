@@ -37,6 +37,7 @@
 #   migrate_v2.22.5_to_v2.23.0.sh --project <name>   # one project only
 #   migrate_v2.22.5_to_v2.23.0.sh --dry-run          # preview only, no writes
 #   migrate_v2.22.5_to_v2.23.0.sh --project <name> --dry-run
+#   migrate_v2.22.5_to_v2.23.0.sh --help             # print this usage and exit 0
 #
 # Exit codes:
 #   0 — success (including "nothing to do" no-ops, and an empty registry
@@ -46,8 +47,13 @@
 #   3 — KANBAN_ROOT not set or not found
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no project is read or written.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 if [[ ! -d "$KANBAN_ROOT" ]]; then
@@ -56,7 +62,7 @@ if [[ ! -d "$KANBAN_ROOT" ]]; then
     exit 3
 fi
 
-_MIG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_MIG_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/operator_args.sh
 source "${_MIG_SCRIPT_DIR}/../lib/operator_args.sh"
 # shellcheck source=../lib/projects.sh
@@ -78,11 +84,6 @@ operator_args_argparse --value-flags "project" -- "$@"
 if argparse_missing "project"; then
     echo "ERROR: --project requires a value" >&2
     exit 1
-fi
-
-if argparse_has "help" || argparse_has "h"; then
-    printf '%s\n' "$_USAGE_TEXT" >&2
-    exit 0
 fi
 
 if [[ "${#ARGPARSE_POSITIONAL[@]}" -gt 0 ]]; then

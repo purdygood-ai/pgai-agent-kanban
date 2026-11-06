@@ -55,9 +55,7 @@ def _load_script_module(name: str, path: pathlib.Path):
     return mod
 
 
-_pm = _load_script_module(
-    "pm_materialize_release_state_readers", _TEAM_DIR / "pm-agent" / "pm_materialize.py"
-)
+_pm = _load_script_module("pm_materialize_release_state_readers", _TEAM_DIR / "pm-agent" / "pm_materialize.py")
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +73,7 @@ _RC_OPEN = (
     "## Last Released\nv2.27.3\n"
 )
 _NO_LAST_RELEASED = (
-    "# Release State\n\n## Active RC\nv1.0.0\n\n## RC Opened At\nnone\n\n"
-    "## RC Opened By Task\nnone\n"
+    "# Release State\n\n## Active RC\nv1.0.0\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n"
 )
 _ONLY_ACTIVE_RC = "# Release State\n\n## Active RC\nnone\n"
 _RETIRED_HEADINGS_RC_OPEN = (
@@ -91,10 +88,7 @@ _RETIRED_HEADINGS_ONLY = (
 )
 _ZERO_LAST_RELEASED = "## Active RC\nnone\n\n## Last Released\nv0.0.0\n"
 _BLANK_LINES = "## Active RC\n\n\n   v3.1.4   \n\n## Last Released\n\n\nv3.1.3\n"
-_EVENTS_APPENDED = (
-    "## Active RC\nv2.0.0\n\n## Last Released\nv1.9.9\n\n"
-    "## OVERWATCH Decision\nVersion: v2.0.0\n"
-)
+_EVENTS_APPENDED = "## Active RC\nv2.0.0\n\n## Last Released\nv1.9.9\n\n" "## OVERWATCH Decision\nVersion: v2.0.0\n"
 
 # (fixture text or None for "no release-state.md", expected values)
 # Expected keys: board active, board last, attention active, rc_is_open,
@@ -113,7 +107,7 @@ _CASES = {
 }
 
 
-def _project(tmp_path: pathlib.Path, text: "str | None") -> pathlib.Path:
+def _project(tmp_path: pathlib.Path, text: str | None) -> pathlib.Path:
     """A project directory holding *text* as release-state.md (or none)."""
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -123,9 +117,7 @@ def _project(tmp_path: pathlib.Path, text: "str | None") -> pathlib.Path:
 
 
 @pytest.mark.parametrize("case", sorted(_CASES))
-def test_migrated_readers_return_the_values_their_private_parsers_returned(
-    tmp_path: pathlib.Path, case: str
-) -> None:
+def test_migrated_readers_return_the_values_their_private_parsers_returned(tmp_path: pathlib.Path, case: str) -> None:
     """Every migrated reader returns the same value on each fixture shape."""
     text, expected = _CASES[case]
     proj = _project(tmp_path, text)
@@ -273,11 +265,7 @@ def _code_string_constants(tree: ast.AST):
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
             docstrings.add(id(node.value))
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in docstrings
-        ):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
             yield node
 
 

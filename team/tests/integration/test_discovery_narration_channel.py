@@ -51,7 +51,6 @@ import pathlib
 import re
 import subprocess
 import textwrap
-from typing import Optional
 
 import pytest
 
@@ -91,7 +90,7 @@ def _run_discovery(
     project_name: str,
     *,
     log_prelude: str = "",
-    log_file: Optional[pathlib.Path] = None,
+    log_file: pathlib.Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Run discovery_run_pipeline against a temporary kanban tree.
 
@@ -143,7 +142,7 @@ def _add_bug_file(
     bug_id: str = "BUG-0001",
     slug: str = "test-fix",
     status: str = "open",
-    severity: Optional[str] = "low",
+    severity: str | None = "low",
 ) -> pathlib.Path:
     """Create a bug file. severity=None omits the **Severity:** field entirely."""
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
@@ -151,10 +150,7 @@ def _add_bug_file(
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     severity_line = f"**Severity:** {severity}\n\n" if severity is not None else ""
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"{severity_line}"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"{severity_line}" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -168,9 +164,9 @@ def _set_defer_posture(
     kanban_root: pathlib.Path,
     project_name: str,
     *,
-    deferred_bugs: Optional[bool] = None,
-    deferred_bug_level: Optional[str] = None,
-    defer_piggyback: Optional[bool] = None,
+    deferred_bugs: bool | None = None,
+    deferred_bug_level: str | None = None,
+    defer_piggyback: bool | None = None,
 ) -> None:
     cfg_path = kanban_root / "projects" / project_name / "project.cfg"
     lines = ["", "[release]"]
@@ -198,9 +194,7 @@ def _bug_status(bug_file: pathlib.Path) -> str:
 
 def _make_five_bug_scenario(root: pathlib.Path, project_name: str) -> tuple[pathlib.Path, list[pathlib.Path]]:
     """One medium trigger bug + three low (deferred) riders, piggyback=true."""
-    _set_defer_posture(
-        root, project_name, deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True
-    )
+    _set_defer_posture(root, project_name, deferred_bugs=True, deferred_bug_level="low", defer_piggyback=True)
     trigger = _add_bug_file(root, project_name, bug_id="BUG-0001", slug="trigger", severity="medium")
     riders = [
         _add_bug_file(root, project_name, bug_id="BUG-0002", slug="rider-a", severity="low"),
@@ -230,9 +224,7 @@ class TestPiggybackUnderTheRealWakeLogChannel:
 
         log_file = tmp_path / "wake.log"
         real_log_fn = _extract_bash_function(_WAKE_BOOTSTRAP_SH, "log")
-        result = _run_discovery(
-            root, "project-a", log_prelude=real_log_fn, log_file=log_file
-        )
+        result = _run_discovery(root, "project-a", log_prelude=real_log_fn, log_file=log_file)
 
         assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert "Traceback" not in result.stdout, result.stdout
@@ -294,9 +286,7 @@ class TestContaminatedPostFilterListRefusesTheWholeBundle:
         """)
 
         log_file = tmp_path / "wake.log"
-        result = _run_discovery(
-            root, "project-a", log_prelude=contaminating_log_fn, log_file=log_file
-        )
+        result = _run_discovery(root, "project-a", log_prelude=contaminating_log_fn, log_file=log_file)
 
         assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert "Traceback" not in result.stdout, result.stdout
@@ -308,12 +298,9 @@ class TestContaminatedPostFilterListRefusesTheWholeBundle:
         log_content = log_file.read_text(encoding="utf-8")
         trigger_id = trigger.name.replace(".md", "")
         assert (
-            "refusing to bundle -- post-filter item list contains a line "
-            "that is not a bundleable item path"
+            "refusing to bundle -- post-filter item list contains a line " "that is not a bundleable item path"
         ) in log_content, log_content
-        assert f"piggybacking 3 deferred bugs (trigger: {trigger_id} medium)" in log_content, (
-            log_content
-        )
+        assert f"piggybacking 3 deferred bugs (trigger: {trigger_id} medium)" in log_content, log_content
 
         # No bundle is produced: the post-filter shape guard refuses the
         # whole step before _disc_write_bundle is ever called.
@@ -345,9 +332,7 @@ class TestFullTranscriptHasNoPythonTracebacks:
 
         log_file = tmp_path / "wake.log"
         real_log_fn = _extract_bash_function(_WAKE_BOOTSTRAP_SH, "log")
-        result = _run_discovery(
-            root, "project-a", log_prelude=real_log_fn, log_file=log_file
-        )
+        result = _run_discovery(root, "project-a", log_prelude=real_log_fn, log_file=log_file)
 
         transcript = result.stdout + "\n" + result.stderr + "\n" + log_file.read_text(encoding="utf-8")
         assert "Traceback" not in transcript, transcript
@@ -367,8 +352,7 @@ class TestDiscoveryDriverWritesNoNarrationToStdout:
         offending = _unredirected_narration_lines(_SCRIPTS_LIB / "discovery.sh")
         assert not offending, (
             "team/scripts/lib/discovery.sh has an echo/printf site that does not "
-            "redirect to stderr (narration must never reach stdout):\n"
-            + "\n".join(offending)
+            "redirect to stderr (narration must never reach stdout):\n" + "\n".join(offending)
         )
 
     def test_check_flags_a_bare_unredirected_echo(self, tmp_path: pathlib.Path) -> None:
@@ -388,11 +372,11 @@ class TestDiscoveryDriverWritesNoNarrationToStdout:
             ("printf '%s\\n' \"$msg\"", True),
             ('echo "narration" >&2', False),
             # Captured by a command substitution: nothing reaches stdout.
-            ("remedy=\"run: $(printf '%q' \"${root}/scripts/unhalt.sh\")\"", False),
+            ('remedy="run: $(printf \'%q\' "${root}/scripts/unhalt.sh")"', False),
             ('x="$(echo "$(printf %s inner)")"', False),
             ("x=`echo captured`", False),
             # The substitution is captured, but the echo around it is not.
-            ("echo \"run: $(printf '%q' \"$root\")\"", True),
+            ('echo "run: $(printf \'%q\' "$root")"', True),
             ("$(true) ; echo outer", True),
             # A redirect inside a substitution does not excuse the outer echo.
             ('echo "$(cmd >&2)"', True),
@@ -430,14 +414,10 @@ def test_halt_guard_refusal_prints_quoted_remedy_on_stderr_and_nothing_on_stdout
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert result.stdout == "DISCOVERY_STATUS=blocked\n", result.stdout
     quoted_script = _bash_quoted(str(root / remedy_scripts[0]))
-    expected_command = (
-        f"{quoted_script} --project {project_name}" if halt_scope == "project" else quoted_script
-    )
+    expected_command = f"{quoted_script} --project {project_name}" if halt_scope == "project" else quoted_script
     remedy = re.search(r"^remedy:\s*(.*)$", result.stderr, re.MULTILINE)
     assert remedy, result.stderr
-    assert remedy.group(1).strip() == (
-        f"Once the underlying issue is resolved, run: {expected_command}"
-    ), result.stderr
+    assert remedy.group(1).strip() == (f"Once the underlying issue is resolved, run: {expected_command}"), result.stderr
 
 
 def _bash_quoted(value: str) -> str:
@@ -558,11 +538,7 @@ class TestBugDiscoveryStepWritesNoNarrationToStdout:
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            if (
-                re.search(r"\becho\b|\bprintf\b", stripped)
-                and ">&2" not in stripped
-                and "|" not in stripped
-            ):
+            if re.search(r"\becho\b|\bprintf\b", stripped) and ">&2" not in stripped and "|" not in stripped:
                 offending.append(f"{lineno}: {line}")
         assert not offending, (
             "discovery_step_bugs() in team/scripts/lib/discovery_steps.sh has an "

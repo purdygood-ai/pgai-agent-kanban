@@ -48,23 +48,19 @@ def _source(func_call: str) -> str:
             "1",
         ),  # standalone --flag (not in value-flags) gets value '1'
         (
-            "argparse_parse --value-flags 'project' -- --project=myproject"
-            " && echo ${ARGPARSE_FLAGS[project]}",
+            "argparse_parse --value-flags 'project' -- --project=myproject" " && echo ${ARGPARSE_FLAGS[project]}",
             "myproject",
         ),  # --flag=value form
         (
-            "argparse_parse --value-flags 'project' -- --project myproject"
-            " && echo ${ARGPARSE_FLAGS[project]}",
+            "argparse_parse --value-flags 'project' -- --project myproject" " && echo ${ARGPARSE_FLAGS[project]}",
             "myproject",
         ),  # --flag value (space-separated) form
         (
-            "argparse_parse --value-flags 'foo' -- --foo a=b"
-            " && echo ${ARGPARSE_FLAGS[foo]}",
+            "argparse_parse --value-flags 'foo' -- --foo a=b" " && echo ${ARGPARSE_FLAGS[foo]}",
             "a=b",
         ),  # values containing '=' are preserved verbatim
         (
-            "argparse_parse -- --some-unknown-flag"
-            " && echo ${ARGPARSE_FLAGS[some-unknown-flag]:-MISSING}",
+            "argparse_parse -- --some-unknown-flag" " && echo ${ARGPARSE_FLAGS[some-unknown-flag]:-MISSING}",
             "1",
         ),  # unknown flags are recorded, not rejected
         (
@@ -73,13 +69,11 @@ def _source(func_call: str) -> str:
             "alpha beta gamma",
         ),  # non-flag tokens appear in ARGPARSE_POSITIONAL in input order
         (
-            "argparse_parse --value-flags 'project' -- --project"
-            " && echo ${ARGPARSE_MISSING[0]}",
+            "argparse_parse --value-flags 'project' -- --project" " && echo ${ARGPARSE_MISSING[0]}",
             "project",
         ),  # value-taking flag with no value (end of argv) goes into ARGPARSE_MISSING
         (
-            "argparse_parse --value-flags 'project color' -- --project --color red"
-            " && echo ${ARGPARSE_MISSING[0]}",
+            "argparse_parse --value-flags 'project color' -- --project --color red" " && echo ${ARGPARSE_MISSING[0]}",
             "project",
         ),  # value-taking flag whose next token is another flag goes into ARGPARSE_MISSING
         (
@@ -88,18 +82,15 @@ def _source(func_call: str) -> str:
             "foo coder 1",
         ),  # multiple flags in a single argparse_parse call are all recorded
         (
-            "argparse_parse --dry-run"
-            " && argparse_has dry-run && echo yes || echo no",
+            "argparse_parse --dry-run" " && argparse_has dry-run && echo yes || echo no",
             "yes",
         ),  # argparse_has returns 0 (true) when the flag was present in argv
         (
-            "argparse_parse --some-flag"
-            " && argparse_has absent-flag && echo yes || echo no",
+            "argparse_parse --some-flag" " && argparse_has absent-flag && echo yes || echo no",
             "no",
         ),  # argparse_has returns 1 (false) when the flag was not in argv
         (
-            "argparse_parse --value-flags 'project' -- --project"
-            " && argparse_missing project && echo yes || echo no",
+            "argparse_parse --value-flags 'project' -- --project" " && argparse_missing project && echo yes || echo no",
             "yes",
         ),  # argparse_missing returns 0 when the flag was declared value-taking but got no value
         (
@@ -121,15 +112,13 @@ def test_value_flag_equals_and_space_forms_produce_same_result(tmp_path: pathlib
     result_eq = run_bash(
         tmp_path,
         _source(
-            "argparse_parse --value-flags 'dev-tree' -- --dev-tree=/path/to/tree"
-            " && echo ${ARGPARSE_FLAGS[dev-tree]}"
+            "argparse_parse --value-flags 'dev-tree' -- --dev-tree=/path/to/tree" " && echo ${ARGPARSE_FLAGS[dev-tree]}"
         ),
     )
     result_sp = run_bash(
         tmp_path,
         _source(
-            "argparse_parse --value-flags 'dev-tree' -- --dev-tree /path/to/tree"
-            " && echo ${ARGPARSE_FLAGS[dev-tree]}"
+            "argparse_parse --value-flags 'dev-tree' -- --dev-tree /path/to/tree" " && echo ${ARGPARSE_FLAGS[dev-tree]}"
         ),
     )
     assert result_eq.stdout.strip() == "/path/to/tree"
@@ -141,8 +130,7 @@ def test_double_dash_signals_end_of_flags(tmp_path: pathlib.Path) -> None:
     result = run_bash(
         tmp_path,
         _source(
-            "argparse_parse -- -- --not-a-flag pos1"
-            " && echo ${ARGPARSE_POSITIONAL[0]} ${ARGPARSE_POSITIONAL[1]:-}"
+            "argparse_parse -- -- --not-a-flag pos1" " && echo ${ARGPARSE_POSITIONAL[0]} ${ARGPARSE_POSITIONAL[1]:-}"
         ),
     )
     assert result.returncode == 0
@@ -176,11 +164,7 @@ def test_argparse_reset_clears_flags(tmp_path: pathlib.Path) -> None:
     """argparse_reset clears ARGPARSE_FLAGS so a subsequent parse starts fresh."""
     result = run_bash(
         tmp_path,
-        _source(
-            "argparse_parse --dry-run"
-            " && argparse_reset"
-            " && echo COUNT:${#ARGPARSE_FLAGS[@]}"
-        ),
+        _source("argparse_parse --dry-run" " && argparse_reset" " && echo COUNT:${#ARGPARSE_FLAGS[@]}"),
     )
     assert result.returncode == 0
     assert "COUNT:0" in result.stdout
@@ -190,11 +174,7 @@ def test_argparse_reset_clears_positional(tmp_path: pathlib.Path) -> None:
     """argparse_reset clears ARGPARSE_POSITIONAL."""
     result = run_bash(
         tmp_path,
-        _source(
-            "argparse_parse alpha beta"
-            " && argparse_reset"
-            " && echo COUNT:${#ARGPARSE_POSITIONAL[@]}"
-        ),
+        _source("argparse_parse alpha beta" " && argparse_reset" " && echo COUNT:${#ARGPARSE_POSITIONAL[@]}"),
     )
     assert result.returncode == 0
     assert "COUNT:0" in result.stdout

@@ -148,9 +148,7 @@ def test_latest_record_returns_most_recent_after_multiple_appends(tmp_path: Path
 
 
 @pytest.mark.parametrize("verdict", ["built", "failed-to-build", "could-not-attempt"])
-def test_each_verdict_class_round_trips_through_append_and_parse(
-    tmp_path: Path, verdict: str
-) -> None:
+def test_each_verdict_class_round_trips_through_append_and_parse(tmp_path: Path, verdict: str) -> None:
     ledger_path = str(tmp_path / "deep-verify-ledger.md")
     append_record(ledger_path, _make_record(verdict=verdict, detail=f"detail for {verdict}"))
     record = latest_record(ledger_path)

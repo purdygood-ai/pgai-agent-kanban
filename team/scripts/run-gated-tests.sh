@@ -7,10 +7,21 @@
 # docker daemon is available.
 #
 # Usage:
-#   run-gated-tests.sh [--verbose]
+#   PGAI_CONTAINER_TIER=1 run-gated-tests.sh [--verbose]
+#
+# Operator-only gate:
+#   The image tests build images and start containers, which is the
+#   operator-only container tier (lib/container_tier.sh). They run only when
+#   PGAI_CONTAINER_TIER=1 is set and the run is not inside an agent wake
+#   (PGAI_AGENT_WAKE_ACTIVE is not 1); otherwise the test module skips every
+#   image test before any docker command, naming the gate
+#   (key=container_tier.operator_only), and only the Dockerfile structural
+#   tests run.  The operator runs:
+#     PGAI_CONTAINER_TIER=1 bash team/scripts/run-gated-tests.sh
 #
 # Exit codes:
-#   0  = all tests passed (or all docker-gated tests skipped — no docker daemon)
+#   0  = all tests passed (or the image tests skipped — no operator
+#        authorization or no docker daemon)
 #   1  = test failure
 #   2  = pytest not installed
 #
@@ -55,11 +66,11 @@
 # BLOCK-WORTHY: an unreachable bootstrap prelude leaves every downstream
 # tunable/path resolution undefined for this runner.
 # CENSUS-ANCHOR: run-gated-tests-env-bootstrap-01
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve kanban root and script directory ---
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
-_RGT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RGT_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # --- Source optional config files ---
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
@@ -92,7 +103,7 @@ set -euo pipefail
 
 # --- Clean exit handling ---
 # shellcheck source=lib/script_common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/script_common.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/script_common.sh"
 trap cleanup_on_exit EXIT
 
 # --- Release this invocation's pytest basetemp on every exit path ---
@@ -110,7 +121,7 @@ CLEANUP_ON_EXIT_PRE_HOOK=_rg_release_basetemp_on_exit
 # Run from a checkout (team/scripts/), the root is that checkout; run from an
 # install (scripts/), it is the resolved dev tree, PGAI_DEV_TREE_PATH
 # (resolve_runner_repo_root in lib/dev_tree.sh).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO_ROOT="$(resolve_runner_repo_root "$SCRIPT_DIR" "$TEAM_ROOT/kanban.cfg")"
 
 # --- Parse arguments ---
@@ -123,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<EOF
-Usage: $(basename "$0") [--verbose]
+Usage: PGAI_CONTAINER_TIER=1 $(basename "$0") [--verbose]
 
 Run the docker-gated test suite for the pgai-agent-kanban workspace entrypoint.
 
@@ -132,6 +143,11 @@ PGAI_AGENT_KANBAN_ROOT_PATH is unset or unmounted, and that a valid mounted
 root lands an interactive login shell in that directory.
 
 Both docker/rocky9 and docker/debian flavors are exercised.
+
+Building images is the operator-only container tier: the image tests run only
+with PGAI_CONTAINER_TIER=1 set outside an agent wake. Without it they skip
+before any docker command, naming the gate (key=container_tier.operator_only),
+and only the Dockerfile structural tests run.
 
 When no docker daemon is available, all docker-gated tests skip cleanly.
 This script treats pytest exit code 5 (no tests collected or all skipped)
@@ -142,7 +158,8 @@ Options:
   --help, -h      Show this help
 
 Exit codes:
-  0  = all tests passed (or all docker tests skipped — no docker daemon)
+  0  = all tests passed (or the image tests skipped — no operator
+       authorization or no docker daemon)
   1  = test failure
   2  = pytest not installed
 
@@ -153,42 +170,15 @@ EOF
       exit 0
       ;;
     *)
-      # Partial remedy (docs/coding-standards.md "Gates prescribe, not just
-      # diagnose"): the offending argument is named deterministically, but which
-      # valid flag the operator meant to pass is user intent this runner
-      # cannot resolve — --help names every accepted flag as the next step.
-      echo "FAIL: unrecognized argument '$1'." >&2
-      echo "" >&2
-      echo "Cause(s):" >&2
-      echo "  - '$1' does not match any flag this runner accepts." >&2
-      echo "" >&2
-      echo "To fix:" >&2
-      echo "  1. bash \"${BASH_SOURCE[0]}\" --help          # list every accepted flag" >&2
-      echo "  2. Re-run with the corrected flag, e.g.: bash \"${BASH_SOURCE[0]}\" --verbose" >&2
-      echo "" >&2
-      echo "Rule: this runner accepts only the flags listed in its --help output; an" >&2
-      echo "unrecognized argument is rejected rather than silently ignored." >&2
+      gated_runner_reject_unknown_arg "${BASH_SOURCE[0]}" "$1" "bash \"${BASH_SOURCE[0]}\" --verbose"
       exit 1
       ;;
   esac
 done
 
 # --- Check pytest is available ---
-# Full remedy (docs/coding-standards.md "Gates prescribe, not just
-# diagnose"): pytest's absence has one universal, verbatim-runnable fix.
-if ! command -v pytest >/dev/null 2>&1 && ! python3 -m pytest --version >/dev/null 2>&1; then
-  echo "FAIL: pytest is not installed in this Python environment." >&2
-  echo "" >&2
-  echo "Cause(s):" >&2
-  echo "  - no 'pytest' executable found on PATH" >&2
-  echo "  - 'python3 -m pytest --version' also failed (pytest not importable)" >&2
-  echo "" >&2
-  echo "To fix:" >&2
-  echo "  1. pip install pytest" >&2
-  echo "  2. bash \"${BASH_SOURCE[0]}\"" >&2
-  echo "" >&2
-  echo "Rule: this runner requires pytest as a hard dependency; it cannot execute" >&2
-  echo "the test suite without it." >&2
+if ! gated_runner_pytest_available; then
+  gated_runner_report_pytest_missing "bash \"${BASH_SOURCE[0]}\"" "the test suite"
   # BLOCK-WORTHY: verification unable to run at all -- pytest missing means
   # this gated suite cannot execute, not that it ran clean.
   # CENSUS-ANCHOR: run-gated-tests-pytest-missing-01

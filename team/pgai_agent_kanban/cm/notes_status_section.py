@@ -96,7 +96,7 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import Iterator, List, Optional, Sequence, Tuple
+from collections.abc import Iterator, Sequence
 
 # Run by file path (``python3 .../notes_status_section.py``) or loaded from a
 # file outside its package, this module has no parent package and the
@@ -144,10 +144,10 @@ _VALUE_TOKEN_RE = re.compile(r"^(?:status\s*:\s*)?[*_`\s]*([A-Za-z][A-Za-z0-9_-]
 # A release-notes file named for a version: v1.2.3.md, 1.2.3.md, v1.2.3-notes.md.
 _NOTES_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
 
-Segment = Tuple[str, bool]
+Segment = tuple[str, bool]
 
 
-def _line_segments(lines: Sequence[str]) -> List[List[Segment]]:
+def _line_segments(lines: Sequence[str]) -> list[list[Segment]]:
     """Split each line of *lines* into ``(text, is_comment)`` segments.
 
     *lines* are a file's lines as ``str.splitlines(keepends=True)`` gives
@@ -167,14 +167,14 @@ def _line_segments(lines: Sequence[str]) -> List[List[Segment]]:
     text = "".join(pieces)
     spans = comment_spans(text, html_block_interrupts_paragraph=True)
 
-    result: List[List[Segment]] = []
+    result: list[list[Segment]] = []
     span_index = 0
     offset = 0
     for index, line in enumerate(lines):
         line_start, line_end = offset, offset + len(line)
         while span_index < len(spans) and spans[span_index][1] <= line_start:
             span_index += 1
-        segments: List[Segment] = []
+        segments: list[Segment] = []
         pos = line_start
         probe = span_index
         while pos < line_end:
@@ -197,15 +197,12 @@ def _line_segments(lines: Sequence[str]) -> List[List[Segment]]:
     return result
 
 
-def _visible_lines(lines: Sequence[str]) -> List[str]:
+def _visible_lines(lines: Sequence[str]) -> list[str]:
     """Return each line of *lines* with its HTML comment text removed."""
-    return [
-        "".join(text for text, is_comment in segments if not is_comment)
-        for segments in _line_segments(lines)
-    ]
+    return ["".join(text for text, is_comment in segments if not is_comment) for segments in _line_segments(lines)]
 
 
-def status_sections(lines: Sequence[str]) -> Iterator[Tuple[int, int]]:
+def status_sections(lines: Sequence[str]) -> Iterator[tuple[int, int]]:
     """Yield ``(start, end)`` line-index ranges of every Status section body.
 
     *lines* are as ``str.splitlines(keepends=True)`` gives them. *start* is
@@ -251,7 +248,7 @@ def _replace_visible_placeholder(line: str, segments: Sequence[Segment], target_
     return "".join(rebuilt).rstrip() + "\n"
 
 
-def stamp_status_placeholder(text: str, target_status: str) -> Optional[str]:
+def stamp_status_placeholder(text: str, target_status: str) -> str | None:
     """Return *text* with the Status placeholder replaced by *target_status*.
 
     The stamp agrees with ``status_section_has_placeholder``: whenever that
@@ -298,14 +295,10 @@ def status_section_has_placeholder(text: str) -> bool:
     """
     lines = text.splitlines(keepends=True)
     visible = _visible_lines(lines)
-    return any(
-        PLACEHOLDER in visible[index]
-        for start, end in status_sections(lines)
-        for index in range(start, end)
-    )
+    return any(PLACEHOLDER in visible[index] for start, end in status_sections(lines) for index in range(start, end))
 
 
-def status_value(text: str) -> Optional[str]:
+def status_value(text: str) -> str | None:
     """Return the value of the first Status section in *text*, or None.
 
     HTML comments are removed first, as the module docstring describes, one
@@ -323,7 +316,7 @@ def status_value(text: str) -> Optional[str]:
     return body.split("\n", 1)[0].strip()
 
 
-def status_value_token(text: str) -> Optional[str]:
+def status_value_token(text: str) -> str | None:
     """Return the leading status token of *text*'s Status value, upper-cased.
 
     Markdown emphasis and code markers and a ``Status:`` label before the
@@ -347,20 +340,20 @@ class PatternResult:
     narration lines the CLI prints.
     """
 
-    def __init__(self, detected: bool, window: List[str], lines: List[str]) -> None:
+    def __init__(self, detected: bool, window: list[str], lines: list[str]) -> None:
         self.detected = detected
         self.window = window
         self.lines = lines
 
 
-def _notes_version(path: pathlib.Path) -> Optional[Tuple[int, int, int]]:
+def _notes_version(path: pathlib.Path) -> tuple[int, int, int] | None:
     match = _NOTES_VERSION_RE.match(path.name)
     if not match:
         return None
     return semver.parse(".".join(match.groups()))
 
 
-def non_functional_pattern(notes_dir: pathlib.Path, active_rc: Optional[str] = None) -> PatternResult:
+def non_functional_pattern(notes_dir: pathlib.Path, active_rc: str | None = None) -> PatternResult:
     """Decide whether the last three shipped releases were all NON-FUNCTIONAL.
 
     Every ``<version>.md`` file in *notes_dir* is a candidate, ordered by
@@ -372,7 +365,7 @@ def non_functional_pattern(notes_dir: pathlib.Path, active_rc: Optional[str] = N
     above the value, and Markdown emphasis around it, never hide it.
     """
     active = semver.parse(active_rc) if active_rc else None
-    shipped: List[Tuple[Tuple[int, int, int], pathlib.Path, str]] = []
+    shipped: list[tuple[tuple[int, int, int], pathlib.Path, str]] = []
     for path in notes_dir.glob("*.md"):
         version = _notes_version(path)
         if version is None or (active is not None and version == active):
@@ -388,9 +381,13 @@ def non_functional_pattern(notes_dir: pathlib.Path, active_rc: Optional[str] = N
     shipped.sort(key=lambda item: item[0])
 
     if len(shipped) < 3:
-        return PatternResult(False, [], [
-            f"NON-FUNCTIONAL pattern check: only {len(shipped)} shipped release(s) found — need at least 3.",
-        ])
+        return PatternResult(
+            False,
+            [],
+            [
+                f"NON-FUNCTIONAL pattern check: only {len(shipped)} shipped release(s) found — need at least 3.",
+            ],
+        )
     last_three = shipped[-3:]
     pairs = ", ".join(f"{path.name}={status}" for _, path, status in last_three)
     lines = [f"NON-FUNCTIONAL pattern check: last 3 releases: {pairs}"]
@@ -402,7 +399,7 @@ def non_functional_pattern(notes_dir: pathlib.Path, active_rc: Optional[str] = N
     return PatternResult(detected, window, lines)
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point; see the module docstring for the contract."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.notes_status_section",

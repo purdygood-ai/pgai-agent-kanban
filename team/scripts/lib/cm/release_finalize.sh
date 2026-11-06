@@ -65,19 +65,17 @@
 # cm_release_finalize invokes each at exactly the right point, preserving
 # the original step order and stdout without duplicating either hook body.
 #
-# Other functions in this file (_run_release_hook,
-# _cm_remove_stale_worktrees_for_branch) are internal helpers used by
-# cm_release_finalize and by the hook-step callbacks defined in release.sh.
+# The other function in this file (_cm_remove_stale_worktrees_for_branch)
+# is an internal helper used by cm_release_finalize.
 # Step 16b's two helpers (_cm_release_snapshot_running_bugs,
 # _cm_release_stamp_fixed_in) are in the sibling release_fixed_in.sh, and
 # Step 16c's (_cm_release_archive_finished_items) in release_archive.sh;
 # this file sources both itself.
 # The closing summary's origin/branch lines come from
 # _cm_release_print_origin_summary_lines in release_origin_summary.sh.
-# _run_release_hook lives here (rather than staying inline in release.sh)
-# because every one of its call sites is a hook-step callback; like
-# git_step (see release_squash.sh's header), it only needs to exist by call
-# time, not by release.sh's own source time.
+# The hook runner the hook-step callbacks call (_run_release_hook, and the
+# runner check cm_release_hook_runner_check) is in release_hook_runner.sh,
+# which this file also sources itself.
 #
 # Dependencies (must already be sourced/defined by the caller before this
 # file's entry point is called)
@@ -94,9 +92,9 @@
 #     (called by the caller-supplied hook-step callbacks, not directly here).
 #   team/scripts/lib/pp_run_ops.sh / lib/project_paths.sh — pp_run_ops
 #     (Step 15c's reliability refresh, Step 16b's writeback, Step 16c's archive), pp_pythonpath
-#     (Step 13c's bundled-item promotion), pp_prefix_tag, pp_strip_prefix_from_tag, pp_project_root.
+#     (Step 13c's bundled-item promotion; the hook runner), pp_prefix_tag, pp_strip_prefix_from_tag, pp_project_root.
 #   team/scripts/lib/error_contract.sh — pgai_emit_error_contract (the
-#     blocking-hook failure refusal in _run_release_hook).
+#     hook runner's refusals in release_hook_runner.sh).
 #   team/scripts/lib/cm/release_ship_posture.sh —
 #     cm_release_append_auto_ship_events (Step 12 post-write: appends each
 #     Auto-Ship Event the posture recorded; prints nothing when none was).
@@ -128,84 +126,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/release_fixed_in.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/release_archive.sh"
 # shellcheck source=release_resolve.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release_resolve.sh"
+# The hook runner the hook-step callbacks call (release_hook_runner.sh), likewise.
+# shellcheck source=release_hook_runner.sh
+source "$(dirname "${BASH_SOURCE[0]}")/release_hook_runner.sh"
 
-# Helper: run a lifecycle hook for this release.
-# Usage: _run_release_hook <hook-name> <hook-path> [--no-block|--inbox]
-#
-# hook-name  : identifier used in log prefixes (e.g. "cm-release-pre-squash")
-# hook-path  : absolute path to the hook script
-# --no-block : if set, hook failure is a logged warning; release continues
-# --inbox    : a blocking failure also writes its triple to the operator inbox
-#              (pre-tag; pre-squash's trigger 4 HALT writes its own entry)
-#
-# Hook runs with cwd=$REPO_ROOT and six required PGAI_* env vars plus the
-# ambient environment. stdout/stderr are captured and prefixed with
-# "[hook <name>]". Return: 0 = success or benign skip; non-zero = blocking
-# failure (when --no-block is absent).
-_run_release_hook() {
-  local hook_name="$1"
-  local hook_path="$2"
-  local no_block="${3:-}"
-
-  if [[ ! -f "$hook_path" ]]; then
-    echo "[cm-release] hook ${hook_name}: not present, skipping"
-    return 0
-  fi
-  if [[ ! -x "$hook_path" ]]; then
-    echo "[cm-release] WARNING: hook ${hook_name} exists but is not executable, skipping" >&2
-    return 0
-  fi
-
-  echo "[cm-release] running hook ${hook_name}..."
-  local _hook_rc=0
-  (
-    cd "$REPO_ROOT"
-    PGAI_TARGET_VERSION="$ACTIVE_RC" \
-    PGAI_PROJECT_NAME="$PROJECT_NAME" \
-    PGAI_PROJECT_ROOT="$_CM_PROJECT_ROOT" \
-    PGAI_DEV_TREE_PATH="$REPO_ROOT" \
-    PGAI_RC_BRANCH="$RC_BRANCH" \
-    PGAI_KANBAN_ROOT="$KANBAN_ROOT" \
-    "$hook_path" 2>&1 | sed "s/^/[hook ${hook_name}] /"
-    exit "${PIPESTATUS[0]}"
-  ) || _hook_rc=$?
-
-  if [[ $_hook_rc -ne 0 ]]; then
-    if [[ "$no_block" == "--no-block" ]]; then
-      echo "[cm-release] WARNING: hook ${hook_name} failed (rc=$_hook_rc), continuing per --no-block" >&2
-      return 0
-    fi
-    # Non-deterministic (exempt): the hook is project-supplied, so its failure
-    # cause lives inside the hook's own logic, not in anything release.sh can
-    # inspect. Per docs/coding-standards.md "The non-deterministic exemption",
-    # this failure is exempt from a numbered fix-command block but is NEVER
-    # exempt from naming the next diagnostic step — the "[hook <name>]"
-    # lines already printed above are that step.
-    echo "[cm-release] ERROR: ${hook_name}: FAIL — hook exited non-zero (rc=$_hook_rc)" >&2
-    echo "[cm-release] ERROR:" >&2
-    echo "[cm-release] ERROR: Cause(s):" >&2
-    echo "[cm-release] ERROR:   - ${hook_path} — project-supplied hook returned rc=$_hook_rc" >&2
-    echo "[cm-release] ERROR:" >&2
-    echo "[cm-release] ERROR: Next diagnostic step: read the \"[hook ${hook_name}]\"-prefixed lines printed above for this hook's own stdout/stderr — that output names the specific failure inside the hook. This gate cannot prescribe a fix command because the hook's internal logic is project-supplied; its failure cause is not knowable from release.sh." >&2
-    echo "[cm-release] ERROR:" >&2
-    echo "[cm-release] ERROR: Rule: a blocking hook (${hook_name}) must exit 0 for the release to proceed past this phase." >&2
-    # Dual-channel error contract (team/scripts/lib/error_contract.sh), in
-    # addition to the Cause(s)/Next-diagnostic-step/Rule block above: the
-    # error key below is the hook's own phase name, the documented id an
-    # operator or tool would grep for.
-    local _hook_err_key="cm-release.hook-failure.${hook_name}"
-    local _hook_err_msg="The ${hook_name} release hook exited non-zero (rc=${_hook_rc}); a blocking release hook must exit 0 for the release to proceed past this phase."
-    local _hook_err_remedy="Read the \"[hook ${hook_name}]\"-prefixed lines printed above for the hook's own stdout/stderr, fix the underlying cause inside ${hook_path}, then re-run scripts/cm/release.sh."
-    pgai_emit_error_contract "$_hook_err_key" "$_hook_err_msg" "$_hook_err_remedy"
-    [[ "$no_block" == "--inbox" ]] && cm_release_stop_inbox_entry "$_hook_err_key" "$_hook_err_msg" "$_hook_err_remedy" no
-    # BLOCK-WORTHY: a blocking release hook is an integrity invariant the
-    # project declared; the release stops before the phase it guards.
-    # CENSUS-ANCHOR: release-finalize-hook-failure-01
-    exit 1
-  fi
-  echo "[cm-release] hook ${hook_name}: completed successfully"
-  return 0
-}
+# The scripts root, resolved once, now, while BASH_SOURCE[0] still names this
+# file relative to the directory it was opened from. This stage sits two
+# levels below it in both the dev tree (team/scripts/lib/cm/) and the
+# installed layout (scripts/lib/cm/); Step 13c finds cm/promote_bundled_items.py
+# there, so a later `cd` or a relatively named release.sh changes nothing.
+_CM_RELEASE_FINALIZE_SCRIPTS_ROOT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Helper: force-remove any linked worktree still checked out on the given
 # branch, so a subsequent `git branch -D <branch>` does not fail with
@@ -541,14 +471,9 @@ EOF
     # Promotes the file's own ## Status (always) and, only when a
     # ## Bundled Items section exists, each referenced item's ## Status too.
     # Lives in promote_bundled_items.py so the regression suite can import it.
-    #
-    # This stage file sits two levels below the scripts root in both the dev
-    # tree (team/scripts/lib/cm/) and the installed layout (scripts/lib/cm/);
-    # promote_bundled_items.py sits in cm/ at that same root. Anchoring to
-    # this file's OWN location (never whatever sourced it) keeps the lookup
-    # correct in both layouts.
-    _cm_scripts_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-    _cm_promote_script="${_cm_scripts_root}/cm/promote_bundled_items.py"
+    # The scripts root was captured from this file's OWN location (never
+    # whatever sourced it) when the file was sourced; see the top of the file.
+    _cm_promote_script="${_CM_RELEASE_FINALIZE_SCRIPTS_ROOT}/cm/promote_bundled_items.py"
     # Both failure branches below are warnings (exit 0), deliberately: the tag
     # is cut, the RC branch torn down and release-state.md rewritten, all
     # irreversible, and Steps 13d-16c still need to run. Step 13c only updates

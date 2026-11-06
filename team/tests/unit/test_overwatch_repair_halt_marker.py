@@ -83,7 +83,11 @@ def _sweep(tmp_path: pathlib.Path, root: pathlib.Path) -> subprocess.CompletedPr
     env.update(_env(root))
     return subprocess.run(
         ["bash", str(_SWEEP), "--only", "leaked-listeners"],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=120,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
     )
 
 

@@ -19,6 +19,9 @@ Fixtures exercised:
       unscoped firing: the scan prunes it (deletes it, logs the prune), while
       a pre-existing, non-claim-lock ".empty.orphan" file is left in place as
       evidence.
+  (E) An empty report whose bug deposit fails (intake exits 1): the rename
+      is undone, so the file keeps its original name, no ".empty.orphan"
+      file remains, and the restore is logged.
 
 All tests run against synthetic fixtures and never touch the live kanban root.
 """
@@ -28,8 +31,8 @@ from __future__ import annotations
 import pathlib
 import textwrap
 
+from tests.fixtures.failing_intake import failing_intake
 from tests.unit.shell_harness import run_bash
-
 
 # ---------------------------------------------------------------------------
 # Path to the check module (relative to the team/ cwd used by run-unit-tests.sh)
@@ -40,6 +43,7 @@ _CHECK_EMPTY_FILES = "scripts/lib/overwatch-checks/check-empty-files.sh"
 # ---------------------------------------------------------------------------
 # Kanban fixture builder
 # ---------------------------------------------------------------------------
+
 
 def _build_kanban(kanban_root: pathlib.Path, project_name: str) -> pathlib.Path:
     """Build a minimal synthetic kanban root with one registered project,
@@ -127,21 +131,15 @@ def test_claim_lock_sentinel_survives_scan(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-empty-files should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-empty-files should exit 0\nstderr={result.stderr}"
 
-    assert lock_file.exists(), (
-        f"claim-lock sentinel must survive the scan unrenamed\nstderr={result.stderr}"
-    )
-    assert not (proj_dir / "bugs" / ".claim-0007.lock.empty.orphan").exists(), (
-        "claim-lock sentinel must not be renamed to .empty.orphan"
-    )
+    assert lock_file.exists(), f"claim-lock sentinel must survive the scan unrenamed\nstderr={result.stderr}"
+    assert not (
+        proj_dir / "bugs" / ".claim-0007.lock.empty.orphan"
+    ).exists(), "claim-lock sentinel must not be renamed to .empty.orphan"
 
     filed_reports = list((proj_dir / "bugs").glob("BUG-*.md"))
-    assert filed_reports == [], (
-        f"no bug report should be filed for a claim-lock sentinel, got: {filed_reports}"
-    )
+    assert filed_reports == [], f"no bug report should be filed for a claim-lock sentinel, got: {filed_reports}"
 
 
 # ---------------------------------------------------------------------------
@@ -174,25 +172,19 @@ def test_empty_bug_report_still_quarantined(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-empty-files should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-empty-files should exit 0\nstderr={result.stderr}"
 
     assert not report.exists(), "the original empty report should be renamed away"
     orphan = proj_dir / "bugs" / "BUG-0001-something.md.empty.orphan"
-    assert orphan.exists(), (
-        f"empty report should be renamed to {orphan}\nstderr={result.stderr}"
-    )
+    assert orphan.exists(), f"empty report should be renamed to {orphan}\nstderr={result.stderr}"
 
     log = _action_log(proj_dir)
-    assert "renamed-to-empty-orphan" in log, (
-        f"Expected 'renamed-to-empty-orphan' in action log, got:\n{log}\nstderr={result.stderr}"
-    )
+    assert (
+        "renamed-to-empty-orphan" in log
+    ), f"Expected 'renamed-to-empty-orphan' in action log, got:\n{log}\nstderr={result.stderr}"
 
     filed_reports = list((proj_dir / "bugs").glob("BUG-*-auto-empty-files-*.md"))
-    assert len(filed_reports) == 1, (
-        f"Expected exactly one consolidated bug report filed, got: {filed_reports}"
-    )
+    assert len(filed_reports) == 1, f"Expected exactly one consolidated bug report filed, got: {filed_reports}"
 
 
 # ---------------------------------------------------------------------------
@@ -225,16 +217,12 @@ def test_claim_ledger_dotfile_not_quarantined(tmp_path: pathlib.Path) -> None:
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-empty-files should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-empty-files should exit 0\nstderr={result.stderr}"
 
-    assert ledger.exists(), (
-        f"claim ledger dotfile must survive the scan unrenamed\nstderr={result.stderr}"
-    )
-    assert not (proj_dir / "bugs" / ".bug-claims.log.empty.orphan").exists(), (
-        "claim ledger dotfile must not be renamed to .empty.orphan"
-    )
+    assert ledger.exists(), f"claim ledger dotfile must survive the scan unrenamed\nstderr={result.stderr}"
+    assert not (
+        proj_dir / "bugs" / ".bug-claims.log.empty.orphan"
+    ).exists(), "claim ledger dotfile must not be renamed to .empty.orphan"
 
 
 # ---------------------------------------------------------------------------
@@ -271,18 +259,57 @@ def test_claim_lock_residue_pruned_scope_bounded(tmp_path: pathlib.Path) -> None
     """)
 
     result = run_bash(tmp_path, script)
-    assert result.returncode == 0, (
-        f"check-empty-files should exit 0\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"check-empty-files should exit 0\nstderr={result.stderr}"
 
-    assert not residue.exists(), (
-        f"claim-lock residue should have been pruned\nstderr={result.stderr}"
-    )
-    assert evidence.exists(), (
-        "a non-claim-lock .empty.orphan file must be left in place as evidence"
-    )
+    assert not residue.exists(), f"claim-lock residue should have been pruned\nstderr={result.stderr}"
+    assert evidence.exists(), "a non-claim-lock .empty.orphan file must be left in place as evidence"
 
     log = _action_log(proj_dir)
-    assert "pruned-claim-lock-residue" in log, (
-        f"Expected 'pruned-claim-lock-residue' in action log, got:\n{log}\nstderr={result.stderr}"
-    )
+    assert (
+        "pruned-claim-lock-residue" in log
+    ), f"Expected 'pruned-claim-lock-residue' in action log, got:\n{log}\nstderr={result.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# (E) A failed deposit undoes the rename: nothing stays quarantined unreported.
+# ---------------------------------------------------------------------------
+
+
+def test_failed_deposit_restores_the_quarantined_report(tmp_path: pathlib.Path) -> None:
+    """
+    Fixture (E): an empty "BUG-NNNN-something.md" report sits in bugs/ and
+    intake exits 1 when the check deposits its bug.
+
+    Expected: intake is run once, the file is back under its original name
+    with no ".empty.orphan" copy left, no bug report exists, and the action
+    log records the rename and its undo.
+    """
+    kanban_root = tmp_path / "kanban"
+    project_name = "test-project-e"
+    proj_dir = _build_kanban(kanban_root, project_name)
+    stub = failing_intake(tmp_path)
+
+    report = proj_dir / "bugs" / "BUG-0001-something.md"
+    report.write_text("", encoding="utf-8")
+
+    script = _stub_header(proj_dir) + textwrap.dedent(f"""\
+        set -euo pipefail
+        export KANBAN_ROOT="{kanban_root}"
+        export OVERWATCH_PROJECT="{project_name}"
+        export PGAI_AGENT_KANBAN_TEMP_DIR="{tmp_path / "tmp"}"
+        source {_CHECK_EMPTY_FILES}
+        {stub.shell_override}
+        overwatch_check_empty_files
+    """)
+
+    result = run_bash(tmp_path, script)
+    assert result.returncode == 0, f"check-empty-files should exit 0\nstderr={result.stderr}"
+
+    assert stub.calls() == 1, f"the check should deposit through intake once\nstderr={result.stderr}"
+    assert report.exists() and report.stat().st_size == 0, f"the report keeps its original name\nstderr={result.stderr}"
+    assert not list((proj_dir / "bugs").glob("*.empty.orphan")), "no quarantined copy may remain"
+    assert not list((proj_dir / "bugs").glob("BUG-*-auto-empty-files-*.md")), "no bug report was filed"
+
+    log = _action_log(proj_dir)
+    assert "renamed-to-empty-orphan" in log, log
+    assert "restored-after-failed-deposit" in log, log

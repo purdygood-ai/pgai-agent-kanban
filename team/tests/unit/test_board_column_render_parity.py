@@ -107,18 +107,25 @@ def _write(path: pathlib.Path, text: str) -> None:
 def _add_board_items(project_dir: pathlib.Path) -> None:
     """Widen the golden board: every bug status, a requirements column, a stale marker."""
     for number, status in ((2, "wont-do"), (3, "done"), (4, "running"), (5, "blocked"), (6, "superseded")):
-        _write(project_dir / "bugs" / f"BUG-000{number}-parity-{status}.md",
-               f"# BUG-000{number}\n\n**Severity:** high\n\n## Status\n{status}\n")
+        _write(
+            project_dir / "bugs" / f"BUG-000{number}-parity-{status}.md",
+            f"# BUG-000{number}\n\n**Severity:** high\n\n## Status\n{status}\n",
+        )
     for version, status in (("v1.0.0", "done"), ("v1.2.0", "running"), ("v1.3.0", "running"), ("v1.4.0", "wont-do")):
-        _write(project_dir / "requirements" / f"{version}-parity.md",
-               f"# {version}\n\n## Target Version\n{version}\n\n## Status\n{status}\n")
-    _write(project_dir / "release-state.md",
-           "# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
-           "## RC Opened By Task\nparity-fixture\n\n## Last Released\nv1.1.0\n")
+        _write(
+            project_dir / "requirements" / f"{version}-parity.md",
+            f"# {version}\n\n## Target Version\n{version}\n\n## Status\n{status}\n",
+        )
+    _write(
+        project_dir / "release-state.md",
+        "# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
+        "## RC Opened By Task\nparity-fixture\n\n## Last Released\nv1.1.0\n",
+    )
     _write(project_dir / "tasks" / _STALE_MARKER_TASK / "status.md", "## State\nBLOCKED\n")
     backlog = project_dir / "tasks" / "queues" / "coder_backlog.md"
-    backlog.write_text(backlog.read_text(encoding="utf-8") + f"- [ ] {_STALE_MARKER_TASK} — stale marker\n",
-                       encoding="utf-8")
+    backlog.write_text(
+        backlog.read_text(encoding="utf-8") + f"- [ ] {_STALE_MARKER_TASK} — stale marker\n", encoding="utf-8"
+    )
 
 
 @pytest.fixture
@@ -214,13 +221,14 @@ def test_renderer_classifies_queue_items_as_board_does(board_root: pathlib.Path)
     board = _board(board_root)["CODER"]
     project = board_root / "projects" / PROJECT_NAME
     backlog = project / "tasks" / "queues" / "coder_backlog.md"
-    single = {
-        _display_id("CODER", item["task_id"]): item["status"]
-        for item in queue_items(backlog, project / "tasks")
-    }
+    single = {_display_id("CODER", item["task_id"]): item["status"] for item in queue_items(backlog, project / "tasks")}
     multi_entries = gather_project_entries(
-        ProjectSource(PROJECT_NAME, "#378ADD", max_rows=50, backlog_file=str(backlog), tasks_dir=str(project / "tasks")),
-        subcommand="queue", column_type="coder", use_color=False,
+        ProjectSource(
+            PROJECT_NAME, "#378ADD", max_rows=50, backlog_file=str(backlog), tasks_dir=str(project / "tasks")
+        ),
+        subcommand="queue",
+        column_type="coder",
+        use_color=False,
     )
     multi = {e["display_id"]: e["board_status"] for e in multi_entries}
     assert single == board
@@ -236,14 +244,25 @@ def test_renderer_classifies_input_items_as_board_does(board_root: pathlib.Path,
     is_req = column == "REQUIREMENTS"
     single = {
         compact_id(path.stem, is_req): classify_input_file(
-            path, is_requirements=is_req, active_rc=active_rc, last_released=last_released,
+            path,
+            is_requirements=is_req,
+            active_rc=active_rc,
+            last_released=last_released,
         )[0]
         for path in (project / dirname).glob("*.md")
     }
     multi_entries = gather_project_entries(
-        ProjectSource(PROJECT_NAME, "#378ADD", max_rows=50, input_dir=str(project / dirname),
-                      active_rc=active_rc, last_released=last_released),
-        subcommand="input", column_type=dirname, use_color=False,
+        ProjectSource(
+            PROJECT_NAME,
+            "#378ADD",
+            max_rows=50,
+            input_dir=str(project / dirname),
+            active_rc=active_rc,
+            last_released=last_released,
+        ),
+        subcommand="input",
+        column_type=dirname,
+        use_color=False,
     )
     multi = {e["display_id"].replace(" [active]", ""): e["board_status"] for e in multi_entries}
     assert single == board
@@ -268,7 +287,10 @@ def test_multi_project_queue_pane_matches_board(board_root: pathlib.Path, tmp_pa
 
 @pytest.mark.parametrize("column, dirname", [("BUGS", "bugs"), ("REQUIREMENTS", "requirements")])
 def test_single_project_input_pane_matches_board(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, column: str, dirname: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    column: str,
+    dirname: str,
 ) -> None:
     input_dir = board_root / "projects" / PROJECT_NAME / dirname
     rows = _render(board_root, tmp_path, "input", str(input_dir), "none", "20", "40")
@@ -276,7 +298,8 @@ def test_single_project_input_pane_matches_board(
 
 
 def test_retired_superseded_status_reads_closed_on_the_board_and_both_panes(
-    board_root: pathlib.Path, tmp_path: pathlib.Path,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     """A bug whose existing ## Status is the retired "superseded" is wont-do on
     GET /board and is drawn in the closed (green) colour by column-render.sh
@@ -284,8 +307,9 @@ def test_retired_superseded_status_reads_closed_on_the_board_and_both_panes(
     assert _board(board_root)["BUGS"]["BUG-0006"] == "wont-do"
     bugs_dir = board_root / "projects" / PROJECT_NAME / "bugs"
     single = _render(board_root, tmp_path, "input", str(bugs_dir), "none", "20", "40")
-    multi = _render(board_root, tmp_path, "input", "none", "none", "20", "40",
-                    "--all-projects", "--column-type", "bugs")
+    multi = _render(
+        board_root, tmp_path, "input", "none", "none", "20", "40", "--all-projects", "--column-type", "bugs"
+    )
     assert single["BUG-0006"] == _SGR_BY_BOARD_STATUS["wont-do"]
     assert multi["BUG-0006"] == _SGR_BY_BOARD_STATUS["wont-do"]
 
@@ -299,17 +323,22 @@ def test_carried_bug_carries_its_marker_in_both_panes(board_root: pathlib.Path, 
     for args in (("input", str(bugs_dir), "none"), ("input", "none", "none")):
         extra = ("--all-projects", "--column-type", "bugs") if args[1] == "none" else ()
         lines = _render_lines(board_root, tmp_path, *args, "20", "40", *extra)
-        marked = sorted(m.group(2) for line in lines if line.endswith(CARRIED_GLYPH_MARKER)
-                        for m in [_ROW_RE.search(line)] if m)
+        marked = sorted(
+            m.group(2) for line in lines if line.endswith(CARRIED_GLYPH_MARKER) for m in [_ROW_RE.search(line)] if m
+        )
         assert marked == sorted(carried), lines
 
 
 @pytest.mark.parametrize("column, column_type", [("BUGS", "bugs"), ("REQUIREMENTS", "requirements")])
 def test_multi_project_input_pane_matches_board(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, column: str, column_type: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    column: str,
+    column_type: str,
 ) -> None:
-    rows = _render(board_root, tmp_path, "input", "none", "none", "20", "40",
-                   "--all-projects", "--column-type", column_type)
+    rows = _render(
+        board_root, tmp_path, "input", "none", "none", "20", "40", "--all-projects", "--column-type", column_type
+    )
     assert rows == _expected_rows(_board(board_root)[column])
 
 
@@ -341,8 +370,10 @@ def _fill_every_column(project_dir: pathlib.Path) -> None:
     The priority/ README and the non-markdown file are in no listing.
     """
     for number, status in ((1, "open"), (2, "running"), (3, "done")):
-        _write(project_dir / "priority" / f"PRIORITY-00{number}-parity-{status}.md",
-               f"# PRIORITY-00{number}\n\n## Status\n{status}\n")
+        _write(
+            project_dir / "priority" / f"PRIORITY-00{number}-parity-{status}.md",
+            f"# PRIORITY-00{number}\n\n## Status\n{status}\n",
+        )
     _write(project_dir / "priority" / "README.md", "# Priorities\n")
     _write(project_dir / "priority" / "notes.txt", "not an intake file\n")
     lines_by_agent: dict = {}
@@ -351,8 +382,10 @@ def _fill_every_column(project_dir: pathlib.Path) -> None:
             _write(project_dir / "tasks" / task_id / "status.md", f"## State\n{state}\n")
         lines_by_agent.setdefault(agent, []).append(f"- [{marker}] {task_id} — parity")
     for agent, lines in lines_by_agent.items():
-        _write(project_dir / "tasks" / "queues" / f"{agent.lower()}_backlog.md",
-               f"# {agent} backlog\n\n" + "\n".join(lines) + "\n")
+        _write(
+            project_dir / "tasks" / "queues" / f"{agent.lower()}_backlog.md",
+            f"# {agent} backlog\n\n" + "\n".join(lines) + "\n",
+        )
 
 
 def _board_ids(root: pathlib.Path) -> dict:
@@ -379,8 +412,18 @@ def _multi_pane_ids(root: pathlib.Path, tmp_path: pathlib.Path, column: str) -> 
     else:
         args = ["queue", "none"]
     result = run_dashboard_script(
-        ["bash", str(root / "scripts" / "dashboard" / "column-render.sh"), *args, "40", "60",
-         "--all-projects", "--column-type", column.lower(), "--kanban-root", str(root)],
+        [
+            "bash",
+            str(root / "scripts" / "dashboard" / "column-render.sh"),
+            *args,
+            "40",
+            "60",
+            "--all-projects",
+            "--column-type",
+            column.lower(),
+            "--kanban-root",
+            str(root),
+        ],
         env=env,
         timeout=60,
     )
@@ -400,7 +443,9 @@ def test_board_reads_its_columns_through_the_dashboard_column_code() -> None:
 
 @pytest.mark.parametrize("column", COLUMN_ORDER)
 def test_board_ids_equal_the_multi_project_pane_ids(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, column: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    column: str,
 ) -> None:
     _fill_every_column(board_root / "projects" / PROJECT_NAME)
     board = _board_ids(board_root)
@@ -436,16 +481,23 @@ def git_tree_root(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pa
     build_synthetic_board(root, with_queues=True)
     project = root / "projects" / PROJECT_NAME
     for version in _GIT_TREE_REQUIREMENTS:
-        _write(project / "requirements" / f"{version}-git-tree.md",
-               f"# {version}\n\n## Target Version\n{version}\n\n## Status\nopen\n")
-    _write(project / "release-state.md",
-           "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
-           "## RC Opened By Task\nnone\n\n## Last Released\nv1.1.0\n")
+        _write(
+            project / "requirements" / f"{version}-git-tree.md",
+            f"# {version}\n\n## Target Version\n{version}\n\n## Status\nopen\n",
+        )
+    _write(
+        project / "release-state.md",
+        "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n"
+        "## RC Opened By Task\nnone\n\n## Last Released\nv1.1.0\n",
+    )
     dev_tree = tmp_path / "dev-tree"
     dev_tree.mkdir()
     git = ["git", "-C", str(dev_tree), "-c", "user.name=parity-fixture", "-c", "user.email=parity@fixture.invalid"]
-    for args in (["init", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "fixture"],
-                 ["tag", _DEV_TREE_TAG]):
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["commit", "-q", "--allow-empty", "-m", "fixture"],
+        ["tag", _DEV_TREE_TAG],
+    ):
         subprocess.run([*git, *args], check=True, capture_output=True, stdin=subprocess.DEVNULL)
     _write(project / "project.cfg", f"[project]\ndev_tree_path = {dev_tree}\n")
     (root / "pgai_agent_kanban").symlink_to(_PKG_DIR, target_is_directory=True)
@@ -460,11 +512,13 @@ def git_tree_root(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pa
 
 
 def test_board_requirements_on_a_git_dev_tree_match_the_multi_project_pane(
-    git_tree_root: pathlib.Path, tmp_path: pathlib.Path,
+    git_tree_root: pathlib.Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     """Tags ahead of release-state.md: /board gives each requirement the colour the pane draws."""
     board = _board(git_tree_root)["REQUIREMENTS"]
     assert board == {**_GOLDEN_BUNDLE_REQUIREMENTS, **_GIT_TREE_REQUIREMENTS}
-    rows = _render(git_tree_root, tmp_path, "input", "none", "none", "20", "40",
-                   "--all-projects", "--column-type", "requirements")
+    rows = _render(
+        git_tree_root, tmp_path, "input", "none", "none", "20", "40", "--all-projects", "--column-type", "requirements"
+    )
     assert rows == _expected_rows(board)

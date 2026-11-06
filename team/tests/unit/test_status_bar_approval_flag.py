@@ -45,7 +45,6 @@ import os
 import pathlib
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths to the scripts under test.
@@ -55,14 +54,14 @@ import pytest
 # working directory (e.g. direct pytest invocations from the repo root).
 # ---------------------------------------------------------------------------
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/tests/unit/ -> team/
-_STATUS_RIGHT  = _TEAM_DIR / "scripts" / "dashboard" / "status-right.sh"
+_STATUS_RIGHT = _TEAM_DIR / "scripts" / "dashboard" / "status-right.sh"
 _STATUS_BOTTOM = _TEAM_DIR / "scripts" / "dashboard" / "status-bottom.sh"
 
 # Strings asserted on in tests.  NO_COLOR / TERM=dumb mode strips ANSI and
 # tmux markup, leaving bare bracketed markers.
-_APPROVAL_1   = "APPROVAL(1)"
-_APPROVAL_2   = "APPROVAL(2)"
-_APPROVAL_ANY = "APPROVAL("   # substring that must be ABSENT when n=0
+_APPROVAL_1 = "APPROVAL(1)"
+_APPROVAL_2 = "APPROVAL(2)"
+_APPROVAL_ANY = "APPROVAL("  # substring that must be ABSENT when n=0
 
 
 # ---------------------------------------------------------------------------
@@ -140,18 +139,13 @@ def test_status_right_one_waiting_task_shows_approval_1(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-right.sh output contains 'APPROVAL(1)' when one HUMAN-APPROVE task is WAITING."""
-    _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING"
-    )
+    _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING")
 
     result = _run_status_right(tmp_path)
 
-    assert result.returncode == 0, (
-        f"status-right.sh exited with {result.returncode}; stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"status-right.sh exited with {result.returncode}; stderr: {result.stderr!r}"
     assert _APPROVAL_1 in result.stdout, (
-        f"Expected '{_APPROVAL_1}' in status-right.sh output but it was absent.\n"
-        f"stdout: {result.stdout!r}"
+        f"Expected '{_APPROVAL_1}' in status-right.sh output but it was absent.\n" f"stdout: {result.stdout!r}"
     )
 
 
@@ -159,51 +153,40 @@ def test_status_right_one_backlog_task_shows_approval_1(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-right.sh output contains 'APPROVAL(1)' when one HUMAN-APPROVE task is BACKLOG."""
-    _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-100", state="BACKLOG"
-    )
+    _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-100", state="BACKLOG")
 
     result = _run_status_right(tmp_path)
 
     assert result.returncode == 0
-    assert _APPROVAL_1 in result.stdout, (
-        f"Expected '{_APPROVAL_1}' in output for BACKLOG task; stdout: {result.stdout!r}"
-    )
+    assert (
+        _APPROVAL_1 in result.stdout
+    ), f"Expected '{_APPROVAL_1}' in output for BACKLOG task; stdout: {result.stdout!r}"
 
 
 def test_status_right_two_pending_tasks_across_projects_shows_approval_2(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-right.sh output contains 'APPROVAL(2)' when two tasks across two projects are pending."""
-    _write_human_approve_task(
-        tmp_path, "proj-alpha", "HUMAN-APPROVE-v1.10.0-001", state="WAITING"
-    )
-    _write_human_approve_task(
-        tmp_path, "proj-beta", "HUMAN-APPROVE-v1.10.0-002", state="BACKLOG"
-    )
+    _write_human_approve_task(tmp_path, "proj-alpha", "HUMAN-APPROVE-v1.10.0-001", state="WAITING")
+    _write_human_approve_task(tmp_path, "proj-beta", "HUMAN-APPROVE-v1.10.0-002", state="BACKLOG")
 
     result = _run_status_right(tmp_path)
 
     assert result.returncode == 0
-    assert _APPROVAL_2 in result.stdout, (
-        f"Expected '{_APPROVAL_2}' in output; stdout: {result.stdout!r}"
-    )
+    assert _APPROVAL_2 in result.stdout, f"Expected '{_APPROVAL_2}' in output; stdout: {result.stdout!r}"
 
 
 def test_status_right_no_pending_tasks_omits_approval_flag(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-right.sh output contains no 'APPROVAL(' string when no tasks are pending."""
-    _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="DONE"
-    )
+    _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="DONE")
 
     result = _run_status_right(tmp_path)
 
     assert result.returncode == 0
     assert _APPROVAL_ANY not in result.stdout, (
-        f"Unexpected approval indicator in output with no pending tasks; "
-        f"stdout: {result.stdout!r}"
+        f"Unexpected approval indicator in output with no pending tasks; " f"stdout: {result.stdout!r}"
     )
 
 
@@ -218,8 +201,7 @@ def test_status_right_no_human_approve_tasks_omits_approval_flag(
 
     assert result.returncode == 0
     assert _APPROVAL_ANY not in result.stdout, (
-        f"Unexpected approval indicator in output with no tasks; "
-        f"stdout: {result.stdout!r}"
+        f"Unexpected approval indicator in output with no tasks; " f"stdout: {result.stdout!r}"
     )
 
 
@@ -238,19 +220,15 @@ def test_status_right_approve_clears_flag(
       4. Run status-right.sh again — APPROVAL flag must be absent.
     """
     # Step 1: inject pending approval gate
-    status_file = _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING"
-    )
+    status_file = _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING")
 
     # Step 2: flag present
     result_before = _run_status_right(tmp_path)
     assert result_before.returncode == 0, (
-        f"status-right.sh (before approve) exited {result_before.returncode}; "
-        f"stderr: {result_before.stderr!r}"
+        f"status-right.sh (before approve) exited {result_before.returncode}; " f"stderr: {result_before.stderr!r}"
     )
     assert _APPROVAL_1 in result_before.stdout, (
-        f"Expected '{_APPROVAL_1}' in output before approval; "
-        f"stdout: {result_before.stdout!r}"
+        f"Expected '{_APPROVAL_1}' in output before approval; " f"stdout: {result_before.stdout!r}"
     )
 
     # Step 3: approve — update State to DONE
@@ -262,12 +240,10 @@ def test_status_right_approve_clears_flag(
     # Step 4: flag absent
     result_after = _run_status_right(tmp_path)
     assert result_after.returncode == 0, (
-        f"status-right.sh (after approve) exited {result_after.returncode}; "
-        f"stderr: {result_after.stderr!r}"
+        f"status-right.sh (after approve) exited {result_after.returncode}; " f"stderr: {result_after.stderr!r}"
     )
     assert _APPROVAL_ANY not in result_after.stdout, (
-        f"Approval flag still present after task approved to DONE; "
-        f"stdout: {result_after.stdout!r}"
+        f"Approval flag still present after task approved to DONE; " f"stdout: {result_after.stdout!r}"
     )
 
 
@@ -280,18 +256,13 @@ def test_status_bottom_one_waiting_task_shows_approval_1(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-bottom.sh output contains 'APPROVAL(1)' when one HUMAN-APPROVE task is WAITING."""
-    _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING"
-    )
+    _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING")
 
     result = _run_status_bottom(tmp_path)
 
-    assert result.returncode == 0, (
-        f"status-bottom.sh exited with {result.returncode}; stderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"status-bottom.sh exited with {result.returncode}; stderr: {result.stderr!r}"
     assert _APPROVAL_1 in result.stdout, (
-        f"Expected '{_APPROVAL_1}' in status-bottom.sh output but it was absent.\n"
-        f"stdout: {result.stdout!r}"
+        f"Expected '{_APPROVAL_1}' in status-bottom.sh output but it was absent.\n" f"stdout: {result.stdout!r}"
     )
 
 
@@ -299,16 +270,13 @@ def test_status_bottom_no_pending_tasks_omits_approval_flag(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-bottom.sh output contains no 'APPROVAL(' when no tasks are pending."""
-    _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="DONE"
-    )
+    _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="DONE")
 
     result = _run_status_bottom(tmp_path)
 
     assert result.returncode == 0
     assert _APPROVAL_ANY not in result.stdout, (
-        f"Unexpected approval indicator in output with no pending tasks; "
-        f"stdout: {result.stdout!r}"
+        f"Unexpected approval indicator in output with no pending tasks; " f"stdout: {result.stdout!r}"
     )
 
 
@@ -317,16 +285,14 @@ def test_status_bottom_approve_clears_flag(
 ) -> None:
     """status-bottom.sh: inject → flag present → approve → flag absent on next render."""
     # Inject pending approval gate
-    status_file = _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING"
-    )
+    status_file = _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WAITING")
 
     # Flag must be present before approval
     result_before = _run_status_bottom(tmp_path)
     assert result_before.returncode == 0
-    assert _APPROVAL_1 in result_before.stdout, (
-        f"Expected '{_APPROVAL_1}' before approval; stdout: {result_before.stdout!r}"
-    )
+    assert (
+        _APPROVAL_1 in result_before.stdout
+    ), f"Expected '{_APPROVAL_1}' before approval; stdout: {result_before.stdout!r}"
 
     # Approve: set State to DONE
     status_file.write_text(
@@ -338,8 +304,7 @@ def test_status_bottom_approve_clears_flag(
     result_after = _run_status_bottom(tmp_path)
     assert result_after.returncode == 0
     assert _APPROVAL_ANY not in result_after.stdout, (
-        f"Approval flag still present after DONE in status-bottom.sh; "
-        f"stdout: {result_after.stdout!r}"
+        f"Approval flag still present after DONE in status-bottom.sh; " f"stdout: {result_after.stdout!r}"
     )
 
 
@@ -347,13 +312,11 @@ def test_status_bottom_wontdo_task_omits_approval_flag(
     tmp_path: pathlib.Path,
 ) -> None:
     """status-bottom.sh: a WONT-DO HUMAN-APPROVE task does not trigger the flag."""
-    _write_human_approve_task(
-        tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WONT-DO"
-    )
+    _write_human_approve_task(tmp_path, "fixture-proj", "HUMAN-APPROVE-v1.10.0-099", state="WONT-DO")
 
     result = _run_status_bottom(tmp_path)
 
     assert result.returncode == 0
-    assert _APPROVAL_ANY not in result.stdout, (
-        f"Unexpected approval indicator for WONT-DO task; stdout: {result.stdout!r}"
-    )
+    assert (
+        _APPROVAL_ANY not in result.stdout
+    ), f"Unexpected approval indicator for WONT-DO task; stdout: {result.stdout!r}"

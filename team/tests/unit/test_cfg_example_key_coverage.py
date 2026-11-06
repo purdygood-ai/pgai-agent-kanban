@@ -92,9 +92,7 @@ def test_kanban_cfg_example_documents_block_triage_keys_at_their_defaults(
     defaults the resolvers apply when the key is absent, so copying the
     template unedited changes no behaviour."""
     value = _read_ini(_KANBAN_CFG_EXAMPLE, section, key)
-    assert value == expected, (
-        f"kanban.cfg_example [{section}] {key} resolved to {value!r}; expected {expected!r}"
-    )
+    assert value == expected, f"kanban.cfg_example [{section}] {key} resolved to {value!r}; expected {expected!r}"
 
 
 @pytest.mark.parametrize(
@@ -130,8 +128,7 @@ def test_project_cfg_example_documents_block_triage_override_commented_out() -> 
         if in_overwatch:
             section_lines.append(stripped)
     assert any(l.startswith("# block_triage =") for l in section_lines), (
-        "project.cfg_example's [overwatch] section should carry a commented "
-        "'# block_triage = ...' override line"
+        "project.cfg_example's [overwatch] section should carry a commented " "'# block_triage = ...' override line"
     )
 
 
@@ -170,9 +167,7 @@ def test_project_cfg_example_documents_requeue_budget_override_commented_out() -
         pytest.param("versioning", "max_priorities_per_run", "1", id="versioning_max_priorities_per_run"),
     ],
 )
-def test_project_cfg_example_documents_previously_undocumented_key(
-    section: str, key: str, expected: str
-) -> None:
+def test_project_cfg_example_documents_previously_undocumented_key(section: str, key: str, expected: str) -> None:
     value = _read_ini(_PROJECT_CFG_EXAMPLE, section, key)
     assert value == expected, (
         f"project.cfg_example [{section}] {key} resolved to {value!r}; expected {expected!r} "

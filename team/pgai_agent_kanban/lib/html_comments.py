@@ -46,7 +46,6 @@ strip_html_comments(text, *, html_block_interrupts_paragraph=False) -> str
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
 
 __all__ = ["comment_spans", "strip_html_comments"]
 
@@ -61,15 +60,15 @@ _PARAGRAPH_END_RE = re.compile(r"\n[ \t]*(?:\n|#)")
 _PARAGRAPH_OR_HTML_BLOCK_END_RE = re.compile(r"\n[ \t]*(?:\n|#|<!--)")
 
 
-def _closing_backticks_end(text: str, start: int, stop: int, run: int) -> Optional[int]:
+def _closing_backticks_end(text: str, start: int, stop: int, run: int) -> int | None:
     """End offset of the first run of exactly *run* backticks in
     ``text[start:stop]``, or None when the code span is never closed."""
-    closing = re.compile(r"(?<!`)`{%d}(?!`)" % run)
+    closing = re.compile(rf"(?<!`)`{{{run}}}(?!`)")
     m = closing.search(text, start, stop)
     return m.end() if m else None
 
 
-def comment_spans(text: str, *, html_block_interrupts_paragraph: bool = False) -> List[Tuple[int, int]]:
+def comment_spans(text: str, *, html_block_interrupts_paragraph: bool = False) -> list[tuple[int, int]]:
     """Return the ``(start, end)`` offsets of every HTML comment in *text*.
 
     Comments are found as the module docstring describes: a line-start
@@ -83,7 +82,7 @@ def comment_spans(text: str, *, html_block_interrupts_paragraph: bool = False) -
     empty list.
     """
     paragraph_end_re = _PARAGRAPH_OR_HTML_BLOCK_END_RE if html_block_interrupts_paragraph else _PARAGRAPH_END_RE
-    spans: List[Tuple[int, int]] = []
+    spans: list[tuple[int, int]] = []
     pos = 0
     while True:
         m = _COMMENT_SCAN_RE.search(text, pos)
@@ -112,7 +111,7 @@ def comment_spans(text: str, *, html_block_interrupts_paragraph: bool = False) -
 
 def strip_html_comments(text: str, *, html_block_interrupts_paragraph: bool = False) -> str:
     """Return *text* with its HTML comments (see :func:`comment_spans`) removed."""
-    out: List[str] = []
+    out: list[str] = []
     pos = 0
     for start, end in comment_spans(text, html_block_interrupts_paragraph=html_block_interrupts_paragraph):
         out.append(text[pos:start])

@@ -87,7 +87,7 @@ def normalize(text: str, scratch_prefix: str, temp_root: str) -> str:
     # Git SHAs: 7-40 lowercase hex chars containing at least one a-f letter,
     # so plain numeric literals (dates, task-ID suffixes, version numbers)
     # are never mistaken for a SHA.
-    def _sha_sub(m: "re.Match[str]") -> str:
+    def _sha_sub(m: re.Match[str]) -> str:
         token = m.group(0)
         return "<SHA>" if any(c in "abcdef" for c in token) else token
 

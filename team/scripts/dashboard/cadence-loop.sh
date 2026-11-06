@@ -53,11 +53,17 @@
 #                                            the real tmux visibility query
 #                                            (see lib/cadence.sh)
 
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
+
 set -uo pipefail
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=../lib/dashboard_constants.sh
 source "${SCRIPT_DIR}/../lib/dashboard_constants.sh"
 # shellcheck source=lib/cadence.sh
@@ -89,12 +95,6 @@ while [[ $# -gt 0 ]]; do
         --)
             shift
             break
-            ;;
-        -h|--help)
-            # shellcheck source=../lib/header_help.sh
-            source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-            header_help_print "${BASH_SOURCE[0]}"
-            exit 0
             ;;
         *)
             echo "ERROR: Unknown argument: $1" >&2

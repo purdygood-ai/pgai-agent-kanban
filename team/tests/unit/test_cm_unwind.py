@@ -33,6 +33,10 @@ Coverage:
      project.cfg, no projects.cfg, no dev_tree_path with PGAI_DEV_TREE_PATH
      set) make neither call in a dry run or a confirmed run, narrate the
      skip once, and still finish every local step.
+  8. Unreadable or empty state: an empty release-state.md, an unreadable
+     release-state.md and an unreadable task README each refuse
+     dual-channel before anything is changed, the remedy naming the path
+     and the dry-run re-check.
 
 git is replaced in process (``unwind._git``), so no repository is needed and
 nothing reaches a remote; the end-to-end runs on a real sandbox repository,
@@ -47,7 +51,6 @@ import pathlib
 import shlex
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -73,9 +76,7 @@ _MUTATING = ("checkout", "push", "mv")
 class FakeGit:
     """Stands in for ``unwind._git``: local branches and tags are sets, every call is recorded."""
 
-    def __init__(
-        self, branches=("main", _RC), tags=(), fail: Optional[str] = None, remote: bool = False
-    ) -> None:
+    def __init__(self, branches=("main", _RC), tags=(), fail: str | None = None, remote: bool = False) -> None:
         self.branches = set(branches)
         self.tags = set(tags)
         self.fail = fail
@@ -123,7 +124,7 @@ def fake_git(monkeypatch: pytest.MonkeyPatch) -> FakeGit:
     return git
 
 
-def _seed(tmp_path: pathlib.Path, active: Optional[str] = _VERSION, halt: bool = True) -> OpsContext:
+def _seed(tmp_path: pathlib.Path, active: str | None = _VERSION, halt: bool = True) -> OpsContext:
     """A kanban root with one halted project in the middle of RC _VERSION."""
     root = tmp_path / "root"
     proj = root / "projects" / _PROJECT
@@ -140,9 +141,7 @@ def _seed(tmp_path: pathlib.Path, active: Optional[str] = _VERSION, halt: bool =
     task = proj / "tasks" / "CODER-20260101-001-task"
     task.mkdir()
     (task / "README.md").write_text(f"# Task\n\n## Release Version\n{_VERSION}\n", encoding="utf-8")
-    (task / "status.md").write_text(
-        "# Status\n\n## State\nWORKING\n\n## Summary\nunit\n", encoding="utf-8"
-    )
+    (task / "status.md").write_text("# Status\n\n## State\nWORKING\n\n## Summary\nunit\n", encoding="utf-8")
     (proj / "tasks" / "queues" / "coder_backlog.md").write_text(
         "# Coder Backlog\n\n## Queue\n- [A] CODER-20260101-001-task — working\n", encoding="utf-8"
     )
@@ -197,7 +196,11 @@ def test_a_live_call_without_confirmation_refuses_before_reading_anything(
     # The remedy names the script as installed under the context's root.
     assert shlex.split(fields["remedy"]) == [
         str(tmp_path / "absent-root" / "scripts" / "unwind-rc.sh"),
-        "--project", _PROJECT, "--key", _VERSION, "--confirm",
+        "--project",
+        _PROJECT,
+        "--key",
+        _VERSION,
+        "--confirm",
     ], fields["remedy"]
     assert "team/scripts/" not in result.text, result.text
     assert (out, err, fake_git.calls) == ("", "", [])
@@ -221,9 +224,7 @@ def test_the_cli_contract_lets_force_answer_the_prompt(tmp_path: pathlib.Path, f
     assert "Type 'yes'" not in out
 
 
-def test_a_dry_run_needs_no_confirmation_and_changes_nothing(
-    tmp_path: pathlib.Path, fake_git: FakeGit
-) -> None:
+def test_a_dry_run_needs_no_confirmation_and_changes_nothing(tmp_path: pathlib.Path, fake_git: FakeGit) -> None:
     ctx = _seed(tmp_path)
     before = _files(ctx)
     result, out, _ = _run(ctx, tmp_path, dry_run=True)
@@ -236,7 +237,7 @@ def test_a_dry_run_needs_no_confirmation_and_changes_nothing(
 
 @pytest.mark.parametrize("answer", [None, "no", "y", "YES"], ids=["unanswered", "no", "y", "upper-case"])
 def test_a_prompt_not_answered_yes_changes_nothing(
-    tmp_path: pathlib.Path, fake_git: FakeGit, answer: Optional[str]
+    tmp_path: pathlib.Path, fake_git: FakeGit, answer: str | None
 ) -> None:
     ctx = _seed(tmp_path)
     before = _files(ctx)
@@ -277,8 +278,7 @@ def test_force_bypasses_the_mismatch_with_a_warning(tmp_path: pathlib.Path, fake
     result, _, err = _run(ctx, tmp_path, confirm=True, force=True)
     assert isinstance(result, unwind.UnwindOutcome), err
     assert err.startswith(
-        "WARNING: Active RC mismatch (--force bypassing check).\n"
-        f"  Active RC: v9.9.9\n  Requested: {_VERSION}\n\n"
+        "WARNING: Active RC mismatch (--force bypassing check).\n" f"  Active RC: v9.9.9\n  Requested: {_VERSION}\n\n"
     )
 
 
@@ -306,8 +306,14 @@ def test_force_does_not_bypass_the_other_checks(
     before = _files(ctx)
     with pytest.raises(unwind.UnwindRcError) as caught:
         unwind.unwind_rc(
-            ctx, _PROJECT, version, confirm=True, force=True,
-            temp_root=str(tmp_path / "tmp"), out=lambda _t: None, err=lambda _t: None,
+            ctx,
+            _PROJECT,
+            version,
+            confirm=True,
+            force=True,
+            temp_root=str(tmp_path / "tmp"),
+            out=lambda _t: None,
+            err=lambda _t: None,
         )
     assert caught.value.error == "unwind_rc.refused"
     assert caught.value.text.startswith(message), caught.value.text
@@ -340,7 +346,7 @@ def test_the_no_halt_refusal_names_the_installed_halt_and_unhalt_scripts(
 
     def command_after(prefix: str) -> list:
         line = next(line for line in lines if line.startswith(prefix))
-        return shlex.split(line[len(prefix):])
+        return shlex.split(line[len(prefix) :])
 
     def command_before(suffix: str) -> list:
         line = next(line for line in lines if line.endswith(suffix))
@@ -350,7 +356,9 @@ def test_the_no_halt_refusal_names_the_installed_halt_and_unhalt_scripts(
     assert command_after("  To halt only this project, run: ") == [f"{scripts}/halt.sh", "--project", _PROJECT]
     assert command_before(" (if you halted globally), or") == [f"{scripts}/unhalt-global.sh"]
     assert command_before(" (if you halted this project only).") == [
-        f"{scripts}/unhalt.sh", "--project", _PROJECT,
+        f"{scripts}/unhalt.sh",
+        "--project",
+        _PROJECT,
     ]
     if " " in parent:
         assert f"run: '{scripts}/halt-global.sh'" in result.text
@@ -389,9 +397,7 @@ def test_a_failing_checkout_stops_after_the_backup_with_exit_two(
 # ---------------------------------------------------------------------------
 
 
-def test_an_unwind_writes_every_store_and_keeps_what_it_does_not_own(
-    tmp_path: pathlib.Path, fake_git: FakeGit
-) -> None:
+def test_an_unwind_writes_every_store_and_keeps_what_it_does_not_own(tmp_path: pathlib.Path, fake_git: FakeGit) -> None:
     ctx = _seed(tmp_path)
     proj = ctx.project_root(_PROJECT)
     result, out, err = _run(ctx, tmp_path, confirm=True)
@@ -402,9 +408,9 @@ def test_an_unwind_writes_every_store_and_keeps_what_it_does_not_own(
     status = (proj / "tasks" / "CODER-20260101-001-task" / "status.md").read_text(encoding="utf-8")
     assert status.startswith("# Status\n\n## State\nWONT-DO\n\n## Summary\nunit\n\n## Cancellation Note (")
     assert status.count("## Cancellation Note") == 1
-    assert "- [x] CODER-20260101-001-task — working\n" in (
-        proj / "tasks" / "queues" / "coder_backlog.md"
-    ).read_text(encoding="utf-8")
+    assert "- [x] CODER-20260101-001-task — working\n" in (proj / "tasks" / "queues" / "coder_backlog.md").read_text(
+        encoding="utf-8"
+    )
     assert "- [ ] BUG-0001-alpha\n" in (proj / "tasks" / "queues" / "bug_backlog.md").read_text(encoding="utf-8")
     assert (proj / "bugs" / "BUG-0001-alpha.md").read_text(encoding="utf-8") == (
         "# BUG-0001-alpha\n\n## Status\nopen\n\n**Severity:** high\nbody text\n"
@@ -419,7 +425,9 @@ def test_an_unwind_writes_every_store_and_keeps_what_it_does_not_own(
     assert len(superseded) == 1
     backup = pathlib.Path(result.backup_dir)
     assert backup.parent == tmp_path / "tmp"
-    assert (backup / "tasks" / "CODER-20260101-001-task" / "status.md").read_text(encoding="utf-8").count("WORKING") == 1
+    assert (backup / "tasks" / "CODER-20260101-001-task" / "status.md").read_text(encoding="utf-8").count(
+        "WORKING"
+    ) == 1
     assert "BUG-0009" not in out, "only the ## Bundled Items section is read"
 
 
@@ -435,9 +443,7 @@ def test_a_status_md_already_carrying_a_cancellation_note_is_left_alone(
     assert "  CODER-20260101-001-task — already cancelled (skipping)\n" in out
 
 
-def test_files_without_their_heading_are_warned_about_and_left_whole(
-    tmp_path: pathlib.Path, fake_git: FakeGit
-) -> None:
+def test_files_without_their_heading_are_warned_about_and_left_whole(tmp_path: pathlib.Path, fake_git: FakeGit) -> None:
     ctx = _seed(tmp_path)
     status = ctx.tasks_dir(_PROJECT) / "CODER-20260101-001-task" / "status.md"
     status.write_text("# Status\n\nno state here\n", encoding="utf-8")
@@ -476,9 +482,7 @@ def test_the_superseded_bundle_is_closed_to_wont_do_and_keeps_every_other_line(
     assert "could not set ## Status" not in err
 
 
-def test_a_file_an_earlier_run_superseded_is_closed_on_the_next_run(
-    tmp_path: pathlib.Path, fake_git: FakeGit
-) -> None:
+def test_a_file_an_earlier_run_superseded_is_closed_on_the_next_run(tmp_path: pathlib.Path, fake_git: FakeGit) -> None:
     ctx = _seed(tmp_path)
     requirements = ctx.requirements_dir(_PROJECT)
     (requirements / f"{_VERSION}-bugfix-bundle-20260101.md").unlink()
@@ -544,10 +548,20 @@ def test_the_cli_reports_a_refusal_on_stderr_with_its_exit_code(
     tmp_path: pathlib.Path, fake_git: FakeGit, capsys: pytest.CaptureFixture
 ) -> None:
     ctx = _seed(tmp_path, halt=False)
-    code = unwind._cli_main([
-        "unwind_rc", "--kanban-root", str(ctx.kanban_root), "--project", _PROJECT,
-        "--key", _VERSION, "--confirm", "--temp-root", str(tmp_path / "tmp"),
-    ])
+    code = unwind._cli_main(
+        [
+            "unwind_rc",
+            "--kanban-root",
+            str(ctx.kanban_root),
+            "--project",
+            _PROJECT,
+            "--key",
+            _VERSION,
+            "--confirm",
+            "--temp-root",
+            str(tmp_path / "tmp"),
+        ]
+    )
     captured = capsys.readouterr()
     assert code == 1
     assert captured.err.startswith("ERROR: no HALT file found.\n")
@@ -555,15 +569,27 @@ def test_the_cli_reports_a_refusal_on_stderr_with_its_exit_code(
 
 
 def test_the_cli_force_flag_answers_the_prompt(
-    tmp_path: pathlib.Path, fake_git: FakeGit, capsys: pytest.CaptureFixture,
+    tmp_path: pathlib.Path,
+    fake_git: FakeGit,
+    capsys: pytest.CaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ctx = _seed(tmp_path)
     monkeypatch.setattr("sys.stdin", None)
-    code = unwind._cli_main([
-        "unwind_rc", "--kanban-root", str(ctx.kanban_root), "--project", _PROJECT,
-        "--key", _VERSION, "--force", "--temp-root", str(tmp_path / "tmp"),
-    ])
+    code = unwind._cli_main(
+        [
+            "unwind_rc",
+            "--kanban-root",
+            str(ctx.kanban_root),
+            "--project",
+            _PROJECT,
+            "--key",
+            _VERSION,
+            "--force",
+            "--temp-root",
+            str(tmp_path / "tmp"),
+        ]
+    )
     captured = capsys.readouterr()
     assert code == 0, captured.err
     assert "Type 'yes'" not in captured.out
@@ -580,9 +606,7 @@ def test_the_cli_names_its_verbs_for_an_unknown_one(capsys: pytest.CaptureFixtur
 # ---------------------------------------------------------------------------
 
 _SKIP = "skipped-unresolved-project"
-_LOCAL_ONLY_POLICY = (
-    "[unwind-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\n"
-)
+_LOCAL_ONLY_POLICY = "[unwind-rc] Push policy: push_to_remote=false — skipping origin operations. Local cleanup only.\n"
 
 
 @pytest.fixture
@@ -593,7 +617,7 @@ def no_inherited_paths(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     return monkeypatch
 
 
-def _set_cfg(ctx: OpsContext, text: Optional[str]) -> None:
+def _set_cfg(ctx: OpsContext, text: str | None) -> None:
     cfg = ctx.project_root(_PROJECT) / "project.cfg"
     if text is None:
         cfg.unlink()
@@ -655,8 +679,7 @@ def test_push_to_remote_false_contacts_no_remote_and_unwinds_locally(
     assert out.count("Push policy") == 1 and _SKIP not in out + err
     assert f"     - Delete remote branch: origin/{_RC}  [skipped — push_to_remote=false]\n" in out
     assert (
-        f"  [push_to_remote=false] skipping origin push for {_PROJECT}: "
-        f"git push origin --delete {_RC} (Step c)\n"
+        f"  [push_to_remote=false] skipping origin push for {_PROJECT}: " f"git push origin --delete {_RC} (Step c)\n"
     ) in out
     assert _RC not in git.branches
     assert result.cancelled_tasks == ("CODER-20260101-001-task",)
@@ -665,8 +688,11 @@ def test_push_to_remote_false_contacts_no_remote_and_unwinds_locally(
 
 @pytest.mark.parametrize(("shape", "token"), _UNRESOLVED, ids=[shape for shape, _ in _UNRESOLVED])
 def test_an_unresolved_project_contacts_no_remote_and_logs_one_skip_line(
-    tmp_path: pathlib.Path, no_inherited_paths: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch,
-    shape: str, token: str,
+    tmp_path: pathlib.Path,
+    no_inherited_paths: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+    shape: str,
+    token: str,
 ) -> None:
     ctx = _seed(tmp_path)
     extra = _shape(ctx, tmp_path, shape, no_inherited_paths)
@@ -682,8 +708,7 @@ def test_an_unresolved_project_contacts_no_remote_and_logs_one_skip_line(
     assert out.startswith(skips[0] + "\n") and "Push policy" not in out
     assert f"     - Delete remote branch: origin/{_RC}  [skipped — unresolved project]\n" in out
     assert (
-        f"  [unresolved project] skipping origin push for {_PROJECT}: "
-        f"git push origin --delete {_RC} (Step c)\n"
+        f"  [unresolved project] skipping origin push for {_PROJECT}: " f"git push origin --delete {_RC} (Step c)\n"
     ) in out
     assert _RC not in git.branches
     assert result.cancelled_tasks == ("CODER-20260101-001-task",)
@@ -691,7 +716,8 @@ def test_an_unresolved_project_contacts_no_remote_and_logs_one_skip_line(
 
 
 @pytest.mark.parametrize(
-    "shape", ["local-only", *[shape for shape, _ in _UNRESOLVED]],
+    "shape",
+    ["local-only", *[shape for shape, _ in _UNRESOLVED]],
 )
 def test_a_dry_run_for_a_project_that_does_not_push_makes_no_ls_remote(
     tmp_path: pathlib.Path, no_inherited_paths: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch, shape: str
@@ -727,3 +753,85 @@ def test_the_skip_line_is_printed_before_a_refusal_that_follows_it(
     assert out.startswith(f"[unwind-rc] {_SKIP}: project '{_PROJECT}': missing project-cfg: ")
     assert out.count("\n") == 1
     assert fake_git.calls == []
+
+
+# ---------------------------------------------------------------------------
+# 8. Unreadable or empty state refuses before anything changes
+# ---------------------------------------------------------------------------
+
+
+def _deny_reads_of(monkeypatch: pytest.MonkeyPatch, denied: pathlib.Path) -> None:
+    """Make *denied* raise EACCES on read, whatever user the suite runs as."""
+    real_read_text = pathlib.Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if self == denied:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
+
+
+def _assert_state_refusal(result, ctx: OpsContext, before: dict, git: FakeGit, key: str, path: pathlib.Path) -> None:
+    assert isinstance(result, unwind.UnwindRcError), result
+    assert result.error == key
+    assert unwind.unwind_exit_code(result) == 1
+    fields = parse_error_contract(result.text)
+    assert fields is not None and fields["error"] == key, result.text
+    assert str(path) in fields["message"], fields
+    assert shlex.split(fields["remedy"]) == [
+        "ls",
+        "-ld",
+        "--",
+        str(path),
+        "&&",
+        str(ctx.kanban_root / "scripts" / "unwind-rc.sh"),
+        "--project",
+        _PROJECT,
+        "--key",
+        _VERSION,
+        "--dry-run",
+    ]
+    assert _files(ctx) == before, "a refused unwind changed project state"
+    assert not git.mutated()
+
+
+def test_an_empty_release_state_refuses_dual_channel(tmp_path: pathlib.Path, fake_git: FakeGit) -> None:
+    ctx = _seed(tmp_path)
+    state = ctx.release_state_path(_PROJECT)
+    state.write_text("\n  \n", encoding="utf-8")
+    before = _files(ctx)
+
+    result, _out, _err = _run(ctx, tmp_path, confirm=True, force=True)
+
+    _assert_state_refusal(result, ctx, before, fake_git, "unwind_rc.state_empty", state)
+
+
+def test_an_unreadable_release_state_refuses_dual_channel(
+    tmp_path: pathlib.Path, fake_git: FakeGit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _seed(tmp_path)
+    state = ctx.release_state_path(_PROJECT)
+    before = _files(ctx)
+    _deny_reads_of(monkeypatch, state)
+
+    result, _out, _err = _run(ctx, tmp_path, confirm=True)
+
+    monkeypatch.undo()
+    _assert_state_refusal(result, ctx, before, fake_git, "unwind_rc.state_unreadable", state)
+    assert "Permission denied" in parse_error_contract(result.text)["message"]
+
+
+def test_an_unreadable_task_readme_refuses_instead_of_being_skipped(
+    tmp_path: pathlib.Path, fake_git: FakeGit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = _seed(tmp_path)
+    readme = ctx.tasks_dir(_PROJECT) / "CODER-20260101-001-task" / "README.md"
+    before = _files(ctx)
+    _deny_reads_of(monkeypatch, readme)
+
+    result, _out, _err = _run(ctx, tmp_path, confirm=True)
+
+    monkeypatch.undo()
+    _assert_state_refusal(result, ctx, before, fake_git, "unwind_rc.state_unreadable", readme)
+    assert list((tmp_path / "tmp").glob("unwind-rc-*")) == [], "a backup was taken before the refusal"

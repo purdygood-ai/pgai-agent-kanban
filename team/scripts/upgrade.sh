@@ -86,6 +86,17 @@
 #   --add-claude-agents    Deploy provider-agent wrappers to $CLAUDE_CONFIG_DIR/agents/
 #                          (default ~/.claude/agents/).
 #   --add-codex-agents     Deploy provider-agent wrappers to ~/.codex/agents/.
+#                          Either flag refreshes its provider even when
+#                          kanban.cfg [providers] available does not list it,
+#                          printing a notice that names the provider.
+#   --add-claude-skills    After the deposit, install every skill in the staging
+#                          directory into $CLAUDE_CONFIG_DIR/skills/ (default
+#                          ~/.claude/skills/): runs
+#                          scripts/install-skills.sh --provider claude --force.
+#   --add-codex-skills     The same for ~/.codex/skills/ (--provider codex).
+#                          Like the agent flags, either one refreshes its
+#                          provider even when kanban.cfg [providers] available
+#                          does not list it, with a notice naming it.
 #   --dev-tree PATH        Explicit path to dev tree (overrides kanban.cfg and env).
 #   --stamp-version STRING Write STRING verbatim to VERSION; bypass git resolution
 #                          and suppress divergence advisory.
@@ -107,7 +118,8 @@
 #   PGAI_AGENT_KANBAN_ROOT_PATH   Kanban root (default: $HOME/pgai_agent_kanban)
 #   PGAI_DEV_TREE_PATH            Dev tree path (required when not set in kanban.cfg)
 #   CLAUDE_CONFIG_DIR             Claude Code config dir (default: $HOME/.claude);
-#                                 --add-claude-agents deploys to its agents/ subdirectory
+#                                 --add-claude-agents deploys to its agents/ subdirectory,
+#                                 --add-claude-skills to its skills/ subdirectory
 #
 # PROTECTED SET (declared once here; never overwritten on upgrade):
 #   Config files:   kanban.cfg, projects.cfg, secrets, shell-env, claude-env,
@@ -134,6 +146,19 @@
 #                   and the summary says "current" when all match. A provider
 #                   whose agents directory does not exist is neither compared
 #                   nor created.
+#   Provider skills: $CLAUDE_CONFIG_DIR/skills/ (default ~/.claude/skills/) and
+#                   ~/.codex/skills/ (opt-in only; when --add-claude-skills /
+#                   --add-codex-skills are NOT passed, nothing under them is
+#                   written or created). Every upgrade still compares them,
+#                   read-only, with the skills this tree ships under skills/:
+#                   each missing or differing one is warned by name, e.g.
+#                   "Skill out of date: claude/pgai-agent-kanban (...) --
+#                   refresh: <root>/scripts/install-skills.sh --provider claude
+#                   --force", and the summary says "current" when all match.
+#                   A provider whose skills directory does not exist is
+#                   neither compared nor created.
+#   Operator skills: every skill under $KANBAN_ROOT/skills/<provider>/<name>/
+#                   whose <name> this tree does not ship (see SKILL STAGING)
 #   Example templates: *_example files are refreshed; the ACTIVE config they seed
 #                      (e.g. kanban.cfg, claude-env) is preserved
 #   Runtime dirs:   logs/, locks/ — ensure-if-missing; never deleted
@@ -158,6 +183,21 @@
 #   .readme-template.<UTC timestamp>.md and replaced, with a one-line notice.
 #   The project README.md itself is never written.
 #
+# SKILL STAGING (refreshed; operator skills protected):
+#   Phase 2 deposits every skill the tree ships under skills/<provider>/<name>/
+#   into $KANBAN_ROOT/skills/<provider>/<name>/ through the same deposit step
+#   as every other managed item: an identical skill is skipped, a differing
+#   one is overwritten with --force and otherwise stops the run as a partial
+#   deposit naming skills/<provider>/<name>. A skill the tree no longer ships
+#   but $KANBAN_ROOT/.installed-skills records as shipped is deleted only
+#   when every file is byte-identical to the recorded copy and it holds no
+#   other file; an edited one is kept, named, and from then on is the
+#   operator's. Every other skill in the staging directory is the operator's:
+#   it is listed as operator-owned and never written, renamed, moved aside or
+#   deleted, with or without --force. The record is then rewritten to name the
+#   skills this tree ships. A tree that ships no skills leaves the staging
+#   directory and the record as they are.
+#
 # ORPHAN SWEEP (after the deposit and the retirement step):
 #   Phase 2 lists every file under the directories it deposited into (the
 #   team/ directories such as scripts/, roles/, workflows/, and the docs/
@@ -170,9 +210,10 @@
 #   "Orphans:" line with the count. Never scanned or moved: anything outside
 #   those directories, the protected set (including projects/), Python
 #   bytecode caches, files install.sh generates into them
-#   (scripts/cron-suggested.txt), and an operator's own plugin directories
+#   (scripts/cron-suggested.txt), an operator's own plugin directories
 #   (workflows/<name>/ and templates/project/<name>/ whose <name> the
-#   deposited tree does not ship).
+#   deposited tree does not ship), and the skill staging directory skills/
+#   (see SKILL STAGING).
 #
 # BACKUP:
 #   A tarball of the whole kanban root is created before any change, excluding
@@ -183,7 +224,7 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # PHASE 2 EARLY DETECTION
@@ -244,14 +285,18 @@ fi
 # Operator user config, then [chain] pm_mode. config_loader.sh is
 # self-located: in phase 2 the installed root's lib may predate it.
 # shellcheck source=lib/config_loader.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/config_loader.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/config_loader.sh"
 config_startup_prelude "$KANBAN_ROOT"
 
 # Source INI parser for kanban.cfg access.
 _UPG_INI_SH="${KANBAN_ROOT}/scripts/lib/ini_parser.sh"
 [[ -f "$_UPG_INI_SH" ]] && source "$_UPG_INI_SH"
+# The global dev tree: PGAI_DEV_TREE_PATH, else kanban.cfg [paths] dev_tree_path.
+# Self-located, like config_loader.sh above.
+# shellcheck source=lib/dev_tree.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/dev_tree.sh"
 if [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
-    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(read_ini "$KANBAN_ROOT/kanban.cfg" paths dev_tree_path "")}"
+    export PGAI_DEV_TREE_PATH="${PGAI_DEV_TREE_PATH:-$(resolve_global_dev_tree "$KANBAN_ROOT/kanban.cfg")}"
 fi
 unset _UPG_INI_SH
 
@@ -263,7 +308,7 @@ unset _UPG_INI_SH
 # projects_cfg_list --registration-order, which an installed lib may predate.
 # Optional, as that resolver is: a missing or failing copy leaves the
 # prefix "" rather than stopping the upgrade.
-_UPG_PROJECTS_SH="$(dirname "${BASH_SOURCE[0]}")/lib/projects.sh"
+_UPG_PROJECTS_SH="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/projects.sh"
 if [[ -f "$_UPG_PROJECTS_SH" ]]; then
   # shellcheck source=lib/projects.sh
   source "$_UPG_PROJECTS_SH" || true
@@ -278,7 +323,7 @@ unset _UPG_PROJECTS_SH
 # indirection required since the two-phase architecture eliminated the
 # self-overwrite problem that necessitated the temp-copy guard.
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _UPG_ARGPARSE_SH="${_SCRIPT_DIR}/lib/argparse.sh"
 if [[ ! -f "$_UPG_ARGPARSE_SH" ]]; then
   echo "[upgrade] ERROR: argparse.sh not found: $_UPG_ARGPARSE_SH" >&2
@@ -296,22 +341,8 @@ source "${_SCRIPT_DIR}/lib/script_common.sh"
 REPO_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd)"
 unset _SCRIPT_DIR
 
-# --- Color helpers ---
-if [[ -t 1 ]]; then
-  C_RED=$'\033[0;31m'
-  C_GREEN=$'\033[0;32m'
-  C_YELLOW=$'\033[0;33m'
-  C_BLUE=$'\033[0;34m'
-  C_BOLD=$'\033[1m'
-  C_RESET=$'\033[0m'
-else
-  C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_BOLD=""; C_RESET=""
-fi
-
-info()  { echo "${C_BLUE}[upgrade]${C_RESET} $*"; }
-ok()    { echo "${C_GREEN}[upgrade]${C_RESET} $*"; }
-warn()  { echo "${C_YELLOW}[upgrade]${C_RESET} $*"; }
-err()   { echo "${C_RED}[upgrade]${C_RESET} $*" >&2; }
+# --- Colour table and status-line logger (lib/script_common.sh) ---
+script_log_init upgrade
 
 # ---------------------------------------------------------------------------
 # _upg_resolve_branch_prefix
@@ -406,11 +437,11 @@ _upg_tree_version() {
 # backup and the handoff, so it holds even when the dev tree's own
 # upgrade.sh predates it; phase 2 (the script that deposits) runs it again.
 # Reads DEV_TREE, KANBAN_ROOT, FORCE_UPGRADE, WAKE_TIER and the
-# ADD_*_AGENTS flags.
+# ADD_*_AGENTS and ADD_*_SKILLS flags.
 # ---------------------------------------------------------------------------
 _upg_noarg_forward_only_check() {
   local lib_dir
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+  lib_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib"
 
   # git_describe_tag_pattern, for a dev tree that carries no VERSION file.
   if ! declare -f git_describe_tag_pattern >/dev/null 2>&1 \
@@ -472,6 +503,8 @@ _upg_noarg_forward_only_check() {
     [[ -n "$WAKE_TIER" ]] && remedy+=" --wake-tier ${WAKE_TIER}"
     [[ "$ADD_CLAUDE_AGENTS" == "true" ]] && remedy+=" --add-claude-agents"
     [[ "$ADD_CODEX_AGENTS" == "true" ]] && remedy+=" --add-codex-agents"
+    [[ "$ADD_CLAUDE_SKILLS" == "true" ]] && remedy+=" --add-claude-skills"
+    [[ "$ADD_CODEX_SKILLS" == "true" ]] && remedy+=" --add-codex-skills"
     [[ "$FORCE_UPGRADE" == "true" ]] && remedy+=" --force"
 
     # shellcheck source=lib/error_contract.sh
@@ -553,6 +586,8 @@ DO_BACKUP=true
 WAKE_TIER=""          # empty = leave the crontab untouched (tier detected, reported only)
 ADD_CLAUDE_AGENTS=false
 ADD_CODEX_AGENTS=false
+ADD_CLAUDE_SKILLS=false
+ADD_CODEX_SKILLS=false
 BACKUP_PATH=""
 STAMP_VERSION=""      # non-empty = write verbatim, skip git resolution
 REQUESTED_VERSION=""  # non-empty = optional positional VERSION argument (e.g. "v2.2.0"):
@@ -628,6 +663,17 @@ the count. Never touched: anything outside those directories, protected files
 and projects/, Python bytecode caches, scripts/cron-suggested.txt (generated
 by install.sh), and your own plugin directories under workflows/<name>/ or
 templates/project/<name>/ when the deposited tree has no <name> there.
+The skill staging directory skills/ is never swept.
+
+Skill staging: phase 2 deposits every skill the tree ships under
+skills/<provider>/<name>/ into the staging directory \$KANBAN_ROOT/skills/
+like any other managed item (identical skipped; a changed one overwritten
+with --force, otherwise left and named as a skipped item). A skill the tree
+no longer ships is removed from staging only when it is byte-identical to
+the copy last shipped (recorded in \$KANBAN_ROOT/.installed-skills); an
+edited one is kept and named. Every other skill under skills/ is yours: it
+is listed as operator-owned and never written, moved or deleted, even with
+--force.
 
 Version-targeted upgrade (forward-only):
   Pass an optional positional VERSION argument to upgrade TO a specific
@@ -686,6 +732,9 @@ OPTIONS:
   --add-claude-agents     Deploy provider-agent wrappers to \$CLAUDE_CONFIG_DIR/agents/
                           (default ~/.claude/agents/).
   --add-codex-agents      Deploy provider-agent wrappers to ~/.codex/agents/.
+                          A flag refreshes its provider even when kanban.cfg
+                          [providers] available does not list it: a notice
+                          names the provider and the summary carries its line.
                           Without either flag the deployed wrappers are
                           protected: nothing under a provider's agents
                           directory is written or created, but each existing
@@ -694,6 +743,20 @@ OPTIONS:
                           provider and file name with the refresh command
                           (upgrade.sh --add-<provider>-agents); when all match,
                           the summary reports the wrappers as current.
+  --add-claude-skills     After the deposit, install every skill in the staging
+                          directory into \$CLAUDE_CONFIG_DIR/skills/ (default
+                          ~/.claude/skills/) by running
+                          scripts/install-skills.sh --provider claude --force.
+  --add-codex-skills      The same for ~/.codex/skills/ (--provider codex).
+                          As with the agent flags, a provider not listed in
+                          kanban.cfg [providers] available is still refreshed
+                          when its flag is passed, with a notice naming it.
+                          Without either flag nothing under a provider's skills
+                          directory is written or created; each existing one is
+                          compared with the skills this upgrade ships, and a
+                          missing or differing skill is warned by provider and
+                          name with the refresh command
+                          (install-skills.sh --provider <provider> --force).
   --dev-tree PATH         Explicit path to dev tree (overrides env and kanban.cfg).
   --stamp-version STRING  Write STRING verbatim to VERSION; bypass git resolution
                           and suppress divergence advisory.
@@ -715,7 +778,8 @@ ENVIRONMENT:
   PGAI_AGENT_KANBAN_ROOT_PATH   Kanban root (default: \$HOME/pgai_agent_kanban)
   PGAI_DEV_TREE_PATH            Dev tree path (set via kanban.cfg or this env var)
   CLAUDE_CONFIG_DIR             Claude Code config dir (default: \$HOME/.claude);
-                                --add-claude-agents deploys to its agents/ subdirectory
+                                --add-claude-agents deploys to its agents/ subdirectory,
+                                --add-claude-skills to its skills/ subdirectory
 
 EXAMPLES:
   $(basename "$0")                                      # upgrade, crontab untouched
@@ -723,6 +787,7 @@ EXAMPLES:
   $(basename "$0") --wake-tier large                   # upgrade; kanban cron lines -> large tier
   $(basename "$0") --wake-tier none                    # upgrade, skip crontab
   $(basename "$0") --add-claude-agents                 # upgrade and refresh claude wrappers
+  $(basename "$0") --add-claude-skills                 # upgrade and install skills into ~/.claude/skills
   $(basename "$0") --no-backup                         # upgrade without backup (advanced)
   $(basename "$0") v2.2.0                              # forward-only upgrade to tag v2.2.0
 EOF
@@ -802,7 +867,8 @@ unset _pos
 # Reject unknown flags.
 for _flag in "${!ARGPARSE_FLAGS[@]}"; do
   case "$_flag" in
-    force|no-backup|add-claude-agents|add-codex-agents|dev-tree|stamp-version|wake-tier|crontab-tier|help|h) ;;
+    force|no-backup|add-claude-agents|add-codex-agents|add-claude-skills|add-codex-skills) ;;
+    dev-tree|stamp-version|wake-tier|crontab-tier|help|h) ;;
     phase2|phase2-protocol|kanban-root|backup) ;;
     *)
       err "Unknown option: --${_flag}"
@@ -818,6 +884,8 @@ if argparse_has "force";             then FORCE_UPGRADE=true; fi
 if argparse_has "no-backup";         then DO_BACKUP=false; fi
 if argparse_has "add-claude-agents"; then ADD_CLAUDE_AGENTS=true; fi
 if argparse_has "add-codex-agents";  then ADD_CODEX_AGENTS=true; fi
+if argparse_has "add-claude-skills"; then ADD_CLAUDE_SKILLS=true; fi
+if argparse_has "add-codex-skills";  then ADD_CODEX_SKILLS=true; fi
 
 # Extract --dev-tree.
 if argparse_has "dev-tree"; then
@@ -903,7 +971,7 @@ if [[ "$_PHASE2_MODE" == "true" ]]; then
   fi
 
   # Infer DEV_TREE from BASH_SOURCE (this script lives at <dev_tree>/team/scripts/).
-  DEV_TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  DEV_TREE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 
   info "Phase 2 running (protocol 1): kanban root = $KANBAN_ROOT"
   info "Dev tree (BASH_SOURCE-relative): $DEV_TREE"
@@ -1095,7 +1163,7 @@ if [[ -z "$DEV_TREE" ]]; then
   # Fallback: upgrade.sh may itself live in the dev tree.
   # team/scripts/upgrade.sh → repo root is two levels up.
   # BASH_SOURCE[0] is always the installed upgrade.sh in phase 1.
-  _candidate="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || true
+  _candidate="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." 2>/dev/null && pwd)" || true
   if [[ -f "${_candidate}/install.sh" ]]; then
     DEV_TREE="$_candidate"
     info "Dev tree inferred from script location: $DEV_TREE"
@@ -1281,7 +1349,7 @@ if [[ ! -f "$_UPG_STAMP_LIB" ]]; then
     _upg_stamp_remedy="git clone https://github.com/purdygood-ai/pgai-agent-kanban.git '${HOME}/pgai-agent-kanban-src' && '${HOME}/pgai-agent-kanban-src/team/scripts/upgrade.sh' --dev-tree '${HOME}/pgai-agent-kanban-src'"
   fi
   # shellcheck source=lib/error_contract.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+  source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/error_contract.sh"
   # BLOCK-WORTHY (docs/blocking-site-census.md): depositing a tree that
   # cannot stamp its own VERSION leaves the root half-upgraded -- new files,
   # the old VERSION, no migrations -- a state-corrupting partial upgrade.
@@ -1399,13 +1467,30 @@ if [[ -z "$WAKE_TIER" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Shared provider deploy helpers (team/scripts/lib/subagent_deploy.sh): the
+# deposit's directory-current check, the skill staging step and the
+# provider-agent wrapper and provider skill steps further down all use them.
+# ---------------------------------------------------------------------------
+_SUBAGENT_DEPLOY_LIB="$DEV_TREE/team/scripts/lib/subagent_deploy.sh"
+if [[ -f "$_SUBAGENT_DEPLOY_LIB" ]]; then
+  # shellcheck source=team/scripts/lib/subagent_deploy.sh
+  source "$_SUBAGENT_DEPLOY_LIB"
+else
+  err "subagent_deploy.sh not found at $_SUBAGENT_DEPLOY_LIB"
+  err "This file is required and ships with the kanban repo."
+  exit 1
+fi
+unset _SUBAGENT_DEPLOY_LIB
+
+# ---------------------------------------------------------------------------
 # DEPOSIT — same tree as install.sh, protected items skipped.
 #
 # Helper: deposit_item <src-path> <kanban-root-relative-path> <label>
 #   - Skips items that are in the protected set.
 #   - Skips identical files silently, and a directory whose every source file
-#     is already identical in place (extra files at the root do not count;
-#     see _deposit_dir_is_current).
+#     is already identical in place: deploy_tree_current, where files only in
+#     the destination do not count and neither do the caches named in
+#     _UPG_CACHE_NAMES; a comparator that cannot run counts as differing.
 #   - With FORCE_UPGRADE=true: overwrites non-protected items without prompting.
 #   - Without force and with a TTY: prompts [y]es/[N]o/[a]ll/[q]uit.
 #   - Without force and without a TTY: skips with a message.
@@ -1428,34 +1513,14 @@ _UPG_CACHE_NAMES=(__pycache__ '*.pyc' .pytest_cache)
 _UPG_DEPOSITED_DIRS=()
 _UPG_DEPOSITED_DOCS=()
 
-# _deposit_dir_is_current <src-dir> <dst-dir>
-#
-# Returns 0 when depositing <src-dir> onto <dst-dir> would change nothing:
-# every file under <src-dir> exists under <dst-dir> with identical content.
-# Files only present under <dst-dir> are ignored (the deposit copies over and
-# never deletes; the orphan sweep reports them), as are the caches named in
-# _UPG_CACHE_NAMES. Returns 1 on any difference, or when diff is not
-# available (the item is then treated as differing, as before).
-_deposit_dir_is_current() {
-  local src="$1" dst="$2"
-  [[ -d "$src" && -d "$dst" ]] || return 1
-  command -v diff >/dev/null 2>&1 || return 1
-  local _report _rc=0 _cache_name
-  local -a _excludes=()
-  for _cache_name in "${_UPG_CACHE_NAMES[@]}"; do
-    _excludes+=(-x "$_cache_name")
-  done
-  _report="$(LC_ALL=C diff -rq "${_excludes[@]}" "$src" "$dst" 2>&1)" || _rc=$?
-  [[ "$_rc" -le 1 ]] || return 1
-  # Only "Only in <dst...>" lines are acceptable: extra files at the root.
-  local _line
-  while IFS= read -r _line; do
-    [[ -z "$_line" ]] && continue
-    [[ "$_line" == "Only in ${dst}: "* || "$_line" == "Only in ${dst}/"* ]] && continue
-    return 1
-  done <<< "$_report"
-  return 0
-}
+# The deposit's directory-current check (deploy_tree_current in
+# team/scripts/lib/subagent_deploy.sh, the one deployed-copy comparator) skips
+# the caches above: one "--exclude <glob>" pair per _UPG_CACHE_NAMES entry.
+_UPG_CACHE_EXCLUDES=()
+for _upg_cache_name in "${_UPG_CACHE_NAMES[@]}"; do
+  _UPG_CACHE_EXCLUDES+=(--exclude "$_upg_cache_name")
+done
+unset _upg_cache_name
 
 deposit_item() {
   local src="$1"
@@ -1479,7 +1544,7 @@ deposit_item() {
     return 0
   fi
   # Directory already current — every shipped file identical in place.
-  if [[ -d "$src" && -d "$dst" ]] && _deposit_dir_is_current "$src" "$dst"; then
+  if [[ -d "$src" && -d "$dst" ]] && deploy_tree_current "${_UPG_CACHE_EXCLUDES[@]}" "$src" "$dst"; then
     return 0
   fi
 
@@ -1615,6 +1680,103 @@ fi
 unset _claude_env_template
 
 # ---------------------------------------------------------------------------
+# SKILL STAGING — refresh the shipped skills in $KANBAN_ROOT/skills/ (see
+# SKILL STAGING in the header).
+#
+# skills/ is a repository-root directory, like docs/, so the team/ item loop
+# never reaches it and the orphan sweep never scans it. Each shipped skill
+# (skills/<provider>/<name>/ holding a SKILL.md, as list_shipped_skills
+# enumerates them) goes through deposit_item as one directory item labelled
+# skills/<provider>/<name>: identical in place is skipped (a file only the
+# staged copy has does not count), --force overwrites, and otherwise a
+# differing skill is prompted for or, with no TTY, recorded in
+# _DEPOSIT_SKIPPED so the run stops at PARTIAL DEPOSIT naming it.
+#
+# Formerly shipped: a <provider>/<name> the previous record names
+# (deploy_record_skills) that this tree no longer ships. It is deleted only
+# when deploy_record_unedited proves the staged copy is exactly the one last
+# shipped; otherwise it is kept, named, and dropped from the new record, so
+# later runs treat it as the operator's. A symlinked skill is kept: what it
+# points at was not laid down here.
+#
+# Operator-owned: every other directory under skills/<provider>/. Only
+# listed; nothing below this point writes, renames or deletes under it.
+#
+# The record ($KANBAN_ROOT/.installed-skills, the same file install.sh
+# writes) is rewritten by deploy_record_write from this tree's copies.
+# A tree that ships no skills changes nothing here: no removal is made on
+# its strength and the earlier record stays usable.
+# ---------------------------------------------------------------------------
+INSTALLED_SKILLS_STATE="$KANBAN_ROOT/.installed-skills"
+_UPG_SHIPPED_SKILLS=()     # <provider>/<name> this tree ships
+_UPG_SKILLS_REMOVED=()     # formerly shipped, unedited: deleted from staging
+_UPG_SKILLS_KEPT=()        # formerly shipped, edited: kept in staging
+_UPG_OPERATOR_SKILLS=()    # operator-owned: left alone
+
+# _upg_skill_listed <provider/name> [<item>...]
+# Returns 0 when <provider/name> is one of the items.
+_upg_skill_listed() {
+  local want="$1" item
+  shift
+  for item in "$@"; do
+    [[ "$item" == "$want" ]] && return 0
+  done
+  return 1
+}
+
+_upg_skills_source="$DEV_TREE/skills"
+while IFS= read -r _upg_skill; do
+  [[ -n "$_upg_skill" ]] && _UPG_SHIPPED_SKILLS+=("$_upg_skill")
+done < <(list_shipped_skills "$_upg_skills_source")
+
+info ""
+if [[ ${#_UPG_SHIPPED_SKILLS[@]} -eq 0 ]]; then
+  info "Skill staging: this tree ships no skills under $_upg_skills_source; the staging directory and $INSTALLED_SKILLS_STATE are left as they are"
+else
+  info "Skill staging: refreshing ${#_UPG_SHIPPED_SKILLS[@]} shipped skill(s) in $KANBAN_ROOT/skills"
+  for _upg_skill in "${_UPG_SHIPPED_SKILLS[@]}"; do
+    deposit_item "$_upg_skills_source/$_upg_skill" "skills/$_upg_skill" "skills/$_upg_skill"
+  done
+
+  while IFS= read -r _upg_skill; do
+    [[ -n "$_upg_skill" ]] || continue
+    _upg_skill_listed "$_upg_skill" "${_UPG_SHIPPED_SKILLS[@]+"${_UPG_SHIPPED_SKILLS[@]}"}" && continue
+    _upg_skill_dir="$KANBAN_ROOT/skills/$_upg_skill"
+    [[ -e "$_upg_skill_dir" || -L "$_upg_skill_dir" ]] || continue
+    if [[ ! -L "$_upg_skill_dir" && -d "$_upg_skill_dir" ]] \
+        && deploy_record_unedited "$INSTALLED_SKILLS_STATE" "$KANBAN_ROOT" "skills/$_upg_skill"; then
+      rm -rf -- "$_upg_skill_dir"
+      ok "Removed formerly shipped skill: skills/$_upg_skill (no longer shipped; byte-identical to the copy last shipped)"
+      _UPG_SKILLS_REMOVED+=("$_upg_skill")
+    else
+      warn "Kept formerly shipped skill: skills/$_upg_skill -- no longer shipped, but it differs from the copy last shipped (edited, or holds files that copy did not), so it is now yours. Remove it if unwanted: rm -r -- '$_upg_skill_dir'"
+      _UPG_SKILLS_KEPT+=("$_upg_skill")
+    fi
+  done < <(deploy_record_skills "$INSTALLED_SKILLS_STATE")
+
+  _upg_skill_record_paths=()
+  for _upg_skill in "${_UPG_SHIPPED_SKILLS[@]}"; do
+    _upg_skill_record_paths+=("skills/$_upg_skill")
+  done
+  if deploy_record_write "$INSTALLED_SKILLS_STATE" "$DEV_TREE" \
+      "skills shipped to the staging directory by upgrade.sh" "${_upg_skill_record_paths[@]}"; then
+    info "Updated installed-skills state file: $INSTALLED_SKILLS_STATE"
+  else
+    warn "Skill staging: $INSTALLED_SKILLS_STATE was not updated; a later upgrade removes no formerly shipped skill on its strength."
+  fi
+fi
+
+for _upg_skill_dir in "$KANBAN_ROOT"/skills/[!.]*/[!.]*; do
+  [[ -d "$_upg_skill_dir" ]] || continue
+  _upg_skill="${_upg_skill_dir#"$KANBAN_ROOT/skills/"}"
+  _upg_skill_listed "$_upg_skill" "${_UPG_SHIPPED_SKILLS[@]+"${_UPG_SHIPPED_SKILLS[@]}"}" && continue
+  _upg_skill_listed "$_upg_skill" "${_UPG_SKILLS_KEPT[@]+"${_UPG_SKILLS_KEPT[@]}"}" && continue
+  info "Operator-owned skill (left alone): skills/$_upg_skill"
+  _UPG_OPERATOR_SKILLS+=("$_upg_skill")
+done
+unset _upg_skills_source _upg_skill _upg_skill_dir _upg_skill_record_paths
+
+# ---------------------------------------------------------------------------
 # Ensure runtime directories exist (never delete, only create if missing).
 # ---------------------------------------------------------------------------
 info ""
@@ -1704,10 +1866,17 @@ fi
 # default; provider_agents_dir (team/scripts/lib/subagent_deploy.sh) names
 # each provider's directory.  Passing --add-claude-agents / --add-codex-agents
 # explicitly OPTs IN to refreshing those wrappers for the named provider.
-# Without the flag, NOTHING is written under the provider directory.
+# Without the flag, NOTHING is written under the provider directory. The
+# step walks kanban.cfg [providers] available; a flag for a provider that
+# list does not name adds it for this run, with a notice naming it
+# (deploy_flagged_providers), so an explicit flag is never ignored.
+#
+# An opted-in provider is deployed by deploy_provider_wrappers, the deploy
+# and obsolete-wrapper removal install.sh runs too; both live in
+# team/scripts/lib/subagent_deploy.sh.
 #
 # On that protected path the deployed wrappers are still compared, read-only
-# (subagent_wrapper_drift in team/scripts/lib/subagent_deploy.sh), with the
+# (deploy_drift in team/scripts/lib/subagent_deploy.sh), with the
 # ones this tree ships under subagents/: each missing or differing wrapper
 # gets a warning naming provider and file plus the runnable refresh command,
 # and an all-match result says the wrappers are current. A provider whose
@@ -1715,65 +1884,34 @@ fi
 # summary reports one line per provider from the same results.
 #
 # Once opted in, the target agents directory is always created via mkdir -p
-# (ensure_provider_agents_dir in team/scripts/lib/subagent_deploy.sh) when
+# (ensure_deploy_dir in team/scripts/lib/subagent_deploy.sh) when
 # absent, before any wrapper is copied — a missing directory never causes a
 # silent no-op. Creation failure (permissions, read-only HOME) fails loud
 # naming the path and exits non-zero. Narration: "created <path>" once if
 # the directory had to be created, then "deployed N wrapper(s)" always.
 # ---------------------------------------------------------------------------
-_SUBAGENT_SAFE_OVERWRITE_LIB="$DEV_TREE/team/scripts/lib/safe_overwrite.sh"
-_subagent_safe_overwrite_available=false
-if [[ -f "$_SUBAGENT_SAFE_OVERWRITE_LIB" ]]; then
-  # shellcheck source=team/scripts/lib/safe_overwrite.sh
-  source "$_SUBAGENT_SAFE_OVERWRITE_LIB"
-  _subagent_safe_overwrite_available=true
-fi
-unset _SUBAGENT_SAFE_OVERWRITE_LIB
-
-_SUBAGENT_DEPLOY_LIB="$DEV_TREE/team/scripts/lib/subagent_deploy.sh"
-if [[ -f "$_SUBAGENT_DEPLOY_LIB" ]]; then
-  # shellcheck source=team/scripts/lib/subagent_deploy.sh
-  source "$_SUBAGENT_DEPLOY_LIB"
-else
-  err "subagent_deploy.sh not found at $_SUBAGENT_DEPLOY_LIB"
-  err "This file is required and ships with the kanban repo."
-  exit 1
-fi
-unset _SUBAGENT_DEPLOY_LIB
-
 _SUBAGENT_INI_PARSER_LIB="$DEV_TREE/team/scripts/lib/ini_parser.sh"
-_subagent_providers=""
+_upg_configured_providers=""
 if [[ -f "$_SUBAGENT_INI_PARSER_LIB" ]] && [[ -f "$KANBAN_ROOT/kanban.cfg" ]]; then
   # shellcheck source=team/scripts/lib/ini_parser.sh
   source "$_SUBAGENT_INI_PARSER_LIB"
-  _subagent_providers="$(read_ini "$KANBAN_ROOT/kanban.cfg" providers available "")"
+  _upg_configured_providers="$(read_ini "$KANBAN_ROOT/kanban.cfg" providers available "")"
 fi
-[[ -z "$_subagent_providers" ]] && _subagent_providers="claude codex"
+[[ -z "$_upg_configured_providers" ]] && _upg_configured_providers="claude codex"
 unset _SUBAGENT_INI_PARSER_LIB
+
+# The configured providers, plus any whose --add-<provider>-agents was passed.
+deploy_flagged_providers "Provider-agent wrappers" agents "$_upg_configured_providers" \
+  "$ADD_CLAUDE_AGENTS" "$ADD_CODEX_AGENTS"
+_subagent_providers="$DEPLOY_STEP_PROVIDERS"
 
 SUBAGENT_MANIFEST="$DEV_TREE/subagents/MANIFEST.txt"
 CURRENT_SUBAGENTS=()
-if [[ -f "$SUBAGENT_MANIFEST" ]]; then
-  while IFS= read -r line; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [[ -z "$line" ]] && continue
-    CURRENT_SUBAGENTS+=("$line")
-  done < "$SUBAGENT_MANIFEST"
-fi
+while IFS= read -r line; do
+  CURRENT_SUBAGENTS+=("$line")
+done < <(deploy_read_names "$SUBAGENT_MANIFEST")
 
 INSTALLED_AGENTS_STATE="$KANBAN_ROOT/.installed-subagents"
-PREVIOUSLY_INSTALLED=()
-if [[ -f "$INSTALLED_AGENTS_STATE" ]]; then
-  while IFS= read -r prev_line; do
-    prev_line="${prev_line%%#*}"
-    prev_line="${prev_line#"${prev_line%%[![:space:]]*}"}"
-    prev_line="${prev_line%"${prev_line##*[![:space:]]}"}"
-    [[ -z "$prev_line" ]] && continue
-    PREVIOUSLY_INSTALLED+=("$prev_line")
-  done < "$INSTALLED_AGENTS_STATE"
-fi
 
 _ANY_PROVIDER_FLAG_SET=false
 # One entry per provider, printed under "Protected (preserved)" in the final
@@ -1784,7 +1922,7 @@ _WRAPPER_SUMMARY_LINES=()
 #
 # Protected path for a provider whose opt-in flag was not passed. Compares
 # the deployed wrappers with $DEV_TREE/subagents/ through
-# subagent_wrapper_drift, which only reads, then narrates:
+# deploy_drift, which only reads, then narrates:
 #   - agents directory absent: one skip line; not compared, not created.
 #   - drift: one warning per missing or differing wrapper, naming
 #     <provider>/<name>.md and the refresh command
@@ -1810,7 +1948,7 @@ _report_protected_wrapper_drift() {
     return 0
   fi
 
-  drift="$(subagent_wrapper_drift "$DEV_TREE/subagents" "$agents_dir" "${CURRENT_SUBAGENTS[@]}")" || drift=""
+  drift="$(deploy_drift --suffix .md "$DEV_TREE/subagents" "$agents_dir" "${CURRENT_SUBAGENTS[@]}")" || drift=""
   while read -r state name; do
     [[ -n "$name" ]] || continue
     drifted+=("$provider/$name.md")
@@ -1856,78 +1994,24 @@ for _provider in $_subagent_providers; do
   esac
   _ANY_PROVIDER_FLAG_SET=true
 
-  info "Provider-agent wrapper deployment: provider=$_provider"
-
-  if ! command -v "$_provider" >/dev/null 2>&1; then
-    warn "Skipping $_provider: CLI binary not found on PATH"
-    _WRAPPER_SUMMARY_LINES+=("$_provider: not refreshed (CLI binary not found on PATH)")
-    continue
-  fi
-
-  _provider_agents_dir="$(provider_agents_dir "$_provider")"
-
-  # Directory creation: always ensured before deploying wrappers — a missing
-  # target directory must never silently no-op the deploy. See
-  # ensure_provider_agents_dir() in team/scripts/lib/subagent_deploy.sh for
-  # the fail-loud contract on creation failure.
-  if ! ensure_provider_agents_dir "$_provider_agents_dir" "false"; then
-    exit 1
-  fi
-
-  _provider_deployed_count=0
-  for agent in "${CURRENT_SUBAGENTS[@]}"; do
-    src="$DEV_TREE/subagents/${agent}.md"
-    dst="${_provider_agents_dir}/${agent}.md"
-    [[ -f "$src" ]] || { warn "Subagent source missing: $src"; continue; }
-
-    _provider_deployed_count=$((_provider_deployed_count + 1))
-
-    if [[ "$FORCE_UPGRADE" == "true" ]]; then
-      cp "$src" "$dst"
-      ok "Upgraded: $_provider/$agent"
-    elif [[ "$_subagent_safe_overwrite_available" == "true" ]]; then
-      safe_overwrite_file "$src" "$dst" || true
-    else
-      deposit_item "$src" ".${_provider}/agents/${agent}.md" "subagent: $_provider/$agent"
-    fi
-  done
-  ok "deployed ${_provider_deployed_count} wrapper(s)"
-
-  # Remove obsolete subagents (previously installed, no longer in manifest).
-  if [[ ${#PREVIOUSLY_INSTALLED[@]} -gt 0 ]]; then
-    for prev in "${PREVIOUSLY_INSTALLED[@]}"; do
-      still_shipped=false
-      for current in "${CURRENT_SUBAGENTS[@]}"; do
-        [[ "$prev" == "$current" ]] && still_shipped=true && break
-      done
-      if [[ "$still_shipped" == "false" ]]; then
-        obsolete_file="${_provider_agents_dir}/${prev}.md"
-        if [[ -f "$obsolete_file" ]]; then
-          info "Removing obsolete subagent (no longer in manifest): $_provider/$prev"
-          rm -f "$obsolete_file"
-        fi
-      fi
-    done
-  fi
-
-  ok "Provider-agent wrapper deployment complete for: $_provider"
-  _WRAPPER_SUMMARY_LINES+=("$_provider: refreshed (--add-${_provider}-agents)")
+  _deploy_rc=0
+  deploy_provider_wrappers "$_provider" "$DEV_TREE/subagents" "$INSTALLED_AGENTS_STATE" \
+    "$FORCE_UPGRADE" false "${CURRENT_SUBAGENTS[@]+"${CURRENT_SUBAGENTS[@]}"}" || _deploy_rc=$?
+  case "$_deploy_rc" in
+    0) _WRAPPER_SUMMARY_LINES+=("$_provider: refreshed (--add-${_provider}-agents)") ;;
+    3) _WRAPPER_SUMMARY_LINES+=("$_provider: not refreshed (CLI binary not found on PATH)") ;;
+    *) exit 1 ;; # the agents directory could not be created (named above)
+  esac
 done
 
 # Update .installed-subagents state file when at least one provider ran.
 if [[ "$_ANY_PROVIDER_FLAG_SET" == "true" ]] && [[ ${#CURRENT_SUBAGENTS[@]} -gt 0 ]]; then
-  {
-    echo "# pgai-agent-kanban: subagents installed by upgrade.sh"
-    echo "# This file is managed automatically."
-    echo "# Last updated: $(date -Iseconds)"
-    printf '%s\n' "${CURRENT_SUBAGENTS[@]}"
-  } > "$INSTALLED_AGENTS_STATE"
-  info "Updated installed-subagents state file: $INSTALLED_AGENTS_STATE"
+  if deploy_wrapper_record_write "$INSTALLED_AGENTS_STATE" upgrade.sh "${CURRENT_SUBAGENTS[@]}"; then
+    info "Updated installed-subagents state file: $INSTALLED_AGENTS_STATE"
+  fi
 fi
 
-unset _provider _provider_agents_dir _provider_deployed_count _subagent_providers
-unset PREVIOUSLY_INSTALLED prev still_shipped current obsolete_file
-unset _subagent_safe_overwrite_available _ANY_PROVIDER_FLAG_SET
+unset _provider _deploy_rc _subagent_providers _ANY_PROVIDER_FLAG_SET
 
 # ---------------------------------------------------------------------------
 # PARTIAL DEPOSIT: stop before the hooks, the VERSION stamp and migrations.
@@ -1952,9 +2036,11 @@ if [[ ${#_DEPOSIT_SKIPPED[@]} -gt 0 ]]; then
   [[ -n "$REQUESTED_VERSION" ]] && _upg_rerun+=" '${REQUESTED_VERSION}'"
   _upg_rerun+=" --dev-tree '${_upg_rerun_dev_tree}'"
   [[ -n "$WAKE_TIER" ]] && _upg_rerun+=" --wake-tier ${WAKE_TIER}"
+  [[ "$ADD_CLAUDE_SKILLS" == "true" ]] && _upg_rerun+=" --add-claude-skills"
+  [[ "$ADD_CODEX_SKILLS" == "true" ]] && _upg_rerun+=" --add-codex-skills"
   _upg_rerun+=" --force"
   # shellcheck source=lib/error_contract.sh
-  source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+  source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/error_contract.sh"
   # BLOCK-WORTHY (docs/blocking-site-census.md): stamping VERSION over a
   # partly deposited root records a version whose files are not all in
   # place and drops that version's migrations from every later run's range
@@ -1966,6 +2052,118 @@ if [[ ${#_DEPOSIT_SKIPPED[@]} -gt 0 ]]; then
   # CENSUS-ANCHOR: upgrade-partial-deposit-01
   exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# Provider skills (opt-in; protected unless --add-<provider>-skills is passed).
+#
+# Runs after PARTIAL DEPOSIT, so the staging directory it installs from holds
+# every shipped skill this run deposits. The provider skill homes
+# ($CLAUDE_CONFIG_DIR/skills/, default ~/.claude/skills/, and
+# ~/.codex/skills/, named by provider_skills_dir) are in the protected set by
+# default, as the agent wrapper directories are:
+#
+#   - No flag: nothing under the home is written or created. An existing
+#     home is compared, read-only (deploy_drift), with the skills this tree
+#     ships for that provider; each missing or differing skill is warned by
+#     <provider>/<name> with the refresh command, and an all-match result
+#     says the skills are current. A home that does not exist is neither
+#     compared nor created.
+#   - --add-<provider>-skills: the installed scripts/install-skills.sh runs
+#     with --provider <provider> --force against this root, installing every
+#     skill in the staging directory (shipped and operator-owned) into that
+#     home. A provider whose CLI binary is not on PATH is skipped with a
+#     notice, as the wrapper deploy skips it. A failed install is warned with
+#     the re-run command and the upgrade carries on: the kanban root is
+#     already complete, and only the provider home is behind. A provider
+#     kanban.cfg [providers] available does not list is still installed when
+#     its flag is passed, after a notice naming it.
+#
+# The final summary reports one line per provider from these results.
+# ---------------------------------------------------------------------------
+_SKILL_SUMMARY_LINES=()
+_UPG_INSTALL_SKILLS_SH="$KANBAN_ROOT/scripts/install-skills.sh"
+
+# _report_protected_skill_drift <provider>
+#
+# Protected path for a provider whose --add-<provider>-skills flag was not
+# passed: compares the provider skill home with $DEV_TREE/skills/<provider>/
+# through deploy_drift, which only reads, narrates the result and appends the
+# provider's summary line to _SKILL_SUMMARY_LINES. Writes nothing.
+_report_protected_skill_drift() {
+  local provider="$1"
+  local home refresh_cmd drift state name skill
+  local -a names=() drifted=()
+  home="$(provider_skills_dir "$provider")"
+  refresh_cmd="$_UPG_INSTALL_SKILLS_SH --provider $provider --force"
+
+  for skill in "${_UPG_SHIPPED_SKILLS[@]+"${_UPG_SHIPPED_SKILLS[@]}"}"; do
+    [[ "$skill" == "$provider/"* ]] && names+=("${skill#"$provider/"}")
+  done
+  if [[ ${#names[@]} -eq 0 ]]; then
+    info "Provider skills: skipping $provider (protected; this tree ships no $provider skills to compare)"
+    _SKILL_SUMMARY_LINES+=("$provider: not compared (no $provider skills shipped)")
+    return 0
+  fi
+  if [[ ! -d "$home" ]]; then
+    info "Provider skills: skipping $provider (protected; no skills directory at $home, so nothing to compare)"
+    _SKILL_SUMMARY_LINES+=("$provider: not compared (no skills directory at $home) -- install: $refresh_cmd")
+    return 0
+  fi
+
+  drift="$(deploy_drift "$DEV_TREE/skills/$provider" "$home" "${names[@]}")" || drift=""
+  while read -r state name; do
+    [[ -n "$name" ]] || continue
+    drifted+=("$provider/$name")
+    if [[ "$state" == "missing" ]]; then
+      warn "Skill out of date: $provider/$name (missing from $home) -- refresh: $refresh_cmd"
+    else
+      warn "Skill out of date: $provider/$name (differs from skills/$provider/$name) -- refresh: $refresh_cmd"
+    fi
+  done <<< "$drift"
+
+  if [[ ${#drifted[@]} -eq 0 ]]; then
+    info "Provider skills: $provider skills current (all ${#names[@]} match skills/$provider/; protected, nothing written)"
+    _SKILL_SUMMARY_LINES+=("$provider: current (${#names[@]} skill(s) match the shipped copies)")
+  else
+    info "Provider skills: $provider has ${#drifted[@]} out-of-date skill(s); protected, nothing written"
+    local joined
+    joined="$(printf '%s, ' "${drifted[@]}")"
+    _SKILL_SUMMARY_LINES+=("$provider: ${#drifted[@]} out of date (${joined%, }) -- refresh: $refresh_cmd")
+  fi
+  return 0
+}
+
+info ""
+# The configured providers, plus any whose --add-<provider>-skills was passed.
+deploy_flagged_providers "Provider skills" skills "$_upg_configured_providers" \
+  "$ADD_CLAUDE_SKILLS" "$ADD_CODEX_SKILLS"
+_upg_skill_providers="$DEPLOY_STEP_PROVIDERS"
+unset _upg_configured_providers
+for _provider in $_upg_skill_providers; do
+  case "$_provider" in
+    claude) _upg_skill_flag="$ADD_CLAUDE_SKILLS" ;;
+    codex)  _upg_skill_flag="$ADD_CODEX_SKILLS" ;;
+    *)
+      info "Provider skills: skipping unknown provider '$_provider' (no explicit opt-in flag)"
+      continue
+      ;;
+  esac
+  if [[ "$_upg_skill_flag" != "true" ]]; then
+    _report_protected_skill_drift "$_provider"
+    continue
+  fi
+
+  _upg_skill_cmd="$_UPG_INSTALL_SKILLS_SH --provider $_provider --force"
+  _upg_skill_rc=0
+  deploy_provider_skills "$_provider" "$KANBAN_ROOT" false || _upg_skill_rc=$?
+  case "$_upg_skill_rc" in
+    0) _SKILL_SUMMARY_LINES+=("$_provider: refreshed (--add-${_provider}-skills)") ;;
+    3) _SKILL_SUMMARY_LINES+=("$_provider: not refreshed (CLI binary not found on PATH)") ;;
+    4) _SKILL_SUMMARY_LINES+=("$_provider: not refreshed ($_UPG_INSTALL_SKILLS_SH not installed)") ;;
+    *) _SKILL_SUMMARY_LINES+=("$_provider: refresh failed (install-skills.sh exit $DEPLOY_SKILLS_RC) -- re-run: $_upg_skill_cmd") ;;
+  esac
+done
+unset _provider _upg_skill_providers _upg_skill_flag _upg_skill_cmd _upg_skill_rc _UPG_INSTALL_SKILLS_SH
 
 # ---------------------------------------------------------------------------
 # Scheduler hooks: crontab and pseudocron.
@@ -2366,7 +2564,8 @@ unset _RETIRED_MANIFEST _RETIRED_LINT_SH _ret_line _ret_src
 # path exists: $DEV_TREE/team/<path>, or for docs/ a path at or under a
 # deposited manifest entry that exists under $DEV_TREE/docs/.
 #
-# Never an orphan (see _upg_orphan_exempt): the protected set, the caches in
+# Never an orphan (see _upg_orphan_exempt): the protected set, the skill
+# staging directory skills/ (operator skills included), the caches in
 # _UPG_CACHE_NAMES, the files install.sh generates into a deposited
 # directory, and an operator's own plugin directory -- a <name>/ under one of
 # _UPG_OPERATOR_PLUGIN_ROOTS that the deposited tree does not ship, which
@@ -2420,11 +2619,16 @@ _upg_in_deposited_tree() {
 # _upg_orphan_exempt <kanban-root-relative-path>
 #
 # Returns 0 when <path> is never treated as an orphan, whatever the deposited
-# tree holds: a protected path, a file install.sh generates, or a file inside
-# an operator plugin directory the deposited tree does not ship.
+# tree holds: a protected path, anything in the skill staging directory, a
+# file install.sh generates, or a file inside an operator plugin directory
+# the deposited tree does not ship.
 _upg_orphan_exempt() {
   local rel="$1" generated plugin_root rest name
   _is_protected_path "$rel" && return 0
+  # skills/: operator-added skills are never moved aside, with or without
+  # --force, and the skill staging step alone refreshes and retires the
+  # shipped ones. Exempt whichever directories the sweep scans.
+  [[ "$rel" == skills || "$rel" == skills/* ]] && return 0
   for generated in "${_UPG_GENERATED_FILES[@]}"; do
     [[ "$rel" == "$generated" ]] && return 0
   done
@@ -2533,6 +2737,28 @@ elif [[ "$_ORPHAN_MOVED" -gt 0 ]]; then
 else
   echo "  Orphans:           ${_ORPHAN_COUNT} file(s) left in place (not in the deposited tree; --force moves them aside)"
 fi
+# _upg_join_skills <item>... — "a, b, c", or "none" with no items.
+_upg_join_skills() {
+  if [[ $# -eq 0 ]]; then
+    printf 'none'
+  else
+    local joined
+    joined="$(printf '%s, ' "$@")"
+    printf '%s' "${joined%, }"
+  fi
+}
+if [[ ${#_UPG_SHIPPED_SKILLS[@]} -gt 0 ]]; then
+  echo "  Skills staged:     $(_upg_join_skills "${_UPG_SHIPPED_SKILLS[@]}") (skills/)"
+else
+  echo "  Skills staged:     none (this tree ships no skills)"
+fi
+if [[ ${#_UPG_SKILLS_REMOVED[@]} -gt 0 ]]; then
+  echo "  Skills removed:    $(_upg_join_skills "${_UPG_SKILLS_REMOVED[@]}") (no longer shipped; unedited)"
+fi
+if [[ ${#_UPG_SKILLS_KEPT[@]} -gt 0 ]]; then
+  echo "  Skills kept:       $(_upg_join_skills "${_UPG_SKILLS_KEPT[@]}") (no longer shipped; edited, so left in place and now yours)"
+fi
+echo "  Operator skills:   $(_upg_join_skills "${_UPG_OPERATOR_SKILLS[@]+"${_UPG_OPERATOR_SKILLS[@]}"}") (operator-owned; left alone)"
 echo ""
 echo "${C_BOLD}Protected (preserved):${C_RESET}"
 echo "  kanban.cfg, projects.cfg, secrets, shell-env, claude-env, pseudocron.env"
@@ -2550,12 +2776,22 @@ if [[ ${#_WRAPPER_SUMMARY_LINES[@]} -gt 0 ]]; then
 else
   echo "  agent wrappers (pass --add-claude-agents / --add-codex-agents to refresh)"
 fi
+if [[ ${#_SKILL_SUMMARY_LINES[@]} -gt 0 ]]; then
+  for _skill_line in "${_SKILL_SUMMARY_LINES[@]}"; do
+    echo "  provider skills, ${_skill_line}"
+  done
+else
+  echo "  provider skills (pass --add-claude-skills / --add-codex-skills to install)"
+fi
+echo "  operator skills under skills/ (never written, moved or deleted)"
 echo ""
 echo "See $KANBAN_ROOT/README.md for post-upgrade notes."
 echo ""
 
 unset _RETIRED_COUNT _RETIRED_DEST_LABEL _RETIRED_TS _WRAPPER_SUMMARY_LINES _wrapper_line
 unset _ORPHAN_COUNT _ORPHAN_MOVED _ORPHAN_KEPT
+unset _SKILL_SUMMARY_LINES _skill_line _UPG_SHIPPED_SKILLS _UPG_SKILLS_REMOVED _UPG_SKILLS_KEPT
+unset _UPG_OPERATOR_SKILLS INSTALLED_SKILLS_STATE
 unset _UPG_DETECTED_TIER _UPG_PSEUDOCRON_TIER
 
 exit 0

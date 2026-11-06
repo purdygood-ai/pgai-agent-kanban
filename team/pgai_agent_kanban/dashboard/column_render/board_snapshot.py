@@ -12,6 +12,13 @@ classifies them for a single column.  Every column then reads its own slice
 and only renders it (:func:`render_column`), so its output is byte-identical
 to gathering and rendering that column directly.
 
+The snapshot also holds the AGENTS column (``multi.AGENTS_COLUMN``, the
+``queue`` subcommand): every task of each project's five role backlogs,
+gathered from the role columns' own sources by
+:func:`~pgai_agent_kanban.dashboard.column_render.multi.gather_agents_column`,
+so it needs no gather of its own and renders exactly as a direct gather of
+the same sources does.
+
 Freshness
 ---------
 A snapshot is fresh while its file is younger than the caller's TTL (the
@@ -51,12 +58,14 @@ import json
 import os
 import pathlib
 import time
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from pgai_agent_kanban.dashboard.column_render.cells import Palette
 from pgai_agent_kanban.dashboard.column_render.multi import (
+    AGENTS_COLUMN,
     DEFAULT_STATUS_GLYPH,
     Layout,
+    gather_agents_column,
     gather_project_entries,
     render_project_entries,
     sources_from_env,
@@ -64,6 +73,7 @@ from pgai_agent_kanban.dashboard.column_render.multi import (
 from pgai_agent_kanban.lib.atomic_write import atomic_write
 
 __all__ = [
+    "AGENTS_SUBCOMMAND",
     "BOARD_COLUMNS",
     "MISS_MISSING",
     "MISS_STALE",
@@ -98,6 +108,10 @@ BOARD_COLUMNS = (
     ("queue", "cm"),
 )
 
+#: The subcommand the AGENTS column takes; its slice is derived from the
+#: role columns' sources, so it is not one of the gathered BOARD_COLUMNS.
+AGENTS_SUBCOMMAND = "queue"
+
 #: Miss reasons :func:`read_snapshot` reports.
 MISS_MISSING = "missing"
 MISS_STALE = "stale"
@@ -110,8 +124,10 @@ def column_env_suffix(column_type: str) -> str:
     return f"__{column_type}"
 
 
-def column_subcommand(column_type: str) -> Optional[str]:
+def column_subcommand(column_type: str) -> str | None:
     """The subcommand (``input`` / ``queue``) a board column type takes, or None."""
+    if column_type == AGENTS_COLUMN:
+        return AGENTS_SUBCOMMAND
     for subcommand, board_column in BOARD_COLUMNS:
         if board_column == column_type:
             return subcommand
@@ -122,9 +138,11 @@ def parse_board_widths(spec: str) -> dict:
     """Parse a ``--board-widths`` value into ``{column type: width}``.
 
     *spec* is comma-separated ``KEY=WIDTH`` entries.  KEY is a board column
-    type (``bugs`` ... ``cm``) or a subcommand (``input`` / ``queue``), which
-    sets every column of that kind; a column-type entry wins over its
-    kind's.  WIDTH is a positive integer.  Whitespace around keys, values
+    type (``bugs`` ... ``cm``, or ``agents``) or a subcommand (``input`` /
+    ``queue``), which sets every column of that kind in
+    :data:`BOARD_COLUMNS`; a column-type entry wins over its kind's.  The
+    AGENTS column is set only by its own ``agents`` key, so a pane set
+    without that column never pre-renders it.  WIDTH is a positive integer.  Whitespace around keys, values
     and commas is ignored; an entry with an unknown key or a bad width is
     skipped, so a malformed value pre-renders less but never fails a pane.
 
@@ -151,6 +169,8 @@ def parse_board_widths(spec: str) -> dict:
             widths[column_type] = by_column[column_type]
         elif subcommand in by_kind:
             widths[column_type] = by_kind[subcommand]
+    if AGENTS_COLUMN in by_column:
+        widths[AGENTS_COLUMN] = by_column[AGENTS_COLUMN]
     return widths
 
 
@@ -175,7 +195,9 @@ def build_snapshot(sources_by_column: Mapping[str, list], *, use_color: bool) ->
     *sources_by_column* maps each column type in :data:`BOARD_COLUMNS` to
     its per-project ``ProjectSource`` list (registry order).  Each column
     holds one entry list per project, as ``gather_project_entries`` returns
-    it -- the same entries a direct render of that column would draw.
+    it -- the same entries a direct render of that column would draw -- and
+    the AGENTS column the entries ``gather_agents_column`` returns for the
+    five role columns' sources.
     """
     columns = {}
     for subcommand, column_type in BOARD_COLUMNS:
@@ -183,15 +205,22 @@ def build_snapshot(sources_by_column: Mapping[str, list], *, use_color: bool) ->
             "subcommand": subcommand,
             "projects": [
                 gather_project_entries(
-                    source, subcommand=subcommand, column_type=column_type, use_color=use_color,
+                    source,
+                    subcommand=subcommand,
+                    column_type=column_type,
+                    use_color=use_color,
                 )
                 for source in sources_by_column.get(column_type, [])
             ],
         }
+    columns[AGENTS_COLUMN] = {
+        "subcommand": AGENTS_SUBCOMMAND,
+        "projects": gather_agents_column(sources_by_column),
+    }
     return {"format": SNAPSHOT_FORMAT, "use_color": bool(use_color), "columns": columns}
 
 
-def build_snapshot_from_env(environ: Optional[Mapping[str, str]] = None, *, use_color: bool) -> dict:
+def build_snapshot_from_env(environ: Mapping[str, str] | None = None, *, use_color: bool) -> dict:
     """:func:`build_snapshot` over the per-column lists the bash gather exported."""
     env = os.environ if environ is None else environ
     return build_snapshot(
@@ -213,7 +242,7 @@ def read_snapshot(
     *,
     ttl_seconds: float,
     use_color: bool,
-    now: Optional[float] = None,
+    now: float | None = None,
 ) -> tuple:
     """Return ``(snapshot, None)`` for a fresh, usable snapshot, else ``(None, reason)``.
 
@@ -251,7 +280,7 @@ def render_column(
     palette: Palette,
     layout: Layout = Layout(),
     status_glyph: str = DEFAULT_STATUS_GLYPH,
-) -> Optional[list]:
+) -> list | None:
     """Render one column's slice of *snapshot*; ``None`` when it has no such slice."""
     column = snapshot.get("columns", {}).get(column_type)
     if not isinstance(column, dict) or column.get("subcommand") != subcommand:
@@ -260,8 +289,13 @@ def render_column(
     if not isinstance(projects, list):
         return None
     return render_project_entries(
-        projects, subcommand=subcommand, column_type=column_type, width=width,
-        palette=palette, layout=layout, status_glyph=status_glyph,
+        projects,
+        subcommand=subcommand,
+        column_type=column_type,
+        width=width,
+        palette=palette,
+        layout=layout,
+        status_glyph=status_glyph,
     )
 
 
@@ -284,7 +318,7 @@ def read_stats(snapshot_path: pathlib.Path) -> dict:
     return fields
 
 
-def record_gather(snapshot_path: pathlib.Path, now: Optional[datetime.datetime] = None) -> int:
+def record_gather(snapshot_path: pathlib.Path, now: datetime.datetime | None = None) -> int:
     """Increment the gather count beside *snapshot_path*; return the new count.
 
     The caller holds the board-build lock, so the read-increment-write is
@@ -295,6 +329,6 @@ def record_gather(snapshot_path: pathlib.Path, now: Optional[datetime.datetime] 
     except ValueError:
         count = 0
     count += 1
-    stamp = (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = (now or datetime.datetime.now(datetime.UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
     atomic_write(stats_path(snapshot_path), f"gathers={count}\nlast={stamp}\n", prefix=_SCRATCH_PREFIX)
     return count

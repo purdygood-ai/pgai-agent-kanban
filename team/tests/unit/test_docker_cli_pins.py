@@ -43,10 +43,7 @@ def _write_env_file(path: pathlib.Path, content: str) -> pathlib.Path:
 def test_load_cli_pins_parses_both_required_keys(tmp_path: pathlib.Path) -> None:
     env_file = _write_env_file(
         tmp_path / "cli-versions.env",
-        "# header comment, ignored\n"
-        "\n"
-        "CLAUDE_CODE_VERSION=2.1.268\n"
-        "CODEX_VERSION=0.154.0\n",
+        "# header comment, ignored\n" "\n" "CLAUDE_CODE_VERSION=2.1.268\n" "CODEX_VERSION=0.154.0\n",
     )
 
     pins = load_cli_pins(env_file)

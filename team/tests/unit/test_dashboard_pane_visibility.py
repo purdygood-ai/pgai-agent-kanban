@@ -43,7 +43,8 @@ import subprocess
 import threading
 import time
 import uuid
-from typing import Callable, Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Callable, Iterator
 
 import pytest
 
@@ -118,7 +119,9 @@ def dashboard(tmp_path: pathlib.Path) -> Iterator[Fixture]:
             f'#!/usr/bin/env bash\nexec {shlex.quote(guard.path)} -L {shlex.quote(socket)} "$@"\n', encoding="utf-8"
         )
         (shim / "tmux").chmod(0o755)
-        env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE", "PGAI_DASHBOARD_CADENCE_FORCE_STATE")}
+        env = {
+            k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE", "PGAI_DASHBOARD_CADENCE_FORCE_STATE")
+        }
         env.update(
             PATH=f"{shim}{os.pathsep}{env.get('PATH', '')}",
             PGAI_AGENT_KANBAN_ROOT_PATH=str(root),
@@ -129,24 +132,39 @@ def dashboard(tmp_path: pathlib.Path) -> Iterator[Fixture]:
         fx = Fixture(guard.path, socket, session, tmp_path, env)
         # The server inherits this environment (PATH with the shim, the
         # sandboxed roots), as create.sh's server does.
-        subprocess.run([guard.path, "-L", socket, "new-session", "-d", "-s", session, "-n", "winA", "-x", "120", "-y", "30"],
-                       env=env, check=True, timeout=15)
+        subprocess.run(
+            [guard.path, "-L", socket, "new-session", "-d", "-s", session, "-n", "winA", "-x", "120", "-y", "30"],
+            env=env,
+            check=True,
+            timeout=15,
+        )
         assert fx.run("new-window", "-t", session, "-n", "winB").returncode == 0
 
-        armed_dir = _bash(env, f"source {shlex.quote(str(_READINESS_LIB))}; "
-                               f"dashboard_pane_armed_dir {shlex.quote(str(root))} {shlex.quote(session)}").strip()
+        armed_dir = _bash(
+            env,
+            f"source {shlex.quote(str(_READINESS_LIB))}; "
+            f"dashboard_pane_armed_dir {shlex.quote(str(root))} {shlex.quote(session)}",
+        ).strip()
         for window in ("winA", "winB"):
             renderer = f"echo render >> {shlex.quote(str(fx.counter(window)))}; date +%s.%N"
-            inner = (f"{shlex.quote(str(_CADENCE_LOOP))} --interval {_INTERVAL} --jitter-bound 0 -- "
-                     f"bash -c {shlex.quote(renderer)}")
-            wrapped = _bash(env, f"source {shlex.quote(str(_READINESS_LIB))}; "
-                                 f"dashboard_pane_wrap_cmd {shlex.quote(armed_dir)} {window}.0 {shlex.quote(inner)}")
+            inner = (
+                f"{shlex.quote(str(_CADENCE_LOOP))} --interval {_INTERVAL} --jitter-bound 0 -- "
+                f"bash -c {shlex.quote(renderer)}"
+            )
+            wrapped = _bash(
+                env,
+                f"source {shlex.quote(str(_READINESS_LIB))}; "
+                f"dashboard_pane_wrap_cmd {shlex.quote(armed_dir)} {window}.0 {shlex.quote(inner)}",
+            )
             assert fx.run("send-keys", "-t", f"{session}:{window}.0", wrapped, "Enter").returncode == 0
         for window in ("winA", "winB"):
             _wait_until(lambda w=window: fx.renders(w) >= 1, f"the arrival render of {window}")
         _wait_until(lambda: all(_loop_pid(fx, w) for w in ("winA", "winB")), "both loops to register")
-        _bash(env, f"source {shlex.quote(str(_HOOK_LIB))}; dashboard_install_activation_hook "
-                   f"{shlex.quote(str(root))} {shlex.quote(session)} {shlex.quote(str(_DASHBOARD))}")
+        _bash(
+            env,
+            f"source {shlex.quote(str(_HOOK_LIB))}; dashboard_install_activation_hook "
+            f"{shlex.quote(str(root))} {shlex.quote(session)} {shlex.quote(str(_DASHBOARD))}",
+        )
         yield fx
     finally:
         teardown_private_tmux(guard, socket)
@@ -157,8 +175,11 @@ def _pane_id(fx: Fixture, window: str) -> str:
 
 
 def _loop_pid(fx: Fixture, window: str) -> int | None:
-    registry = _bash(fx.env, f"source {shlex.quote(str(_CADENCE_LIB))}; "
-                             f"dashboard_cadence_loop_registry_path {shlex.quote(_pane_id(fx, window))}").strip()
+    registry = _bash(
+        fx.env,
+        f"source {shlex.quote(str(_CADENCE_LIB))}; "
+        f"dashboard_cadence_loop_registry_path {shlex.quote(_pane_id(fx, window))}",
+    ).strip()
     try:
         text = pathlib.Path(registry).read_text(encoding="utf-8").strip()
     except OSError:
@@ -209,8 +230,11 @@ def _attached(fx: Fixture) -> Iterator[None]:
     drainer = threading.Thread(target=_drain, daemon=True)
     drainer.start()
     try:
-        _wait_until(lambda: fx.run("display-message", "-p", "-t", fx.session, "#{session_attached}").stdout.strip()
-                    not in ("", "0"), "a client to attach")
+        _wait_until(
+            lambda: fx.run("display-message", "-p", "-t", fx.session, "#{session_attached}").stdout.strip()
+            not in ("", "0"),
+            "a client to attach",
+        )
         yield
     finally:
         fx.run("detach-client", "-s", fx.session)
@@ -248,8 +272,9 @@ def test_attach_renders_the_active_window_and_a_switch_moves_rendering_with_it(d
 
         # The departed window's loop notices at its next tick and suspends:
         # its pending wait becomes the hidden re-check, with no renderer.
-        _wait_until(lambda: _pending_wait_seconds(fx, "winB") == str(_HIDDEN_INTERVAL),
-                    "the departed window's loop to suspend")
+        _wait_until(
+            lambda: _pending_wait_seconds(fx, "winB") == str(_HIDDEN_INTERVAL), "the departed window's loop to suspend"
+        )
         settled = fx.renders("winB")
         assert settled <= departed_at_switch + 1, "the departed window kept rendering after the switch"
         time.sleep(_INTERVAL * 2)
@@ -257,8 +282,10 @@ def test_attach_renders_the_active_window_and_a_switch_moves_rendering_with_it(d
         assert fx.renders("winA") >= 3, "the visible window stopped refreshing"
 
     # Detached again: everything suspends.
-    _wait_until(lambda: _pending_wait_seconds(fx, "winA") == str(_HIDDEN_INTERVAL),
-                "the last visible window to suspend after detach")
+    _wait_until(
+        lambda: _pending_wait_seconds(fx, "winA") == str(_HIDDEN_INTERVAL),
+        "the last visible window to suspend after detach",
+    )
     after_detach = fx.renders("winA")
     time.sleep(_INTERVAL * 2)
     assert fx.renders("winA") == after_detach
@@ -332,13 +359,29 @@ def _hidden_stream_loop(tmp_path: pathlib.Path) -> Iterator[tuple[subprocess.Pop
     state.write_text("hidden\n", encoding="utf-8")
     out = tmp_path / "stream.out"
     env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE")}
-    env.update(PGAI_DASHBOARD_CADENCE_FORCE_STATE=f"file:{state}", PGAI_AGENT_KANBAN_TEMP_DIR=str(tmp_path / "t"),
-               TERM="xterm-256color")
+    env.update(
+        PGAI_DASHBOARD_CADENCE_FORCE_STATE=f"file:{state}",
+        PGAI_AGENT_KANBAN_TEMP_DIR=str(tmp_path / "t"),
+        TERM="xterm-256color",
+    )
     with out.open("wb") as sink:
         proc = subprocess.Popen(
-            ["bash", str(_CADENCE_LOOP), "--stream", "--interval", "0.2", "--",
-             "bash", "-c", "while :; do echo tick; sleep 0.05; done"],
-            env=env, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.DEVNULL, start_new_session=True,
+            [
+                "bash",
+                str(_CADENCE_LOOP),
+                "--stream",
+                "--interval",
+                "0.2",
+                "--",
+                "bash",
+                "-c",
+                "while :; do echo tick; sleep 0.05; done",
+            ],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=sink,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
     try:
         yield proc, out, state
@@ -350,10 +393,15 @@ def _hidden_stream_loop(tmp_path: pathlib.Path) -> Iterator[tuple[subprocess.Pop
         groups = {"loop": proc.pid, "stream": stream}
         # An ended process stays in its group until it is reaped (the stream
         # by init, once its loop has gone), so wait for the groups to empty.
-        _wait_until(lambda: not any(_group_members(g) for g in groups.values() if g is not None),
-                    "the loop's and the stream's process groups to have no member left",
-                    lambda: "\n".join(f"{name} group {g}: members {[(m, _proc_state(m)) for m in _group_members(g)]}"
-                                      for name, g in groups.items() if g is not None))
+        _wait_until(
+            lambda: not any(_group_members(g) for g in groups.values() if g is not None),
+            "the loop's and the stream's process groups to have no member left",
+            lambda: "\n".join(
+                f"{name} group {g}: members {[(m, _proc_state(m)) for m in _group_members(g)]}"
+                for name, g in groups.items()
+                if g is not None
+            ),
+        )
 
 
 def test_stream_selector_returns_only_the_stream_during_loop_start_up(tmp_path: pathlib.Path) -> None:
@@ -371,8 +419,11 @@ def test_stream_selector_returns_only_the_stream_during_loop_start_up(tmp_path: 
             time.sleep(0.005)
         assert returned, "the stream never started during the sampled start-up"
         for pid in returned:
-            _wait_until(lambda p=pid: _proc_state(p) == "T", f"selected pid {pid} to be the stopped stream",
-                        lambda p=pid: f"state of {p}: {_proc_state(p)}; returned pids: {sorted(returned)}")
+            _wait_until(
+                lambda p=pid: _proc_state(p) == "T",
+                f"selected pid {pid} to be the stopped stream",
+                lambda p=pid: f"state of {p}: {_proc_state(p)}; returned pids: {sorted(returned)}",
+            )
         assert len(returned) == 1, f"the selector returned more than one pid: {sorted(returned)}"
 
 
@@ -407,19 +458,33 @@ def test_registered_loop_is_woken_and_unregisters_on_exit(tmp_path: pathlib.Path
     state.write_text("hidden\n", encoding="utf-8")
     counter = tmp_path / "renders"
     env = {k: v for k, v in os.environ.items() if k != "TMUX"}
-    env.update(PGAI_DASHBOARD_CADENCE_FORCE_STATE=f"file:{state}", PGAI_AGENT_KANBAN_TEMP_DIR=str(tmp_path / "t"),
-               TMUX_PANE="%4242", TERM="xterm-256color")
-    registry = pathlib.Path(_bash(env, f"source {shlex.quote(str(_CADENCE_LIB))}; "
-                                       "dashboard_cadence_loop_registry_path %4242").strip())
+    env.update(
+        PGAI_DASHBOARD_CADENCE_FORCE_STATE=f"file:{state}",
+        PGAI_AGENT_KANBAN_TEMP_DIR=str(tmp_path / "t"),
+        TMUX_PANE="%4242",
+        TERM="xterm-256color",
+    )
+    registry = pathlib.Path(
+        _bash(env, f"source {shlex.quote(str(_CADENCE_LIB))}; " "dashboard_cadence_loop_registry_path %4242").strip()
+    )
     # The pane preamble ignores the pane signal before the loop starts, as
     # it does in a real pane: the loop must still be wakeable.
-    script = (f"trap '' USR1; exec bash {shlex.quote(str(_CADENCE_LOOP))} --interval 60 --jitter-bound 0 -- "
-              f"bash -c {shlex.quote(f'echo r >> {counter}')}")
-    proc = subprocess.Popen(["bash", "-c", script], env=env, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    script = (
+        f"trap '' USR1; exec bash {shlex.quote(str(_CADENCE_LOOP))} --interval 60 --jitter-bound 0 -- "
+        f"bash -c {shlex.quote(f'echo r >> {counter}')}"
+    )
+    proc = subprocess.Popen(
+        ["bash", "-c", script],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
     try:
-        _wait_until(lambda: registry.exists() and registry.read_text().strip() == str(proc.pid),
-                    "the loop to register its pid")
+        _wait_until(
+            lambda: registry.exists() and registry.read_text().strip() == str(proc.pid), "the loop to register its pid"
+        )
         _wait_until(lambda: counter.exists(), "the arrival render")
         state.write_text("active\n", encoding="utf-8")
         _bash(env, f"source {shlex.quote(str(_CADENCE_LIB))}; dashboard_cadence_wake_loop %4242")
@@ -438,13 +503,17 @@ def test_stale_registration_never_signals_an_unrelated_process(tmp_path: pathlib
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(tmp_path / "t")
     bystander = subprocess.Popen(["sleep", "30"], start_new_session=True)
     try:
-        registry = pathlib.Path(_bash(env, f"source {shlex.quote(str(_CADENCE_LIB))}; "
-                                           "dashboard_cadence_loop_registry_path %77").strip())
+        registry = pathlib.Path(
+            _bash(env, f"source {shlex.quote(str(_CADENCE_LIB))}; " "dashboard_cadence_loop_registry_path %77").strip()
+        )
         registry.parent.mkdir(parents=True, exist_ok=True)
         registry.write_text(f"{bystander.pid}\n", encoding="utf-8")
         result = subprocess.run(
             ["bash", "-c", f"source {shlex.quote(str(_CADENCE_LIB))}; dashboard_cadence_wake_loop %77"],
-            capture_output=True, text=True, env=env, timeout=30,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
         )
         assert result.returncode == 1
         time.sleep(0.3)

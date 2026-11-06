@@ -54,10 +54,16 @@
 #     role with no manifest or whose manifest resolves to zero files.
 #
 # Safety invariants:
-#   - No top-level side effects when sourced -- only function definitions.
+#   - No top-level side effects when sourced -- only function definitions
+#     and this file's own directory, resolved once.
 #   - Functions do not modify the caller's environment (all locals).
 #   - stdout carries only the resolved paths / byte total; narration
 #     about skipped lines goes to stderr.
+
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_READ_ORDER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _READ_ORDER_LIB_DIR=""
 
 # ---------------------------------------------------------------------------
 # _read_order_default_root (private)
@@ -68,7 +74,7 @@
 # ---------------------------------------------------------------------------
 _read_order_default_root() {
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    lib_dir="${_READ_ORDER_LIB_DIR}"
     (cd "${lib_dir}/../.." && pwd)
 }
 

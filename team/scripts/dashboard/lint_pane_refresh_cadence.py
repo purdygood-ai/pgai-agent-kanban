@@ -106,7 +106,7 @@ _ASSIGNMENT_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)="([^"\n]*)"\s*$', re.
 # else, e.g. "${SCHED_STATUS_CMD}" -- resolved via the assignment table.
 # A command argument with any other shape (a literal string, possibly
 # itself containing other ${...} interpolations) is used as-is.
-_BARE_VAR_REF_RE = re.compile(r'^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$')
+_BARE_VAR_REF_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 # The explicit one-shot-static / self-refreshing registry inside create.sh
 # -- a plain-text data block (never executed bash, deliberately, so a

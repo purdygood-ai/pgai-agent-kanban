@@ -38,7 +38,6 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-from typing import Optional
 import pytest
 from tests.fixtures.binary_guard import require_binary
 from tests.fixtures.section_reader_modules import copy_section_reader_modules
@@ -53,6 +52,7 @@ def _require_git() -> None:
     of repeating a per-test check at each git-dependent call site.
     """
     require_binary("git", label="cm-release-operator-force-override")
+
 
 # ---------------------------------------------------------------------------
 # Path helpers — mirrors test_cm_release_synthetic.py's own resolution.
@@ -77,15 +77,18 @@ def _init_git_repo_with_remote(
     subprocess.run(["git", "init", "--bare", str(bare_remote)], capture_output=True, check=True)
     subprocess.run(
         ["git", "-C", str(repo_path), "init", f"--initial-branch={main_branch}"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.email", "test@pgai.local"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "config", "--local", "user.name", "PGAI Test"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
     (repo_path / "README.md").write_text("# Synthetic release test repo\n", encoding="utf-8")
@@ -93,19 +96,23 @@ def _init_git_repo_with_remote(
     (repo_path / "release-notes" / "PUBLISHED").write_text("", encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(repo_path), "add", "README.md", "release-notes/PUBLISHED"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "commit", "-m", "Initial commit"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "remote", "add", "origin", str(bare_remote)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repo_path), "push", "origin", main_branch],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -116,8 +123,7 @@ def _build_kanban_root(
     root.mkdir(parents=True, exist_ok=True)
 
     (root / "kanban.cfg").write_text(
-        "[paths]\n\n[chain]\npm_mode = automatic\n\n"
-        "[wake]\nmax_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
+        "[paths]\n\n[chain]\npm_mode = automatic\n\n" "[wake]\nmax_tasks_per_wake = 1\nmax_runtime_seconds = 600\n",
         encoding="utf-8",
     )
     (root / "projects.cfg").write_text(
@@ -154,8 +160,14 @@ def _build_kanban_root(
 
 
 def _run_cm_script(
-    script_path: pathlib.Path, args: list[str], kanban_root: pathlib.Path, project_name: str,
-    *, repo_root: Optional[pathlib.Path] = None, extra_env: Optional[dict] = None, timeout: int = 90,
+    script_path: pathlib.Path,
+    args: list[str],
+    kanban_root: pathlib.Path,
+    project_name: str,
+    *,
+    repo_root: pathlib.Path | None = None,
+    extra_env: dict | None = None,
+    timeout: int = 90,
 ) -> subprocess.CompletedProcess:
     base_env = dict(os.environ)
     base_env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(kanban_root)
@@ -173,13 +185,20 @@ def _run_cm_script(
         base_env.update(extra_env)
     return subprocess.run(
         ["bash", str(script_path)] + args,
-        capture_output=True, text=True, env=base_env, cwd=str(kanban_root), timeout=timeout,
+        capture_output=True,
+        text=True,
+        env=base_env,
+        cwd=str(kanban_root),
+        timeout=timeout,
     )
 
 
 def _git_local(repo_path: pathlib.Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo_path)] + list(args), capture_output=True, text=True, check=True,
+        ["git", "-C", str(repo_path)] + list(args),
+        capture_output=True,
+        text=True,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -187,14 +206,19 @@ def _git_local(repo_path: pathlib.Path, *args: str) -> str:
 def _git_tag_exists(repo_path: pathlib.Path, tag: str) -> bool:
     result = subprocess.run(
         ["git", "-C", str(repo_path), "rev-parse", "--verify", f"refs/tags/{tag}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     return result.returncode == 0
 
 
 def _commit_on_branch(
-    repo_path: pathlib.Path, branch: str, filename: str, content: str, message: str,
-    return_branch: Optional[str] = None,
+    repo_path: pathlib.Path,
+    branch: str,
+    filename: str,
+    content: str,
+    message: str,
+    return_branch: str | None = None,
 ) -> None:
     _git_local(repo_path, "checkout", branch)
     (repo_path / filename).write_text(content, encoding="utf-8")
@@ -205,8 +229,14 @@ def _commit_on_branch(
 
 
 def _build_tester_task(
-    kanban_root: pathlib.Path, project_name: str, task_id: str, release_version: str,
-    *, state: str = "DONE", recommendation: str = "PASS", systemic_risk: str = "low",
+    kanban_root: pathlib.Path,
+    project_name: str,
+    task_id: str,
+    release_version: str,
+    *,
+    state: str = "DONE",
+    recommendation: str = "PASS",
+    systemic_risk: str = "low",
 ) -> pathlib.Path:
     """Synthetic TESTER task folder in the shape cm-release.sh's Step 4d
     discovers. Mirrors test_cm_release_synthetic.py's own _build_tester_task."""
@@ -262,22 +292,26 @@ def test_force_without_reason_is_refused_and_ships_nothing(tmp_path: pathlib.Pat
     release_state_before = release_state_path.read_text(encoding="utf-8")
 
     result = _run_cm_script(
-        _RELEASE_SCRIPT, ["--force"], kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT,
+        ["--force"],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
     )
     assert result.returncode != 0, (
         f"cm-release.sh --force with no --reason must exit non-zero.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "cm-release.operator-force.reason-required" in combined, (
-        f"Expected the reason-required error key in output.\noutput:\n{combined}"
-    )
-    assert release_state_path.read_text(encoding="utf-8") == release_state_before, (
-        "release-state.md must be byte-identical after a refused --force invocation."
-    )
-    assert not (kanban_root / "projects" / project_name / "HALT").exists(), (
-        "A refused --force invocation must never create a project HALT file."
-    )
+    assert (
+        "cm-release.operator-force.reason-required" in combined
+    ), f"Expected the reason-required error key in output.\noutput:\n{combined}"
+    assert (
+        release_state_path.read_text(encoding="utf-8") == release_state_before
+    ), "release-state.md must be byte-identical after a refused --force invocation."
+    assert not (
+        kanban_root / "projects" / project_name / "HALT"
+    ).exists(), "A refused --force invocation must never create a project HALT file."
 
 
 def test_force_with_reason_refused_in_wake_context(tmp_path: pathlib.Path) -> None:
@@ -299,8 +333,11 @@ def test_force_with_reason_refused_in_wake_context(tmp_path: pathlib.Path) -> No
     release_state_before = release_state_path.read_text(encoding="utf-8")
 
     result = _run_cm_script(
-        _RELEASE_SCRIPT, ["--force", "--reason", "operator says ship it anyway"],
-        kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT,
+        ["--force", "--reason", "operator says ship it anyway"],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
         extra_env={"PGAI_AGENT_WAKE_ACTIVE": "1"},
     )
     assert result.returncode != 0, (
@@ -308,12 +345,12 @@ def test_force_with_reason_refused_in_wake_context(tmp_path: pathlib.Path) -> No
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "cm-release.operator-force.agent-wake-refused" in combined, (
-        f"Expected the agent-wake-refused error key in output.\noutput:\n{combined}"
-    )
-    assert release_state_path.read_text(encoding="utf-8") == release_state_before, (
-        "release-state.md must be byte-identical after a refused --force invocation."
-    )
+    assert (
+        "cm-release.operator-force.agent-wake-refused" in combined
+    ), f"Expected the agent-wake-refused error key in output.\noutput:\n{combined}"
+    assert (
+        release_state_path.read_text(encoding="utf-8") == release_state_before
+    ), "release-state.md must be byte-identical after a refused --force invocation."
 
 
 # ---------------------------------------------------------------------------
@@ -354,13 +391,17 @@ def test_forced_ship_over_systemic_risk_high_writes_both_records_and_next_releas
     cfg.write_text(cfg.read_text(encoding="utf-8") + "\n[release]\nship_posture = matrix\n", encoding="utf-8")
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_forced_ship.txt", "forced-ship test feature content\n",
-        "feat: add feature for forced-ship test", return_branch="main",
+        repo_path,
+        rc_branch,
+        "feature_forced_ship.txt",
+        "forced-ship test feature content\n",
+        "feat: add feature for forced-ship test",
+        return_branch="main",
     )
 
     tester_task_id = "TESTER-20260908-910-forced-ship-high-risk"
@@ -368,8 +409,11 @@ def test_forced_ship_over_systemic_risk_high_writes_both_records_and_next_releas
 
     reason_text = "Verification infra was down; the diff is a docs-only change reviewed by hand."
     result_release = _run_cm_script(
-        _RELEASE_SCRIPT, ["--force", "--reason", reason_text],
-        kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT,
+        ["--force", "--reason", reason_text],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
     )
     assert result_release.returncode == 0, (
         "cm-release.sh --force --reason must pass a systemic-risk-high trigger-2 HALT and ship.\n"
@@ -377,20 +421,20 @@ def test_forced_ship_over_systemic_risk_high_writes_both_records_and_next_releas
     )
 
     release_state_text = _release_state_text(kanban_root, project_name)
-    assert "## Operator Override" in release_state_text, (
-        f"Expected an '## Operator Override' event in release-state.md.\n{release_state_text}"
-    )
-    assert "cm-release.trigger-2.systemic-risk-high" in release_state_text, (
-        f"Expected the overridden trigger key in the event.\n{release_state_text}"
-    )
-    assert reason_text in release_state_text, (
-        f"Expected the operator's reason verbatim in the event.\n{release_state_text}"
-    )
+    assert (
+        "## Operator Override" in release_state_text
+    ), f"Expected an '## Operator Override' event in release-state.md.\n{release_state_text}"
+    assert (
+        "cm-release.trigger-2.systemic-risk-high" in release_state_text
+    ), f"Expected the overridden trigger key in the event.\n{release_state_text}"
+    assert (
+        reason_text in release_state_text
+    ), f"Expected the operator's reason verbatim in the event.\n{release_state_text}"
 
     notes_text = (repo_path / "release-notes" / f"{version}.md").read_text(encoding="utf-8")
-    assert "## Status\nSHIPPED-BY-OPERATOR-OVERRIDE" in notes_text, (
-        f"Expected the release notes to record the operator override status.\n{notes_text}"
-    )
+    assert (
+        "## Status\nSHIPPED-BY-OPERATOR-OVERRIDE" in notes_text
+    ), f"Expected the release notes to record the operator override status.\n{notes_text}"
 
     assert _git_tag_exists(repo_path, version), (
         f"Release tag '{version}' not found after a forced ship.\n"
@@ -402,19 +446,27 @@ def test_forced_ship_over_systemic_risk_high_writes_both_records_and_next_releas
     # ever having seen --force before.
     version2 = "v0.30.1"
     result_open2 = _run_cm_script(_OPEN_RC_SCRIPT, [version2], kanban_root, project_name, repo_root=repo_path)
-    assert result_open2.returncode == 0, (
-        f"cm-open-rc.sh (second RC) failed.\nstdout: {result_open2.stdout}\nstderr: {result_open2.stderr}"
-    )
+    assert (
+        result_open2.returncode == 0
+    ), f"cm-open-rc.sh (second RC) failed.\nstdout: {result_open2.stdout}\nstderr: {result_open2.stderr}"
     rc_branch2 = f"rc/{version2}"
     _commit_on_branch(
-        repo_path, rc_branch2, "feature_second_rc.txt", "second RC feature content\n",
-        "feat: add feature for second RC", return_branch="main",
+        repo_path,
+        rc_branch2,
+        "feature_second_rc.txt",
+        "second RC feature content\n",
+        "feat: add feature for second RC",
+        return_branch="main",
     )
     tester_task_id2 = "TESTER-20260908-911-second-rc-high-risk"
     _build_tester_task(kanban_root, project_name, tester_task_id2, version2, systemic_risk="high")
 
     result_release2 = _run_cm_script(
-        _RELEASE_SCRIPT, [], kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT,
+        [],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
     )
     assert result_release2.returncode != 0, (
         "The release immediately following a forced one must apply the matrix "
@@ -423,12 +475,12 @@ def test_forced_ship_over_systemic_risk_high_writes_both_records_and_next_releas
         f"stdout: {result_release2.stdout}\nstderr: {result_release2.stderr}"
     )
     combined2 = result_release2.stdout + result_release2.stderr
-    assert "cm-release.trigger-2.systemic-risk-high" in combined2, (
-        f"Expected the second (unforced) release to HALT on trigger-2 normally.\noutput:\n{combined2}"
-    )
-    assert not _git_tag_exists(repo_path, version2), (
-        f"Release tag '{version2}' must NOT exist — the second release was not forced and must HALT."
-    )
+    assert (
+        "cm-release.trigger-2.systemic-risk-high" in combined2
+    ), f"Expected the second (unforced) release to HALT on trigger-2 normally.\noutput:\n{combined2}"
+    assert not _git_tag_exists(
+        repo_path, version2
+    ), f"Release tag '{version2}' must NOT exist — the second release was not forced and must HALT."
 
 
 # ---------------------------------------------------------------------------
@@ -457,34 +509,44 @@ def test_forced_ship_still_halts_on_squash_conflict(tmp_path: pathlib.Path) -> N
     subprocess.run(["git", "-C", str(repo_path), "push", "origin", "main"], capture_output=True, check=True)
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "shared.txt", "line A\nline B — RC version\nline C\n",
-        "feat: RC modifies shared.txt", return_branch="main",
+        repo_path,
+        rc_branch,
+        "shared.txt",
+        "line A\nline B — RC version\nline C\n",
+        "feat: RC modifies shared.txt",
+        return_branch="main",
     )
     _commit_on_branch(
-        repo_path, "main", "shared.txt", "line A\nline B — main operator version\nline C\n",
+        repo_path,
+        "main",
+        "shared.txt",
+        "line A\nline B — main operator version\nline C\n",
         "fix: operator commits conflicting change to main mid-RC",
     )
 
     result_release = _run_cm_script(
-        _RELEASE_SCRIPT, ["--force", "--reason", "trying to force past a squash conflict"],
-        kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT,
+        ["--force", "--reason", "trying to force past a squash conflict"],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
     )
     assert result_release.returncode != 0, (
         "--force must NOT pass a squash conflict — this gate is outside its scope.\n"
         f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
     )
     combined = result_release.stdout + result_release.stderr
-    assert "Trigger 5" in combined, (
-        f"Expected the Trigger-5 squash-conflict HALT to fire unchanged under --force.\noutput:\n{combined}"
-    )
-    assert not _git_tag_exists(repo_path, version), (
-        f"Release tag '{version}' must NOT exist — --force does not reach the squash-conflict gate."
-    )
+    assert (
+        "Trigger 5" in combined
+    ), f"Expected the Trigger-5 squash-conflict HALT to fire unchanged under --force.\noutput:\n{combined}"
+    assert not _git_tag_exists(
+        repo_path, version
+    ), f"Release tag '{version}' must NOT exist — --force does not reach the squash-conflict gate."
 
 
 def test_forced_ship_still_halts_on_malformed_release_notes_status_heading(tmp_path: pathlib.Path) -> None:
@@ -503,12 +565,15 @@ def test_forced_ship_still_halts_on_malformed_release_notes_status_heading(tmp_p
     kanban_root = _build_kanban_root(tmp_path, project_name, repo_path, push_to_remote="false")
 
     result_open = _run_cm_script(_OPEN_RC_SCRIPT, [version], kanban_root, project_name, repo_root=repo_path)
-    assert result_open.returncode == 0, (
-        f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
-    )
+    assert (
+        result_open.returncode == 0
+    ), f"cm-open-rc.sh failed.\nstdout: {result_open.stdout}\nstderr: {result_open.stderr}"
     rc_branch = f"rc/{version}"
     _commit_on_branch(
-        repo_path, rc_branch, "feature_notes_guard.txt", "notes-guard test feature content\n",
+        repo_path,
+        rc_branch,
+        "feature_notes_guard.txt",
+        "notes-guard test feature content\n",
         "feat: add feature for notes-stamp-guard test",
     )
 
@@ -522,11 +587,16 @@ def test_forced_ship_still_halts_on_malformed_release_notes_status_heading(tmp_p
     _git_local(repo_path, "checkout", "main")
 
     tester_task_id = "TESTER-20260908-912-notes-guard-pass"
-    _build_tester_task(kanban_root, project_name, tester_task_id, version, state="DONE", recommendation="PASS", systemic_risk="low")
+    _build_tester_task(
+        kanban_root, project_name, tester_task_id, version, state="DONE", recommendation="PASS", systemic_risk="low"
+    )
 
     result_release = _run_cm_script(
-        _RELEASE_SCRIPT, ["--force", "--reason", "trying to force past a malformed notes file"],
-        kanban_root, project_name, repo_root=repo_path,
+        _RELEASE_SCRIPT,
+        ["--force", "--reason", "trying to force past a malformed notes file"],
+        kanban_root,
+        project_name,
+        repo_root=repo_path,
     )
     assert result_release.returncode != 0, (
         "--force must NOT pass the release-notes Status-heading guard — this "
@@ -534,9 +604,9 @@ def test_forced_ship_still_halts_on_malformed_release_notes_status_heading(tmp_p
         f"stdout: {result_release.stdout}\nstderr: {result_release.stderr}"
     )
     combined = result_release.stdout + result_release.stderr
-    assert "cm-release.trigger-9.notes-missing-status-heading" in combined, (
-        f"Expected the Trigger-9 malformed-notes HALT to fire unchanged under --force.\noutput:\n{combined}"
-    )
-    assert not _git_tag_exists(repo_path, version), (
-        f"Release tag '{version}' must NOT exist — --force does not reach the notes-stamp guard."
-    )
+    assert (
+        "cm-release.trigger-9.notes-missing-status-heading" in combined
+    ), f"Expected the Trigger-9 malformed-notes HALT to fire unchanged under --force.\noutput:\n{combined}"
+    assert not _git_tag_exists(
+        repo_path, version
+    ), f"Release tag '{version}' must NOT exist — --force does not reach the notes-stamp guard."

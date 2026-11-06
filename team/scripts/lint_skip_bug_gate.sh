@@ -95,14 +95,14 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 # shellcheck source=lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/error_contract.sh"
 
 # ---------------------------------------------------------------------------
 # Locate the repo root relative to this script.
 # ---------------------------------------------------------------------------
-_LSG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LSG_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _LSG_REPO_ROOT="$(cd "${_LSG_SCRIPT_DIR}/../.." && pwd)"
 
 # ---------------------------------------------------------------------------

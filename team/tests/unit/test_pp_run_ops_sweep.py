@@ -70,6 +70,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="pp-run-ops-sweep")
 
+
 # ---------------------------------------------------------------------------
 # Exemption list (one entry per file; includes rationale as a comment above).
 # The paths are relative to the repo root and matched as exact file-relative
@@ -121,8 +122,7 @@ def _find_violations() -> list[str]:
 
     if not scripts_dir.is_dir():
         raise FileNotFoundError(
-            f"team/scripts/ directory not found at {scripts_dir}; "
-            "repo root resolution may be wrong."
+            f"team/scripts/ directory not found at {scripts_dir}; " "repo root resolution may be wrong."
         )
 
     violations: list[str] = []
@@ -202,14 +202,12 @@ def test_bare_invocation_pattern_detects_synthetic_violation(
     bad_script.write_text(
         "#!/usr/bin/env bash\n"
         "# Synthetic bare invocation — should be caught by the sweep gate.\n"
-        "python3 -m pgai_agent_kanban.ops close_item \"$project_root\" \"$key\" done\n",
+        'python3 -m pgai_agent_kanban.ops close_item "$project_root" "$key" done\n',
         encoding="utf-8",
     )
 
     matching_lines = [
-        line
-        for line in bad_script.read_text(encoding="utf-8").splitlines()
-        if _BARE_INVOCATION_PATTERN.search(line)
+        line for line in bad_script.read_text(encoding="utf-8").splitlines() if _BARE_INVOCATION_PATTERN.search(line)
     ]
 
     assert len(matching_lines) >= 1, (
@@ -231,14 +229,12 @@ def test_bare_invocation_pattern_does_not_match_pp_run_ops_call(
     clean_script.write_text(
         "#!/usr/bin/env bash\n"
         "source lib/pp_run_ops.sh\n"
-        "pp_run_ops pgai_agent_kanban.ops close_item \"$project_root\" \"$key\" done\n",
+        'pp_run_ops pgai_agent_kanban.ops close_item "$project_root" "$key" done\n',
         encoding="utf-8",
     )
 
     matching_lines = [
-        line
-        for line in clean_script.read_text(encoding="utf-8").splitlines()
-        if _BARE_INVOCATION_PATTERN.search(line)
+        line for line in clean_script.read_text(encoding="utf-8").splitlines() if _BARE_INVOCATION_PATTERN.search(line)
     ]
 
     assert not matching_lines, (
@@ -254,10 +250,12 @@ def test_exempt_suffixes_cover_expected_files() -> None:
     exemption is added without rationale, or an existing exemption is
     accidentally removed, this test fails and forces an explicit acknowledgment.
     """
-    expected = frozenset({
-        "team/scripts/lib/pp_run_ops.sh",
-        "team/scripts/generate-icd.sh",
-    })
+    expected = frozenset(
+        {
+            "team/scripts/lib/pp_run_ops.sh",
+            "team/scripts/generate-icd.sh",
+        }
+    )
     actual = frozenset(_EXEMPT_SUFFIXES)
     assert actual == expected, (
         f"Exemption list mismatch.\n"

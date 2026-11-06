@@ -84,9 +84,7 @@ def _require_git() -> None:
 
 
 def _git(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
-    )
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True)
 
 
 @pytest.fixture(scope="module")
@@ -194,15 +192,12 @@ def _error_contract_fields(stderr: str) -> dict[str, str]:
         for label in ("error", "message", "remedy"):
             prefix = f"{label}:"
             if line.startswith(prefix):
-                fields[label] = line[len(prefix):].strip()
+                fields[label] = line[len(prefix) :].strip()
     return fields
 
 
 def _diagnostic(result: subprocess.CompletedProcess) -> str:
-    return (
-        f"exit code: {result.returncode}\n"
-        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-    )
+    return f"exit code: {result.returncode}\n" f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
 
 
 def _installed_version(root: pathlib.Path) -> str:
@@ -221,17 +216,13 @@ def _assert_refused_unchanged(
         f"{installed_version} must be refused.\n{_diagnostic(result)}"
     )
     after = _snapshot(root)
-    changed = sorted(
-        rel for rel in set(before) | set(after) if before.get(rel, b"") != after.get(rel, b"")
-    )
+    changed = sorted(rel for rel in set(before) | set(after) if before.get(rel, b"") != after.get(rel, b""))
     assert not changed, (
-        f"The refused upgrade changed paths under the kanban root: {changed[:20]}\n"
-        f"{_diagnostic(result)}"
+        f"The refused upgrade changed paths under the kanban root: {changed[:20]}\n" f"{_diagnostic(result)}"
     )
     fields = _error_contract_fields(result.stderr)
     assert fields.get("error") == _ERROR_KEY, (
-        f"stderr must carry the error key {_ERROR_KEY!r}; parsed {fields!r}.\n"
-        f"{_diagnostic(result)}"
+        f"stderr must carry the error key {_ERROR_KEY!r}; parsed {fields!r}.\n" f"{_diagnostic(result)}"
     )
     message = fields.get("message", "")
     assert dev_version in message and installed_version in message, (
@@ -253,16 +244,14 @@ def test_noarg_upgrade_refuses_dev_tree_older_than_installed(
 
     fields = _assert_refused_unchanged(result, root, before, _TAG_OLD, _TAG_MID)
     remedy = fields.get("remedy", "")
-    assert remedy and "<" not in remedy and ">" not in remedy, (
-        f"The remedy must be a command with no placeholder; got {remedy!r}"
-    )
-    assert str(dev_tree) in remedy and str(root) in remedy, (
-        f"The remedy must name this dev tree and kanban root; got {remedy!r}"
-    )
+    assert (
+        remedy and "<" not in remedy and ">" not in remedy
+    ), f"The remedy must be a command with no placeholder; got {remedy!r}"
+    assert (
+        str(dev_tree) in remedy and str(root) in remedy
+    ), f"The remedy must name this dev tree and kanban root; got {remedy!r}"
     backups = sorted((tmp_path / "home").glob("pgai-kanban-backup-*"))
-    assert not backups, (
-        f"The refusal must come before the pre-upgrade backup; found {backups}"
-    )
+    assert not backups, f"The refusal must come before the pre-upgrade backup; found {backups}"
 
 
 def test_noarg_refusal_remedy_completes_the_upgrade_when_run_as_printed(
@@ -273,18 +262,16 @@ def test_noarg_refusal_remedy_completes_the_upgrade_when_run_as_printed(
     root = _build_installed_root(tmp_path, _TAG_MID)
     refused = _run_noarg_upgrade(tmp_path, root, dev_tree)
     remedy = _error_contract_fields(refused.stderr).get("remedy", "")
-    assert refused.returncode != 0 and remedy, (
-        f"Setup: the older dev tree must be refused with a remedy.\n{_diagnostic(refused)}"
-    )
+    assert (
+        refused.returncode != 0 and remedy
+    ), f"Setup: the older dev tree must be refused with a remedy.\n{_diagnostic(refused)}"
 
     result = _run(["bash", "-c", remedy], _sandbox_env(tmp_path, root), tmp_path)
 
-    assert result.returncode == 0, (
-        f"The remedy {remedy!r} must complete the upgrade.\n{_diagnostic(result)}"
-    )
-    assert _installed_version(root) == _TAG_NEW, (
-        f"After the remedy VERSION must be {_TAG_NEW}; got {_installed_version(root)!r}"
-    )
+    assert result.returncode == 0, f"The remedy {remedy!r} must complete the upgrade.\n{_diagnostic(result)}"
+    assert (
+        _installed_version(root) == _TAG_NEW
+    ), f"After the remedy VERSION must be {_TAG_NEW}; got {_installed_version(root)!r}"
 
 
 def test_noarg_upgrade_refuses_older_dev_tree_identified_by_release_tag(
@@ -319,12 +306,11 @@ def test_noarg_upgrade_allows_dev_tree_equal_to_or_newer_than_installed(
     result = _run_noarg_upgrade(tmp_path, root, dev_tree)
 
     assert result.returncode == 0, (
-        f"An upgrade from {dev_tree_tag} over {installed_version} must succeed.\n"
-        f"{_diagnostic(result)}"
+        f"An upgrade from {dev_tree_tag} over {installed_version} must succeed.\n" f"{_diagnostic(result)}"
     )
-    assert _installed_version(root) == dev_tree_tag, (
-        f"VERSION must be stamped {dev_tree_tag}; got {_installed_version(root)!r}"
-    )
+    assert (
+        _installed_version(root) == dev_tree_tag
+    ), f"VERSION must be stamped {dev_tree_tag}; got {_installed_version(root)!r}"
 
 
 def test_phase2_body_refuses_older_dev_tree_without_phase1(

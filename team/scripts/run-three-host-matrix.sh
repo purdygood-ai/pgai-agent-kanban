@@ -20,6 +20,11 @@
 # to run its own test suite unassisted). Each container host runs once per
 # selected image and is reported as <host>@<image>.
 #
+# Both suite runs inside a container host pass --init (Docker and Podman
+# both accept it), so the engine's init is PID 1 and reaps orphaned
+# processes the suites leave behind; without it PID 1 is `bash -lc`, which
+# reaps only its own children.
+#
 # Usage:
 #   PGAI_CONTAINER_TIER=1 run-three-host-matrix.sh --image <name|all>
 #                             [--host dev] [--host gitless] [--host tmuxless]
@@ -89,11 +94,11 @@
 # BLOCK-WORTHY: an unreachable bootstrap prelude leaves every downstream
 # tunable/path resolution undefined for this runner.
 # CENSUS-ANCHOR: run-three-host-matrix-env-bootstrap-01
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
 # --- Resolve kanban root and script directory ---
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
-_RTM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_RTM_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # --- Source optional config files ---
 [[ -f "$TEAM_ROOT/bashrc" ]] && source "$TEAM_ROOT/bashrc"
@@ -169,7 +174,7 @@ trap cleanup_on_exit EXIT
 # --operator-approved are separated out by lib/container_tier.sh first) ---
 _RTM_ORIG_ARGS=("$@")
 # shellcheck source=lib/container_tier.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/container_tier.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/container_tier.sh"
 container_tier_take_args "$@"
 set -- ${CONTAINER_TIER_REST_ARGS[@]+"${CONTAINER_TIER_REST_ARGS[@]}"}
 HOSTS=()
@@ -568,7 +573,8 @@ _rtm_run_container_host() {
     # the --rm container exits. Named to avoid any resemblance to that host
     # path rather than reuse its literal.
     local rootdir="/var/tmp/host-matrix-kanban-root"
-    pgai_docker "${_RTM_ENGINE}" run --rm \
+    # --init: a reaping PID 1 (see the header).
+    pgai_docker "${_RTM_ENGINE}" run --rm --init \
         -v "${tree_copy}:/workspace:rw" \
         -e "PGAI_AGENT_KANBAN_ROOT_PATH=${rootdir}" \
         -e "PGAI_DEV_TREE_PATH=/workspace" \
@@ -578,7 +584,7 @@ _rtm_run_container_host() {
         -lc "mkdir -p '${rootdir}' && cd /workspace && bash team/scripts/run-unit-tests.sh $([[ "$VERBOSE" == "true" ]] && echo --verbose)" \
         >>"$log" 2>&1
     local rc_unit=$?
-    pgai_docker "${_RTM_ENGINE}" run --rm \
+    pgai_docker "${_RTM_ENGINE}" run --rm --init \
         -v "${tree_copy}:/workspace:rw" \
         -e "PGAI_AGENT_KANBAN_ROOT_PATH=${rootdir}" \
         -e "PGAI_DEV_TREE_PATH=/workspace" \

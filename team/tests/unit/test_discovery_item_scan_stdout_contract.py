@@ -67,9 +67,7 @@ def _arm_settle_guard(state_dir: pathlib.Path, item: pathlib.Path) -> None:
 
     settle_dir = state_dir / "settle"
     settle_dir.mkdir(parents=True, exist_ok=True)
-    (settle_dir / f"{item.name}.settle").write_text(
-        f"{int(time.time())}\n{item}\n", encoding="utf-8"
-    )
+    (settle_dir / f"{item.name}.settle").write_text(f"{int(time.time())}\n{item}\n", encoding="utf-8")
 
 
 def _finder_script(
@@ -81,13 +79,17 @@ def _finder_script(
     """Source the finder's libraries, install *log_fragment* as log(), and
     invoke the finder exactly as discovery_step_bugs does (state_dir set,
     project name empty so quarantine uses the <dir>/.rejected fallback)."""
-    return textwrap.dedent(f"""\
+    return (
+        textwrap.dedent(f"""\
         set -uo pipefail
         source {_TEMP_LIB}
         source {_ITEMS_LIB}
-        """) + log_fragment + textwrap.dedent(f"""
+        """)
+        + log_fragment
+        + textwrap.dedent(f"""
         _disc_find_unhandled_items '{bugs_dir}' '{cache_file}' 'BUG-' '{state_dir}' ''
         """)
+    )
 
 
 def _stdout_lines(result) -> list[str]:
@@ -171,9 +173,7 @@ class TestStdoutCarriesOnlyAbsolutePaths:
 
         result = run_bash(
             tmp_path,
-            _finder_script(
-                'log() { printf "%s\\n" "$*" >&2; }\n', bugs_dir, cache_file, state_dir
-            ),
+            _finder_script('log() { printf "%s\\n" "$*" >&2; }\n', bugs_dir, cache_file, state_dir),
         )
 
         assert result.returncode == 0, _diagnostic(result)
@@ -211,9 +211,7 @@ class TestStrayScanLineIsDroppedAndNarrated:
 
         result = run_bash(
             tmp_path,
-            _finder_script(
-                'log() { printf "%s\\n" "$*" >&2; }\n', bugs_dir, cache_file, state_dir
-            ),
+            _finder_script('log() { printf "%s\\n" "$*" >&2; }\n', bugs_dir, cache_file, state_dir),
             extra_env={"PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}"},
         )
 

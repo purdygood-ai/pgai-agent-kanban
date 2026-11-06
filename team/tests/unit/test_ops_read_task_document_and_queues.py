@@ -93,8 +93,7 @@ def board(tmp_path: pathlib.Path) -> pathlib.Path:
     _task(project, _AMBIG_B, "BACKLOG")
     _task(project, _NO_README, "DONE", role=None)
     _write(project / "tasks" / _CRLF / "status.md", raw=b"## State\r\nDONE\r\n\r\n## Summary\r\ncrlf\r\n")
-    _write(project / "tasks" / "queues" / "coder_backlog.md",
-           f"# Coder\n\n- [A] {_WORKING}\n- [ ] {_AMBIG_A}\n")
+    _write(project / "tasks" / "queues" / "coder_backlog.md", f"# Coder\n\n- [A] {_WORKING}\n- [ ] {_AMBIG_A}\n")
     _write(project / "bugs" / "BUG-0001-crash.md", "# BUG-0001\n\n## Status\nopen\n")
     _write(project / "bugs" / "BUG-0002-a.md", "# BUG-0002-a\n\n## Status\nopen\n")
     _write(project / "bugs" / "BUG-0002-b.md", "# BUG-0002-b\n\n## Status\ndone\n")
@@ -223,9 +222,7 @@ def test_missing_project_root_raises_ops_error(ctx: OpsContext) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_queues_returns_counters_working_task_listing_and_queue_lines(
-    ctx: OpsContext, board: pathlib.Path
-) -> None:
+def test_get_queues_returns_counters_working_task_listing_and_queue_lines(ctx: OpsContext, board: pathlib.Path) -> None:
     queues = ops_read.get_queues(ctx, _PROJECT)
     tasks = _project_dir(board) / "tasks"
 
@@ -283,9 +280,7 @@ def test_get_queues_refuses_a_missing_project_directory_dual_channel(ctx: OpsCon
 
 
 @pytest.mark.parametrize("project", ["", "  "], ids=["empty", "blank"])
-def test_get_queues_refuses_an_empty_project_naming_a_registered_one(
-    ctx: OpsContext, project: str
-) -> None:
+def test_get_queues_refuses_an_empty_project_naming_a_registered_one(ctx: OpsContext, project: str) -> None:
     with pytest.raises(Refused) as excinfo:
         ops_read.get_queues(ctx, project)
     contract = parse_error_contract(str(excinfo.value))
@@ -330,9 +325,7 @@ def test_get_queues_refuses_an_empty_project_on_a_single_project_root_with_real_
 # ---------------------------------------------------------------------------
 
 
-def test_cli_get_task_status_prints_the_document_bytes(
-    board: pathlib.Path, capfdbinary: pytest.CaptureFixture
-) -> None:
+def test_cli_get_task_status_prints_the_document_bytes(board: pathlib.Path, capfdbinary: pytest.CaptureFixture) -> None:
     rc = ops_read._cli_main(["get_task_status", str(board), _PROJECT, _CRLF])
     out, err = capfdbinary.readouterr()
     assert rc == 0
@@ -386,9 +379,7 @@ def test_cli_get_queues_prints_the_compact_pane(
     assert "kanban.cfg not found" in err
 
 
-def test_cli_get_queues_refuses_a_missing_project_directory(
-    board: pathlib.Path, capfd: pytest.CaptureFixture
-) -> None:
+def test_cli_get_queues_refuses_a_missing_project_directory(board: pathlib.Path, capfd: pytest.CaptureFixture) -> None:
     rc = ops_read._cli_main(["get_queues", str(board), "ghost", "ghost", "1"])
     out, err = capfd.readouterr()
     assert rc == 3
@@ -430,7 +421,11 @@ def test_package_entry_point_routes_read_verbs_to_the_read_cli(board: pathlib.Pa
     env = {**os.environ, "PYTHONPATH": str(_TEAM_DIR)}
     result = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.ops", "get_task_status", str(board), _PROJECT, _WORKING],
-        capture_output=True, text=True, env=env, timeout=60, cwd=str(_TEAM_DIR),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        cwd=str(_TEAM_DIR),
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == (_project_dir(board) / "tasks" / _WORKING / "status.md").read_text(encoding="utf-8")
@@ -460,7 +455,9 @@ def linked_board(board: pathlib.Path, tmp_path: pathlib.Path) -> pathlib.Path:
     return board
 
 
-@pytest.mark.parametrize(("key", "file"), [(_LINKED_STATUS, "status"), (_LINKED_STATUS, "readme"), (_LINKED_README, "readme")])
+@pytest.mark.parametrize(
+    ("key", "file"), [(_LINKED_STATUS, "status"), (_LINKED_STATUS, "readme"), (_LINKED_README, "readme")]
+)
 def test_show_refuses_a_task_document_linked_outside_its_folder(
     linked_board: pathlib.Path, key: str, file: str
 ) -> None:

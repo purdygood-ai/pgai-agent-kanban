@@ -22,16 +22,19 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_missing_modules_lists_only_the_names_that_fail_to_import() -> None:
-    assert module_probe.missing_modules(["json", "no_such_module_for_probe", "re"]) == [
-        "no_such_module_for_probe"
-    ]
+    assert module_probe.missing_modules(["json", "no_such_module_for_probe", "re"]) == ["no_such_module_for_probe"]
 
 
 def _probe(tmp_path: pathlib.Path, *names: str) -> subprocess.CompletedProcess:
     env = build_scrubbed_env(home_dir=tmp_path / "home", extra_env={"PYTHONPATH": str(_TEAM_DIR)})
     return subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.lib.module_probe", *names],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 

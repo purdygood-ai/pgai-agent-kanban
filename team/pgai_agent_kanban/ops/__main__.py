@@ -36,13 +36,14 @@ Supported verbs (see ops/write.py _cli_main for the full list):
     set_needs_operator PROJECT_ROOT KEY QUESTION
     wontdo_item     PROJECT_ROOT KEY
     delete_item     PROJECT_ROOT KEY [FORCE]
-    reset_item      PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE]
+    reset_item      PROJECT_ROOT KEY [KEEP_ARTIFACTS] [FORCE] [DISCARD_BRANCH]
     set_marker      QUEUE_FILE KEY MARKER [IGNORE_CASE]
     remove_marker   QUEUE_FILE KEY [IGNORE_CASE]
     render_marker   QUEUE_FILE KEY MARKER [IGNORE_CASE]
     render_ensure_marker QUEUE_FILE KEY MARKER
     get_markers     QUEUE_FILE KEY [IGNORE_CASE]
     scan_queue      QUEUE_FILE TASKS_ROOT ID_PATTERN LIMIT RULE...
+    unmerged_branch_commits DEV_TREE BRANCH
 
 Project registry verbs (see ops/projects.py; options, not positionals):
     create_project  --kanban-root=ROOT --project=NAME [--scripts-dir=DIR] [...]

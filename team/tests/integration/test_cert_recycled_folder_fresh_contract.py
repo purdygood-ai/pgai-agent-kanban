@@ -59,7 +59,6 @@ import re
 import shutil
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants derived from this file's location.
@@ -163,8 +162,7 @@ def _build_kanban_root(
     (queues_dir / "plans").mkdir(parents=True, exist_ok=True)
     for agent in ("coder", "pm", "writer", "tester", "cm", "bug", "priority"):
         (queues_dir / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n\n"
-            "<!-- Format: - [ ] TASK-ID -->\n",
+            f"# {agent.upper()} Backlog\n\n" "<!-- Format: - [ ] TASK-ID -->\n",
             encoding="utf-8",
         )
 
@@ -491,9 +489,7 @@ class TestRecycledFolderFreshContract:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -534,19 +530,14 @@ class TestRecycledFolderFreshContract:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         # Find the recycled companion folder (verify-and-report slug).
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         companion_dirs = [d for d in tester_dirs if "verify-and-report" in d.name]
         assert companion_dirs, (
             f"No recycled TESTER verify-and-report folder found under {tasks_root}. "
@@ -599,22 +590,15 @@ class TestRecycledFolderFreshContract:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         companion_dirs = [d for d in tester_dirs if "verify-and-report" in d.name]
-        assert companion_dirs, (
-            f"No recycled TESTER verify-and-report folder found under {tasks_root}."
-        )
+        assert companion_dirs, f"No recycled TESTER verify-and-report folder found under {tasks_root}."
         companion_dir = companion_dirs[0]
 
         state = _extract_state(companion_dir / "status.md")
@@ -650,9 +634,7 @@ class TestRecycledFolderFreshContract:
 
         # _plant_wontdo_corpse writes a progress.log file inside logs/.
         corpse_dir = _plant_wontdo_corpse(tasks_root, slug="verify-and-report")
-        prior_log_content = (corpse_dir / "logs" / "progress.log").read_text(
-            encoding="utf-8"
-        )
+        prior_log_content = (corpse_dir / "logs" / "progress.log").read_text(encoding="utf-8")
 
         plan = _build_one_tester_plan(
             project_name="cert_recycle",
@@ -662,22 +644,15 @@ class TestRecycledFolderFreshContract:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         companion_dirs = [d for d in tester_dirs if "verify-and-report" in d.name]
-        assert companion_dirs, (
-            f"No recycled TESTER verify-and-report folder found under {tasks_root}."
-        )
+        assert companion_dirs, f"No recycled TESTER verify-and-report folder found under {tasks_root}."
         companion_dir = companion_dirs[0]
 
         recycled_log = companion_dir / "logs" / "progress.log"
@@ -716,9 +691,7 @@ class TestRecycledFolderFreshContract:
         # --- Run 1: no-corpse materialization (fresh) ---
         root_fresh = _build_kanban_root(tmp_path / "fresh")
         proj_fresh = root_fresh / "projects" / "cert_recycle"
-        req_path_fresh = str(
-            proj_fresh / "requirements" / "v1.0.0-recycle-cert-run.md"
-        )
+        req_path_fresh = str(proj_fresh / "requirements" / "v1.0.0-recycle-cert-run.md")
         plan_fresh = _build_one_tester_plan(
             project_name="cert_recycle",
             source_branch=_CURRENT_SOURCE_BRANCH,
@@ -727,9 +700,7 @@ class TestRecycledFolderFreshContract:
         plan_file_fresh = tmp_path / "plan_fresh.json"
         plan_file_fresh.write_text(json.dumps(plan_fresh, indent=2), encoding="utf-8")
 
-        result_fresh = _run_pm_materialize(
-            plan_file_fresh, root_fresh, proj_fresh, requirements_path=req_path_fresh
-        )
+        result_fresh = _run_pm_materialize(plan_file_fresh, root_fresh, proj_fresh, requirements_path=req_path_fresh)
         assert result_fresh.returncode == 0, (
             f"Fresh run: pm_materialize.py exited {result_fresh.returncode}.\n"
             f"stdout: {result_fresh.stdout}\nstderr: {result_fresh.stderr}"
@@ -737,12 +708,11 @@ class TestRecycledFolderFreshContract:
 
         fresh_tasks_root = proj_fresh / "tasks"
         fresh_companion_dirs = sorted(
-            d for d in fresh_tasks_root.iterdir()
+            d
+            for d in fresh_tasks_root.iterdir()
             if d.is_dir() and d.name.startswith("TESTER-") and "verify-and-report" in d.name
         )
-        assert fresh_companion_dirs, (
-            f"Fresh run: no TESTER verify-and-report folder found under {fresh_tasks_root}."
-        )
+        assert fresh_companion_dirs, f"Fresh run: no TESTER verify-and-report folder found under {fresh_tasks_root}."
         fresh_companion = fresh_companion_dirs[0]
         fresh_source_branch = _extract_source_branch(fresh_companion / "README.md")
         fresh_state = _extract_state(fresh_companion / "status.md")
@@ -751,9 +721,7 @@ class TestRecycledFolderFreshContract:
         root_recycle = _build_kanban_root(tmp_path / "recycle")
         proj_recycle = root_recycle / "projects" / "cert_recycle"
         tasks_root_recycle = proj_recycle / "tasks"
-        req_path_recycle = str(
-            proj_recycle / "requirements" / "v1.0.0-recycle-cert-run.md"
-        )
+        req_path_recycle = str(proj_recycle / "requirements" / "v1.0.0-recycle-cert-run.md")
 
         # Plant a WONT-DO corpse for the companion slug with a stale source_branch.
         _plant_wontdo_corpse(
@@ -768,9 +736,7 @@ class TestRecycledFolderFreshContract:
             requirements_path=req_path_recycle,
         )
         plan_file_recycle = tmp_path / "plan_recycle.json"
-        plan_file_recycle.write_text(
-            json.dumps(plan_recycle, indent=2), encoding="utf-8"
-        )
+        plan_file_recycle.write_text(json.dumps(plan_recycle, indent=2), encoding="utf-8")
 
         result_recycle = _run_pm_materialize(
             plan_file_recycle,
@@ -784,21 +750,22 @@ class TestRecycledFolderFreshContract:
         )
 
         recycled_companion_dirs = sorted(
-            d for d in tasks_root_recycle.iterdir()
+            d
+            for d in tasks_root_recycle.iterdir()
             if d.is_dir() and d.name.startswith("TESTER-") and "verify-and-report" in d.name
         )
-        assert recycled_companion_dirs, (
-            f"Recycle run: no TESTER verify-and-report folder found under {tasks_root_recycle}."
-        )
+        assert (
+            recycled_companion_dirs
+        ), f"Recycle run: no TESTER verify-and-report folder found under {tasks_root_recycle}."
         recycled_companion = recycled_companion_dirs[0]
         recycled_source_branch = _extract_source_branch(recycled_companion / "README.md")
         recycled_state = _extract_state(recycled_companion / "status.md")
 
         # --- Contract-equivalence assertions ---
         # Both the fresh and recycled companions must carry the current source_branch.
-        assert fresh_source_branch == _CURRENT_SOURCE_BRANCH, (
-            f"Fresh companion README has unexpected source_branch {fresh_source_branch!r}."
-        )
+        assert (
+            fresh_source_branch == _CURRENT_SOURCE_BRANCH
+        ), f"Fresh companion README has unexpected source_branch {fresh_source_branch!r}."
         assert recycled_source_branch == _CURRENT_SOURCE_BRANCH, (
             f"Recycled companion README carries stale source_branch {recycled_source_branch!r} "
             f"instead of current value {_CURRENT_SOURCE_BRANCH!r}. "
@@ -811,8 +778,7 @@ class TestRecycledFolderFreshContract:
 
         # Both status.md files must start in BACKLOG.
         assert fresh_state in ("BACKLOG", "WAITING"), (
-            f"Fresh companion status.md initial state is {fresh_state!r}; "
-            f"expected BACKLOG or WAITING."
+            f"Fresh companion status.md initial state is {fresh_state!r}; " f"expected BACKLOG or WAITING."
         )
         assert recycled_state in ("BACKLOG", "WAITING"), (
             f"Recycled companion status.md state is {recycled_state!r}; "
@@ -846,29 +812,21 @@ class TestRecycledFolderFreshContract:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"pm_materialize.py exited {result.returncode} (expected 0).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
         assert len(tester_dirs) >= 2, (
-            f"Expected at least 2 TESTER task folders; "
-            f"found: {[d.name for d in tester_dirs]}"
+            f"Expected at least 2 TESTER task folders; " f"found: {[d.name for d in tester_dirs]}"
         )
 
         # Both status.md files must be in a dispatch-ready state.
         for tester_dir in tester_dirs:
             status_path = tester_dir / "status.md"
-            assert status_path.is_file(), (
-                f"Expected status.md at {status_path} after materialization."
-            )
+            assert status_path.is_file(), f"Expected status.md at {status_path} after materialization."
             state = _extract_state(status_path)
             assert state in ("BACKLOG", "WAITING"), (
                 f"TESTER task {tester_dir.name} has state {state!r}; "
@@ -887,9 +845,7 @@ class TestRecycledFolderFreshContract:
             status_path.write_text(done_text, encoding="utf-8")
 
             final_state = _extract_state(status_path)
-            assert final_state == "DONE", (
-                f"Failed to set DONE state in {status_path}."
-            )
+            assert final_state == "DONE", f"Failed to set DONE state in {status_path}."
 
     def test_intake_item_closed_after_both_tickets_complete_with_corpse_present(
         self,
@@ -916,22 +872,14 @@ class TestRecycledFolderFreshContract:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert result.returncode == 0, (
-            f"pm_materialize.py exited {result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"pm_materialize.py exited {result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         # Simulate dispatch completion for all TESTER tasks.
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
-        assert len(tester_dirs) >= 2, (
-            f"Expected at least 2 TESTER folders; found: {[d.name for d in tester_dirs]}"
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
+        assert len(tester_dirs) >= 2, f"Expected at least 2 TESTER folders; found: {[d.name for d in tester_dirs]}"
         for tester_dir in tester_dirs:
             status_path = tester_dir / "status.md"
             status_text = status_path.read_text(encoding="utf-8")
@@ -955,12 +903,8 @@ class TestRecycledFolderFreshContract:
 
         # Verify the intake item is closed.
         final_req_text = req_path.read_text(encoding="utf-8")
-        status_match = re.search(
-            r"^##\s+Status\s*\n\s*(\S+)", final_req_text, re.MULTILINE
-        )
-        assert status_match is not None, (
-            f"No ## Status field found in requirements doc {req_path}."
-        )
-        assert status_match.group(1).lower() == "done", (
-            f"Intake item ## Status is {status_match.group(1)!r}; expected 'done'."
-        )
+        status_match = re.search(r"^##\s+Status\s*\n\s*(\S+)", final_req_text, re.MULTILINE)
+        assert status_match is not None, f"No ## Status field found in requirements doc {req_path}."
+        assert (
+            status_match.group(1).lower() == "done"
+        ), f"Intake item ## Status is {status_match.group(1)!r}; expected 'done'."

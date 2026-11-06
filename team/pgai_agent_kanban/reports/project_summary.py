@@ -48,7 +48,7 @@ import os
 import pathlib
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 # Run by file path (``python3 .../project_summary.py``) or loaded from a file
@@ -63,9 +63,9 @@ if not __package__:
     if _OWN_PACKAGE_ROOT not in sys.path:
         sys.path.insert(0, _OWN_PACKAGE_ROOT)
 
+from pgai_agent_kanban.lib.dev_tree import project_dev_tree
 from pgai_agent_kanban.lib.html_comments import strip_html_comments  # noqa: E402
 from pgai_agent_kanban.task_status import read_section, section_value  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -111,6 +111,7 @@ def _kanban_root() -> pathlib.Path:
     PGAI_AGENT_KANBAN_ROOT_PATH and fails loud if the variable is unset or empty.
     """
     from pgai_agent_kanban.env import resolve_kanban_root
+
     return resolve_kanban_root()
 
 
@@ -124,11 +125,7 @@ def _list_projects(root: pathlib.Path) -> list[str]:
     pdir = _projects_dir(root)
     if not pdir.is_dir():
         return []
-    names = [
-        d.name
-        for d in sorted(pdir.iterdir())
-        if d.is_dir() and not d.name.startswith(".")
-    ]
+    names = [d.name for d in sorted(pdir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
     return names
 
 
@@ -145,22 +142,18 @@ def _read_ini_value(cfg_path: pathlib.Path, section: str, key: str) -> str:
     or not valid INI, or the section or key is absent.
     """
     from pgai_agent_kanban.lib import ini
+
     return ini.get_value(cfg_path, section, key)
 
 
 def _dev_tree_path(project_root: pathlib.Path) -> pathlib.Path | None:
-    """Return the dev_tree_path from project.cfg when available.
+    """The project's own repository (``[project] dev_tree_path``), or None.
 
-    Checks for both project.cfg (INI) and PROJECT.cfg (legacy bash key=value).
-    Returns None when neither file declares a dev_tree_path.
+    Release notes belong to the project's own repository, so the global
+    fallback is not consulted (:func:`pgai_agent_kanban.lib.dev_tree.project_dev_tree`).
     """
-    for cfg_name in ("project.cfg", "PROJECT.cfg"):
-        cfg = project_root / cfg_name
-        if cfg.is_file():
-            val = _read_ini_value(cfg, "project", "dev_tree_path")
-            if val:
-                return pathlib.Path(val)
-    return None
+    val = project_dev_tree(project_root)
+    return pathlib.Path(val) if val else None
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +493,7 @@ def _parse_date_loose(date_str: str) -> datetime | None:
     try:
         dt = datetime.fromisoformat(s)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except ValueError:
         pass
@@ -508,7 +501,7 @@ def _parse_date_loose(date_str: str) -> datetime | None:
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", s)
     if m:
         try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=timezone.utc)
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=UTC)
         except ValueError:
             pass
     return None
@@ -519,7 +512,7 @@ def _date_from_task_id(task_id: str) -> datetime | None:
     m = re.search(r"(\d{4})(\d{2})(\d{2})", task_id)
     if m:
         try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=timezone.utc)
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=UTC)
         except ValueError:
             pass
     return None
@@ -527,7 +520,7 @@ def _date_from_task_id(task_id: str) -> datetime | None:
 
 def _sort_key_date(dt: datetime | None) -> datetime:
     """Return dt for sorting; use epoch for None so None sorts earliest."""
-    return dt if dt is not None else datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return dt if dt is not None else datetime(1970, 1, 1, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +536,7 @@ def _load_bugs(project_root: pathlib.Path) -> list[BugItem]:
     for f in sorted(bugs_dir.glob("*.md")):
         try:
             items.append(BugItem(f))
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 -- an unparseable file is left out of the summary, never fatal to it
             pass
     return items
 
@@ -559,7 +552,7 @@ def _load_priorities(project_root: pathlib.Path) -> list[PriorityItem]:
             continue
         try:
             items.append(PriorityItem(f))
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 -- an unparseable file is left out of the summary, never fatal to it
             pass
     return items
 
@@ -574,14 +567,12 @@ def _load_requirements(project_root: pathlib.Path) -> list[RequirementItem]:
             continue
         try:
             items.append(RequirementItem(f))
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 -- an unparseable file is left out of the summary, never fatal to it
             pass
     return items
 
 
-def _load_release_notes(
-    kanban_root: pathlib.Path, project_root: pathlib.Path
-) -> list[ReleaseNote]:
+def _load_release_notes(kanban_root: pathlib.Path, project_root: pathlib.Path) -> list[ReleaseNote]:
     """Load release notes from project-scoped and kanban-level locations.
 
     Search order (highest specificity first):
@@ -615,7 +606,7 @@ def _load_release_notes(
             continue
         try:
             items.append(ReleaseNote(f))
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 -- an unparseable file is left out of the summary, never fatal to it
             pass
 
     # Sort by version tuple ascending
@@ -623,9 +614,7 @@ def _load_release_notes(
     return items
 
 
-def _load_task_events(
-    project_root: pathlib.Path, cutoff: datetime | None
-) -> list[TaskEvent]:
+def _load_task_events(project_root: pathlib.Path, cutoff: datetime | None) -> list[TaskEvent]:
     tasks_dir = project_root / "tasks"
     if not tasks_dir.is_dir():
         return []
@@ -633,7 +622,7 @@ def _load_task_events(
     for status_file in sorted(tasks_dir.glob("*/status.md")):
         try:
             ev = TaskEvent(status_file)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 -- an unparseable file is left out of the summary, never fatal to it
             continue
         if cutoff is not None and ev.date is not None and ev.date < cutoff:
             continue
@@ -717,8 +706,7 @@ def _call_anthropic_api(content: str, api_key: str) -> str:
 
     prompt = (
         "Summarize the following kanban artifact in exactly one sentence (max 80 characters). "
-        "Output only the sentence — no preamble, no trailing punctuation beyond a period.\n\n"
-        + content[:4000]
+        "Output only the sentence — no preamble, no trailing punctuation beyond a period.\n\n" + content[:4000]
     )
     payload = {
         "model": "claude-haiku-4-5",
@@ -763,8 +751,7 @@ def _call_claude_cli(content: str) -> str:
 
     prompt = (
         "Summarize the following kanban artifact in exactly one sentence (max 80 characters). "
-        "Output only the sentence — no preamble, no trailing punctuation beyond a period.\n\n"
-        + content[:4000]
+        "Output only the sentence — no preamble, no trailing punctuation beyond a period.\n\n" + content[:4000]
     )
     try:
         result = subprocess.run(
@@ -781,9 +768,7 @@ def _call_claude_cli(content: str) -> str:
         raise RuntimeError(f"claude CLI error: {e}") from e
 
     if result.returncode != 0:
-        raise RuntimeError(
-            f"claude CLI exited {result.returncode}: {result.stderr[:200]}"
-        )
+        raise RuntimeError(f"claude CLI exited {result.returncode}: {result.stderr[:200]}")
     return _truncate(result.stdout.strip().splitlines()[0] if result.stdout.strip() else "")
 
 
@@ -940,7 +925,7 @@ class ProjectReport:
         dt = self.last_release_date()
         if dt is None:
             return "unknown"
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         delta = now - dt
         if delta.days == 0:
             hours = delta.seconds // 3600
@@ -1072,9 +1057,7 @@ def render_project_report(
     inflight = report.inflight_requirements()
     queued = report.queued_requirements()
 
-    counts_line = (
-        f"shipped={len(shipped)}  in-flight={len(inflight)}  queued={len(queued)}"
-    )
+    counts_line = f"shipped={len(shipped)}  in-flight={len(inflight)}  queued={len(queued)}"
     lines.append(f"  {counts_line}" if fmt == "text" else counts_line)
 
     if not brief and shipped:
@@ -1101,8 +1084,7 @@ def render_project_report(
 
     total_bugs = len(report.bugs)
     bug_counts_line = (
-        f"total={total_bugs}  open={len(open_bugs)}  "
-        f"resolved={len(done_bugs)}  wont-fix={len(wont_fix)}"
+        f"total={total_bugs}  open={len(open_bugs)}  " f"resolved={len(done_bugs)}  wont-fix={len(wont_fix)}"
     )
     lines.append(f"  {bug_counts_line}" if fmt == "text" else bug_counts_line)
 
@@ -1132,9 +1114,7 @@ def render_project_report(
             sev_tag = f"[{b.severity}] " if b.severity != "unknown" else ""
             lines.append(_bullet(f"{b.bug_id}: {sev_tag}{b.oneliner}", fmt, indent=1))
         if limit is not None and len(open_bugs) > limit:
-            lines.append(
-                _bullet(f"... and {len(open_bugs) - limit} more", fmt, indent=1)
-            )
+            lines.append(_bullet(f"... and {len(open_bugs) - limit} more", fmt, indent=1))
 
     # ------------------------------------------------------------------
     # Priorities
@@ -1143,9 +1123,7 @@ def render_project_report(
     open_prios = report.open_priorities()
     done_prios = report.done_priorities()
 
-    prio_counts_line = (
-        f"total={len(report.priorities)}  open={len(open_prios)}  resolved={len(done_prios)}"
-    )
+    prio_counts_line = f"total={len(report.priorities)}  open={len(open_prios)}  resolved={len(done_prios)}"
     lines.append(f"  {prio_counts_line}" if fmt == "text" else prio_counts_line)
 
     if not brief and open_prios:
@@ -1154,9 +1132,7 @@ def render_project_report(
         for p in items_to_show:
             lines.append(_bullet(f"{p.priority_id}: {p.oneliner}", fmt, indent=1))
         if limit is not None and len(open_prios) > limit:
-            lines.append(
-                _bullet(f"... and {len(open_prios) - limit} more", fmt, indent=1)
-            )
+            lines.append(_bullet(f"... and {len(open_prios) - limit} more", fmt, indent=1))
 
     # ------------------------------------------------------------------
     # Bundles (requirements acting as release bundles)
@@ -1166,9 +1142,7 @@ def render_project_report(
     shipped_b = report.shipped_requirements()
     inflight_b = report.inflight_requirements()
 
-    bundle_counts_line = (
-        f"total={len(bundles)}  shipped={len(shipped_b)}  in-flight={len(inflight_b)}"
-    )
+    bundle_counts_line = f"total={len(bundles)}  shipped={len(shipped_b)}  in-flight={len(inflight_b)}"
     lines.append(f"  {bundle_counts_line}" if fmt == "text" else bundle_counts_line)
 
     if not brief and inflight_b:
@@ -1283,19 +1257,11 @@ def _render_json(
 
     if not brief:
         data["bugs"]["open_items"] = [_bug_obj(b) for b in open_bugs]
-        data["bugs"]["oldest_open"] = (
-            _bug_obj(report.oldest_open_bug()) if report.oldest_open_bug() else None
-        )
-        data["bugs"]["most_recent"] = (
-            _bug_obj(report.most_recent_bug()) if report.most_recent_bug() else None
-        )
+        data["bugs"]["oldest_open"] = _bug_obj(report.oldest_open_bug()) if report.oldest_open_bug() else None
+        data["bugs"]["most_recent"] = _bug_obj(report.most_recent_bug()) if report.most_recent_bug() else None
         data["priorities"]["open_items"] = [_prio_obj(p) for p in report.open_priorities()]
-        data["requirements"]["shipped_items"] = [
-            _req_obj(r) for r in report.shipped_requirements()[-5:]
-        ]
-        data["requirements"]["inflight_items"] = [
-            _req_obj(r) for r in report.inflight_requirements()
-        ]
+        data["requirements"]["shipped_items"] = [_req_obj(r) for r in report.shipped_requirements()[-5:]]
+        data["requirements"]["inflight_items"] = [_req_obj(r) for r in report.inflight_requirements()]
         data["releases"] = [_release_obj(rn) for rn in report.releases[-5:]]
         data["recent_activity"] = [_event_obj(ev) for ev in report.recent_events(10)]
 
@@ -1434,6 +1400,7 @@ def main() -> None:  # noqa: C901 — linear CLI parsing
         if not api_key:
             # Fall back to the local `claude` CLI (OAuth flow used by wake scripts)
             import shutil
+
             if shutil.which("claude") is None:
                 sys.stderr.write(
                     "ERROR: --llm requires either ANTHROPIC_API_KEY or the `claude` CLI.\n"
@@ -1464,10 +1431,7 @@ def main() -> None:  # noqa: C901 — linear CLI parsing
 
     if not run_all:
         if project_arg not in all_projects:
-            sys.stderr.write(
-                f"ERROR: project {project_arg!r} not found.\n"
-                f"  Available: {', '.join(all_projects)}\n"
-            )
+            sys.stderr.write(f"ERROR: project {project_arg!r} not found.\n" f"  Available: {', '.join(all_projects)}\n")
             sys.exit(1)
         target_projects = [project_arg]
     else:
@@ -1476,7 +1440,7 @@ def main() -> None:  # noqa: C901 — linear CLI parsing
     # Time cutoff
     cutoff: datetime | None = None
     if days is not None:
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(tz=UTC) - timedelta(days=days)
 
     # Build reports
     reports: list[ProjectReport] = []

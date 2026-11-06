@@ -123,9 +123,7 @@ def test_source_branch_resolves_to_the_real_mainline(
     tmp_path: pathlib.Path, branch_prefix: str, mainline: str, source_written: str
 ) -> None:
     """Either mainline spelling on the ticket resolves to the branch the dev tree has."""
-    task_dir, feature = _build(
-        tmp_path, branch_prefix=branch_prefix, mainline=mainline, source_written=source_written
-    )
+    task_dir, feature = _build(tmp_path, branch_prefix=branch_prefix, mainline=mainline, source_written=source_written)
     target = resolve_git_target(task_dir, _record(feature))
     assert target.source == mainline
     assert target.source_written == source_written
@@ -140,8 +138,10 @@ def test_bare_main_ticket_snapshots_commits_ahead_of_the_prefixed_mainline(tmp_p
     evidence_dir = task_dir / "artifacts" / "block-evidence"
     evidence_dir.mkdir()
     snap = snapshot_commits_ahead(
-        task_dir, evidence_dir, _record(feature),
-        now=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+        task_dir,
+        evidence_dir,
+        _record(feature),
+        now=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
     )
     assert snap.source == "ai_main"
     assert snap.ahead == 2
@@ -150,8 +150,6 @@ def test_bare_main_ticket_snapshots_commits_ahead_of_the_prefixed_mainline(tmp_p
 
 def test_mainline_missing_under_both_spellings_is_refused(tmp_path: pathlib.Path) -> None:
     """A ticket naming a mainline the dev tree lacks under either spelling is refused by name."""
-    task_dir, feature = _build(
-        tmp_path, branch_prefix="ai_", mainline="trunk", source_written="main"
-    )
+    task_dir, feature = _build(tmp_path, branch_prefix="ai_", mainline="trunk", source_written="main")
     with pytest.raises(GitTargetError, match=r"source branch main does not exist"):
         resolve_git_target(task_dir, _record(feature))

@@ -57,13 +57,13 @@ def test_seeded_bare_docker_build_is_reported_naming_the_file(tmp_path: pathlib.
 @pytest.mark.parametrize(
     "line",
     [
-        'podman run --rm img true',
-        '/usr/bin/docker pull alpine:3',
-        'if ! docker info >/dev/null 2>&1; then echo none; fi',
+        "podman run --rm img true",
+        "/usr/bin/docker pull alpine:3",
+        "if ! docker info >/dev/null 2>&1; then echo none; fi",
         'out="$(docker images --format x)"',
         '"${_MY_ENGINE}" build -f Dockerfile .',
         'exec "$DOCKER_EXE" run --rm -it img',
-        'true && podman rmi img',
+        "true && podman rmi img",
     ],
 )
 def test_direct_engine_call_shapes_are_reported(tmp_path: pathlib.Path, line: str) -> None:
@@ -76,12 +76,12 @@ def test_direct_engine_call_shapes_are_reported(tmp_path: pathlib.Path, line: st
 @pytest.mark.parametrize(
     "line",
     [
-        'pgai_docker docker build -t thing .',
+        "pgai_docker docker build -t thing .",
         'pgai_docker "$engine" run --rm img',
-        'command -v docker >/dev/null 2>&1',
+        "command -v docker >/dev/null 2>&1",
         'echo "run docker build yourself; then docker run it"',
         "printf 'RUN docker build\\n'",
-        '# docker build -t thing .',
+        "# docker build -t thing .",
         'for candidate in docker podman; do echo "$candidate"; done',
         'DOCKERFILE="${REPO_ROOT}/docker/debian/Dockerfile"',
     ],

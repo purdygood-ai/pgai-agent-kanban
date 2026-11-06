@@ -135,10 +135,7 @@ def _run(
         "source scripts/lib/project_paths.sh\n"
         "source scripts/lib/discovery.sh\n"
         f'LOCK="$(pp_repo_lock_path {project})"\n'
-        f'REC="{record}"\n'
-        + _RECORDING_WRAPPERS
-        + body
-        + '\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n'
+        f'REC="{record}"\n' + _RECORDING_WRAPPERS + body + '\necho "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n'
     )
     env = build_scrubbed_env(
         home_dir=tmp_path,
@@ -269,7 +266,10 @@ def test_unavailable_lock_defers_the_write_and_no_later_category_runs(two_projec
 
     assert result.returncode == 0, result.stderr
     assert "DISCOVERY_STATUS=idle" in result.stdout
-    assert "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake" in result.stderr
+    assert (
+        "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake"
+        in result.stderr
+    )
     assert "discovery_step_priority" not in result.stderr, "a deferred bug write must not let priorities bundle first"
     assert _bundles(root) == []
     assert recorded == []
@@ -318,7 +318,10 @@ def test_unavailable_lock_leaves_a_carried_bug_and_the_operator_inbox_untouched(
 
     assert result.returncode == 0, result.stderr
     assert "DISCOVERY_STATUS=idle" in result.stdout
-    assert "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake" in result.stderr
+    assert (
+        "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake"
+        in result.stderr
+    )
     assert "converted " not in result.stderr, result.stderr
     assert recorded == []
     assert bug.read_bytes() == bug_before
@@ -426,13 +429,17 @@ def test_auto_write_lock_waits_for_a_holder_that_lets_go_within_the_budget(two_p
     bug = _add_bug(root)
 
     result, recorded = _run(
-        root, tmp_path, _HOLDER_AND_CLOCK,
+        root,
+        tmp_path,
+        _HOLDER_AND_CLOCK,
         extra_env={"LOCK_WAIT_SECONDS": "30", "T_RELEASE_ON_PAUSE": "1"},
     )
 
     assert result.returncode == 0, result.stderr
     assert "DISCOVERY_STATUS=produced_work" in result.stdout, result.stderr
-    assert "discovery write: waiting up to 30s (lock_wait_seconds) for the repo lock held by holder=coder" in result.stderr
+    assert (
+        "discovery write: waiting up to 30s (lock_wait_seconds) for the repo lock held by holder=coder" in result.stderr
+    )
     assert "discovery write: repo lock acquired after waiting" in result.stderr
     assert "repo lock not available for the discovery write" not in result.stderr
     assert 0 < _paused_seconds(result.stdout) <= 30
@@ -447,7 +454,9 @@ def test_auto_write_lock_defers_when_the_holder_keeps_it_past_the_budget(two_pro
     bug = _add_bug(root)
 
     result, recorded = _run(
-        root, tmp_path, _HOLDER_AND_CLOCK,
+        root,
+        tmp_path,
+        _HOLDER_AND_CLOCK,
         extra_env={"LOCK_WAIT_SECONDS": "5", "T_RELEASE_ON_PAUSE": "0"},
     )
 
@@ -455,7 +464,10 @@ def test_auto_write_lock_defers_when_the_holder_keeps_it_past_the_budget(two_pro
     assert "DISCOVERY_STATUS=idle" in result.stdout
     assert "discovery write: waiting up to 5s (lock_wait_seconds)" in result.stderr
     assert "discovery write: repo lock still held after waiting up to 5s (lock_wait_seconds)" in result.stderr
-    assert "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake" in result.stderr
+    assert (
+        "discovery_step_bugs: repo lock not available for the discovery write; deferring to the next wake"
+        in result.stderr
+    )
     assert _paused_seconds(result.stdout) == 5, "the wait must use the whole budget and no more"
     assert _bundles(root) == []
     assert recorded == []

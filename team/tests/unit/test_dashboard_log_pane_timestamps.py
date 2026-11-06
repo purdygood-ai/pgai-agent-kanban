@@ -109,8 +109,13 @@ def _run_pane(tmp_path: pathlib.Path, script: pathlib.Path, root: pathlib.Path, 
         },
     )
     result = subprocess.run(
-        ["bash", str(script)], capture_output=True, text=True, env=env, cwd=str(tmp_path),
-        timeout=120, stdin=subprocess.DEVNULL,
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
+        stdin=subprocess.DEVNULL,
     )
     calls = len(count_file.read_text(encoding="utf-8").splitlines()) if count_file.exists() else 0
     return result, calls
@@ -119,7 +124,8 @@ def _run_pane(tmp_path: pathlib.Path, script: pathlib.Path, root: pathlib.Path, 
 _AWKS = [
     pytest.param(False, id="host-awk"),
     pytest.param(
-        True, id="posix-awk-fallback",
+        True,
+        id="posix-awk-fallback",
         marks=pytest.mark.skipif(_GAWK is None, reason="gawk is needed to run an awk without strftime"),
     ),
 ]
@@ -128,7 +134,9 @@ _AWKS = [
 def _assert_tagged(stdout: str, label: str) -> None:
     tag = re.compile(rf"^\[{re.escape(label)} \d\d:\d\d:\d\d\] line (\d+)$")
     tagged = [m for m in (tag.match(line) for line in stdout.splitlines()) if m]
-    assert len(tagged) == _LINES, f"expected {_LINES} lines tagged [{label} HH:MM:SS]; got {len(tagged)}:\n{stdout[:600]}"
+    assert (
+        len(tagged) == _LINES
+    ), f"expected {_LINES} lines tagged [{label} HH:MM:SS]; got {len(tagged)}:\n{stdout[:600]}"
     assert [int(m.group(1)) for m in tagged[:3]] == [1, 2, 3]
 
 

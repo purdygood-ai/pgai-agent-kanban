@@ -60,15 +60,15 @@ def _generate_notes(
     repo_root.mkdir(exist_ok=True)
 
     argv = [
-        bundle_file,             # bundle_file_arg
-        str(repo_root),          # repo_root
-        active_rc,               # active_rc
-        "FUNCTIONAL",            # status
-        "2026-07-27",            # release_date
-        "test-project",          # project_name
-        "none",                  # merge_base
-        "rc/" + active_rc,       # rc_branch
-        "unknown-tester-task",   # known_issue_block (unused at FUNCTIONAL)
+        bundle_file,  # bundle_file_arg
+        str(repo_root),  # repo_root
+        active_rc,  # active_rc
+        "FUNCTIONAL",  # status
+        "2026-07-27",  # release_date
+        "test-project",  # project_name
+        "none",  # merge_base
+        "rc/" + active_rc,  # rc_branch
+        "unknown-tester-task",  # known_issue_block (unused at FUNCTIONAL)
     ]
     rc = release_notes_main(argv)
     assert rc == 0, f"release-notes generator returned {rc}"

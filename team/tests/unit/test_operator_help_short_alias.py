@@ -100,8 +100,12 @@ def _run(script: pathlib.Path, flag: str, root: pathlib.Path) -> subprocess.Comp
     )
     return subprocess.run(
         ["bash", str(script), flag],
-        capture_output=True, env=env, cwd=str(root / "cwd"),
-        stdin=subprocess.DEVNULL, timeout=_RUN_TIMEOUT_SECONDS, check=False,
+        capture_output=True,
+        env=env,
+        cwd=str(root / "cwd"),
+        stdin=subprocess.DEVNULL,
+        timeout=_RUN_TIMEOUT_SECONDS,
+        check=False,
     )
 
 
@@ -162,9 +166,7 @@ def test_the_covered_set_is_derived_from_scripts_that_advertise_short_help() -> 
 
 
 @pytest.mark.parametrize("script", _ADVERTISING_SCRIPTS, ids=_script_id)
-def test_short_help_prints_the_same_help_and_writes_nothing(
-    tmp_path: pathlib.Path, script: pathlib.Path
-) -> None:
+def test_short_help_prints_the_same_help_and_writes_nothing(tmp_path: pathlib.Path, script: pathlib.Path) -> None:
     root = _throwaway_root(tmp_path)
     before = _tree_snapshot(root)
 
@@ -175,9 +177,9 @@ def test_short_help_prints_the_same_help_and_writes_nothing(
     diagnostic = _diagnostic("-h", short) + "\n" + _diagnostic("--help", long)
     assert short.returncode == 0, f"{_script_id(script)} -h did not exit 0\n{diagnostic}"
     for stream in (short.stdout, short.stderr):
-        assert _POSITIONAL_REFUSAL not in stream.decode("utf-8", errors="replace"), (
-            f"{_script_id(script)} refused -h as a positional argument\n{diagnostic}"
-        )
+        assert _POSITIONAL_REFUSAL not in stream.decode(
+            "utf-8", errors="replace"
+        ), f"{_script_id(script)} refused -h as a positional argument\n{diagnostic}"
     assert after == before, (
         f"{_script_id(script)} -h changed the throwaway root's file tree\n"
         f"added: {sorted(set(after) - set(before))}\n"

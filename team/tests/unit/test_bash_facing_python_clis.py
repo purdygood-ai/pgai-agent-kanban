@@ -18,6 +18,11 @@ in place of inline Python, each run the way its script runs it:
     gated runners run it) -- the findings JSON.
   * pgai_agent_kanban.discovery.items / eligibility -- the discovery
     stages' scans, on the shapes the parity checks used.
+  * pp_run_ops.sh itself -- it finds its own tree once, when sourced or
+    executed: sourced by a relative path, pp_pythonpath prints the same
+    absolute own-tree root after the caller changes directory, and
+    pp_run_ops still resolves the package; executed by a relative path, it
+    resolves the package too.
 
 Every child runs through team/scripts/lib/pp_run_ops.sh with a scrubbed
 environment (this suite's interpreter first on PATH) and a working
@@ -50,14 +55,79 @@ def _run(tmp_path: pathlib.Path, module: str, *args: str, extra_env: dict | None
     )
     return subprocess.run(
         ["bash", str(_PP_RUN_OPS), module, *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
     )
+
+
+# --- pp_run_ops.sh self-location ------------------------------------------------
+
+# Sources the library by $1, prints pp_pythonpath, changes to $2, prints it
+# again, then runs one module through pp_run_ops from there.
+_SOURCE_THEN_CD = """
+set -euo pipefail
+source "$1"
+pp_pythonpath
+cd "$2"
+pp_pythonpath
+pp_run_ops pgai_agent_kanban.lib.json_field '{"k": "resolved"}' k
+"""
+
+
+@pytest.mark.parametrize(
+    "lib_path",
+    [str(_PP_RUN_OPS.relative_to(_TEAM_DIR)), str(_PP_RUN_OPS)],
+    ids=["relative", "absolute"],
+)
+def test_pp_run_ops_keeps_its_own_tree_root_after_the_caller_changes_directory(
+    tmp_path: pathlib.Path,
+    lib_path: str,
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_path_dirs=[pathlib.Path(sys.executable).parent])
+    result = subprocess.run(
+        ["bash", "-c", _SOURCE_THEN_CD, "caller", lib_path, str(elsewhere)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "could not derive own-tree root" not in result.stderr
+    assert result.stdout.splitlines() == [str(_TEAM_DIR), str(_TEAM_DIR), "resolved"]
+
+
+def test_pp_run_ops_executed_by_a_relative_path_resolves_the_package(tmp_path: pathlib.Path) -> None:
+    env = build_scrubbed_env(home_dir=tmp_path / "home", extra_path_dirs=[pathlib.Path(sys.executable).parent])
+    result = subprocess.run(
+        ["bash", str(_PP_RUN_OPS.relative_to(_TEAM_DIR)), "pgai_agent_kanban.lib.json_field", '{"k": "resolved"}', "k"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "resolved\n"
 
 
 # --- json_field ---------------------------------------------------------------
 
-_DOC = json.dumps({"attempt": 2, "family_key": None, "cargo": ["BUG-9001-a.md"], "captured": False,
-                   "workflow_type": "  ", "name": "x"})
+_DOC = json.dumps(
+    {
+        "attempt": 2,
+        "family_key": None,
+        "cargo": ["BUG-9001-a.md"],
+        "captured": False,
+        "workflow_type": "  ",
+        "name": "x",
+    }
+)
 
 
 @pytest.mark.parametrize(
@@ -120,8 +190,7 @@ def test_halt_after_describe_renders_the_token(tmp_path: pathlib.Path, args: lis
 
 def test_intent_declares_only_an_exact_entry(tmp_path: pathlib.Path) -> None:
     intent = tmp_path / "INTENT.md"
-    intent.write_text("# Intent\n\n## Entries\n\n- 2026-10-01: Ship past the HALT for the fixture\n",
-                      encoding="utf-8")
+    intent.write_text("# Intent\n\n## Entries\n\n- 2026-10-01: Ship past the HALT for the fixture\n", encoding="utf-8")
     module = "pgai_agent_kanban.overwatch.intent"
     assert _run(tmp_path, module, "declares", str(intent), "Ship past the HALT for the fixture").returncode == 0
     assert _run(tmp_path, module, "declares", str(intent), "Ship past the HALT").returncode == 1
@@ -163,8 +232,9 @@ def test_discovery_items_commands(tmp_path: pathlib.Path) -> None:
     bugs = tmp_path / "bugs"
     bugs.mkdir()
     (bugs / "BUG-9001-a.md").write_text("# a\n**Severity:**  high \n## Status\nopen\n", encoding="utf-8")
-    (bugs / "BUG-9002-b.md").write_text("# b\n## Status\ndone\n\n## Known Issue Carry Forward\n\nv1\n",
-                                        encoding="utf-8")
+    (bugs / "BUG-9002-b.md").write_text(
+        "# b\n## Status\ndone\n\n## Known Issue Carry Forward\n\nv1\n", encoding="utf-8"
+    )
     (bugs / "BUG-12-bad.md").write_text("x", encoding="utf-8")
     module = "pgai_agent_kanban.discovery.items"
     rejected = tmp_path / "rejected.tsv"
@@ -177,7 +247,8 @@ def test_discovery_items_commands(tmp_path: pathlib.Path) -> None:
     assert _run(tmp_path, module, "severity", str(bugs / "BUG-9001-a.md")).stdout == "high\n"
     lines = f"{bugs / 'BUG-9001-a.md'}\n\n{bugs / 'BUG-9002-b.md'}\tRIDE_ALONG:x\n"
     assert _run(tmp_path, module, "order", lines).stdout.splitlines() == [
-        f"{bugs / 'BUG-9002-b.md'}\tRIDE_ALONG:x", str(bugs / "BUG-9001-a.md"),
+        f"{bugs / 'BUG-9002-b.md'}\tRIDE_ALONG:x",
+        str(bugs / "BUG-9001-a.md"),
     ]
 
     state = tmp_path / "counts.tsv"
@@ -197,8 +268,13 @@ def test_discovery_items_commands(tmp_path: pathlib.Path) -> None:
 def test_discovery_eligibility_orders_and_marks_requirements(tmp_path: pathlib.Path) -> None:
     req = tmp_path / "requirements"
     req.mkdir()
-    for name, target in [("v1.2.0-a.md", "v1.2.0"), ("v1.10.0-b.md", "v1.10.0"), ("v2.0.0-c.md", "v2.0.0"),
-                         ("v1.0.5-d.md", "auto"), ("v1.0.0-e.md", "v1.0.0")]:
+    for name, target in [
+        ("v1.2.0-a.md", "v1.2.0"),
+        ("v1.10.0-b.md", "v1.10.0"),
+        ("v2.0.0-c.md", "v2.0.0"),
+        ("v1.0.5-d.md", "auto"),
+        ("v1.0.0-e.md", "v1.0.0"),
+    ]:
         (req / name).write_text(f"# r\n\n## Target Version\n{target}\n", encoding="utf-8")
     result = _run(tmp_path, "pgai_agent_kanban.discovery.eligibility", str(req), "v1.0.0", "", "1", "", "semver")
     assert result.returncode == 0, result.stderr
@@ -247,13 +323,21 @@ def test_gated_findings_build_record_split_and_write(tmp_path: pathlib.Path) -> 
 
     def run(*args: str, stdin: str = "") -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["python3", str(script), *args], input=stdin,
-            capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60,
+            ["python3", str(script), *args],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(tmp_path),
+            timeout=60,
         )
 
     built = run("build", "lint_x", "3", stdin="\n  first line \nmore\n")
     assert json.loads(built.stdout) == {
-        "lint": "lint_x", "severity": "quality", "exit_code": 3, "summary": "first line",
+        "lint": "lint_x",
+        "severity": "quality",
+        "exit_code": 3,
+        "summary": "first line",
         "detail": "\n  first line \nmore\n",
     }
     recorded = json.loads(run("record", "lint_y", "aborted").stdout)
@@ -262,7 +346,8 @@ def test_gated_findings_build_record_split_and_write(tmp_path: pathlib.Path) -> 
     array = tmp_path / "array.json"
     array.write_text('[{"lint": "a"}, {"lint": "b", "line": 3}]', encoding="utf-8")
     assert run("split", str(array)).stdout.splitlines() == [
-        '{"lint": "a"}', '{"lint": "b", "line": 3}',
+        '{"lint": "a"}',
+        '{"lint": "b", "line": 3}',
     ]
 
     out = tmp_path / "findings.json"

@@ -117,7 +117,7 @@ def _normalize(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", text).strip()
 
 
-def _token_re(token: str, *, separators_interchangeable: bool) -> "re.Pattern[str]":
+def _token_re(token: str, *, separators_interchangeable: bool) -> re.Pattern[str]:
     """A pattern matching *token* as a standalone word.
 
     The token may not be glued to a word character or a hyphen on either
@@ -150,7 +150,7 @@ class TargetedRunner:
     flag: str
 
     @classmethod
-    def parse(cls, template: str) -> "TargetedRunner":
+    def parse(cls, template: str) -> TargetedRunner:
         """Read one command template into its runner and targeted flag."""
         text = _normalize(template)
         if FILES_PLACEHOLDER not in text:
@@ -186,7 +186,7 @@ class TargetedRunner:
             return False
         if self.flag:
             return not _token_re(self.flag, separators_interchangeable=False).search(text)
-        return not any(_lists_files(text[m.end():]) for m in script_re.finditer(text))
+        return not any(_lists_files(text[m.end() :]) for m in script_re.finditer(text))
 
 
 def _lists_files(tail: str) -> bool:
@@ -275,11 +275,7 @@ class RunnerConfig:
         words = _normalize(self.pre_merge_command or "").split()
         if not words or not isinstance(text, str):
             return False
-        pattern = (
-            r"(?<![\w/-])"
-            + r"\s+".join(re.escape(w) for w in words)
-            + r"(?![\w-])(?!\s*=)(?!\s+--?\w)"
-        )
+        pattern = r"(?<![\w/-])" + r"\s+".join(re.escape(w) for w in words) + r"(?![\w-])(?!\s*=)(?!\s+--?\w)"
         return re.search(pattern, text, re.IGNORECASE) is not None
 
 
@@ -379,10 +375,16 @@ def apply_acceptance_policy(role, acceptance_criteria, constraints, runner_confi
     acc_rewrites = con_rewrites = []
     if targeted:
         acceptance, acc_rewrites = _rewrite_items(
-            acceptance, FIELD_ACCEPTANCE, config, targeted,
+            acceptance,
+            FIELD_ACCEPTANCE,
+            config,
+            targeted,
         )
         constraint_list, con_rewrites = _rewrite_items(
-            constraint_list, FIELD_CONSTRAINT, config, targeted,
+            constraint_list,
+            FIELD_CONSTRAINT,
+            config,
+            targeted,
         )
 
     if pre_merge:
@@ -413,10 +415,7 @@ def format_policy_notes(result: PolicyResult) -> str:
     """
     if not result.rewrites:
         return ""
-    lines = [
-        "Targeted-test policy: full gated-runner invocations were rewritten "
-        "to the project's targeted run."
-    ]
+    lines = ["Targeted-test policy: full gated-runner invocations were rewritten " "to the project's targeted run."]
     for rw in result.rewrites:
         suffix = " (duplicate of an earlier rewrite, dropped)" if rw.merged else ""
         lines.append(f'- {rw.field}{suffix}: "{_normalize(rw.original)}"')

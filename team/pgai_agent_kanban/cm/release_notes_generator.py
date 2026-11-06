@@ -159,14 +159,14 @@ _strip_provenance_refs = _INTERNAL_ID_SCRUB._strip_provenance_refs
 
 # Category -> section mapping.
 CATEGORY_SECTION = {
-    "breaking":    "Breaking Changes",
-    "feature":     "Features",
+    "breaking": "Breaking Changes",
+    "feature": "Features",
     "requirement": "Features",
-    "bugfix":      "Bug Fixes",
+    "bugfix": "Bug Fixes",
     "deprecation": "Deprecations",
-    "removal":     "Deprecations",
-    "docs":        "Documentation",
-    "misc":        "Other Changes",
+    "removal": "Deprecations",
+    "docs": "Documentation",
+    "misc": "Other Changes",
 }
 SECTION_ORDER = [
     "Breaking Changes",
@@ -243,7 +243,7 @@ def _first_sentence(text):
     """Collapse whitespace (including newlines) to single spaces and return
     the first sentence, or the whole flattened string when no sentence-
     ending punctuation is found. Punctuation inside a backtick code span
-    (``pvg build . --scene 2``) never ends the sentence."""
+    (``my-app build . --target 2``) never ends the sentence."""
     flat = " ".join(text.split())
     if not flat:
         return ""
@@ -267,9 +267,7 @@ _FENCE_OPEN_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 # A Markdown heading line nested inside a section body ("### Detail").
 _SUBHEADING_RE = re.compile(r"^\s*#{1,6}\s")
 # Abbreviations whose trailing '.' sits mid-sentence, never at its end.
-_NON_TERMINAL_ABBREVIATIONS = frozenset(
-    {"e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "incl."}
-)
+_NON_TERMINAL_ABBREVIATIONS = frozenset({"e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "incl."})
 _TRAILING_WORD_RE = re.compile(r"[A-Za-z.]+$")
 
 
@@ -462,13 +460,47 @@ _MAIN_CLAUSE_END_RE = re.compile(r"[,;:]|\s*[–—]\s*|\s-+\s")
 _CLAUSE_WORD_RE = re.compile(r"[A-Za-z0-9][\w./'-]*")
 # Words that only say documentation exists or join the items it is for. A
 # main clause holding nothing else beside the placeholder names no subject.
-_EMPTY_CLAUSE_WORDS = frozenset({
-    "documentation", "document", "documents", "documented", "documenting",
-    "docs", "doc", "paired", "pair", "matching", "companion",
-    "a", "an", "the", "this", "these", "that", "those", "its", "their",
-    "each", "both", "all", "and", "or", "plus", "for", "of", "on", "about",
-    "covering", "to", "with", "per", "from", "in", "by",
-})
+_EMPTY_CLAUSE_WORDS = frozenset(
+    {
+        "documentation",
+        "document",
+        "documents",
+        "documented",
+        "documenting",
+        "docs",
+        "doc",
+        "paired",
+        "pair",
+        "matching",
+        "companion",
+        "a",
+        "an",
+        "the",
+        "this",
+        "these",
+        "that",
+        "those",
+        "its",
+        "their",
+        "each",
+        "both",
+        "all",
+        "and",
+        "or",
+        "plus",
+        "for",
+        "of",
+        "on",
+        "about",
+        "covering",
+        "to",
+        "with",
+        "per",
+        "from",
+        "in",
+        "by",
+    }
+)
 # A task README's H1 line opens with this label ("# Task: <title>").
 _TASK_TITLE_LABEL_RE = re.compile(r"^task\s*:\s*", re.IGNORECASE)
 # The bullet for a shipped WRITER ticket neither of whose sources names
@@ -513,9 +545,7 @@ def _documentation_sentence(goal_lead, readme_text):
     for source in (goal_lead, _task_title(readme_text)):
         if not source:
             continue
-        sentence = _strip_internal_ids(
-            _LOCAL_PATH_RE.sub(_LOCAL_PATH_REPLACEMENT_TEXT, _lead_sentence(source))
-        )
+        sentence = _strip_internal_ids(_LOCAL_PATH_RE.sub(_LOCAL_PATH_REPLACEMENT_TEXT, _lead_sentence(source)))
         if sentence and not _is_placeholder_only(sentence):
             return sentence
     return _DOCUMENTATION_SHIPPED_TEXT
@@ -588,8 +618,7 @@ def _table_rows(block):
         stripped = line.strip()
         if not stripped.startswith("|"):
             continue
-        cells = [cell.strip().replace("\\|", "|")
-                 for cell in _TABLE_CELL_SPLIT_RE.split(stripped.strip("|"))]
+        cells = [cell.strip().replace("\\|", "|") for cell in _TABLE_CELL_SPLIT_RE.split(stripped.strip("|"))]
         if all(_TABLE_SEPARATOR_CELL_RE.match(cell) for cell in cells if cell):
             rows = []  # everything so far was the header
             continue
@@ -624,15 +653,15 @@ def known_bugs_issues(bugs_skipped_block):
         else:
             bullets.append(f"- {substance} ({rating})")
     if not bullets:
-        return ["This release ships with low-severity bugs unfixed; the Bugs "
-                "Skipped table above lists them."]
-    return ["This release ships with known bugs that did not block shipping. "
-            "Each is listed under Bugs Skipped above and tracked for a fix in "
-            "a later release:"] + bullets
+        return ["This release ships with low-severity bugs unfixed; the Bugs " "Skipped table above lists them."]
+    return [
+        "This release ships with known bugs that did not block shipping. "
+        "Each is listed under Bugs Skipped above and tracked for a fix in "
+        "a later release:"
+    ] + bullets
 
 
-def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
-                     tasks_dir="none", active_rc=""):
+def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch, tasks_dir="none", active_rc=""):
     """Return ``{section name: [bullet, ...]}`` for every name in
     SECTION_ORDER, filled from the bundle file (a path, or "none") or, when
     no bundle supplied any item, from the RC branch's commit subjects since
@@ -663,8 +692,11 @@ def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
                 for item_path in item_paths:
                     p = pathlib.Path(item_path)
                     # A bug report is a bug fix whatever subsystem its Category names.
-                    section_name = ("Bug Fixes" if _BUG_FILENAME_RE.match(p.name) else
-                                    CATEGORY_SECTION.get(read_item_category(item_path), "Other Changes"))
+                    section_name = (
+                        "Bug Fixes"
+                        if _BUG_FILENAME_RE.match(p.name)
+                        else CATEGORY_SECTION.get(read_item_category(item_path), "Other Changes")
+                    )
                     title = get_item_title(item_path)
                     sections[section_name].append(_bullet(title))
             else:
@@ -681,9 +713,10 @@ def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
         if merge_base != "none":
             try:
                 result = subprocess.run(
-                    ["git", "-C", repo_root, "log", "--no-merges",
-                     "--format=%s", f"{merge_base}..{rc_branch}"],
-                    capture_output=True, text=True, check=False
+                    ["git", "-C", repo_root, "log", "--no-merges", "--format=%s", f"{merge_base}..{rc_branch}"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 for subj in result.stdout.splitlines():
                     subj = subj.strip()
@@ -704,8 +737,7 @@ def collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
     return sections
 
 
-def render_notes(project_name, active_rc, release_date, status, sections,
-                 known_issue_block="", bugs_skipped_block=""):
+def render_notes(project_name, active_rc, release_date, status, sections, known_issue_block="", bugs_skipped_block=""):
     """Return the release-notes file text: title, date, Status, then every
     section in SECTION_ORDER, each followed by one blank line. A section
     with no bullets reads "None"; Upgrade Notes always reads "None". Known
@@ -741,10 +773,11 @@ def render_notes(project_name, active_rc, release_date, status, sections,
             if status == "NON-FUNCTIONAL" and known_issue_block:
                 lines_out.append(known_issue_block)  # warning plus the bugs behind an auto-ship
             elif status == "NON-FUNCTIONAL":
-                lines_out.append("This release is shipped non-functional. "
-                                 "Do not use in production. Fix expected in the next patch.")
-                lines_out.append("The findings behind this status are tracked on the "
-                                 "project's internal bug ledger.")
+                lines_out.append(
+                    "This release is shipped non-functional. "
+                    "Do not use in production. Fix expected in the next patch."
+                )
+                lines_out.append("The findings behind this status are tracked on the " "project's internal bug ledger.")
             elif status == "KNOWN-ISSUE":
                 lines_out.append(
                     "This release ships with a known issue that did not "
@@ -755,8 +788,7 @@ def render_notes(project_name, active_rc, release_date, status, sections,
                     lines_out.append(known_issue_block)
                 else:
                     lines_out.append(
-                        "- An unresolved defect (internal-only, not yet "
-                        "disclosed) — No workaround available."
+                        "- An unresolved defect (internal-only, not yet " "disclosed) — No workaround available."
                     )
             elif status == "KNOWN-BUGS" and known_bugs_issues(bugs_skipped_block):
                 lines_out.extend(known_bugs_issues(bugs_skipped_block))
@@ -773,10 +805,19 @@ def render_notes(project_name, active_rc, release_date, status, sections,
     return "\n".join(lines_out)
 
 
-def generate_release_notes(bundle_file_arg, repo_root, active_rc, status,
-                           release_date, project_name, merge_base, rc_branch,
-                           known_issue_block="", bugs_skipped_block="",
-                           tasks_dir="none"):
+def generate_release_notes(
+    bundle_file_arg,
+    repo_root,
+    active_rc,
+    status,
+    release_date,
+    project_name,
+    merge_base,
+    rc_branch,
+    known_issue_block="",
+    bugs_skipped_block="",
+    tasks_dir="none",
+):
     """Write REPO_ROOT/release-notes/ACTIVE_RC.md (creating release-notes/
     first) and return its path. Arguments are the CLI's positional
     arguments, in the same order (see the module docstring)."""
@@ -784,11 +825,11 @@ def generate_release_notes(bundle_file_arg, repo_root, active_rc, status,
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{active_rc}.md"
 
-    sections = collect_sections(bundle_file_arg, repo_root, merge_base, rc_branch,
-                                tasks_dir=tasks_dir, active_rc=active_rc)
+    sections = collect_sections(
+        bundle_file_arg, repo_root, merge_base, rc_branch, tasks_dir=tasks_dir, active_rc=active_rc
+    )
     out_file.write_text(
-        render_notes(project_name, active_rc, release_date, status, sections,
-                     known_issue_block, bugs_skipped_block),
+        render_notes(project_name, active_rc, release_date, status, sections, known_issue_block, bugs_skipped_block),
         encoding="utf-8",
     )
     return out_file

@@ -64,14 +64,11 @@ Shipped-type refusal
 from __future__ import annotations
 
 import argparse
-import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import textwrap
-from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Exception
@@ -93,9 +90,7 @@ class WorkflowGeneratorError(ValueError):
 #: Names that ship with the framework.  These are the only names the generator
 #: refuses; all other names are accepted including names that contain hyphens
 #: or underscores.
-SHIPPED_WORKFLOW_TYPES: frozenset[str] = frozenset(
-    {"release", "document", "testing-only"}
-)
+SHIPPED_WORKFLOW_TYPES: frozenset[str] = frozenset({"release", "document", "testing-only"})
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +141,7 @@ _WORKFLOW_SH_HEADER = """\
 
 def _make_hook_stub(hook_name: str) -> str:
     """Return a bash function stub for one wf_* hook."""
-    return textwrap.dedent(
-        f"""\
+    return textwrap.dedent(f"""\
         # ---------------------------------------------------------------------------
         # {hook_name}
         # ---------------------------------------------------------------------------
@@ -155,8 +149,7 @@ def _make_hook_stub(hook_name: str) -> str:
             echo "NOT IMPLEMENTED: {hook_name}" >&2
             exit 1
         }}
-        """
-    )
+        """)
 
 
 def _render_workflow_sh(name: str) -> str:
@@ -282,7 +275,7 @@ def _render_contract_check_sh(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _detect_git_root() -> Optional[pathlib.Path]:
+def _detect_git_root() -> pathlib.Path | None:
     """Return the git repository root from the current working directory.
 
     Returns None if the CWD is not inside a git repository, or if git is
@@ -304,7 +297,7 @@ def _detect_git_root() -> Optional[pathlib.Path]:
 
 
 def _resolve_workflows_dir(
-    workflows_dir: Optional[pathlib.Path],
+    workflows_dir: pathlib.Path | None,
 ) -> pathlib.Path:
     """Resolve the output workflows root directory.
 
@@ -322,6 +315,7 @@ def _resolve_workflows_dir(
     # 2. Live-operator default via the canonical resolver when the env var is set.
     try:
         from pgai_agent_kanban.env import resolve_kanban_root
+
         return resolve_kanban_root() / "workflows"
     except RuntimeError:
         pass  # Env var unset — fall through to the dev-tree fallback below.
@@ -356,7 +350,7 @@ def create_new_workflow(
     agents: str,
     finalize: str,
     force: bool = False,
-    workflows_dir: Optional[pathlib.Path] = None,
+    workflows_dir: pathlib.Path | None = None,
 ) -> pathlib.Path:
     """Scaffold a new workflow-type plugin directory.
 
@@ -511,10 +505,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--agents",
         default="pm,coder,writer,tester,cm",
         metavar="ROSTER",
-        help=(
-            "Comma-separated ordered agent roster for PM decomposition "
-            "(default: pm,coder,writer,tester,cm)."
-        ),
+        help=("Comma-separated ordered agent roster for PM decomposition " "(default: pm,coder,writer,tester,cm)."),
     )
     parser.add_argument(
         "--finalize",
@@ -547,14 +538,12 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Argparse entry point.  Returns an exit code (0 = success, 1 = error)."""
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    workflows_dir_path: Optional[pathlib.Path] = (
-        pathlib.Path(args.workflows_dir) if args.workflows_dir else None
-    )
+    workflows_dir_path: pathlib.Path | None = pathlib.Path(args.workflows_dir) if args.workflows_dir else None
 
     try:
         target = create_new_workflow(

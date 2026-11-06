@@ -81,7 +81,6 @@ import pathlib
 import shutil
 import subprocess
 
-import pytest
 
 from tests.fixtures.claude_provider_stub import (
     call_count,
@@ -99,10 +98,23 @@ _SUBPROCESS_TIMEOUT_SECONDS = 60
 # built below so a host operator's PGAI_WRITER_MODEL, STOP_FILE, dev-tree
 # path, etc. never leak into a throwaway root under test.
 _LEAK_PREFIXES = (
-    "PGAI_", "PP_", "KANBAN_ROOT", "CLAUDE_", "AI_AGENT", "STOP_FILE",
-    "TMPDIR", "MAX_TASK_SECONDS", "MAX_RUNTIME_SECONDS", "MAX_TASKS_PER_WAKE",
-    "MAX_PROJECT_SECONDS", "KILL_GRACE_SECONDS", "PAUSE_BETWEEN_TASKS",
-    "STOP_ON_BLOCKED", "AI_AUTH_MODE", "BASH_MAX_TIMEOUT_MS", "DASHBOARD_",
+    "PGAI_",
+    "PP_",
+    "KANBAN_ROOT",
+    "CLAUDE_",
+    "AI_AGENT",
+    "STOP_FILE",
+    "TMPDIR",
+    "MAX_TASK_SECONDS",
+    "MAX_RUNTIME_SECONDS",
+    "MAX_TASKS_PER_WAKE",
+    "MAX_PROJECT_SECONDS",
+    "KILL_GRACE_SECONDS",
+    "PAUSE_BETWEEN_TASKS",
+    "STOP_ON_BLOCKED",
+    "AI_AUTH_MODE",
+    "BASH_MAX_TIMEOUT_MS",
+    "DASHBOARD_",
     "PM_MAX_TASKS",
 )
 
@@ -110,11 +122,7 @@ _LEAK_PREFIXES = (
 def _clean_base_env() -> dict[str, str]:
     """The host process env with every var this suite's own live-wake
     context may have exported stripped out. See module docstring."""
-    return {
-        k: v
-        for k, v in os.environ.items()
-        if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)
-    }
+    return {k: v for k, v in os.environ.items() if not any(k == p or k.startswith(p) for p in _LEAK_PREFIXES)}
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +181,7 @@ def _build_kanban_root(
         "[wake]\nmax_tasks_per_wake = 5\n",
         encoding="utf-8",
     )
-    (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text(f"[project:{project_name}]\npriority=1\nenabled=true\n\n", encoding="utf-8")
 
     proj = root / "projects" / project_name
     proj.mkdir(parents=True, exist_ok=True)
@@ -253,7 +259,9 @@ def _latest_batch_log(root: pathlib.Path, agent: str = "writer") -> str:
 # ---------------------------------------------------------------------------
 
 
-def _cron_shaped_root(tmp_path: pathlib.Path, project_name: str, *, queued_task_id: str) -> tuple[pathlib.Path, pathlib.Path]:
+def _cron_shaped_root(
+    tmp_path: pathlib.Path, project_name: str, *, queued_task_id: str
+) -> tuple[pathlib.Path, pathlib.Path]:
     """Build a kanban root at <homedir>/pgai_agent_kanban -- matching
     wake/claude.sh's own TEAM_ROOT default resolution
     (TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-$HOME/pgai_agent_kanban}") --
@@ -332,12 +340,12 @@ def test_cron_wake_exports_derived_ceiling_to_the_agent_process(tmp_path: pathli
 
     result = _run_wake(root, "writer", _cron_env(home_dir, bin_dir))
 
-    assert result.returncode == 0, (
-        f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert call_count(control_dir) == 1, (
-        "Expected exactly one stub invocation (one queued task, no safeguard retry configured)."
-    )
+    assert (
+        result.returncode == 0
+    ), f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert (
+        call_count(control_dir) == 1
+    ), "Expected exactly one stub invocation (one queued task, no safeguard retry configured)."
 
     agent_env = call_env(control_dir, 1)
     assert agent_env.get("BASH_MAX_TIMEOUT_MS") == "5430000", (
@@ -348,9 +356,9 @@ def test_cron_wake_exports_derived_ceiling_to_the_agent_process(tmp_path: pathli
     )
 
     status_text = (root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
-    assert "## State\nDONE" in status_text, (
-        f"Expected the task to reach DONE via the stub agent turn.\nstatus.md:\n{status_text}"
-    )
+    assert (
+        "## State\nDONE" in status_text
+    ), f"Expected the task to reach DONE via the stub agent turn.\nstatus.md:\n{status_text}"
 
 
 def test_cron_wake_honours_claude_env_ceiling_override_in_the_agent_process(tmp_path: pathlib.Path) -> None:
@@ -380,9 +388,7 @@ def test_cron_wake_honours_claude_env_ceiling_override_in_the_agent_process(tmp_
     home_dir, root = _cron_shaped_root(tmp_path, project_name, queued_task_id=task_id)
 
     override_ms = "777777"
-    (root / "claude-env").write_text(
-        f'export BASH_MAX_TIMEOUT_MS="{override_ms}"\n', encoding="utf-8"
-    )
+    (root / "claude-env").write_text(f'export BASH_MAX_TIMEOUT_MS="{override_ms}"\n', encoding="utf-8")
 
     bin_dir = tmp_path / "stub-bin"
     control_dir = tmp_path / "stub-control"
@@ -390,9 +396,9 @@ def test_cron_wake_honours_claude_env_ceiling_override_in_the_agent_process(tmp_
 
     result = _run_wake(root, "writer", _cron_env(home_dir, bin_dir))
 
-    assert result.returncode == 0, (
-        f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert call_count(control_dir) == 1
 
     agent_env = call_env(control_dir, 1)
@@ -402,9 +408,9 @@ def test_cron_wake_honours_claude_env_ceiling_override_in_the_agent_process(tmp_
         f"BASH_MAX_TIMEOUT_MS={agent_env.get('BASH_MAX_TIMEOUT_MS')!r}.\n"
         f"Full stub-received env: {agent_env}"
     )
-    assert agent_env.get("BASH_MAX_TIMEOUT_MS") != "5430000", (
-        "The derived default leaked through despite the operator override being present."
-    )
+    assert (
+        agent_env.get("BASH_MAX_TIMEOUT_MS") != "5430000"
+    ), "The derived default leaked through despite the operator override being present."
 
 
 # ---------------------------------------------------------------------------
@@ -474,9 +480,9 @@ def test_safeguard_refusal_retries_once_and_task_reaches_normal_terminal_state(
 
     result = _run_wake(root, "writer", env)
 
-    assert result.returncode == 0, (
-        f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"wake firing exited {result.returncode}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
     status_text = (root / "projects" / project_name / "tasks" / task_id / "status.md").read_text(encoding="utf-8")
     assert "## State\nDONE" in status_text, (
@@ -485,12 +491,12 @@ def test_safeguard_refusal_retries_once_and_task_reaches_normal_terminal_state(
     )
 
     log_text = _latest_batch_log(root)
-    assert "Error: request blocked by safety system before dispatch." in log_text, (
-        f"Expected the verbatim provider error in the wake log.\nlog:\n{log_text}"
-    )
-    assert "skipping trace injection: provider safeguard" in log_text, (
-        f"Expected the exact skip narration phrase in the wake log.\nlog:\n{log_text}"
-    )
+    assert (
+        "Error: request blocked by safety system before dispatch." in log_text
+    ), f"Expected the verbatim provider error in the wake log.\nlog:\n{log_text}"
+    assert (
+        "skipping trace injection: provider safeguard" in log_text
+    ), f"Expected the exact skip narration phrase in the wake log.\nlog:\n{log_text}"
 
     assert call_count(control_dir) == 2, (
         f"Expected exactly two stub invocations (the refused first attempt, then "
@@ -543,12 +549,12 @@ def test_identity_header_present_for_firing_with_and_without_work(tmp_path: path
         f"stdout:\n{no_work_result.stdout}\nstderr:\n{no_work_result.stderr}"
     )
     no_work_log = _latest_batch_log(no_work_root)
-    assert f"provider CLI version: {stub_version}" in no_work_log, (
-        f"Expected the CLI version line in the no-work firing's log.\nlog:\n{no_work_log}"
-    )
-    assert f"model: {model_name}" in no_work_log, (
-        f"Expected the model line in the no-work firing's log.\nlog:\n{no_work_log}"
-    )
+    assert (
+        f"provider CLI version: {stub_version}" in no_work_log
+    ), f"Expected the CLI version line in the no-work firing's log.\nlog:\n{no_work_log}"
+    assert (
+        f"model: {model_name}" in no_work_log
+    ), f"Expected the model line in the no-work firing's log.\nlog:\n{no_work_log}"
 
     # --- Firing 2: finds work (one queued WRITER task) ---
     work_task_id = "WRITER-20260101-004-identity-log"
@@ -562,17 +568,16 @@ def test_identity_header_present_for_firing_with_and_without_work(tmp_path: path
         f"stdout:\n{work_result.stdout}\nstderr:\n{work_result.stderr}"
     )
     work_log = _latest_batch_log(work_root)
-    assert f"provider CLI version: {stub_version}" in work_log, (
-        f"Expected the CLI version line in the work-found firing's log.\nlog:\n{work_log}"
-    )
-    assert f"model: {model_name}" in work_log, (
-        f"Expected the model line in the work-found firing's log.\nlog:\n{work_log}"
-    )
+    assert (
+        f"provider CLI version: {stub_version}" in work_log
+    ), f"Expected the CLI version line in the work-found firing's log.\nlog:\n{work_log}"
+    assert (
+        f"model: {model_name}" in work_log
+    ), f"Expected the model line in the work-found firing's log.\nlog:\n{work_log}"
 
-    status_text = (
-        work_root / "projects" / "identity-work" / "tasks" / work_task_id / "status.md"
-    ).read_text(encoding="utf-8")
+    status_text = (work_root / "projects" / "identity-work" / "tasks" / work_task_id / "status.md").read_text(
+        encoding="utf-8"
+    )
     assert "## State\nDONE" in status_text, (
-        f"Expected the work-found firing to actually complete the queued task.\n"
-        f"status.md:\n{status_text}"
+        f"Expected the work-found firing to actually complete the queued task.\n" f"status.md:\n{status_text}"
     )

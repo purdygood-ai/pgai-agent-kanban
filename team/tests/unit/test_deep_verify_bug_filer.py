@@ -173,10 +173,7 @@ def test_filed_bug_severity_is_one_of_the_canonical_vocabulary(tmp_path: pathlib
         output_text=_DOCKERFILE_FAILURE_OUTPUT,
     )
     content = next(bugs_dir.glob("BUG-*.md")).read_text(encoding="utf-8")
-    assert any(
-        f"**Severity:** {sev}" in content
-        for sev in ("critical", "high", "medium", "low")
-    )
+    assert any(f"**Severity:** {sev}" in content for sev in ("critical", "high", "medium", "low"))
 
 
 # ---------------------------------------------------------------------------
@@ -367,12 +364,18 @@ def test_repeat_non_build_test_failure_cites_the_open_bug_instead_of_duplicating
 ) -> None:
     bugs_dir = tmp_path / "bugs"
     first = file_or_cite_bug(
-        str(bugs_dir), project="demo", version="v2.9.12", commit="abc1234",
+        str(bugs_dir),
+        project="demo",
+        version="v2.9.12",
+        commit="abc1234",
         output_text=NON_BUILD_TEST_FAILURE_OUTPUT,
     )
 
     second = file_or_cite_bug(
-        str(bugs_dir), project="demo", version="v2.9.13", commit="def5678",
+        str(bugs_dir),
+        project="demo",
+        version="v2.9.13",
+        commit="def5678",
         output_text=NON_BUILD_TEST_FAILURE_OUTPUT,
     )
 
@@ -381,9 +384,7 @@ def test_repeat_non_build_test_failure_cites_the_open_bug_instead_of_duplicating
     assert len(list(bugs_dir.glob("BUG-*.md"))) == 1
 
 
-def test_bug_filer_cli_reports_the_failing_test_on_its_tests_line(
-    tmp_path: pathlib.Path, capsys
-) -> None:
+def test_bug_filer_cli_reports_the_failing_test_on_its_tests_line(tmp_path: pathlib.Path, capsys) -> None:
     output_file = tmp_path / "lane-output.txt"
     output_file.write_text(NON_BUILD_TEST_FAILURE_OUTPUT, encoding="utf-8")
 
@@ -473,9 +474,7 @@ def test_live_bug_with_an_ordinal_variant_slug_is_cited_and_nothing_is_filed(
     tmp_path: pathlib.Path, status: str
 ) -> None:
     bugs_dir = tmp_path / "bugs"
-    hand_filed = write_hand_filed_bug(
-        bugs_dir, "BUG-9302", "cold-build-claude-code-failure-again", status=status
-    )
+    hand_filed = write_hand_filed_bug(bugs_dir, "BUG-9302", "cold-build-claude-code-failure-again", status=status)
     assert find_existing_bug(str(bugs_dir), "Deep-Verify Pairs", {"docker/claude-code"}) is None
 
     result = file_or_cite_bug(
@@ -497,7 +496,7 @@ def test_live_bug_with_an_ordinal_variant_of_a_test_failure_slug_is_cited(
     tmp_path: pathlib.Path,
 ) -> None:
     bugs_dir = tmp_path / "bugs"
-    module = NON_BUILD_TEST_FILE.rsplit("/", 1)[-1][len("test_"):-len(".py")].replace("_", "-")
+    module = NON_BUILD_TEST_FILE.rsplit("/", 1)[-1][len("test_") : -len(".py")].replace("_", "-")
     write_hand_filed_bug(bugs_dir, "BUG-9303", f"second-cold-test-{module}-failure")
 
     result = file_or_cite_bug(

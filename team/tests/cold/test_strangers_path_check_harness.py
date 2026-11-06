@@ -31,8 +31,9 @@ container stage builds the shipped image and starts a container, so this
 module lives in team/tests/cold/ and runs only through
 team/scripts/run-cold-build-tests.sh, never in the fast suites. The
 operator's authorization (PGAI_CONTAINER_TIER) is forwarded from the lane's
-own environment to the harness subprocess; without it the harness refuses
-and this test fails naming the refusal. The lane's image selection
+own environment to the harness subprocess; without it the harness test
+skips (operator_container_tier, tests/cold/conftest.py) before the harness
+is started. The lane's image selection
 (PGAI_CONTAINER_IMAGES) is passed as --image flags, every declared image
 when the lane exported none.
 
@@ -139,7 +140,7 @@ def _make_broken_doc_root(tmp_path: pathlib.Path) -> pathlib.Path:
 
 
 def test_seeded_break_in_install_step_fails_and_cites_doc_and_line(
-    tmp_path: pathlib.Path,
+    tmp_path: pathlib.Path, operator_container_tier: None
 ) -> None:
     doc_root = _make_broken_doc_root(tmp_path)
     result = _run_harness(doc_root, temp_root=tmp_path / "scratch")
@@ -151,24 +152,20 @@ def test_seeded_break_in_install_step_fails_and_cites_doc_and_line(
 
     # The install stage's own report line: verdict FAIL, and the detail
     # line naming the exact broken command and the doc:line it came from.
-    assert "install      FAIL" in result.stdout, (
-        f"expected the install stage to report FAIL.\nstdout:\n{result.stdout}"
-    )
+    assert "install      FAIL" in result.stdout, f"expected the install stage to report FAIL.\nstdout:\n{result.stdout}"
     assert _INSTALL_STEP5_BROKEN in result.stdout, (
         f"expected the FAIL detail to quote the seeded broken command "
         f"verbatim (proving it was extracted from the scratch document, "
         f"not a transcribed copy).\nstdout:\n{result.stdout}"
     )
     assert re.search(r"docs/docker\.md:\d+", result.stdout), (
-        f"expected the FAIL detail to cite 'docs/docker.md:<line>'.\n"
-        f"stdout:\n{result.stdout}"
+        f"expected the FAIL detail to cite 'docs/docker.md:<line>'.\n" f"stdout:\n{result.stdout}"
     )
 
     # The dual-channel refusal at the run's own final exit also names the
     # failed stage list, including "install".
     assert "error:   strangers_path_check.stage_failed" in result.stderr, (
-        f"expected the dual-channel error contract on the final refusal.\n"
-        f"stderr:\n{result.stderr}"
+        f"expected the dual-channel error contract on the final refusal.\n" f"stderr:\n{result.stderr}"
     )
     assert "install" in result.stderr
 

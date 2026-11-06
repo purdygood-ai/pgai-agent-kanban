@@ -143,7 +143,7 @@ def _write_caller(
     caller_text = (
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        f'# shellcheck source={lib_rel}\n'
+        f"# shellcheck source={lib_rel}\n"
         f'source "$(dirname "${{BASH_SOURCE[0]}}")/{lib_rel}"\n'
     )
     if extra_lines:
@@ -151,9 +151,7 @@ def _write_caller(
 
     caller_path = script_dir / "caller.sh"
     caller_path.write_text(caller_text, encoding="utf-8")
-    caller_path.chmod(
-        stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
-    )
+    caller_path.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
     return caller_path
 
 
@@ -184,13 +182,9 @@ def test_root_derived_and_exported_when_shell_env_present(
     assert "ROOT=" in result.stdout
     # The exported value must be the absolutized synthetic root
     exported_root = result.stdout.strip().removeprefix("ROOT=")
-    assert pathlib.Path(exported_root).is_absolute(), (
-        f"exported root is not absolute: {exported_root!r}"
-    )
+    assert pathlib.Path(exported_root).is_absolute(), f"exported root is not absolute: {exported_root!r}"
     # No stray output beyond the echo we added
-    assert result.stdout.count("\n") <= 1, (
-        f"unexpected extra stdout lines:\n{result.stdout!r}"
-    )
+    assert result.stdout.count("\n") <= 1, f"unexpected extra stdout lines:\n{result.stdout!r}"
 
 
 def test_root_is_absolutized_on_success(tmp_path: pathlib.Path) -> None:
@@ -210,9 +204,7 @@ def test_root_is_absolutized_on_success(tmp_path: pathlib.Path) -> None:
 
     assert result.returncode == 0
     exported = result.stdout.strip().removeprefix("ROOT=")
-    assert exported == str(pathlib.Path(exported).resolve()), (
-        f"path is not absolutized: {exported!r}"
-    )
+    assert exported == str(pathlib.Path(exported).resolve()), f"path is not absolutized: {exported!r}"
 
 
 def test_no_stdout_on_success(tmp_path: pathlib.Path) -> None:
@@ -231,9 +223,7 @@ def test_no_stdout_on_success(tmp_path: pathlib.Path) -> None:
     )
 
     assert result.returncode == 0
-    assert result.stdout == "", (
-        f"prelude emitted unexpected stdout:\n{result.stdout!r}"
-    )
+    assert result.stdout == "", f"prelude emitted unexpected stdout:\n{result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -258,8 +248,7 @@ def test_exits_one_with_error_when_shell_env_absent(tmp_path: pathlib.Path) -> N
     )
 
     assert result.returncode == 1, (
-        f"expected exit 1, got {result.returncode};\nstdout: {result.stdout!r}\n"
-        f"stderr: {result.stderr!r}"
+        f"expected exit 1, got {result.returncode};\nstdout: {result.stdout!r}\n" f"stderr: {result.stderr!r}"
     )
     expected_fragment = "PGAI_AGENT_KANBAN_ROOT_PATH not set — shell-env missing or broken at"
     assert expected_fragment in result.stderr, (
@@ -268,9 +257,7 @@ def test_exits_one_with_error_when_shell_env_absent(tmp_path: pathlib.Path) -> N
     )
     # The message must name the candidate shell-env path
     assert "shell-env" in result.stderr
-    assert "should not reach here" not in result.stdout, (
-        "caller continued execution after prelude returned 1"
-    )
+    assert "should not reach here" not in result.stdout, "caller continued execution after prelude returned 1"
 
 
 def test_error_message_names_candidate_path(tmp_path: pathlib.Path) -> None:
@@ -329,14 +316,12 @@ def test_preset_env_wins_over_shell_env(tmp_path: pathlib.Path) -> None:
     # The prelude uses realpath -m (resolves without requiring the path to exist),
     # so /operator/custom/root → /operator/custom/root (already absolute, no symlinks).
     assert str(root) not in exported_root, (
-        f"shell-env candidate root leaked into result.\n"
-        f"Exported: {exported_root!r}\n"
-        f"Root dir: {root!s}"
+        f"shell-env candidate root leaked into result.\n" f"Exported: {exported_root!r}\n" f"Root dir: {root!s}"
     )
     # The operator-specified path should be returned as-is (it is already absolute).
-    assert exported_root == operator_root, (
-        f"operator root was not preserved (absolutized with realpath -m): {exported_root!r}"
-    )
+    assert (
+        exported_root == operator_root
+    ), f"operator root was not preserved (absolutized with realpath -m): {exported_root!r}"
 
 
 def test_preset_env_unchanged_when_shell_env_absent(tmp_path: pathlib.Path) -> None:
@@ -355,13 +340,9 @@ def test_preset_env_unchanged_when_shell_env_absent(tmp_path: pathlib.Path) -> N
         extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": operator_root},
     )
 
-    assert result.returncode == 0, (
-        f"unexpected failure with pre-set env and absent shell-env:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"unexpected failure with pre-set env and absent shell-env:\n{result.stderr}"
     exported = result.stdout.strip().removeprefix("ROOT=")
-    assert exported == str(pathlib.Path(operator_root).resolve()), (
-        f"pre-set value not preserved: {exported!r}"
-    )
+    assert exported == str(pathlib.Path(operator_root).resolve()), f"pre-set value not preserved: {exported!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -391,16 +372,12 @@ def test_double_source_is_idempotent(tmp_path: pathlib.Path) -> None:
     )
 
     assert result.returncode == 0, f"double-source failed:\n{result.stderr}"
-    assert result.stderr == "", (
-        f"unexpected stderr on double-source:\n{result.stderr!r}"
-    )
+    assert result.stderr == "", f"unexpected stderr on double-source:\n{result.stderr!r}"
     assert "ROOT_AFTER_SECOND_SOURCE=" in result.stdout
     # Both reads of the env var should yield the same absolutized root
     lines = [ln for ln in result.stdout.splitlines() if ln.startswith("ROOT")]
     values = [ln.split("=", 1)[1] for ln in lines]
-    assert len(set(values)) == 1, (
-        f"env var value changed between first and second source:\n{values}"
-    )
+    assert len(set(values)) == 1, f"env var value changed between first and second source:\n{values}"
 
 
 def test_double_source_no_extra_stdout(tmp_path: pathlib.Path) -> None:
@@ -413,10 +390,7 @@ def test_double_source_no_extra_stdout(tmp_path: pathlib.Path) -> None:
     lib_rel = "lib/env_bootstrap.sh"
 
     # Caller sources twice, echoes one sentinel line
-    double_source_lines = (
-        f'source "$(dirname "${{BASH_SOURCE[0]}}")/{lib_rel}"\n'
-        'echo "SENTINEL"\n'
-    )
+    double_source_lines = f'source "$(dirname "${{BASH_SOURCE[0]}}")/{lib_rel}"\n' 'echo "SENTINEL"\n'
     caller = _write_caller(root, extra_lines=double_source_lines)
 
     result = run_bash(
@@ -427,9 +401,7 @@ def test_double_source_no_extra_stdout(tmp_path: pathlib.Path) -> None:
 
     assert result.returncode == 0
     # Exactly one stdout line from the first source (nothing) + the sentinel
-    assert result.stdout.strip() == "SENTINEL", (
-        f"unexpected stdout on double-source:\n{result.stdout!r}"
-    )
+    assert result.stdout.strip() == "SENTINEL", f"unexpected stdout on double-source:\n{result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -461,9 +433,7 @@ def test_root_derived_from_depth_two_entry_point(
         extra_env={"PGAI_AGENT_KANBAN_ROOT_PATH": ""},
     )
 
-    assert result.returncode == 0, (
-        f"depth-2 ({subdir}/) derivation failed:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"depth-2 ({subdir}/) derivation failed:\n{result.stderr}"
     exported_root = result.stdout.strip().removeprefix("ROOT=")
     assert pathlib.Path(exported_root).is_absolute()
     # The derived root must be the synthetic root, not scripts/ or scripts/<subdir>/

@@ -78,11 +78,12 @@ RC_QUESTION = "Keep the RC open for the late fix?"
 
 
 def _at(day: int, hour: int) -> datetime.datetime:
-    return datetime.datetime(2026, 10, day, hour, tzinfo=datetime.timezone.utc)
+    return datetime.datetime(2026, 10, day, hour, tzinfo=datetime.UTC)
 
 
-def _write_bug(root: pathlib.Path, project: str, stem: str, status: str = "open",
-               severity: str = "low") -> pathlib.Path:
+def _write_bug(
+    root: pathlib.Path, project: str, stem: str, status: str = "open", severity: str = "low"
+) -> pathlib.Path:
     bugs = root / "projects" / project / "bugs"
     bugs.mkdir(parents=True, exist_ok=True)
     path = bugs / f"{stem}.md"
@@ -111,9 +112,15 @@ def park_alpha_bugs(root: pathlib.Path) -> None:
     ctx = OpsContext(kanban_root=root)
     set_needs_operator(ctx, "alpha", "BUG-9001-login-crash", OLDER_QUESTION, now=_at(17, 9))
     set_needs_operator(ctx, "alpha", "BUG-9002-export-timeout", NEWER_QUESTION, now=_at(18, 10))
-    write_entry(ctx, "alpha", source="rc:v1.2.0", question=RC_QUESTION,
-                meanwhile="Left the RC open.", how_to_answer='Answer "keep" or "cancel".',
-                now=_at(18, 12))
+    write_entry(
+        ctx,
+        "alpha",
+        source="rc:v1.2.0",
+        question=RC_QUESTION,
+        meanwhile="Left the RC open.",
+        how_to_answer='Answer "keep" or "cancel".',
+        now=_at(18, 12),
+    )
 
 
 def run_pane(root: pathlib.Path, home: pathlib.Path) -> subprocess.CompletedProcess:
@@ -208,9 +215,9 @@ def test_golden_block_shows_the_count_and_the_newest_needs_operator_question() -
     newest = [line for line in block.splitlines() if line.startswith("    Newest: ")]
     assert len(newest) == 1, block
     assert NEWER_QUESTION in newest[0] and "(BUG-9002-export-timeout)" in newest[0]
-    assert OLDER_QUESTION not in block       # only the newest question is shown
-    assert RC_QUESTION not in block          # newer, but names no needs-operator item
-    assert "beta" not in block               # nothing parked there
+    assert OLDER_QUESTION not in block  # only the newest question is shown
+    assert RC_QUESTION not in block  # newer, but names no needs-operator item
+    assert "beta" not in block  # nothing parked there
 
 
 def test_no_needs_operator_item_hides_the_section_and_leaves_the_pane_unchanged(
@@ -242,8 +249,7 @@ def test_answering_the_question_reopens_the_item_and_the_count_follows(root: pat
     assert OLDER_QUESTION in output and NEWER_QUESTION not in output
 
 
-def test_scanner_prints_nothing_without_a_needs_operator_item(bare_root: pathlib.Path,
-                                                              tmp_path: pathlib.Path) -> None:
+def test_scanner_prints_nothing_without_a_needs_operator_item(bare_root: pathlib.Path, tmp_path: pathlib.Path) -> None:
     assert _scan(bare_root) == ""
     empty = tmp_path / "empty"
     (empty / "projects").mkdir(parents=True)
@@ -255,10 +261,17 @@ def test_priority_items_count_and_a_leading_id_source_names_the_item(tmp_path: p
     _write_bug(tmp_path, "delta", "BUG-9201-crash", status="needs-operator")
     (project / "priority").mkdir(parents=True)
     (project / "priority" / "PRIORITY-dark-mode.md").write_text(
-        "# Dark mode\n\n## Status\nNeeds-Operator\n", encoding="utf-8")
-    write_entry(OpsContext(kanban_root=tmp_path), "delta", source="BUG-9201",
-                question="Ship the crash fix behind a flag?", meanwhile="Waiting.",
-                how_to_answer="Answer yes or no.", now=_at(18, 9))
+        "# Dark mode\n\n## Status\nNeeds-Operator\n", encoding="utf-8"
+    )
+    write_entry(
+        OpsContext(kanban_root=tmp_path),
+        "delta",
+        source="BUG-9201",
+        question="Ship the crash fix behind a flag?",
+        meanwhile="Waiting.",
+        how_to_answer="Answer yes or no.",
+        now=_at(18, 9),
+    )
 
     output = _scan(tmp_path)
     assert "  delta: 2 needs-operator\n" in output
@@ -267,9 +280,15 @@ def test_priority_items_count_and_a_leading_id_source_names_the_item(tmp_path: p
 
 def test_an_item_without_an_open_question_says_so(tmp_path: pathlib.Path) -> None:
     _write_bug(tmp_path, "delta", "BUG-9301-hand-parked", status="needs-operator")
-    write_entry(OpsContext(kanban_root=tmp_path), "delta", source="BUG-9301-hand-parked-other",
-                question="A different item?", meanwhile="Waiting.", how_to_answer="Answer.",
-                now=_at(18, 9))
+    write_entry(
+        OpsContext(kanban_root=tmp_path),
+        "delta",
+        source="BUG-9301-hand-parked-other",
+        question="A different item?",
+        meanwhile="Waiting.",
+        how_to_answer="Answer.",
+        now=_at(18, 9),
+    )
     output = _scan(tmp_path)
     assert "  delta: 1 needs-operator\n" in output
     assert "    Newest: (no open inbox question)\n" in output

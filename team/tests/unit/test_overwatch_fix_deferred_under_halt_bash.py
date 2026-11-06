@@ -98,7 +98,9 @@ def _actions(root: pathlib.Path, project: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _run_wrapper(tmp_path: pathlib.Path, root: pathlib.Path, project: str, option: str = "") -> subprocess.CompletedProcess:
+def _run_wrapper(
+    tmp_path: pathlib.Path, root: pathlib.Path, project: str, option: str = ""
+) -> subprocess.CompletedProcess:
     """Run overwatch_halt_first_fix around a fix that leaves a marker file."""
     marker = tmp_path / "fix-ran"
     script = (
@@ -111,7 +113,11 @@ def _run_wrapper(tmp_path: pathlib.Path, root: pathlib.Path, project: str, optio
         'echo "WRAPPER_EXIT=$?"\n'
     )
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, timeout=60, cwd=str(tmp_path),
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
         env=_env(root, tmp_path / "home", OVERWATCH_PROJECT=project),
     )
 
@@ -277,8 +283,19 @@ def _sweep_project(root: pathlib.Path, scratch: pathlib.Path, name: str) -> path
     a BLOCKED task with no Block Record. Returns the DONE task's worktree."""
     repo = scratch / f"repo-{name}"
     _git("init", "-q", "-b", "main", str(repo))
-    _git("-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-         "commit", "-q", "--allow-empty", "-m", "initial")
+    _git(
+        "-C",
+        str(repo),
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "initial",
+    )
     _git("-C", str(repo), "branch", f"ai_feature/{_DONE_TASK}")
     worktree = scratch / f"worktrees-{name}" / _DONE_TASK
     _git("-C", str(repo), "worktree", "add", "-q", str(worktree), f"ai_feature/{_DONE_TASK}")
@@ -299,7 +316,11 @@ def _sweep_project(root: pathlib.Path, scratch: pathlib.Path, name: str) -> path
 
 def _run_sweep(tmp_path: pathlib.Path, root: pathlib.Path, only: str) -> subprocess.CompletedProcess:
     result = subprocess.run(
-        ["bash", str(_SWEEP), "--only", only], capture_output=True, text=True, timeout=300, cwd=str(tmp_path),
+        ["bash", str(_SWEEP), "--only", only],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=str(tmp_path),
         env=_env(root, tmp_path / "home", OVERWATCH_STALE_WORKTREE_THRESHOLD_DAYS="1"),
     )
     assert result.returncode == 0, _diagnostic(result)

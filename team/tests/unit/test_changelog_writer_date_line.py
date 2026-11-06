@@ -32,8 +32,7 @@ def _repo(tmp_path: pathlib.Path, notes: dict[str, str]) -> tuple[pathlib.Path, 
     notes_dir.mkdir(parents=True)
     for version, date_line in notes.items():
         (notes_dir / f"{version}.md").write_text(
-            textwrap.dedent(
-                f"""\
+            textwrap.dedent(f"""\
                 # Release Notes: test-project {version}
 
                 {date_line}
@@ -44,8 +43,7 @@ def _repo(tmp_path: pathlib.Path, notes: dict[str, str]) -> tuple[pathlib.Path, 
 
                 ## Features
                 None
-                """
-            ),
+                """),
             encoding="utf-8",
         )
     bugs_dir = tmp_path / "bugs"
@@ -63,9 +61,7 @@ def test_date_line_supplies_the_entry_date(tmp_path: pathlib.Path, capsys) -> No
 
 
 def test_release_date_line_wins_over_date_line(tmp_path: pathlib.Path) -> None:
-    repo_root, _ = _repo(
-        tmp_path, {"v1.2.3": "**Release Date:** 2026-03-04\n**Date:** 2026-01-02"}
-    )
+    repo_root, _ = _repo(tmp_path, {"v1.2.3": "**Release Date:** 2026-03-04\n**Date:** 2026-01-02"})
 
     entry = parse_release_notes("v1.2.3", repo_root / "release-notes" / "v1.2.3.md")
 

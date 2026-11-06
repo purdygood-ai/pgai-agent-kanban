@@ -66,9 +66,9 @@ The plan then lists the remote branch as `[skipped — push_to_remote=false]`, a
 
 ## Historical release state in full
 
-Historical release state is git tags on the dev tree's main branch, and the highest semver tag merged into `origin/main` is the canonical answer to "what version are we at." That answer comes from one helper: `pp_last_released_version "<project>"` in `scripts/lib/project_paths.sh`, which reads `dev_tree_path` from `project.cfg`, makes a best-effort tag fetch, filters tags merged into `origin/main` to strict semver, returns the highest (`v0.0.0` when there are none or the tree is unreachable), and never changes the caller's cwd.
+Historical release state is git tags on the dev tree's prefixed main branch, and the canonical answer to "what version are we at" comes from one helper: `pp_last_released_version "<project>"` in `scripts/lib/project_paths.sh`, which reads `dev_tree_path` from `project.cfg`, makes a best-effort tag fetch, and returns the highest strict-semver tag carrying the project's branch prefix — merged into `<remote>/<prefix>main` (`<remote>` is the project's `git_remote_name`), else into the local `<prefix>main`, else among all local tags. When no tag matches, or the project has no git dev tree, it returns `## Last Released` from `release-state.md` if that is a well-formed `vX.Y.Z`, and `v0.0.0` only when neither exists. A matching tag always wins, and the helper never changes the caller's cwd; its header comment carries each step.
 
-Do not parse `## Last Released` as a general version answer and do not run `git tag` inline; both bypass the one place dev-tree resolution lives. `## Last Released` exists for exactly one consumer — `pgai_agent_kanban.halt_after.drain` evaluating the `rc:vX.Y.Z` drain — and the role file's "Release state" section carries that field's four-field schema and lifecycle.
+Do not parse `## Last Released` as a general version answer and do not run `git tag` inline; both bypass the one place dev-tree resolution lives. `## Last Released` feeds `pgai_agent_kanban.halt_after.drain` evaluating the `rc:vX.Y.Z` drain and is the helper's fallback when no tag matches; the role file's "Release state" section carries that field's four-field schema and lifecycle.
 
 ## The approval gate's dashboard surfaces
 
@@ -82,7 +82,7 @@ Operators set `required` where a human must inspect the RC — user-facing chang
 
 Three classes of finding are system-breaking, and nothing else on a report is. A **breakage-class suite failure** — a gated runner exiting non-zero from a syntax error, compile failure, or unresolved first-party import, or a pytest failure the report classifies as a real defect — produced no trustworthy pass signal. A **destructive-path failure** damaged or corrupted state: a fidelity-gate failure, a pre-squash or pre-tag hook failure, a destructive test failure. **Verification unable to run at all** is not one of them: CM cannot ship on inputs it could not obtain, yet it never halts: `release.sh` requeues verification once (exit 4), then ships `NON-FUNCTIONAL` with "Verification did not run". And **a defect too severe for the next bugfix iteration to absorb** — high systemic risk, or serious concerns with a large-fix finding — is the "loop is unhealthy" signal, not the "there are known bugs" signal.
 
-The mechanical release-failure triggers in the role file's "The triggers" stand independently of all four. A squash conflict is one of them, and it halts only when the cancel is not allowed: otherwise `release.sh` cancels the RC and rebundles its cargo (exit 5).
+The mechanical release-failure triggers in the role file's "The triggers" stand independently of all three. A squash conflict is one of them, and it halts only when the cancel is not allowed: otherwise `release.sh` cancels the RC and rebundles its cargo (exit 5).
 
 ## The release-notes status stamp in full
 
@@ -267,7 +267,7 @@ Both halves bind: re-confirming a tree already confirmed learns nothing, and a s
 
 **Shape.** Cold-build has left per-RC verification entirely — an RC runs the fast suites only and TESTER starts no container engine. The lane now sits in a tier named for the tier rather than the lane, so other expensive suites can join `scripts/deep-verify.sh` later without a second entry point. Every authorized run runs the lane and appends one record to `$KANBAN_ROOT/projects/<name>/deep-verify-ledger.md`: timestamp, tree state exercised (version and commit), verdict, per-pair engine/flavor detail. That ledger is append-only kanban process state, a sibling of `release-state.md`, never committed into a dev tree, read only through `scripts/lib/deep_verify_ledger.sh`.
 
-**What the tier holds.** `scripts/run-cold-build-tests.sh` collects the whole of `team/tests/cold/` as a directory rather than naming modules one at a time, so an expensive suite joins the tier by being dropped there. Five modules live in it:
+**What the tier holds.** `scripts/run-cold-build-tests.sh` collects the whole of `team/tests/cold/` as a directory rather than naming modules one at a time, so an expensive suite joins the tier by being dropped there. Six modules live in it:
 
 | Module | What it exercises |
 |---|---|
@@ -276,6 +276,7 @@ Both halves bind: re-confirming a tree already confirmed learns nothing, and a s
 | `test_dashboard_smoke_container.py` | The in-container dashboard smoke harness — `dashboard/create.sh --no-tmux` inside each built flavor image, asserting no pane's external command comes back missing. |
 | `test_dashboard_operator_window.py` | Operator-window geometry and teardown, statically and again inside a live tmux session in a built image. |
 | `test_container_shell_launcher.py` | The workspace-container launcher's own contract: flag validation, required-path failures, and which engine binary it resolves and execs. |
+| `test_strangers_path_check_harness.py` | The stranger's-path harness (`harness/strangers-path-check.sh`) reads its commands from the shipped documents: a broken flag seeded into the documented install step, in a scratch copy of the Docker guide, makes the harness fail and cite the document and line the command came from. |
 
 Every module that needs a real engine carries its own absence guard and emits a narrated skip when none answers, the same way the cold-build sweep does — a host without docker or podman records a conscious skip rather than a failure. The launcher module needs no such guard: it drives `container-shell.sh` against a stub engine placed first on `PATH` and asserts on the invocation the launcher assembles, so it starts nothing.
 

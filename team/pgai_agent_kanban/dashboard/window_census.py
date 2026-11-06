@@ -118,9 +118,9 @@ def load_census(path: pathlib.Path | None = None) -> list[Window]:
 
     Returns:
         Windows in the order their W records appear in the file. A window
-        with more than one variant (currently only drill-N: "release" and
-        "document") appears as two separate Window entries sharing the same
-        tmux_index.
+        with more than one variant (operator: "merged" and "split"; drill-N:
+        "release" and "document") appears as two separate Window entries
+        sharing the same tmux_index.
 
     Raises:
         FileNotFoundError: the census file does not exist at *path*.
@@ -161,9 +161,7 @@ def load_census(path: pathlib.Path | None = None) -> list[Window]:
         current_window = None
         current_panes = []
 
-    for lineno, raw_line in enumerate(
-        census_path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for lineno, raw_line in enumerate(census_path.read_text(encoding="utf-8").splitlines(), start=1):
         fields = raw_line.split("\t")
         kind = fields[0]
 
@@ -171,8 +169,7 @@ def load_census(path: pathlib.Path | None = None) -> list[Window]:
             _flush()
             if len(fields) != 5:
                 raise CensusFormatError(
-                    f"{census_path}:{lineno}: W record has {len(fields)} "
-                    f"fields, expected 5: {raw_line!r}"
+                    f"{census_path}:{lineno}: W record has {len(fields)} " f"fields, expected 5: {raw_line!r}"
                 )
             _, idx_str, name, variant, count_str = fields
             current_window = {
@@ -187,13 +184,11 @@ def load_census(path: pathlib.Path | None = None) -> list[Window]:
         if kind == "P":
             if len(fields) != 7:
                 raise CensusFormatError(
-                    f"{census_path}:{lineno}: P record has {len(fields)} "
-                    f"fields, expected 7: {raw_line!r}"
+                    f"{census_path}:{lineno}: P record has {len(fields)} " f"fields, expected 7: {raw_line!r}"
                 )
             if current_window is None:
                 raise CensusFormatError(
-                    f"{census_path}:{lineno}: P record with no preceding W "
-                    f"record: {raw_line!r}"
+                    f"{census_path}:{lineno}: P record with no preceding W " f"record: {raw_line!r}"
                 )
             _, idx_str, variant, seq_str, position, script, cmd = fields
             tmux_index = _parse_int(idx_str, census_path, lineno, "tmux_index")
@@ -228,9 +223,7 @@ def _parse_int(value: str, path: pathlib.Path, lineno: int, field_name: str) -> 
     try:
         return int(value)
     except ValueError as exc:
-        raise CensusFormatError(
-            f"{path}:{lineno}: {field_name} value {value!r} is not an integer"
-        ) from exc
+        raise CensusFormatError(f"{path}:{lineno}: {field_name} value {value!r} is not an integer") from exc
 
 
 def load_pane_cadence(path: pathlib.Path | None = None) -> dict[tuple[int, str, int], PaneCadence]:
@@ -306,9 +299,7 @@ def pane_hidden_declaration_findings(path: pathlib.Path | None = None) -> list[s
                     f"{pane.pane_seq}\t<cadence>\tpause' directly after its P record"
                 )
                 continue
-            if record.cadence not in SYMBOLIC_CADENCES and not (
-                record.cadence.isdigit() and int(record.cadence) > 0
-            ):
+            if record.cadence not in SYMBOLIC_CADENCES and not (record.cadence.isdigit() and int(record.cadence) > 0):
                 findings.append(
                     f"{label} declares cadence {record.cadence!r}; expected whole seconds, "
                     f"'refresh', 'stream' or '-'"

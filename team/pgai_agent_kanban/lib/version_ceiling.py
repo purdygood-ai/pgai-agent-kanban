@@ -58,7 +58,7 @@ import pathlib
 import re
 import sys
 import types
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 # Run by file path (``python3 .../version_ceiling.py``), this module has no
 # parent package and the interpreter puts only its own directory on
@@ -95,9 +95,7 @@ CEILING_KEYS: tuple[str, ...] = ("max_patch", "max_minor", "max_major")
 
 #: The documented default for each ceiling key -- the single source every
 #: reader uses when a key, or the whole project.cfg, is absent.
-CEILING_DEFAULTS: Mapping[str, int] = types.MappingProxyType(
-    {"max_patch": 21, "max_minor": 13, "max_major": 0}
-)
+CEILING_DEFAULTS: Mapping[str, int] = types.MappingProxyType({"max_patch": 21, "max_minor": 13, "max_major": 0})
 
 #: The explicit "no ceiling" spelling (matched case-insensitively, written lowercase).
 NO_CEILING = "none"
@@ -148,7 +146,7 @@ class Ceiling:
     """
 
     key: str
-    limit: Optional[int]
+    limit: int | None
     defaulted: bool
     raw: str
 
@@ -170,12 +168,10 @@ def _strip_quotes(value: str) -> str:
 
 def _check_key(key: str) -> None:
     if key not in CEILING_DEFAULTS:
-        raise KeyError(
-            f"unknown version ceiling key '{key}' (expected one of: {', '.join(CEILING_KEYS)})"
-        )
+        raise KeyError(f"unknown version ceiling key '{key}' (expected one of: {', '.join(CEILING_KEYS)})")
 
 
-def parse_ceiling(key: str, raw: Optional[str], source: str = "") -> Ceiling:
+def parse_ceiling(key: str, raw: str | None, source: str = "") -> Ceiling:
     """Resolve one ceiling value by the rules in the module docstring.
 
     Args:
@@ -201,7 +197,7 @@ def parse_ceiling(key: str, raw: Optional[str], source: str = "") -> Ceiling:
     raise CeilingValueError(key, value, source)
 
 
-def project_cfg_file(project_dir: pathlib.Path) -> Optional[pathlib.Path]:
+def project_cfg_file(project_dir: pathlib.Path) -> pathlib.Path | None:
     """Return the project's config file (project.cfg, else PROJECT.cfg), or None."""
     for name in _CFG_NAMES:
         candidate = pathlib.Path(project_dir) / name
@@ -210,7 +206,7 @@ def project_cfg_file(project_dir: pathlib.Path) -> Optional[pathlib.Path]:
     return None
 
 
-def _read_raw(cfg_file: pathlib.Path, key: str) -> Optional[str]:
+def _read_raw(cfg_file: pathlib.Path, key: str) -> str | None:
     """Read ``[versioning] key`` the way the bash ``_pp_read_cfg_key`` does.
 
     INI lookup first (``ini.read_line_value``, the line-for-line form of
@@ -228,7 +224,7 @@ def _read_raw(cfg_file: pathlib.Path, key: str) -> Optional[str]:
     return match.group(1).strip() if match else value
 
 
-def read_ceiling(cfg_file: Optional[pathlib.Path], key: str) -> Ceiling:
+def read_ceiling(cfg_file: pathlib.Path | None, key: str) -> Ceiling:
     """Resolve one ceiling from *cfg_file*; None (no config file) means every default.
 
     Raises:
@@ -240,7 +236,7 @@ def read_ceiling(cfg_file: Optional[pathlib.Path], key: str) -> Ceiling:
     return parse_ceiling(key, _read_raw(pathlib.Path(cfg_file), key), source=str(cfg_file))
 
 
-def read_ceilings(cfg_file: Optional[pathlib.Path]) -> dict[str, Ceiling]:
+def read_ceilings(cfg_file: pathlib.Path | None) -> dict[str, Ceiling]:
     """Resolve all three ceilings from *cfg_file*, keyed by :data:`CEILING_KEYS`.
 
     Raises:
@@ -249,7 +245,7 @@ def read_ceilings(cfg_file: Optional[pathlib.Path]) -> dict[str, Ceiling]:
     return {key: read_ceiling(cfg_file, key) for key in CEILING_KEYS}
 
 
-def exceeded_ceiling(version: str, limits: Mapping[str, Optional[int]]) -> Optional[str]:
+def exceeded_ceiling(version: str, limits: Mapping[str, int | None]) -> str | None:
     """Return the ceiling key *version* exceeds, or None when it is within every ceiling.
 
     *version* is an explicit ``vX.Y.Z`` (the ``v`` optional); anything else --
@@ -270,7 +266,7 @@ def exceeded_ceiling(version: str, limits: Mapping[str, Optional[int]]) -> Optio
     return None
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("-h", "--help"):

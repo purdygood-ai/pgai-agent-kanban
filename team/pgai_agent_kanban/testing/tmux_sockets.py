@@ -45,14 +45,13 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Optional
 
 DEFAULT_PREFIX = "pgai-"
 DEFAULT_MIN_AGE_SECONDS = 60.0
 _PROBE_TIMEOUT_SECONDS = 1.0
 
 
-def tmux_socket_dir(env: Optional[Mapping[str, str]] = None) -> pathlib.Path:
+def tmux_socket_dir(env: Mapping[str, str] | None = None) -> pathlib.Path:
     """The current user's tmux socket directory as tmux resolves it:
     ``$TMUX_TMPDIR/tmux-<uid>``, with ``/tmp`` for an unset or empty
     ``TMUX_TMPDIR``. *env* defaults to this process's environment."""
@@ -61,7 +60,7 @@ def tmux_socket_dir(env: Optional[Mapping[str, str]] = None) -> pathlib.Path:
     return pathlib.Path(base) / f"tmux-{os.getuid()}"
 
 
-def socket_path(name: str, env: Optional[Mapping[str, str]] = None) -> pathlib.Path:
+def socket_path(name: str, env: Mapping[str, str] | None = None) -> pathlib.Path:
     """Where ``tmux -L <name>`` started under *env* puts its socket file."""
     return tmux_socket_dir(env) / name
 
@@ -96,11 +95,11 @@ class SweepResult:
 
 
 def sweep_stale_sockets(
-    directory: Optional[os.PathLike | str] = None,
+    directory: os.PathLike | str | None = None,
     *,
     prefix: str = DEFAULT_PREFIX,
     min_age_seconds: float = DEFAULT_MIN_AGE_SECONDS,
-    now: Optional[float] = None,
+    now: float | None = None,
 ) -> SweepResult:
     """Remove every socket in *directory* whose name starts with *prefix*,
     that this user owns, that is at least *min_age_seconds* old and that has
@@ -152,7 +151,7 @@ def _narrate(result: SweepResult, prefix: str) -> str:
     return f"tmux_socket_sweep: OK (no stale {prefix}* sockets in {result.directory})"
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point: parse the ``sweep`` subcommand from *argv*,
     run sweep_stale_sockets() with its --dir, --prefix and --min-age-seconds,
     and print one narration line saying what was removed or kept.
@@ -176,9 +175,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        result = sweep_stale_sockets(
-            args.dir, prefix=args.prefix, min_age_seconds=args.min_age_seconds
-        )
+        result = sweep_stale_sockets(args.dir, prefix=args.prefix, min_age_seconds=args.min_age_seconds)
     except Exception as exc:  # noqa: BLE001 - a cleanup step must never fail its caller
         print(f"tmux_socket_sweep: skipped ({exc})")
         return 0

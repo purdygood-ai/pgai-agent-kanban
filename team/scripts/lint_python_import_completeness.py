@@ -138,11 +138,13 @@ _SCAN_SUBDIRS: tuple[str, ...] = (
 # ``.venv`` — virtualenv packages; third-party code, not project source.
 # ---------------------------------------------------------------------------
 
-_EXCLUDED_DIR_NAMES: frozenset[str] = frozenset({
-    "fixtures",
-    "__pycache__",
-    ".venv",
-})
+_EXCLUDED_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        "fixtures",
+        "__pycache__",
+        ".venv",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Requirements files, relative to the repository root.
@@ -187,8 +189,8 @@ _PACKAGE_TO_IMPORT_NAMES: dict[str, frozenset[str]] = {
 class ImportViolation(NamedTuple):
     """A single import-completeness violation."""
 
-    source_file: Path   # Python file containing the import
-    module_name: str    # Top-level import name that is not covered
+    source_file: Path  # Python file containing the import
+    module_name: str  # Top-level import name that is not covered
 
 
 # ---------------------------------------------------------------------------
@@ -269,9 +271,7 @@ def parse_requirements_file(
         # Handle -r includes.
         if line.startswith("-r ") or line.startswith("-r\t"):
             included = repo_root / line[2:].strip()
-            packages |= parse_requirements_file(
-                included, repo_root=repo_root, _seen=_seen
-            )
+            packages |= parse_requirements_file(included, repo_root=repo_root, _seen=_seen)
             continue
 
         # Skip other option lines (-c, --index-url, etc.).
@@ -483,8 +483,7 @@ def lint_import_completeness(
     if verbose:
         print(f"lint_python_import_completeness: declared packages: {sorted(req_packages)}")
         print(f"lint_python_import_completeness: covered imports: {sorted(covered_imports)}")
-        print(f"lint_python_import_completeness: local names (sample): "
-              f"{sorted(local_names)[:10]} ...")
+        print(f"lint_python_import_completeness: local names (sample): " f"{sorted(local_names)[:10]} ...")
 
     violations: list[ImportViolation] = []
 
@@ -521,10 +520,12 @@ def lint_import_completeness(
             for mod_name in third_party:
                 norm = _normalise_pkg_name(mod_name)
                 if norm not in covered_imports and mod_name not in covered_imports:
-                    violations.append(ImportViolation(
-                        source_file=py_file,
-                        module_name=mod_name,
-                    ))
+                    violations.append(
+                        ImportViolation(
+                            source_file=py_file,
+                            module_name=mod_name,
+                        )
+                    )
 
     # Sort violations for deterministic output: by module name, then by source file.
     violations.sort(key=lambda v: (v.module_name, str(v.source_file)))
@@ -536,9 +537,7 @@ def lint_import_completeness(
 # ---------------------------------------------------------------------------
 
 
-def _target_requirements_file(
-    violations_for_module: list[ImportViolation], team_dir: Path
-) -> str:
+def _target_requirements_file(violations_for_module: list[ImportViolation], team_dir: Path) -> str:
     """Return the requirements file a missing module's declaration belongs in.
 
     ``requirements-test.txt`` when every source file importing this module
@@ -560,8 +559,7 @@ def _target_requirements_file(
 def _build_causes(violations: list[ImportViolation]) -> list[str]:
     """Return one cause bullet per violation, naming the module and source file."""
     return [
-        f"'{v.module_name}' imported in {v.source_file} is not declared in "
-        "requirements.txt or requirements-test.txt"
+        f"'{v.module_name}' imported in {v.source_file} is not declared in " "requirements.txt or requirements-test.txt"
         for v in violations
     ]
 
@@ -597,9 +595,7 @@ def _build_fix_commands(
         target_file = _target_requirements_file(by_module[module_name], team_dir)
         commands.append(f'echo "{module_name}" >> "{repo_root / target_file}"')
 
-    commands.append(
-        f'python3 "{lint_script}" --team-dir "{team_dir}" --repo-root "{repo_root}"'
-    )
+    commands.append(f'python3 "{lint_script}" --team-dir "{team_dir}" --repo-root "{repo_root}"')
     return commands
 
 
@@ -617,9 +613,7 @@ def _format_remedy_block(
     enforces.
     """
     causes = _build_causes(violations)
-    commands = _build_fix_commands(
-        violations, team_dir=team_dir, repo_root=repo_root, lint_script=lint_script
-    )
+    commands = _build_fix_commands(violations, team_dir=team_dir, repo_root=repo_root, lint_script=lint_script)
 
     lines = [
         f"lint_python_import_completeness: {len(violations)} uncovered import(s)",
@@ -709,9 +703,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _findings(
-    violations: list[ImportViolation], *, team_dir: Path, repo_root: Path, lint_script: Path
-) -> list[dict]:
+def _findings(violations: list[ImportViolation], *, team_dir: Path, repo_root: Path, lint_script: Path) -> list[dict]:
     """One quality finding per uncovered (module, file) pair, each with a
     runnable remedy: declare the module in the requirements file its
     importers belong in, then re-check."""
@@ -726,8 +718,7 @@ def _findings(
         findings.append(
             quality_finding(
                 _LINT_NAME,
-                f"'{v.module_name}' imported in {rel} is not declared in "
-                "requirements.txt or requirements-test.txt",
+                f"'{v.module_name}' imported in {rel} is not declared in " "requirements.txt or requirements-test.txt",
                 f'echo "{v.module_name}" >> "{target}" && {relint}',
                 file=rel,
                 module=v.module_name,
@@ -762,16 +753,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if not team_dir.is_dir():
         print(
-            f"ERROR: team directory not found: {team_dir}\n"
-            "Use --team-dir to specify the correct team/ root.",
+            f"ERROR: team directory not found: {team_dir}\n" "Use --team-dir to specify the correct team/ root.",
             file=sys.stderr,
         )
         return 2
 
     if not repo_root.is_dir():
         print(
-            f"ERROR: repository root not found: {repo_root}\n"
-            "Use --repo-root to specify the repository root.",
+            f"ERROR: repository root not found: {repo_root}\n" "Use --repo-root to specify the repository root.",
             file=sys.stderr,
         )
         return 2
@@ -787,9 +776,7 @@ def main(argv: list[str] | None = None) -> int:
 
     violations = lint_import_completeness(team_dir, repo_root, verbose=args.verbose)
     lint_script = Path(__file__).resolve()
-    findings = _findings(
-        violations, team_dir=team_dir, repo_root=repo_root, lint_script=lint_script
-    )
+    findings = _findings(violations, team_dir=team_dir, repo_root=repo_root, lint_script=lint_script)
     write_findings_file(args.findings_file, findings, lint="lint_python_import_completeness")
 
     if violations:

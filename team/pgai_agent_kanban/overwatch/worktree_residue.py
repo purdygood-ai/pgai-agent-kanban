@@ -79,7 +79,6 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Optional
 
 # Run by file path (``python3 .../worktree_residue.py``) or loaded from a
 # file outside its package, this module has no parent package and the
@@ -127,14 +126,16 @@ class WorktreeEntry:
         The path, whether its directory is present or gone, its HEAD, its branch
         (``detached`` when none) and ``locked`` when it is locked.
         """
-        state = "registered, directory gone" if self.prunable or not self.path.exists() else "registered, directory present"
+        state = (
+            "registered, directory gone" if self.prunable or not self.path.exists() else "registered, directory present"
+        )
         return (
             f"{self.path} ({state}; HEAD {self.head or 'unknown'}; "
             f"branch {self.branch or 'detached'}{'; locked' if self.locked else ''})"
         )
 
 
-def list_worktrees(repo: Path) -> Optional[list[WorktreeEntry]]:
+def list_worktrees(repo: Path) -> list[WorktreeEntry] | None:
     """Every worktree *repo* registers, the main one first; None when unreadable."""
     result = run_readonly_git(repo, "worktree", "list", "--porcelain")
     if result is None or not result.ok:
@@ -152,7 +153,7 @@ def list_worktrees(repo: Path) -> Optional[list[WorktreeEntry]]:
             WorktreeEntry(
                 path=Path(fields["worktree"]),
                 head=fields.get("HEAD", ""),
-                branch=branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch,
+                branch=branch[len("refs/heads/") :] if branch.startswith("refs/heads/") else branch,
                 prunable="prunable" in fields,
                 locked="locked" in fields,
                 main=not entries,
@@ -181,13 +182,10 @@ def strictly_inside(path: Path, base: Path) -> bool:
 def task_residue(entries: list[WorktreeEntry], base: Path, task_id: str, branch: str) -> list[WorktreeEntry]:
     """The non-main entries that claim the task: at ``<base>/<task_id>`` or holding *branch*."""
     task_path = _canonical(base / task_id)
-    return [
-        e for e in entries
-        if not e.main and (_canonical(e.path) == task_path or (branch and e.branch == branch))
-    ]
+    return [e for e in entries if not e.main and (_canonical(e.path) == task_path or (branch and e.branch == branch))]
 
 
-def unique_commits(repo: Path, entry: WorktreeEntry) -> Optional[list[str]]:
+def unique_commits(repo: Path, entry: WorktreeEntry) -> list[str] | None:
     """Commits *entry*'s HEAD reaches that no other branch, tag or
     remote-tracking ref holds (its own branch excluded); None when unreadable."""
     if not entry.head or _NULL_SHA_RE.match(entry.head):
@@ -205,7 +203,7 @@ def unique_commits(repo: Path, entry: WorktreeEntry) -> Optional[list[str]]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def holds_changes(path: Path) -> Optional[bool]:
+def holds_changes(path: Path) -> bool | None:
     """Whether the live worktree at *path* holds uncommitted or untracked
     changes (``git status --porcelain`` prints anything); None when git
     cannot read its status."""
@@ -219,7 +217,7 @@ def holds_changes(path: Path) -> Optional[bool]:
 class Assessment:
     """What the repository says about a task's worktree residue."""
 
-    target: Optional[GitTarget]
+    target: GitTarget | None
     residue: tuple[WorktreeEntry, ...] = ()
     outside_base: tuple[WorktreeEntry, ...] = ()
     locked: tuple[WorktreeEntry, ...] = ()
@@ -263,7 +261,7 @@ class Assessment:
         return ""
 
 
-def assess(task_dir: Path, record: Optional[BlockRecord], worktree_base: Optional[Path]) -> Assessment:
+def assess(task_dir: Path, record: BlockRecord | None, worktree_base: Path | None) -> Assessment:
     """Read the repository's worktree registrations for the task. Read-only."""
     if record is None:
         return Assessment(None, problem="the task carries no readable Block Record")
@@ -294,7 +292,7 @@ def assess(task_dir: Path, record: Optional[BlockRecord], worktree_base: Optiona
     )
 
 
-def residue_facts(task_dir: Path, record: Optional[BlockRecord], worktree_base: Optional[Path]) -> dict:
+def residue_facts(task_dir: Path, record: BlockRecord | None, worktree_base: Path | None) -> dict:
     """The classifier facts for a ``worktree_create_failed`` block (all False
     when unreadable), plus ``refusal``: why the residue may not be cleared,
     for the diagnosis, when it may not."""
@@ -320,7 +318,7 @@ class Cleared:
 
 
 def clear_residue(
-    task_dir: Path, evidence_dir: Path, record: BlockRecord, worktree_base: Optional[Path], *, now: datetime.datetime
+    task_dir: Path, evidence_dir: Path, record: BlockRecord, worktree_base: Path | None, *, now: datetime.datetime
 ) -> Cleared:
     """Remove the task's worktree residue (module docstring). Writes the
     evidence file before removing anything.
@@ -345,7 +343,7 @@ def clear_residue(
             raise ResidueError(f"{entry.describe()} holds uncommitted or untracked changes")
 
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    stamp = now.astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = now.astimezone(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
     evidence = evidence_dir / f"worktree-residue-{stamp}.txt"
     n = 2
     while evidence.exists():
@@ -379,11 +377,19 @@ def clear_residue(
         removed.append(str(entry.path))
     pruned = run_worktree_cleanup(target.repo, "prune")
     if pruned is None or not pruned.ok:
-        raise ResidueError(f"git worktree prune failed in {target.repo}" + (f"; removed: {', '.join(removed)}" if removed else ""))
+        raise ResidueError(
+            f"git worktree prune failed in {target.repo}" + (f"; removed: {', '.join(removed)}" if removed else "")
+        )
     after = list_worktrees(target.repo)
-    left = task_residue(after or [], worktree_base, task_dir.name, target.branch) if after is not None else list(found.residue)
+    left = (
+        task_residue(after or [], worktree_base, task_dir.name, target.branch)
+        if after is not None
+        else list(found.residue)
+    )
     if left:
-        raise ResidueError("the residue is still registered after the cleanup: " + "; ".join(e.describe() for e in left))
+        raise ResidueError(
+            "the residue is still registered after the cleanup: " + "; ".join(e.describe() for e in left)
+        )
     return Cleared(
         evidence=evidence,
         removed=tuple(removed),
@@ -396,7 +402,7 @@ def clear_residue(
 # ---------------------------------------------------------------------------
 
 
-def worktree_entry_at(entries: list[WorktreeEntry], path: Path) -> Optional[WorktreeEntry]:
+def worktree_entry_at(entries: list[WorktreeEntry], path: Path) -> WorktreeEntry | None:
     """The registered entry at *path* (both canonicalised), or None."""
     wanted = _canonical(path)
     for entry in entries:
@@ -405,7 +411,7 @@ def worktree_entry_at(entries: list[WorktreeEntry], path: Path) -> Optional[Work
     return None
 
 
-def finished_worktree_refusal(repo: Path, path: Path) -> tuple[Optional[WorktreeEntry], str]:
+def finished_worktree_refusal(repo: Path, path: Path) -> tuple[WorktreeEntry | None, str]:
     """``(entry, why)``: the registered worktree at *path* in *repo*, and why
     it must be kept ("" when it may be removed). Read-only.
 
@@ -483,17 +489,22 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     for name, text in (
         ("assess-finished", 'print "removable<TAB><entry>" or "keep<TAB><why>" (read-only); exit 0'),
-        ("remove-finished", 're-check, then git worktree remove (no --force) and prune; '
-                            'print "removed<TAB><entry>", or refuse dual-channel and exit 3'),
+        (
+            "remove-finished",
+            "re-check, then git worktree remove (no --force) and prune; "
+            'print "removed<TAB><entry>", or refuse dual-channel and exit 3',
+        ),
     ):
         cmd = sub.add_parser(name, help=text, description=text)
-        cmd.add_argument("--repo", required=True, help="the project's dev tree (the repository the worktree belongs to)")
+        cmd.add_argument(
+            "--repo", required=True, help="the project's dev tree (the repository the worktree belongs to)"
+        )
         cmd.add_argument("--path", required=True, help="the worktree path, as git worktree list prints it")
         cmd.add_argument("--project", default=None, help="project name the refusal is recorded against (optional)")
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point; returns the exit code (0 done, 3 refused, 2 bad usage)."""
     parser = _parser()
     args = parser.parse_args(argv)

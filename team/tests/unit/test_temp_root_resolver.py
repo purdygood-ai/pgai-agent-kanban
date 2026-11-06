@@ -158,7 +158,10 @@ def test_copied_files_hold_the_resolver_first_party_import_closure(tmp_path: pat
         f"importing pgai_agent_kanban.lib.temp_root from {_TEAM_DIR} exited {result.returncode}\n"
         f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    loaded = {pathlib.Path(path).resolve().relative_to(_PACKAGE_DIR.resolve()).as_posix() for path in json.loads(result.stdout)}
+    loaded = {
+        pathlib.Path(path).resolve().relative_to(_PACKAGE_DIR.resolve()).as_posix()
+        for path in json.loads(result.stdout)
+    }
     missing = sorted(loaded - set(_RESOLVER_FILES))
     assert not missing, (
         f"importing pgai_agent_kanban.lib.temp_root loads {missing}, which the sandbox copy lacks; "
@@ -175,9 +178,9 @@ def test_copied_files_hold_the_resolver_first_party_import_closure(tmp_path: pat
 def test_resolver_answers_every_case_in_the_shared_table(case: TempRootCase, tmp_path: pathlib.Path) -> None:
     setup, answer = _run_case(case, tmp_path)
     detail = f"case {case.id!r} ({case.covers}){': ' + case.note if case.note else ''}"
-    assert answer["honoured"] == setup.expected, (
-        f"{detail}\nresolve_temp_root() returned {answer['honoured']!r}, the table expects {setup.expected!r}"
-    )
+    assert (
+        answer["honoured"] == setup.expected
+    ), f"{detail}\nresolve_temp_root() returned {answer['honoured']!r}, the table expects {setup.expected!r}"
     assert answer["ignored"] == setup.expected_ignoring_override, (
         f"{detail}\nresolve_temp_root(honour_override=False) returned {answer['ignored']!r}, "
         f"the table expects {setup.expected_ignoring_override!r}"
@@ -208,13 +211,13 @@ def test_every_case_is_drivable_by_a_resolver_without_an_explicit_root(case: Tem
     row sets no root path of its own and gives the self-locate step nothing
     to find."""
     if case.kanban_root is not None:
-        assert case.root_path is None and case.install_cfg is None, (
-            f"case {case.id!r} sets kanban_root, so it must leave root_path and install_cfg null"
-        )
+        assert (
+            case.root_path is None and case.install_cfg is None
+        ), f"case {case.id!r} sets kanban_root, so it must leave root_path and install_cfg null"
     if case.override is not None:
-        assert case.expected_ignoring_override is not None, (
-            f"case {case.id!r} sets an override, so it must state expected_ignoring_override"
-        )
+        assert (
+            case.expected_ignoring_override is not None
+        ), f"case {case.id!r} sets an override, so it must state expected_ignoring_override"
 
 
 @pytest.mark.parametrize(
@@ -224,14 +227,25 @@ def test_every_case_is_drivable_by_a_resolver_without_an_explicit_root(case: Tem
         ("[paths] through an explicit kanban root", lambda c: c.kanban_root and c.covers.startswith("config")),
         ("[paths] through PGAI_AGENT_KANBAN_ROOT_PATH", lambda c: c.root_path and c.covers.startswith("config")),
         ("[paths] through the self-located install root", lambda c: c.install_cfg and c.covers.startswith("config")),
-        ("a lone tmp_root taking tmp_subdir's default", lambda c: c.covers == "per-key default"
-         and c.expected.endswith("/pgai_kanban_tmp") and c.expected != "{fallback}"),
-        ("a lone tmp_subdir taking tmp_root's default", lambda c: c.covers == "per-key default"
-         and c.expected.startswith("/tmp/") and c.expected != "{fallback}"),
+        (
+            "a lone tmp_root taking tmp_subdir's default",
+            lambda c: c.covers == "per-key default"
+            and c.expected.endswith("/pgai_kanban_tmp")
+            and c.expected != "{fallback}",
+        ),
+        (
+            "a lone tmp_subdir taking tmp_root's default",
+            lambda c: c.covers == "per-key default" and c.expected.startswith("/tmp/") and c.expected != "{fallback}",
+        ),
         ("no readable kanban.cfg", lambda c: c.covers == "no readable kanban.cfg"),
         ("an override naming '/'", lambda c: c.override and c.covers == "filesystem-root invariant"),
-        ("a configured pair naming '/'", lambda c: c.board_cfg and not c.override and c.expected == "{fallback}"
-         and c.covers == "filesystem-root invariant"),
+        (
+            "a configured pair naming '/'",
+            lambda c: c.board_cfg
+            and not c.override
+            and c.expected == "{fallback}"
+            and c.covers == "filesystem-root invariant",
+        ),
     ],
 )
 def test_table_covers_each_rule(label: str, matches) -> None:
@@ -296,9 +310,9 @@ def test_resolver_creates_nothing(tmp_path: pathlib.Path, no_kanban_env: pytest.
     assert temp_root.resolve_temp_root(root) == f"{named}/scratch"
     no_kanban_env.setenv("PGAI_AGENT_KANBAN_TEMP_DIR", str(tmp_path / "override-never-created"))
     assert temp_root.resolve_temp_root(root) == str(tmp_path / "override-never-created")
-    assert not named.exists() and not (tmp_path / "override-never-created").exists(), (
-        "resolve_temp_root is read-only: naming a root must not create it"
-    )
+    assert (
+        not named.exists() and not (tmp_path / "override-never-created").exists()
+    ), "resolve_temp_root is read-only: naming a root must not create it"
 
 
 # ---------------------------------------------------------------------------
@@ -306,18 +320,16 @@ def test_resolver_creates_nothing(tmp_path: pathlib.Path, no_kanban_env: pytest.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "case", [c for c in TEMP_ROOT_CASES if c.kanban_root is not None], ids=lambda case: case.id
-)
+@pytest.mark.parametrize("case", [c for c in TEMP_ROOT_CASES if c.kanban_root is not None], ids=lambda case: case.id)
 def test_kanban_temp_root_returns_the_resolver_answer(
     case: TempRootCase, tmp_path: pathlib.Path, no_kanban_env: pytest.MonkeyPatch
 ) -> None:
     setup = set_up_case(case, tmp_path)
     for name, value in setup.env.items():
         no_kanban_env.setenv(name, value)
-    assert config.kanban_temp_root(setup.kanban_root) == pathlib.Path(setup.expected), (
-        f"case {case.id!r}: kanban_temp_root must give the resolver's answer {setup.expected!r}"
-    )
+    assert config.kanban_temp_root(setup.kanban_root) == pathlib.Path(
+        setup.expected
+    ), f"case {case.id!r}: kanban_temp_root must give the resolver's answer {setup.expected!r}"
 
 
 def test_config_fallback_name_is_the_resolver_constant() -> None:

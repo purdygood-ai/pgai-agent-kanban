@@ -36,8 +36,7 @@ _RELEASE_STATE_SH = _TEAM_DIR / "scripts" / "release-state.sh"
 _PROJECT = "gf"
 
 _MALFORMED_RELEASE_STATE = (
-    "## Active RC\nNOTAVERSION\n\n## RC Opened At\nnone\n\n"
-    "## RC Opened By Task\nnone\n\n## Last Released\nnone\n"
+    "## Active RC\nNOTAVERSION\n\n## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n\n## Last Released\nnone\n"
 )
 
 
@@ -61,7 +60,11 @@ def _cli_refusal(root: pathlib.Path) -> tuple[int, dict | None, str]:
     env["PGAI_AGENT_KANBAN_TEMP_DIR"] = str(root / "tmp")
     result = subprocess.run(
         ["bash", str(_RELEASE_STATE_SH), "--project", _PROJECT],
-        capture_output=True, text=True, env=env, cwd=str(_TEAM_DIR), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        timeout=60,
     )
     return result.returncode, parse_error_contract(result.stderr), result.stderr
 
@@ -96,23 +99,19 @@ def test_cli_and_rest_render_the_same_non_empty_remedy(
 ) -> None:
     root = _build_board(tmp_path)
     if release_state_text is not None:
-        (root / "projects" / _PROJECT / "release-state.md").write_text(
-            release_state_text, encoding="utf-8"
-        )
+        (root / "projects" / _PROJECT / "release-state.md").write_text(release_state_text, encoding="utf-8")
 
     cli_status, cli, cli_stderr = _cli_refusal(root)
     rest_status, rest = _rest_refusal(root, monkeypatch)
 
-    assert cli_status == 3, (
-        f"[{case}] release-state.sh must exit 3 on a validation refusal; got {cli_status}\n{cli_stderr}"
-    )
+    assert (
+        cli_status == 3
+    ), f"[{case}] release-state.sh must exit 3 on a validation refusal; got {cli_status}\n{cli_stderr}"
     assert cli is not None, (
         f"[{case}] release-state.sh must print the house-shape error/message/remedy block "
         f"on stderr; got:\n{cli_stderr!r}"
     )
-    assert cli["remedy"].strip(), (
-        f"[{case}] the CLI's remedy: line must not be empty.\n{cli_stderr}"
-    )
+    assert cli["remedy"].strip(), f"[{case}] the CLI's remedy: line must not be empty.\n{cli_stderr}"
     assert rest_status == 422, f"[{case}] GET /release-state must answer 422; got {rest_status}: {rest}"
     assert rest["error"] == "release-state.invalid-field", rest
 

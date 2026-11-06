@@ -27,9 +27,10 @@ copied once.
 
 By project: 133 pgai-agent-kanban, 14 pgai-chomp-man. Each file is named
 ``<project>--<task folder>.md`` and holds the report verbatim except for
-four scrubs: an absolute path under the home-directory root reads ``$HOME``
+five scrubs: an absolute path under the home-directory root reads ``$HOME``
 in place of its home-directory prefix, a personal email address reads
-``operator@example.invalid``, a project name from outside the kanban and
+``operator@example.invalid``, an operator's git handle reads ``operator``,
+a project name from outside the kanban and
 its demos reads ``my-app``, and a container directory path reads
 ``/opt/requirements``.
 
@@ -97,12 +98,11 @@ def test_every_corpus_report_has_a_golden_and_every_golden_a_report() -> None:
     goldens = {path.stem for path in _GOLDEN.glob("*.json")}
 
     assert sorted(reports - goldens) == [], (
-        f"corpus reports with no golden under {_GOLDEN}; generate them with the "
-        "loop in this module's docstring"
+        f"corpus reports with no golden under {_GOLDEN}; generate them with the " "loop in this module's docstring"
     )
-    assert sorted(goldens - reports) == [], (
-        f"golden files with no corpus report under {_CORPUS}; delete them or restore their reports"
-    )
+    assert (
+        sorted(goldens - reports) == []
+    ), f"golden files with no corpus report under {_CORPUS}; delete them or restore their reports"
 
 
 def test_corpus_reports_carry_no_home_directory_path() -> None:

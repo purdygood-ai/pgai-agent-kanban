@@ -126,7 +126,7 @@ def test_bash_remedy_with_planted_placeholder_is_reported(tmp_path: Path) -> Non
         bash_dir,
         "fixture_planted.sh",
         "#!/usr/bin/env bash\n"
-        'pgai_emit_error_contract \\\n'
+        "pgai_emit_error_contract \\\n"
         '  "gate.example" \\\n'
         '  "something stopped" \\\n'
         '  "Re-run with --project <name>."\n',
@@ -137,10 +137,14 @@ def test_bash_remedy_with_planted_placeholder_is_reported(tmp_path: Path) -> Non
     assert findings[0].placeholders == ["<name>"]
     assert findings[0].function == "pgai_emit_error_contract"
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
     assert result == 1, "a planted placeholder must make the lint's own exit code non-zero"
 
 
@@ -154,7 +158,7 @@ def test_bash_remedy_placeholder_reverted_is_clean(tmp_path: Path) -> None:
         bash_dir,
         "fixture_reverted.sh",
         "#!/usr/bin/env bash\n"
-        'pgai_emit_error_contract \\\n'
+        "pgai_emit_error_contract \\\n"
         '  "gate.example" \\\n'
         '  "something stopped" \\\n'
         '  "Re-run with --project pgai-agent-kanban."\n',
@@ -163,10 +167,14 @@ def test_bash_remedy_placeholder_reverted_is_clean(tmp_path: Path) -> None:
     findings = _lint._scan_bash_file(bash_dir / "fixture_reverted.sh")
     assert findings == []
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+        ]
+    )
     assert result == 0
 
 
@@ -235,7 +243,7 @@ def test_bash_remedy_built_entirely_from_variable_is_not_a_finding(tmp_path: Pat
         bash_dir,
         "fixture_variable_remedy.sh",
         "#!/usr/bin/env bash\n"
-        'pgai_emit_error_contract \\\n'
+        "pgai_emit_error_contract \\\n"
         '  "gate.example" \\\n'
         '  "something stopped" \\\n'
         '  "Re-run with --project ${_project} --until ${_until}."\n',
@@ -258,7 +266,7 @@ def test_placeholder_in_message_field_produces_no_finding(tmp_path: Path) -> Non
         bash_dir,
         "fixture_message_placeholder.sh",
         "#!/usr/bin/env bash\n"
-        'pgai_emit_error_contract \\\n'
+        "pgai_emit_error_contract \\\n"
         '  "gate.example" \\\n'
         '  "no project named <name> was found" \\\n'
         '  "Re-run with --project pgai-agent-kanban."\n',
@@ -318,9 +326,7 @@ def test_comment_mentioning_function_name_is_not_a_call_site(tmp_path: Path) -> 
     _write_bash_file(
         bash_dir,
         "fixture_comment_only.sh",
-        "#!/usr/bin/env bash\n"
-        "# Call pgai_emit_error_contract with a remedy like '<name>'.\n"
-        "echo done\n",
+        "#!/usr/bin/env bash\n" "# Call pgai_emit_error_contract with a remedy like '<name>'.\n" "echo done\n",
     )
 
     findings = _lint._scan_bash_file(bash_dir / "fixture_comment_only.sh")
@@ -339,18 +345,23 @@ def test_findings_file_contains_machine_readable_json(tmp_path: Path) -> None:
         bash_dir,
         "fixture_planted.sh",
         "#!/usr/bin/env bash\n"
-        'pgai_emit_error_contract \\\n'
+        "pgai_emit_error_contract \\\n"
         '  "gate.example" \\\n'
         '  "something stopped" \\\n'
         '  "Re-run with --project <name>."\n',
     )
     findings_file = tmp_path / "findings" / "runnable_remedy.json"
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     assert result == 1
     assert findings_file.is_file()
@@ -375,16 +386,21 @@ def test_findings_file_is_empty_array_on_clean_tree(tmp_path: Path) -> None:
     _write_bash_file(
         bash_dir,
         "fixture_ok.sh",
-        '#!/usr/bin/env bash\n'
+        "#!/usr/bin/env bash\n"
         'pgai_emit_error_contract "gate.example" "message text" "run team/scripts/defer.sh --project pgai-agent-kanban --until v2.20.0"\n',
     )
     findings_file = tmp_path / "findings.json"
 
-    result = _lint.main([
-        "--bash-dirs", str(bash_dir),
-        "--python-dir", str(_empty_python_dir(tmp_path)),
-        "--findings-file", str(findings_file),
-    ])
+    result = _lint.main(
+        [
+            "--bash-dirs",
+            str(bash_dir),
+            "--python-dir",
+            str(_empty_python_dir(tmp_path)),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     assert result == 0
     data = json.loads(findings_file.read_text(encoding="utf-8"))

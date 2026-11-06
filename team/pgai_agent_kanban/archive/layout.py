@@ -57,7 +57,7 @@ import os
 import pathlib
 import re
 import shlex
-from typing import Optional, Union
+from typing import Union
 
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 
@@ -251,7 +251,7 @@ def live_layout(kanban_root: PathLike, project: str) -> ProjectLayout:
     return ProjectLayout(root / _require_path_component(project, "project name", str(root)))
 
 
-def archive_layout_for_category_dir(category_dir: PathLike, category: str) -> Optional[ProjectLayout]:
+def archive_layout_for_category_dir(category_dir: PathLike, category: str) -> ProjectLayout | None:
     """Return the archive tree that belongs to the live directory *category_dir*.
 
     *category_dir* is read as ``<kanban_root>/projects/<project>/<category>``
@@ -281,7 +281,7 @@ def archive_layout_for_category_dir(category_dir: PathLike, category: str) -> Op
     return archive_layout(projects_dir.parent, project_root.name)
 
 
-def archive_layout_for_tasks_dir(tasks_dir: PathLike) -> Optional[ProjectLayout]:
+def archive_layout_for_tasks_dir(tasks_dir: PathLike) -> ProjectLayout | None:
     """Return the archive tree that belongs to the live ``tasks/`` directory *tasks_dir*.
 
     *tasks_dir* is read as ``<kanban_root>/projects/<project>/tasks``; see

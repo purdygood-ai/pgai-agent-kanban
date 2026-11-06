@@ -40,7 +40,7 @@ from fastapi.testclient import TestClient
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _API_TESTS_DIR = _THIS_FILE.parent
 _TEAM_DIR = _API_TESTS_DIR.parent.parent.parent  # team/
-_PROJECT_ROOT = _TEAM_DIR.parent                  # project root (contains team/)
+_PROJECT_ROOT = _TEAM_DIR.parent  # project root (contains team/)
 _WHY_SH = _TEAM_DIR / "scripts" / "why.sh"
 
 _project_root_str = str(_PROJECT_ROOT)
@@ -72,9 +72,7 @@ def _make_project_dir(kanban_root: pathlib.Path, name: str) -> pathlib.Path:
 def _write_task(project_dir: pathlib.Path, task_id: str, state: str) -> None:
     task_dir = project_dir / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
-    (task_dir / "status.md").write_text(
-        f"## State\n{state}\n\n## Summary\nfixture task\n", encoding="utf-8"
-    )
+    (task_dir / "status.md").write_text(f"## State\n{state}\n\n## Summary\nfixture task\n", encoding="utf-8")
 
 
 def _build_four_verdict_fixture(kanban_root: pathlib.Path) -> None:
@@ -177,7 +175,9 @@ def _rest_verdicts(client: TestClient) -> dict[str, str]:
 
 class TestCliRestVerdictParity:
     def test_every_project_verdict_matches_between_cli_and_rest(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """CLI and REST agree on the verdict word for every project in a
         four-verdict fixture (RUNNING, BLOCKED, HALTED, IDLE)."""
@@ -199,7 +199,9 @@ class TestCliRestVerdictParity:
         assert set(cli_verdicts.values()) == {"RUNNING", "BLOCKED", "HALTED", "IDLE"}
 
     def test_running_task_evidence_matches_between_cli_line_and_rest_fields(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """For the RUNNING project, the CLI line's task id/state/minutes
         match the REST entry's task_id/task_state/minutes_in_state fields."""
@@ -217,7 +219,9 @@ class TestCliRestVerdictParity:
         assert str(entry["minutes_in_state"]) == cli_minutes
 
     def test_changing_the_fixture_state_changes_both_surfaces_in_lockstep(
-        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: pathlib.Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A single fixture mutation (RUNNING -> BLOCKED) is reflected
         identically by both surfaces, proving they read the same underlying

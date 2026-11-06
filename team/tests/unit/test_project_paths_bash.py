@@ -26,10 +26,20 @@ Functions under test:
     kanban.cfg > default, aliases, refusals and the misplaced-key warning
   - pp_resolve_project_name: exact-then-prefix resolution against
     projects.cfg, including both branches of the not_found remedy
+  - pp_load_config: a failed load leaves no earlier load's known PP_* fields set
+  - pp_load_config (legacy PROJECT.cfg): a legacy load after an INI load keeps
+    none of the INI project's values; a second legacy load replaces the first
+    one's values; a fresh legacy load exports exactly the file's known fields
+    plus PP_TEMP_DIR (with and without temp_dir), and no PP_before_vars or
+    other pp_load_config local; under a set -euo pipefail caller (|| and if
+    forms) a file with a failing command, an unset-variable reference or a
+    failing command substitution still exports its fields, and one with an
+    exit line makes the load return 1 with every known field unset
 """
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shlex
 
@@ -138,9 +148,7 @@ def test_project_root_uses_pgai_project_name_env(tmp_path: pathlib.Path) -> None
         ("pp_release_state", "projects/alpha/release-state.md"),
     ],
 )
-def test_project_paths_helper_echoes_subpath(
-    tmp_path: pathlib.Path, func: str, expected_suffix: str
-) -> None:
+def test_project_paths_helper_echoes_subpath(tmp_path: pathlib.Path, func: str, expected_suffix: str) -> None:
     """Each pp_*_dir/pp_release_state helper echoes <project_root>/<subpath> for the given project."""
     result = _run(tmp_path, f"{func} alpha", tmp_path)
     assert result.returncode == 0
@@ -255,9 +263,7 @@ def test_validate_branch_prefix_charset(tmp_path: pathlib.Path, prefix: str, exp
         ),
     ],
 )
-def test_project_cfg_boolean_or_list_key(
-    tmp_path: pathlib.Path, func: str, cfg_body: str, expected: str
-) -> None:
+def test_project_cfg_boolean_or_list_key(tmp_path: pathlib.Path, func: str, cfg_body: str, expected: str) -> None:
     """pp_verbose_mode/pp_verbose_agents/pp_reasoning_trace read their
     project.cfg key with the documented default when the key/section is absent."""
     proj = _make_project(tmp_path, "myproj")
@@ -408,8 +414,7 @@ def test_deep_verify_mode_release_value_wins_no_warning_even_if_duplicated(
     never trigger the misplaced-key warning."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text(
-        "[project]\nproject_name=myproj\n\n[release]\ndeep_verify=off\n\n"
-        "[training]\ndeep_verify=weekly\n",
+        "[project]\nproject_name=myproj\n\n[release]\ndeep_verify=off\n\n" "[training]\ndeep_verify=weekly\n",
         encoding="utf-8",
     )
     result = _run(tmp_path, "pp_deep_verify_mode myproj", tmp_path)
@@ -661,9 +666,7 @@ def test_deep_verify_offhours_window_project_cfg_value_wins_over_kanban_cfg(
     tmp_path: pathlib.Path,
 ) -> None:
     proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text(
-        "[release]\ndeep_verify_offhours_window = 02:00-02:59\n", encoding="utf-8"
-    )
+    (proj / "project.cfg").write_text("[release]\ndeep_verify_offhours_window = 02:00-02:59\n", encoding="utf-8")
     _write_kanban_cfg(tmp_path, "[release]\ndeep_verify_offhours_window = 01:00-01:59\n")
     result = _run(tmp_path, "pp_deep_verify_offhours_window myproj", tmp_path)
     assert result.returncode == 0
@@ -676,9 +679,7 @@ def test_deep_verify_offhours_window_malformed_project_value_falls_to_kanban_cfg
     """A malformed value counts as absent at its tier: the kanban.cfg value
     applies and exactly one warning names the project.cfg value."""
     proj = _make_project(tmp_path, "myproj")
-    (proj / "project.cfg").write_text(
-        "[release]\ndeep_verify_offhours_window = 3am-4am\n", encoding="utf-8"
-    )
+    (proj / "project.cfg").write_text("[release]\ndeep_verify_offhours_window = 3am-4am\n", encoding="utf-8")
     _write_kanban_cfg(tmp_path, "[release]\ndeep_verify_offhours_window = 01:00-01:59\n")
     result = _run(tmp_path, "pp_deep_verify_offhours_window myproj", tmp_path)
     assert result.returncode == 0
@@ -895,9 +896,7 @@ def test_overwatch_resolve_unrecognized_kanban_default_refuses_dual_channel(
     supplied the bad value."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    (tmp_path / "kanban.cfg").write_text(
-        "[release]\noverwatch_resolve=maybe\n", encoding="utf-8"
-    )
+    (tmp_path / "kanban.cfg").write_text("[release]\noverwatch_resolve=maybe\n", encoding="utf-8")
     result = _run(tmp_path, "pp_overwatch_resolve myproj", tmp_path)
     assert result.returncode != 0
     assert result.stdout.strip() == ""
@@ -1004,9 +1003,7 @@ def test_block_triage_key_in_another_section_is_not_read(tmp_path: pathlib.Path)
 
 
 @pytest.mark.parametrize("value", ["yes", "on", "True", "1"])
-def test_block_triage_non_boolean_project_value_refuses_dual_channel(
-    tmp_path: pathlib.Path, value: str
-) -> None:
+def test_block_triage_non_boolean_project_value_refuses_dual_channel(tmp_path: pathlib.Path, value: str) -> None:
     """Only the exact spellings true/false are accepted. Anything else is
     refused non-zero with the stable error key, a message naming the key,
     the value and the accepted set, and a remedy naming the file -- and
@@ -1091,9 +1088,7 @@ def test_stale_lock_reap_after_wake_periods_returns_kanban_default(
     """Returns the kanban.cfg [locks] default when no project override exists."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    (tmp_path / "kanban.cfg").write_text(
-        "[locks]\nstale_lock_reap_after_wake_periods=5\n", encoding="utf-8"
-    )
+    (tmp_path / "kanban.cfg").write_text("[locks]\nstale_lock_reap_after_wake_periods=5\n", encoding="utf-8")
     result = _run(tmp_path, "pp_stale_lock_reap_after_wake_periods myproj", tmp_path)
     assert result.returncode == 0
     assert result.stdout.strip() == "5"
@@ -1109,9 +1104,7 @@ def test_stale_lock_reap_after_wake_periods_project_override_wins(
         "[project]\nproject_name=patient-project\n\n[locks]\nstale_lock_reap_after_wake_periods=10\n",
         encoding="utf-8",
     )
-    (tmp_path / "kanban.cfg").write_text(
-        "[locks]\nstale_lock_reap_after_wake_periods=3\n", encoding="utf-8"
-    )
+    (tmp_path / "kanban.cfg").write_text("[locks]\nstale_lock_reap_after_wake_periods=3\n", encoding="utf-8")
     result = _run(tmp_path, "pp_stale_lock_reap_after_wake_periods patient-project", tmp_path)
     assert result.returncode == 0
     assert result.stdout.strip() == "10"
@@ -1136,9 +1129,7 @@ def test_stale_lock_reap_after_wake_periods_rejects_zero(tmp_path: pathlib.Path)
     """Zero is rejected rather than silently disabling the reaper."""
     proj = _make_project(tmp_path, "myproj")
     (proj / "project.cfg").write_text("[project]\nproject_name=myproj\n", encoding="utf-8")
-    (tmp_path / "kanban.cfg").write_text(
-        "[locks]\nstale_lock_reap_after_wake_periods=0\n", encoding="utf-8"
-    )
+    (tmp_path / "kanban.cfg").write_text("[locks]\nstale_lock_reap_after_wake_periods=0\n", encoding="utf-8")
     result = _run(tmp_path, "pp_stale_lock_reap_after_wake_periods myproj", tmp_path)
     assert result.returncode != 0
     assert "invalid value" in result.stderr.lower()
@@ -1169,3 +1160,255 @@ def test_dev_tree_path_is_empty_without_a_config_or_key(tmp_path: pathlib.Path) 
 def test_dev_tree_path_needs_a_project_name(tmp_path: pathlib.Path) -> None:
     result = _run(tmp_path, "pp_dev_tree_path", tmp_path, PGAI_PROJECT_NAME="")
     assert result.returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# pp_load_config
+# ---------------------------------------------------------------------------
+
+_PP_KNOWN_FIELDS = (
+    "PP_project_name",
+    "PP_dev_tree_path",
+    "PP_git_repo_url",
+    "PP_git_remote_name",
+    "PP_workflow_type",
+    "PP_branch_prefix",
+    "PP_max_patch",
+    "PP_max_minor",
+    "PP_max_major",
+    "PP_max_priorities_per_run",
+    "PP_cm_release_pre_squash_hook",
+    "PP_cm_release_pre_tag_hook",
+    "PP_cm_release_post_tag_hook",
+    "PP_TEMP_DIR",
+)
+
+
+def test_load_config_failure_leaves_no_earlier_project_values(tmp_path: pathlib.Path) -> None:
+    """A failed load in the same shell clears what an earlier project's load exported."""
+    kanban = tmp_path / "kanban"
+    (_make_project(kanban, "alpha") / "project.cfg").write_text(
+        "[project]\nproject_name = alpha\ndev_tree_path = /srv/alpha-repo\ntemp_dir = alpha-td\n"
+        "branch_prefix = ai_\n[versioning]\nmax_patch = 9\n"
+        "[hooks]\ncm_release_pre_tag_hook = /srv/alpha-hook\n",
+        encoding="utf-8",
+    )
+    _make_project(kanban, "beta")
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    report = " ".join(f'"{name}=${{{name}-<unset>}}"' for name in _PP_KNOWN_FIELDS)
+    script = (
+        "pp_load_config alpha; echo \"alpha_rc=$?\"; "
+        "printf '%s\\n' \"alpha_dev=$PP_dev_tree_path\" \"alpha_temp=$PP_TEMP_DIR\"; "
+        "pp_load_config beta; echo \"beta_rc=$?\"; "
+        f"printf 'after_beta %s\\n' {report}"
+    )
+    result = _run(
+        tmp_path,
+        script,
+        kanban,
+        PGAI_AGENT_KANBAN_ROOT_PATH=str(kanban),
+        PGAI_AGENT_KANBAN_TEMP_DIR=str(temp_root),
+    )
+    lines = result.stdout.splitlines()
+    assert "alpha_rc=0" in lines, result.stderr
+    assert "alpha_dev=/srv/alpha-repo" in lines
+    assert f"alpha_temp={temp_root}/alpha-td" in lines
+    assert "beta_rc=1" in lines
+    assert "not found" in result.stderr
+    after_beta = [line.removeprefix("after_beta ") for line in lines if line.startswith("after_beta ")]
+    assert len(after_beta) == len(_PP_KNOWN_FIELDS)
+    for entry in after_beta:
+        name, _, value = entry.partition("=")
+        assert value in ("", "<unset>"), f"{name} kept alpha's value {value!r} after beta's load failed"
+
+
+def _legacy_load_env(kanban: pathlib.Path, temp_root: pathlib.Path, **extra: str) -> dict[str, str]:
+    """Inherited environment without any PP_* name, pointed at a throwaway kanban root."""
+    stripped = ("PGAI_PROJECT_NAME", "PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PP_") and k not in stripped}
+    env.update(
+        KANBAN_ROOT=str(kanban),
+        PGAI_AGENT_KANBAN_ROOT_PATH=str(kanban),
+        PGAI_AGENT_KANBAN_TEMP_DIR=str(temp_root),
+    )
+    env.update(extra)
+    return env
+
+
+def _report_fields(label: str) -> str:
+    """Bash that prints '<label> NAME=value' (or '=<unset>') for every known field."""
+    report = " ".join(f'"{name}=${{{name}-<unset>}}"' for name in _PP_KNOWN_FIELDS)
+    return f"printf '{label} %s\\n' {report}"
+
+
+def _fields(lines: list[str], label: str) -> dict[str, str]:
+    """Parse the lines _report_fields(label) printed into {name: value}."""
+    prefix = f"{label} "
+    return dict(line.removeprefix(prefix).partition("=")[::2] for line in lines if line.startswith(prefix))
+
+
+def test_load_config_legacy_after_ini_keeps_none_of_the_ini_values(tmp_path: pathlib.Path) -> None:
+    """A legacy PROJECT.cfg load after an INI load leaves no known field at the INI project's value."""
+    kanban = tmp_path / "kanban"
+    (_make_project(kanban, "alpha") / "project.cfg").write_text(
+        "[project]\nproject_name = alpha\ndev_tree_path = /srv/alpha-repo\n"
+        "git_repo_url = https://example.invalid/a.git\n[versioning]\nmax_patch = 9\n"
+        "[hooks]\ncm_release_pre_tag_hook = /srv/h2\n",
+        encoding="utf-8",
+    )
+    (_make_project(kanban, "gamma") / "PROJECT.cfg").write_text(
+        "project_name=gamma\ndev_tree_path=/srv/gamma-repo\ntemp_dir=gamma-td\nbranch_prefix=g_\n",
+        encoding="utf-8",
+    )
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    script = (
+        f"pp_load_config alpha; echo \"alpha_rc=$?\"; {_report_fields('alpha')}; "
+        f"pp_load_config gamma; echo \"gamma_rc=$?\"; {_report_fields('gamma')}"
+    )
+    result = run_bash(tmp_path, f"source {_LIB} && {script}", base_env=_legacy_load_env(kanban, temp_root))
+    lines = result.stdout.splitlines()
+    assert "alpha_rc=0" in lines, result.stderr
+    assert "gamma_rc=0" in lines, result.stderr
+    alpha, gamma = _fields(lines, "alpha"), _fields(lines, "gamma")
+    assert alpha["PP_git_repo_url"] == "https://example.invalid/a.git"
+    assert alpha["PP_cm_release_pre_tag_hook"] == "/srv/h2"
+    assert gamma["PP_project_name"] == "gamma"
+    assert gamma["PP_dev_tree_path"] == "/srv/gamma-repo"
+    assert gamma["PP_git_repo_url"] in ("", "<unset>")
+    assert gamma["PP_cm_release_pre_tag_hook"] in ("", "<unset>")
+    assert len(gamma) == len(_PP_KNOWN_FIELDS)
+    for name, value in gamma.items():
+        if alpha[name] not in ("", "<unset>"):
+            assert value != alpha[name], f"{name} kept alpha's value {value!r} after gamma's legacy load"
+
+
+def test_load_config_second_legacy_load_replaces_the_first(tmp_path: pathlib.Path) -> None:
+    """A second legacy load in the same shell exports its own values, and no inherited one survives."""
+    kanban = tmp_path / "kanban"
+    (_make_project(kanban, "gamma") / "PROJECT.cfg").write_text(
+        "project_name=gamma\ndev_tree_path=/srv/gamma-repo\ntemp_dir=gamma-td\nbranch_prefix=g_\n",
+        encoding="utf-8",
+    )
+    (_make_project(kanban, "delta") / "PROJECT.cfg").write_text(
+        "project_name=delta\ndev_tree_path=/srv/delta-repo\ntemp_dir=delta-td\nbranch_prefix=d_\n",
+        encoding="utf-8",
+    )
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    env = _legacy_load_env(kanban, temp_root, PP_cm_release_pre_tag_hook="/srv/inherited-hook")
+    script = (
+        "pp_load_config gamma; echo \"gamma_rc=$?\"; "
+        f"pp_load_config delta; echo \"delta_rc=$?\"; {_report_fields('delta')}"
+    )
+    result = run_bash(tmp_path, f"source {_LIB} && {script}", base_env=env)
+    lines = result.stdout.splitlines()
+    assert "gamma_rc=0" in lines, result.stderr
+    assert "delta_rc=0" in lines, result.stderr
+    delta = _fields(lines, "delta")
+    assert delta["PP_project_name"] == "delta"
+    assert delta["PP_dev_tree_path"] == "/srv/delta-repo"
+    assert delta["PP_branch_prefix"] == "d_"
+    assert delta["PP_TEMP_DIR"] == f"{temp_root}/delta-td"
+    assert delta["PP_cm_release_pre_tag_hook"] in ("", "<unset>"), "the inherited hook survived a legacy load"
+
+
+@pytest.mark.parametrize(
+    ("cfg_body", "expected"),
+    [
+        (
+            "project_name=gamma\ndev_tree_path=/srv/gamma-repo\n",
+            {"PP_project_name": "gamma", "PP_dev_tree_path": "/srv/gamma-repo", "PP_TEMP_DIR": "projects/gamma"},
+        ),
+        (
+            "project_name=gamma\ndev_tree_path=/srv/gamma-repo\ntemp_dir=gamma-td\nbranch_prefix=g_\n",
+            {
+                "PP_project_name": "gamma",
+                "PP_dev_tree_path": "/srv/gamma-repo",
+                "PP_branch_prefix": "g_",
+                "PP_temp_dir": "gamma-td",
+                "PP_TEMP_DIR": "gamma-td",
+            },
+        ),
+    ],
+    ids=["without-temp-dir", "with-temp-dir"],
+)
+def test_load_config_fresh_legacy_load_exports_only_the_file_fields(
+    tmp_path: pathlib.Path, cfg_body: str, expected: dict[str, str]
+) -> None:
+    """A fresh legacy load exports the file's fields and PP_TEMP_DIR, never PP_before_vars or another local."""
+    kanban = tmp_path / "kanban"
+    (_make_project(kanban, "gamma") / "PROJECT.cfg").write_text(cfg_body, encoding="utf-8")
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    expected = {**expected, "PP_TEMP_DIR": f"{temp_root}/{expected['PP_TEMP_DIR']}"}
+    child = (
+        "printenv PP_before_vars; echo \"printenv_rc=$?\"; "
+        "for n in $(compgen -e); do [[ $n == PP_* ]] && printf \"child %s=%s\\n\" \"$n\" \"${!n}\"; done; true"
+    )
+    script = f"pp_load_config gamma; echo \"rc=$?\"; bash -c {shlex.quote(child)}"
+    result = run_bash(tmp_path, f"source {_LIB} && {script}", base_env=_legacy_load_env(kanban, temp_root))
+    lines = result.stdout.splitlines()
+    assert "rc=0" in lines, result.stderr
+    assert lines[1] == "printenv_rc=1", f"PP_before_vars reached a child process, starting {lines[1:4]!r}"
+    exported = _fields(lines, "child")
+    assert exported == expected
+
+
+_STRICT_CALLER_FORMS = {
+    "or-form": 'rc=0; pp_load_config idiom2 || rc=$?; echo "rc=$rc"',
+    "if-form": 'if pp_load_config idiom2; then echo "rc=0"; else echo "rc=$?"; fi',
+}
+
+
+@pytest.mark.parametrize("caller_form", sorted(_STRICT_CALLER_FORMS))
+@pytest.mark.parametrize(
+    ("cfg_body", "expected_rc", "expected"),
+    [
+        (
+            "project_name=idiom2\ndev_tree_path=/srv/idiom2\n"
+            "git_repo_url=$(git -C /nonexistent remote get-url origin 2>/dev/null)\n",
+            0,
+            {"PP_project_name": "idiom2", "PP_dev_tree_path": "/srv/idiom2", "PP_git_repo_url": ""},
+        ),
+        (
+            "project_name=idiom2\nfalse\ndev_tree_path=/srv/idiom2\n",
+            0,
+            {"PP_project_name": "idiom2", "PP_dev_tree_path": "/srv/idiom2"},
+        ),
+        (
+            "project_name=idiom2\ndev_tree_path=$UNDEFINED_THING/x\n",
+            0,
+            {"PP_project_name": "idiom2", "PP_dev_tree_path": "/x"},
+        ),
+        (
+            "project_name=idiom2\ndev_tree_path=/srv/idiom2\nexit 0\n",
+            1,
+            {name: "<unset>" for name in _PP_KNOWN_FIELDS},
+        ),
+    ],
+    ids=["failing-command-substitution", "failing-command", "unset-variable", "exit-line"],
+)
+def test_load_config_legacy_failing_line_under_strict_caller(
+    tmp_path: pathlib.Path, cfg_body: str, expected_rc: int, expected: dict[str, str], caller_form: str
+) -> None:
+    """Under set -euo pipefail a legacy load exports the file's fields or fails; never 0 with them unset."""
+    kanban = tmp_path / "kanban"
+    (_make_project(kanban, "idiom2") / "PROJECT.cfg").write_text(cfg_body, encoding="utf-8")
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    env = _legacy_load_env(kanban, temp_root, PP_dev_tree_path="/srv/inherited", PP_TEMP_DIR="/srv/inherited-temp")
+    script = f"set -euo pipefail; {_STRICT_CALLER_FORMS[caller_form]}; {_report_fields('after')}"
+    result = run_bash(tmp_path, f"source {_LIB} && {script}", base_env=env)
+    lines = result.stdout.splitlines()
+    assert result.returncode == 0, f"the strict caller aborted: {result.stderr}"
+    assert f"rc={expected_rc}" in lines, result.stderr
+    after = _fields(lines, "after")
+    assert not ("rc=0" in lines and after["PP_project_name"] == "<unset>"), "returned 0 with the file's fields unset"
+    for name, value in expected.items():
+        assert after[name] == value, f"{name}={after[name]!r}, expected {value!r}"
+    if expected_rc == 0:
+        assert after["PP_TEMP_DIR"] == f"{temp_root}/projects/idiom2"
+    else:
+        assert "stopped before it finished loading" in result.stderr

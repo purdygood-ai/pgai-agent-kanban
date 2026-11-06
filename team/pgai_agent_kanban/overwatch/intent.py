@@ -53,7 +53,6 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List
 
 # Run by file path or loaded from a file outside its package, this module has
 # no parent package and the interpreter puts only its own directory on
@@ -95,9 +94,7 @@ class IntentEntry:
 _FENCE_RE = re.compile(r"^\s*```")
 _BLANK_RE = re.compile(r"^\s*$")
 _BULLET_START_RE = re.compile(r"^\s*-")
-_ENTRY_LINE_RE = re.compile(
-    r"^-\s+(?P<date>\d{4}-\d{2}-\d{2}):\s+(?P<declaration>\S.*)$"
-)
+_ENTRY_LINE_RE = re.compile(r"^-\s+(?P<date>\d{4}-\d{2}-\d{2}):\s+(?P<declaration>\S.*)$")
 
 
 def _is_real_date(value: str) -> bool:
@@ -112,7 +109,7 @@ def _is_real_date(value: str) -> bool:
     return True
 
 
-def _entries_section_lines(text: str) -> List[str]:
+def _entries_section_lines(text: str) -> list[str]:
     """Return the lines of the "## Entries" section body, as
     task_status.read_section reads it (up to the next level-2 heading or
     end of file). Returns [] when no "## Entries" heading is present — a
@@ -123,9 +120,9 @@ def _entries_section_lines(text: str) -> List[str]:
     return body.splitlines() if body else []
 
 
-def _parse_section(section: List[str]) -> List[IntentEntry]:
+def _parse_section(section: list[str]) -> list[IntentEntry]:
     """Parse the pre-sliced "## Entries" section body into entries."""
-    entries: List[IntentEntry] = []
+    entries: list[IntentEntry] = []
     in_fence = False
     index = 0
     while index < len(section):
@@ -180,7 +177,7 @@ def _parse_section(section: List[str]) -> List[IntentEntry]:
 # ---------------------------------------------------------------------------
 
 
-def parse_entries(intent_path: str) -> List[IntentEntry]:
+def parse_entries(intent_path: str) -> list[IntentEntry]:
     """Parse the INTENT.md at *intent_path* into a list of IntentEntry, in
     file (top-to-bottom) order.
 
@@ -191,7 +188,7 @@ def parse_entries(intent_path: str) -> List[IntentEntry]:
     template's shape). This function performs no writes of any kind.
     """
     try:
-        with open(intent_path, "r", encoding="utf-8") as handle:
+        with open(intent_path, encoding="utf-8") as handle:
             text = handle.read()
     except (OSError, UnicodeDecodeError):
         return []
@@ -205,7 +202,7 @@ def intent_path_for_project(kanban_root: str, project_name: str) -> str:
     return os.path.join(kanban_root, "projects", project_name, "INTENT.md")
 
 
-def read_project_intent(kanban_root: str, project_name: str) -> List[IntentEntry]:
+def read_project_intent(kanban_root: str, project_name: str) -> list[IntentEntry]:
     """Resolve *project_name*'s standard INTENT.md path under *kanban_root*
     and parse it. Same fail-closed behavior as parse_entries(): an absent
     file, an unreadable file, or a file with zero live entries all return
@@ -220,7 +217,7 @@ def declares(intent_path: str, declaration: str) -> bool:
     return any(entry.declaration == declaration for entry in parse_entries(intent_path))
 
 
-def main(argv: "List[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] in ("-h", "--help"):

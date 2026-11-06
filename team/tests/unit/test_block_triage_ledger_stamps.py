@@ -52,7 +52,7 @@ _SOURCE = f"task:{_TASK}"
 _BLOCKED_AT = "2026-01-01T10:00:00+00:00"
 _EVIDENCE = "worktree=gone; branch=ai_feature/example; ahead=2; merged=no"
 _README = "# Task: example\n\n## Role\nCODER\n\n## Goal\nDo the thing.\n"
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _NOW_ISO = "2026-01-01T12:00:00+00:00"
 
 
@@ -172,8 +172,13 @@ def test_requeue_opens_the_block_with_its_reason_code_then_closes_it_class_any(s
 
 def test_block_opened_by_the_record_write_gets_no_second_start(sandbox):
     sandbox.seed(_status(_record("zero_progress")).split("## Block Record")[0])
-    write_block_record(sandbox.status, "zero_progress", "CODER", [_EVIDENCE],
-                       now=datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.timezone.utc))
+    write_block_record(
+        sandbox.status,
+        "zero_progress",
+        "CODER",
+        [_EVIDENCE],
+        now=datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.UTC),
+    )
     assert [r["kind"] for r in sandbox.records()] == ["block-start"]
 
     result = sandbox.apply()
@@ -192,8 +197,13 @@ def test_block_opened_by_the_record_write_gets_no_second_start(sandbox):
 
 def test_escalation_marks_the_open_block_human_without_rewriting_a_line(sandbox):
     sandbox.seed(_status(_record("missing_readme")).split("## Block Record")[0])
-    write_block_record(sandbox.status, "missing_readme", "CODER", [_EVIDENCE],
-                       now=datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.timezone.utc))
+    write_block_record(
+        sandbox.status,
+        "missing_readme",
+        "CODER",
+        [_EVIDENCE],
+        now=datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.UTC),
+    )
     before = sandbox.ledger.read_bytes()
     assert before
 
@@ -202,7 +212,7 @@ def test_escalation_marks_the_open_block_human_without_rewriting_a_line(sandbox)
 
     after = sandbox.ledger.read_bytes()
     assert after.startswith(before), "an earlier ledger line was rewritten"
-    added = [json.loads(line) for line in after[len(before):].decode("utf-8").splitlines() if line.strip()]
+    added = [json.loads(line) for line in after[len(before) :].decode("utf-8").splitlines() if line.strip()]
     assert [(r["kind"], r["source"], r["class"]) for r in added] == [("block-escalate", _SOURCE, "human")]
     assert added[0]["reason_code"] == "missing_readme"
     (block,) = sandbox.blocks()
@@ -312,9 +322,9 @@ def test_escalation_through_the_sweep_check_reaches_the_ledger(sandbox, tmp_path
     """)
     result = run_bash(tmp_path, script, extra_env=sandbox.env(), timeout=120)
     assert "CHECK_EXIT=0" in result.stdout, result.stderr
-    assert "block-triage:missing_readme:escalate" in (
-        sandbox.project_root / "overwatch" / "actions.log"
-    ).read_text(encoding="utf-8")
+    assert "block-triage:missing_readme:escalate" in (sandbox.project_root / "overwatch" / "actions.log").read_text(
+        encoding="utf-8"
+    )
 
     (block,) = sandbox.blocks()
     assert block["source"] == _SOURCE and block["class"] == "human" and block["version"] == "v9.9.9"

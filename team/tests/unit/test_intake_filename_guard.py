@@ -127,9 +127,7 @@ def test_traversal_source_path_is_refused_through_the_shared_helper(
 
 
 @pytest.mark.parametrize("name", ["BUG-0001..x.md", "BUG-0001\\x.md", "BUG-0001%2Fx.md"])
-def test_not_bare_name_is_refused_dual_channel_even_with_a_routing_prefix(
-    name: str, tmp_path: pathlib.Path
-) -> None:
+def test_not_bare_name_is_refused_dual_channel_even_with_a_routing_prefix(name: str, tmp_path: pathlib.Path) -> None:
     project, ctx = _make_board(tmp_path)
     source = _stage(tmp_path / "staging" / name)
 
@@ -222,7 +220,7 @@ def test_not_bare_remedy_keeps_the_routing_prefix_and_deposits_where_it_routes(
     remedy = _not_bare_remedy(project, ctx, source)
 
     # The runnable part is the shell command after the prose lead-in.
-    command = remedy[remedy.index("mv "):]
+    command = remedy[remedy.index("mv ") :]
     words = shlex.split(command)
     assert words[:2] == ["mv", str(source)], remedy
     target = pathlib.Path(words[2])
@@ -300,13 +298,13 @@ def test_rename_remedy_reruns_the_installed_intake_sh_on_a_spaced_root(
     assert triple is not None and triple["error"] == error, refused.stderr
     remedy = triple["remedy"]
     assert "<" not in remedy, remedy
-    rerun = shlex.split(remedy[remedy.index("&&") + len("&&"):])
+    rerun = shlex.split(remedy[remedy.index("&&") + len("&&") :])
     assert rerun[0] == str(root / "scripts" / "intake.sh"), remedy
     assert rerun[1:3] == ["--project", _PROJECT], remedy
     assert _deposited(project) == []
 
     # The whole remedy, run as printed from the same directory, deposits the file.
-    command = remedy[remedy.index("mv "):]
+    command = remedy[remedy.index("mv ") :]
     result = subprocess.run(
         ["bash", "-c", command],
         capture_output=True,

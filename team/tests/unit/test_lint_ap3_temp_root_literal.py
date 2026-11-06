@@ -54,9 +54,7 @@ _PY_LITERAL_SRC = make_hardcoded_literal_src()
 _PY_LITERAL_LINENO = len(_PY_LITERAL_SRC.splitlines())
 
 _SH_LITERAL_SRC = (
-    "#!/usr/bin/env bash\n"
-    "# Synthetic shell script carrying the temp-root literal.\n"
-    f'root="{_LITERAL}"\n'
+    "#!/usr/bin/env bash\n" "# Synthetic shell script carrying the temp-root literal.\n" f'root="{_LITERAL}"\n'
 )
 _SH_LITERAL_LINENO = 3
 
@@ -209,14 +207,11 @@ def test_default_scan_covers_the_team_package(tmp_path: Path) -> None:
     Asserts only that the scan reached the package -- not that the real
     package is finding-free, which is the quality-class lint's own verdict.
     """
-    result = _run_ap_lint(
-        tmp_path, "--tests-dir", str(_empty_tests_dir(tmp_path)), "--scripts-dirs"
-    )
+    result = _run_ap_lint(tmp_path, "--tests-dir", str(_empty_tests_dir(tmp_path)), "--scripts-dirs")
 
-    assert (
-        f"lint_test_anti_patterns: scanning package modules (AP3) in {_PACKAGE_DIR}"
-        in result.stdout
-    ), result.stdout + result.stderr
+    assert f"lint_test_anti_patterns: scanning package modules (AP3, AP10) in {_PACKAGE_DIR}" in result.stdout, (
+        result.stdout + result.stderr
+    )
 
 
 def test_default_runtime_scan_covers_team_verification(tmp_path: Path) -> None:
@@ -225,12 +220,11 @@ def test_default_runtime_scan_covers_team_verification(tmp_path: Path) -> None:
     Asserts only that the scan reached the directory, as the package case
     above does.
     """
-    result = _run_ap_lint(
-        tmp_path, "--tests-dir", str(_empty_tests_dir(tmp_path)), "--package-dirs"
-    )
+    result = _run_ap_lint(tmp_path, "--tests-dir", str(_empty_tests_dir(tmp_path)), "--package-dirs")
 
     scanned = [
-        line for line in result.stdout.splitlines()
+        line
+        for line in result.stdout.splitlines()
         if line.startswith("lint_test_anti_patterns: scanning runtime scripts in ")
     ]
     assert len(scanned) == 1, result.stdout + result.stderr
@@ -240,9 +234,7 @@ def test_default_runtime_scan_covers_team_verification(tmp_path: Path) -> None:
 def test_files_with_package_dirs_is_a_usage_error(tmp_path: Path) -> None:
     named = _write(tmp_path / "tests" / "test_clean.py", "def test_ok():\n    assert True\n")
 
-    result = _run_ap_lint(
-        tmp_path, "--files", str(named), "--package-dirs", str(tmp_path / "pkg")
-    )
+    result = _run_ap_lint(tmp_path, "--files", str(named), "--package-dirs", str(tmp_path / "pkg"))
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "--files cannot be combined" in result.stderr
@@ -279,9 +271,7 @@ def _lint_temp_root_basename(tmp_path: Path, extra_env: dict) -> str:
 def test_temp_root_basename_follows_the_override(tmp_path: Path) -> None:
     override = tmp_path / "scratch" / "operator_temp_root"
 
-    basename = _lint_temp_root_basename(
-        tmp_path, {"PGAI_AGENT_KANBAN_TEMP_DIR": str(override)}
-    )
+    basename = _lint_temp_root_basename(tmp_path, {"PGAI_AGENT_KANBAN_TEMP_DIR": str(override)})
 
     assert basename == "operator_temp_root"
 
@@ -292,14 +282,10 @@ def test_temp_root_basename_follows_kanban_cfg_paths_without_override(
     kanban_root = tmp_path / "kanban"
     _write(
         kanban_root / "kanban.cfg",
-        "[paths]\n"
-        f"tmp_root = {tmp_path / 'scratch'}\n"
-        "tmp_subdir = configured_temp_root\n",
+        "[paths]\n" f"tmp_root = {tmp_path / 'scratch'}\n" "tmp_subdir = configured_temp_root\n",
     )
 
-    basename = _lint_temp_root_basename(
-        tmp_path, {"PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root)}
-    )
+    basename = _lint_temp_root_basename(tmp_path, {"PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root)})
 
     assert basename == "configured_temp_root"
 
@@ -320,7 +306,11 @@ def test_temp_sh_and_wake_driver_invoke_are_ap3_clean_without_the_whitelist(tmp_
     ):
         _write(scripts / name, source.read_text(encoding="utf-8"))
     result = _run_ap_lint(
-        tmp_path, "--tests-dir", str(_empty_tests_dir(tmp_path)), "--scripts-dirs", str(scripts),
+        tmp_path,
+        "--tests-dir",
+        str(_empty_tests_dir(tmp_path)),
+        "--scripts-dirs",
+        str(scripts),
         "--package-dirs",
     )
     assert _ap3_lines(result.stdout) == [], result.stdout
@@ -332,7 +322,7 @@ def test_temp_sh_last_resort_root_is_the_joined_per_key_defaults(tmp_path: Path)
     temp_sh = _TEAM_DIR / "scripts" / "lib" / "temp.sh"
     result = run_bash(
         tmp_path,
-        f'source {shlex.quote(str(temp_sh))}\n'
+        f"source {shlex.quote(str(temp_sh))}\n"
         f'printf "%s\\n" "$_PGAI_TEMP_FALLBACK_ROOT" "$(pgai_configured_temp_root /nonexistent/kanban.cfg)"\n',
     )
     assert result.returncode == 0, result.stderr

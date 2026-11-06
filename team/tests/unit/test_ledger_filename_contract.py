@@ -54,9 +54,7 @@ _DISCOVERY_SH = _SCRIPTS_LIB / "discovery.sh"
 # both.
 _DISCOVERY_ITEMS_SH = _SCRIPTS_LIB / "discovery_items.sh"
 _DISCOVERY_ITEMS_PY = _TEAM_DIR / "pgai_agent_kanban" / "discovery" / "items.py"
-_LEDGER_CONTRACT_PY = (
-    _TEAM_DIR / "pgai_agent_kanban" / "lib" / "ledger_filename_contract.py"
-)
+_LEDGER_CONTRACT_PY = _TEAM_DIR / "pgai_agent_kanban" / "lib" / "ledger_filename_contract.py"
 
 
 def _import_ledger_module():
@@ -134,15 +132,11 @@ class TestLedgerFilenameContractModule:
 
     def test_ledger_filename_re_accepts_historical_dated_form(self) -> None:
         mod = _import_ledger_module()
-        assert mod.ledger_filename_re("PRIORITY").match(
-            "PRIORITY-0036-20260803-some-slug.md"
-        )
+        assert mod.ledger_filename_re("PRIORITY").match("PRIORITY-0036-20260803-some-slug.md")
 
     def test_ledger_filename_re_rejects_date_first_form(self) -> None:
         mod = _import_ledger_module()
-        assert not mod.ledger_filename_re("PRIORITY").match(
-            "PRIORITY-20260803-001-some-slug.md"
-        )
+        assert not mod.ledger_filename_re("PRIORITY").match("PRIORITY-20260803-001-some-slug.md")
 
     def test_ledger_filename_re_rejects_under_padded_number(self) -> None:
         mod = _import_ledger_module()
@@ -162,9 +156,7 @@ class TestLedgerFilenameContractModule:
         mod = _import_ledger_module()
         assert mod.classify_defect("PRIORITY-0036-slug.md", "PRIORITY") is None
 
-    def test_next_free_number_parses_numerically(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_next_free_number_parses_numerically(self, tmp_path: pathlib.Path) -> None:
         """0009 and 0036 in the same directory yield next free number 37.
 
         A lexical high-water scan would still coincidentally get this case
@@ -180,9 +172,7 @@ class TestLedgerFilenameContractModule:
         (d / "PRIORITY-0036-b.md").write_text("x", encoding="utf-8")
         assert mod.next_free_number(d, "PRIORITY") == 37
 
-    def test_next_free_number_ignores_malformed_planted_file(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_next_free_number_ignores_malformed_planted_file(self, tmp_path: pathlib.Path) -> None:
         """A planted malformed file with a large apparent number does not poison scanning."""
         mod = _import_ledger_module()
         d = tmp_path / "priority"
@@ -192,9 +182,7 @@ class TestLedgerFilenameContractModule:
         (d / "PRIORITY-20260803-001-date-first-bad.md").write_text("x", encoding="utf-8")
         assert mod.next_free_number(d, "PRIORITY") == 37
 
-    def test_number_held_by_contract_invalid_name_is_taken_by_remedy_and_claim(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_number_held_by_contract_invalid_name_is_taken_by_remedy_and_claim(self, tmp_path: pathlib.Path) -> None:
         """A name that fails the contract still holds its four-digit number.
 
         A dotted slug, e.g. BUG-0002-v1.2.3-notes-count.md, fails the
@@ -223,9 +211,7 @@ class TestLedgerFilenameContractModule:
         release_bug_id_claim(lock_path)
         assert bug_id == "BUG-0003", bug_id
 
-    def test_next_free_number_counts_contract_invalid_name_for_any_prefix(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_next_free_number_counts_contract_invalid_name_for_any_prefix(self, tmp_path: pathlib.Path) -> None:
         """The taken rule is prefix-general: a contract-invalid name with a
         dotted slug, e.g. PRIORITY-0005-a.b.md, still holds 0005."""
         mod = _import_ledger_module()
@@ -248,17 +234,13 @@ class TestLedgerFilenameContractModule:
             ("PRIORITY-0003-other-prefix.md", None),
         ],
     )
-    def test_ledger_taken_re_takes_exactly_four_digit_prefixes(
-        self, name: str, expected: "int | None"
-    ) -> None:
+    def test_ledger_taken_re_takes_exactly_four_digit_prefixes(self, name: str, expected: int | None) -> None:
         mod = _import_ledger_module()
         m = mod.ledger_taken_re("BUG-").match(name)
         got = int(m.group(1)) if m else None
         assert got == expected, f"{name!r}: expected {expected!r}, got {got!r}"
 
-    def test_build_remedy_date_first_names_next_free_number(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_build_remedy_date_first_names_next_free_number(self, tmp_path: pathlib.Path) -> None:
         mod = _import_ledger_module()
         d = tmp_path / "priority"
         d.mkdir()
@@ -267,24 +249,16 @@ class TestLedgerFilenameContractModule:
         assert "PRIORITY-0037" in remedy
         assert "number-first" in remedy or "date" in remedy.lower()
 
-    def test_build_remedy_under_padded_names_padded_guess_and_next_free(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_build_remedy_under_padded_names_padded_guess_and_next_free(self, tmp_path: pathlib.Path) -> None:
         mod = _import_ledger_module()
         d = tmp_path / "priority"
         d.mkdir()
         (d / "PRIORITY-0036-existing.md").write_text("x", encoding="utf-8")
         remedy = mod.build_remedy("PRIORITY-036-bad.md", "PRIORITY", d)
-        assert "PRIORITY-0036" in remedy, (
-            f"Expected the padded guess in remedy text: {remedy!r}"
-        )
-        assert "PRIORITY-0037" in remedy, (
-            f"Expected the next free number in remedy text: {remedy!r}"
-        )
+        assert "PRIORITY-0036" in remedy, f"Expected the padded guess in remedy text: {remedy!r}"
+        assert "PRIORITY-0037" in remedy, f"Expected the next free number in remedy text: {remedy!r}"
 
-    def test_build_remedy_never_suggests_auto_rename(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_build_remedy_never_suggests_auto_rename(self, tmp_path: pathlib.Path) -> None:
         """Remedy text prescribes; it never instructs an automated rename."""
         mod = _import_ledger_module()
         d = tmp_path / "priority"
@@ -305,10 +279,8 @@ class TestSingleSourceStructural:
         )
         module_text = _DISCOVERY_ITEMS_PY.read_text(encoding="utf-8")
         assert "pgai_agent_kanban.lib.ledger_filename_contract" in module_text, (
-            "pgai_agent_kanban.discovery.items must import from "
-            "pgai_agent_kanban.lib.ledger_filename_contract."
+            "pgai_agent_kanban.discovery.items must import from " "pgai_agent_kanban.lib.ledger_filename_contract."
         )
-
 
     def test_bug_claim_uses_the_shared_taken_rule(self) -> None:
         """The atomic BUG-ID claim takes its "taken" rule from the contract
@@ -318,9 +290,7 @@ class TestSingleSourceStructural:
 
         scanner = load_bug_scanner()
         assert scanner._BUG_TAKEN_RE.pattern == mod.ledger_taken_re("BUG").pattern
-        scanner_text = (
-            _TEAM_DIR / "pm-agent" / "lib" / "bug_scanner.py"
-        ).read_text(encoding="utf-8")
+        scanner_text = (_TEAM_DIR / "pm-agent" / "lib" / "bug_scanner.py").read_text(encoding="utf-8")
         assert "_BUG_TAKEN_RE = re.compile" not in scanner_text, (
             "bug_scanner.py must import ledger_taken_re from "
             "pgai_agent_kanban.lib.ledger_filename_contract, not compile its own."
@@ -336,91 +306,63 @@ class TestFilingTimeGateRealPath:
     """Exercises the real production scan-and-select entry point, not a
     regex-only unit test, per the acceptance fixtures."""
 
-    def test_date_first_priority_name_is_refused_with_date_first_remedy(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_date_first_priority_name_is_refused_with_date_first_remedy(self, tmp_path: pathlib.Path) -> None:
         priority_dir = tmp_path / "priority"
-        _write_priority_file(
-            priority_dir, "PRIORITY-20260803-001-date-first-bad.md"
-        )
+        _write_priority_file(priority_dir, "PRIORITY-20260803-001-date-first-bad.md")
         # A well-formed sibling must remain selected — ledger/selection untouched.
         _write_priority_file(priority_dir, "PRIORITY-0001-well-formed.md")
 
         result = _run_find_unhandled(priority_dir, "PRIORITY-")
-        assert result.returncode == 0, (
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
         assert "date-first-bad.md" in result.stderr, (
-            f"Expected the date-first file to be rejected on stderr.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the date-first file to be rejected on stderr.\n" f"stderr: {result.stderr}"
         )
-        assert "number-first" in result.stderr, (
-            f"Expected the date-first remedy text on stderr.\nstderr: {result.stderr}"
-        )
+        assert (
+            "number-first" in result.stderr
+        ), f"Expected the date-first remedy text on stderr.\nstderr: {result.stderr}"
         assert "date-first-bad.md" not in result.stdout, (
-            f"Malformed file must not appear in the selected/validated output.\n"
-            f"stdout: {result.stdout}"
+            f"Malformed file must not appear in the selected/validated output.\n" f"stdout: {result.stdout}"
         )
-        assert "well-formed" in result.stdout, (
-            f"Well-formed sibling file must still be selected.\nstdout: {result.stdout}"
-        )
+        assert (
+            "well-formed" in result.stdout
+        ), f"Well-formed sibling file must still be selected.\nstdout: {result.stdout}"
 
-    def test_under_padded_priority_name_is_refused_with_padding_remedy(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_under_padded_priority_name_is_refused_with_padding_remedy(self, tmp_path: pathlib.Path) -> None:
         priority_dir = tmp_path / "priority"
         _write_priority_file(priority_dir, "PRIORITY-0036-existing.md")
         _write_priority_file(priority_dir, "PRIORITY-036-under-padded.md")
 
         result = _run_find_unhandled(priority_dir, "PRIORITY-")
-        assert result.returncode == 0, (
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
         assert "under-padded.md" in result.stderr
         assert "PRIORITY-0036" in result.stderr, (
-            f"Expected the padded guess in the remedy.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the padded guess in the remedy.\n" f"stderr: {result.stderr}"
         )
         assert "PRIORITY-0037" in result.stderr, (
-            f"Expected the next free number in the remedy.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the next free number in the remedy.\n" f"stderr: {result.stderr}"
         )
         assert "under-padded.md" not in result.stdout
 
-    def test_valid_plain_and_historical_dated_names_are_both_accepted(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_valid_plain_and_historical_dated_names_are_both_accepted(self, tmp_path: pathlib.Path) -> None:
         priority_dir = tmp_path / "priority"
         _write_priority_file(priority_dir, "PRIORITY-0036-plain-form.md")
-        _write_priority_file(
-            priority_dir, "PRIORITY-0037-20260803-historical-dated-form.md"
-        )
+        _write_priority_file(priority_dir, "PRIORITY-0037-20260803-historical-dated-form.md")
 
         result = _run_find_unhandled(priority_dir, "PRIORITY-")
-        assert result.returncode == 0, (
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
 
-        output_names = {
-            pathlib.Path(line.strip()).name
-            for line in result.stdout.strip().splitlines()
-            if line.strip()
-        }
-        assert "PRIORITY-0036-plain-form.md" in output_names, (
-            f"got {output_names!r}\nstderr: {result.stderr}"
-        )
-        assert "PRIORITY-0037-20260803-historical-dated-form.md" in output_names, (
-            f"got {output_names!r}\nstderr: {result.stderr}"
-        )
+        output_names = {pathlib.Path(line.strip()).name for line in result.stdout.strip().splitlines() if line.strip()}
+        assert "PRIORITY-0036-plain-form.md" in output_names, f"got {output_names!r}\nstderr: {result.stderr}"
+        assert (
+            "PRIORITY-0037-20260803-historical-dated-form.md" in output_names
+        ), f"got {output_names!r}\nstderr: {result.stderr}"
         # No rejections for either well-formed file.
         assert "plain-form.md" not in result.stderr
         assert "historical-dated-form.md" not in result.stderr
 
-    def test_high_water_fixture_yields_correct_next_number_via_module(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_high_water_fixture_yields_correct_next_number_via_module(self, tmp_path: pathlib.Path) -> None:
         """The directory scan feeding the real filing path computes 0009,
         0036 -> next free 0037, with a planted malformed file excluded.
 
@@ -432,9 +374,7 @@ class TestFilingTimeGateRealPath:
         priority_dir.mkdir()
         (priority_dir / "PRIORITY-0009-a.md").write_text("x", encoding="utf-8")
         (priority_dir / "PRIORITY-0036-b.md").write_text("x", encoding="utf-8")
-        (priority_dir / "PRIORITY-99-planted-malformed.md").write_text(
-            "x", encoding="utf-8"
-        )
+        (priority_dir / "PRIORITY-99-planted-malformed.md").write_text("x", encoding="utf-8")
 
         mod = _import_ledger_module()
         assert mod.next_free_number(priority_dir, "PRIORITY") == 37

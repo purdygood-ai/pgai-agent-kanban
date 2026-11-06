@@ -96,7 +96,7 @@ import argparse
 import pathlib
 import re
 import sys
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 from tests.fixtures.tester_reports.legacy_readers.stop_bug_files import (
     bug_file_for_id,
@@ -171,7 +171,7 @@ def skip_rationale(section: str, category: str) -> str:
 
 def resolve_skipped_bug_pairs(
     report_path: str, bugs_dir: str, exclude_paths: Sequence[str] = ()
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """Return the (bug_file, rationale) rows for a release's Bugs Skipped table.
 
     Args:
@@ -200,7 +200,7 @@ def resolve_skipped_bug_pairs(
 
     bugs = pathlib.Path(bugs_dir)
     seen_ids: set = set()
-    pairs: List[Tuple[str, str]] = []
+    pairs: list[tuple[str, str]] = []
     for section in finding_blocks(text):
         category = field_first_word(section, "Category")
         if category not in SKIPPED_CATEGORIES:
@@ -221,7 +221,7 @@ def resolve_skipped_bug_pairs(
     return pairs
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.skipped_bug_pairs",
@@ -244,9 +244,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
-    for bug_file, rationale in resolve_skipped_bug_pairs(
-        args.report_path, args.bugs_dir, args.exclude_paths
-    ):
+    for bug_file, rationale in resolve_skipped_bug_pairs(args.report_path, args.bugs_dir, args.exclude_paths):
         print(f"{bug_file}\t{rationale}")
     return 0
 

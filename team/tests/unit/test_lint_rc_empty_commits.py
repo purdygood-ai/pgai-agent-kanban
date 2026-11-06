@@ -63,6 +63,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="lint-rc-empty-commits")
 
+
 # ---------------------------------------------------------------------------
 # Locate lint_rc_empty_commits.py and import it as a module (mirrors
 # test_lint_hygiene.py's approach so the test exercises the real
@@ -92,9 +93,7 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, (
-        f"git {' '.join(args)} failed in {repo}:\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"git {' '.join(args)} failed in {repo}:\n{result.stdout}\n{result.stderr}"
     return result
 
 
@@ -122,9 +121,7 @@ def _empty_commit(repo: Path, message: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_flags_empty_non_merge_commit_in_rc_range(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_flags_empty_non_merge_commit_in_rc_range(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo, main_branch="main")
     _write_commit(repo, "README.md", "hello\n", "initial commit")
@@ -258,9 +255,7 @@ def test_discovers_prefixed_main_and_rc_branches(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unresolvable_range_exits_2_without_the_found_key(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_unresolvable_range_exits_2_without_the_found_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo = tmp_path / "repo"
     _init_repo(repo, main_branch="main")
     _write_commit(repo, "README.md", "hello\n", "initial commit")

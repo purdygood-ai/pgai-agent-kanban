@@ -39,7 +39,6 @@ Design:
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import shutil
 import subprocess
@@ -71,6 +70,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="overwatch-resolution-stage")
 
+
 _TEAM_DIR = pathlib.Path(__file__).parent.parent.parent  # team/
 _CANCEL_RC_SCRIPT = _TEAM_DIR / "scripts" / "cm" / "cancel-rc.sh"
 _KANBAN_PY_CM_DIR = _TEAM_DIR / "pgai_agent_kanban" / "cm"
@@ -92,7 +92,8 @@ def _init_git_repo(repo_path: pathlib.Path, main_branch: str, rc_branch: str) ->
     )
     subprocess.run(
         ["git", "init", f"--initial-branch={main_branch}", str(repo_path)],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     run("config", "--local", "user.email", "test@pgai.local")
     run("config", "--local", "user.name", "PGAI Test")
@@ -204,9 +205,7 @@ def _write_tester_report(tasks_dir: pathlib.Path, tester_task_id: str, version: 
     (task_dir / "artifacts").mkdir(parents=True, exist_ok=True)
     _write_task(tasks_dir, tester_task_id, version, "DONE", role="TESTER")
     (task_dir / "artifacts" / "report.md").write_text(
-        "# TESTER Report\n\n"
-        "### Finding 1: sample regression\n"
-        f"**Filed As:** {bug_id}\n",
+        "# TESTER Report\n\n" "### Finding 1: sample regression\n" f"**Filed As:** {bug_id}\n",
         encoding="utf-8",
     )
 
@@ -220,7 +219,9 @@ def _write_bug(bugs_dir: pathlib.Path, bug_id: str, status: str = "assigned") ->
     return path
 
 
-def _write_bundle(requirements_dir: pathlib.Path, version: str, bug_basenames: list, bugs_dir: pathlib.Path) -> pathlib.Path:
+def _write_bundle(
+    requirements_dir: pathlib.Path, version: str, bug_basenames: list, bugs_dir: pathlib.Path
+) -> pathlib.Path:
     bundle_path = requirements_dir / f"{version}-bugfix-bundle-20260727.md"
     lines = [
         f"# Requirements: {version} — BUG bundle\n\n",
@@ -282,7 +283,14 @@ def _build_golden_fixture(tmp_path: pathlib.Path, project_name: str = "golden_pr
 class TestGoldenPathExecutesTheDrill:
     def test_matched_row_runs_cancel_rc_and_writes_one_ledger_entry(self, tmp_path: pathlib.Path) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
         ) = _build_golden_fixture(tmp_path)
 
         outcome = run_resolution_stage("golden_project", str(kanban_root))
@@ -310,7 +318,9 @@ class TestGoldenPathExecutesTheDrill:
         # Local RC branch deleted by cancel-rc.sh.
         branches = subprocess.run(
             ["git", "-C", str(repo_path), "branch", "--list", f"ai_rc/{version}"],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
         assert branches.strip() == ""
 
@@ -334,7 +344,7 @@ class TestGoldenPathExecutesTheDrill:
         """Once the HALT is cleared and Active RC reset, a second firing has
         nothing left to evaluate — proves the stage does not loop or re-fire
         on its own prior work."""
-        (kanban_root, proj, *_rest) = _build_golden_fixture(tmp_path)
+        kanban_root, proj, *_rest = _build_golden_fixture(tmp_path)
         first = run_resolution_stage("golden_project", str(kanban_root))
         assert first.status == EXECUTED, first.reason
 
@@ -356,7 +366,14 @@ class TestGoldenPathExecutesTheDrill:
 class TestSquashConflictRunsTheDrillWithoutAHalt:
     def test_squash_conflict_cancels_and_rebundles_and_writes_no_halt(self, tmp_path: pathlib.Path) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
         ) = _build_golden_fixture(tmp_path)
         halt_path.unlink()
 
@@ -378,11 +395,16 @@ class TestSquashConflictRunsTheDrillWithoutAHalt:
             assert "## State\nWONT-DO" in (proj / "tasks" / tid / "status.md").read_text(encoding="utf-8")
         assert "## Status\nopen" in (proj / "bugs" / f"{bug_id}.md").read_text(encoding="utf-8")
 
-    def test_squash_conflict_with_an_approval_gate_declines_and_touches_nothing(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_squash_conflict_with_an_approval_gate_declines_and_touches_nothing(self, tmp_path: pathlib.Path) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
         ) = _build_golden_fixture(tmp_path)
         halt_path.unlink()
         (proj / "tasks" / f"HUMAN-APPROVE-{version}-001").mkdir()
@@ -408,7 +430,14 @@ class TestOperatorHaltInviolability:
         self, tmp_path: pathlib.Path
     ) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
         ) = _build_golden_fixture(tmp_path)
 
         # An operator-authored HALT sits at the GLOBAL scope alongside the
@@ -443,7 +472,7 @@ class TestOperatorHaltInviolability:
 
 class TestFailClosedDeclines:
     def test_no_halt_at_all_is_a_silent_no_op(self, tmp_path: pathlib.Path) -> None:
-        (kanban_root, proj, *_rest) = _build_golden_fixture(tmp_path)
+        kanban_root, proj, *_rest = _build_golden_fixture(tmp_path)
         (proj / "HALT").unlink()
 
         outcome = run_resolution_stage("golden_project", str(kanban_root))
@@ -453,7 +482,7 @@ class TestFailClosedDeclines:
         assert not (proj / "auto-resolutions.md").exists()
 
     def test_halt_present_but_not_cm_authored_declines(self, tmp_path: pathlib.Path) -> None:
-        (kanban_root, proj, *_rest) = _build_golden_fixture(tmp_path)
+        kanban_root, proj, *_rest = _build_golden_fixture(tmp_path)
         halt_path = proj / "HALT"
         _write_operator_halt(halt_path)
 
@@ -464,7 +493,7 @@ class TestFailClosedDeclines:
         assert not (proj / "auto-resolutions.md").exists()
 
     def test_active_rc_none_declines_and_leaves_halt_in_place(self, tmp_path: pathlib.Path) -> None:
-        (kanban_root, proj, repo_path, version, halt_path, *_rest) = _build_golden_fixture(tmp_path)
+        kanban_root, proj, repo_path, version, halt_path, *_rest = _build_golden_fixture(tmp_path)
         _write_release_state_md(proj, "none")
 
         outcome = run_resolution_stage("golden_project", str(kanban_root))
@@ -475,12 +504,10 @@ class TestFailClosedDeclines:
         assert not (proj / "auto-resolutions.md").exists()
 
     def test_approval_gate_present_declines_and_leaves_halt_in_place(self, tmp_path: pathlib.Path) -> None:
-        (kanban_root, proj, repo_path, version, halt_path, *_rest) = _build_golden_fixture(tmp_path)
+        kanban_root, proj, repo_path, version, halt_path, *_rest = _build_golden_fixture(tmp_path)
         approve_task = proj / "tasks" / f"HUMAN-APPROVE-{version}-001"
         approve_task.mkdir(parents=True, exist_ok=True)
-        (approve_task / "status.md").write_text(
-            "# Status\n\n## State\nBACKLOG\n", encoding="utf-8"
-        )
+        (approve_task / "status.md").write_text("# Status\n\n## State\nBACKLOG\n", encoding="utf-8")
 
         outcome = run_resolution_stage("golden_project", str(kanban_root))
 
@@ -489,7 +516,7 @@ class TestFailClosedDeclines:
         assert not (proj / "auto-resolutions.md").exists()
 
     def test_unfiled_finding_declines_and_leaves_halt_in_place(self, tmp_path: pathlib.Path) -> None:
-        (kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id) = _build_golden_fixture(tmp_path)
+        kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id = _build_golden_fixture(tmp_path)
         report_path = proj / "tasks" / "TESTER-20260727-001-verify" / "artifacts" / "report.md"
         report_path.write_text(
             "# TESTER Report\n\n### Finding 1: sample regression\n**Filed As:** none\n",
@@ -605,18 +632,34 @@ def _build_ceiling_fixture(tmp_path: pathlib.Path, project_name: str = "ceiling_
     )
 
     return (
-        kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
-        ledger_path, entry1_id, entry2_id,
+        kanban_root,
+        proj,
+        repo_path,
+        version,
+        halt_path,
+        task_id,
+        cm_task_id,
+        bug_id,
+        ledger_path,
+        entry1_id,
+        entry2_id,
     )
 
 
 class TestCeilingReached:
-    def test_attempt_at_ceiling_declines_with_full_history_and_no_drill_action(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_attempt_at_ceiling_declines_with_full_history_and_no_drill_action(self, tmp_path: pathlib.Path) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
-            ledger_path, entry1_id, entry2_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
+            ledger_path,
+            entry1_id,
+            entry2_id,
         ) = _build_ceiling_fixture(tmp_path)
 
         outcome = run_resolution_stage("ceiling_project", str(kanban_root))
@@ -664,7 +707,7 @@ class TestCeilingReached:
         """A repeat firing on the same still-blocked state must not error on
         the already-backfilled ledger entries (backfill_family_outcome is
         idempotent — see ledger.py)."""
-        (kanban_root, proj, *_rest) = _build_ceiling_fixture(tmp_path)
+        kanban_root, proj, *_rest = _build_ceiling_fixture(tmp_path)
 
         first = run_resolution_stage("ceiling_project", str(kanban_root))
         assert first.status == DECLINED
@@ -682,15 +725,20 @@ class TestCeilingReached:
 class TestMissingCeilingConfigFailsLoud:
     def test_missing_max_rc_retries_declines_loudly_with_no_action(self, tmp_path: pathlib.Path) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
         ) = _build_golden_fixture(tmp_path, project_name="noceiling_project")
 
         # Strip [release] max_rc_retries from BOTH config sources — the one
         # fact resolution_matrix.py never silently defaults (requirements
         # Goal 4: "Fail-loud if the key is absent when the resolver needs it").
-        (kanban_root / "kanban.cfg").write_text(
-            "[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8"
-        )
+        (kanban_root / "kanban.cfg").write_text("[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8")
         (proj / "project.cfg").write_text(
             "[project]\n"
             "project_name = noceiling_project\n"
@@ -728,7 +776,14 @@ class TestMissingCeilingConfigFailsLoud:
 class TestSubCeilingRemainsEligible:
     def test_attempt_below_ceiling_still_executes_matched_resolution(self, tmp_path: pathlib.Path) -> None:
         (
-            kanban_root, proj, repo_path, version, halt_path, task_id, cm_task_id, bug_id,
+            kanban_root,
+            proj,
+            repo_path,
+            version,
+            halt_path,
+            task_id,
+            cm_task_id,
+            bug_id,
         ) = _build_golden_fixture(tmp_path, project_name="subceiling_project")
 
         # Second attempt of three (ceiling 3) — still below the ceiling, so
@@ -769,9 +824,7 @@ class TestClassifyHaltFile:
             pytest.param(_write_operator_halt, "operator", id="operator_content"),
         ],
     )
-    def test_classify_by_content(
-        self, tmp_path: pathlib.Path, writer, expected: str
-    ) -> None:
+    def test_classify_by_content(self, tmp_path: pathlib.Path, writer, expected: str) -> None:
         path = _project_halt_path(tmp_path)
         writer(path)
         assert classify_halt_file(str(path)) == expected

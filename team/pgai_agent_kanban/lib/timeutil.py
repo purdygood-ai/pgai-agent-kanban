@@ -53,7 +53,6 @@ Public API:
 from __future__ import annotations
 
 import datetime
-from typing import Optional
 
 __all__ = [
     "compact_utc_stamp",
@@ -91,11 +90,11 @@ def parse_iso(value: str, *, naive_as_utc: bool = True) -> datetime.datetime:
         text = text[:-1] + "+00:00"
     dt = datetime.datetime.fromisoformat(text)
     if naive_as_utc and dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.replace(tzinfo=datetime.UTC)
     return dt
 
 
-def try_parse_iso(value: str, *, naive_as_utc: bool = True) -> Optional[datetime.datetime]:
+def try_parse_iso(value: str, *, naive_as_utc: bool = True) -> datetime.datetime | None:
     """Parse an ISO-8601 timestamp, returning ``None`` when it does not parse.
 
     Same accepted forms and ``naive_as_utc`` meaning as ``parse_iso``.
@@ -113,13 +112,13 @@ def format_iso(dt: datetime.datetime) -> str:
     already be UTC. Sub-second precision is dropped.
     """
     if dt.tzinfo is not None:
-        dt = dt.astimezone(datetime.timezone.utc)
+        dt = dt.astimezone(datetime.UTC)
     return dt.strftime(_UTC_FORMAT)
 
 
 def utc_now_iso() -> str:
     """Return the current time as ``YYYY-MM-DDThh:mm:ss+00:00`` in UTC."""
-    return format_iso(datetime.datetime.now(datetime.timezone.utc))
+    return format_iso(datetime.datetime.now(datetime.UTC))
 
 
 def compact_utc_stamp(moment: datetime.datetime) -> str:
@@ -128,7 +127,7 @@ def compact_utc_stamp(moment: datetime.datetime) -> str:
     The moment is converted to UTC first; a naive one is read as local time,
     as ``datetime.astimezone`` reads it. Sub-second precision is dropped.
     """
-    return moment.astimezone(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return moment.astimezone(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def format_days_hours(delta: datetime.timedelta) -> str:
@@ -144,12 +143,12 @@ def format_days_hours(delta: datetime.timedelta) -> str:
     return f"{hours}h"
 
 
-def moment_or_now(now: "datetime.datetime | str | None") -> datetime.datetime:
+def moment_or_now(now: datetime.datetime | str | None) -> datetime.datetime:
     """*now* as an aware datetime; the current UTC time when None or unparseable.
 
     A naive datetime is taken to be UTC; ISO text is read by ``try_parse_iso``.
     """
     if isinstance(now, datetime.datetime):
-        return now if now.tzinfo is not None else now.replace(tzinfo=datetime.timezone.utc)
+        return now if now.tzinfo is not None else now.replace(tzinfo=datetime.UTC)
     parsed = try_parse_iso(now) if isinstance(now, str) else None
-    return parsed or datetime.datetime.now(datetime.timezone.utc)
+    return parsed or datetime.datetime.now(datetime.UTC)

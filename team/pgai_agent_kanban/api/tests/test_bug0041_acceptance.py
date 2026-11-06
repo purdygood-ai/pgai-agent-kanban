@@ -46,14 +46,12 @@ Design notes
 from __future__ import annotations
 
 import hashlib
-import os
 import pathlib
 from typing import NamedTuple
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Resolve the dev tree from this file's location.
@@ -102,10 +100,7 @@ def _make_minimal_sandbox(root: pathlib.Path, project: str = _SANDBOX_PROJECT) -
     (project_root / "tasks" / "queues").mkdir(parents=True, exist_ok=True)
 
     (project_root / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {project}\n"
-        f"dev_tree_path = {root}\n"
-        "git_repo_url = none\n",
+        "[project]\n" f"project_name = {project}\n" f"dev_tree_path = {root}\n" "git_repo_url = none\n",
         encoding="utf-8",
     )
     (project_root / "release-state.md").write_text(
@@ -193,9 +188,7 @@ def _in_process_operation_routes() -> frozenset[str]:
     )
 
 
-def _make_operation_client(
-    route: str, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> TestClient:
+def _make_operation_client(route: str, kanban_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """A TestClient for *route*: rooted at the sandbox for an in-process
     route, at team/ (so scripts resolve) for a route that shells out."""
     if route in _in_process_operation_routes():
@@ -227,17 +220,13 @@ class TestReferenceShapes:
         with _make_client(kanban_root, monkeypatch) as client:
             resp = client.get("/health")
 
-        assert resp.status_code == 200, (
-            f"GET /health must return 200; got {resp.status_code}."
-        )
+        assert resp.status_code == 200, f"GET /health must return 200; got {resp.status_code}."
         body = resp.json()
         assert "warnings" in body, (
-            f"'warnings' key must always be present in /health response.\n"
-            f"Got keys: {sorted(body.keys())}"
+            f"'warnings' key must always be present in /health response.\n" f"Got keys: {sorted(body.keys())}"
         )
         assert body["warnings"] == [], (
-            f"GET /health with no unknown params must return warnings=[]; "
-            f"got {body['warnings']!r}"
+            f"GET /health with no unknown params must return warnings=[]; " f"got {body['warnings']!r}"
         )
 
     def test_health_unknown_query_param_produces_named_warning(
@@ -256,17 +245,13 @@ class TestReferenceShapes:
         with _make_client(kanban_root, monkeypatch) as client:
             resp = client.get("/health?bob=unknown_var")
 
-        assert resp.status_code == 200, (
-            f"GET /health?bob=unknown_var must return 200; got {resp.status_code}."
-        )
+        assert resp.status_code == 200, f"GET /health?bob=unknown_var must return 200; got {resp.status_code}."
         body = resp.json()
         assert "warnings" in body, (
-            f"'warnings' key must be present in /health response.\n"
-            f"Got keys: {sorted(body.keys())}"
+            f"'warnings' key must be present in /health response.\n" f"Got keys: {sorted(body.keys())}"
         )
         assert body["warnings"] == ["unknown parameter: bob"], (
-            f"Unknown param 'bob' must produce exactly ['unknown parameter: bob']; "
-            f"got {body['warnings']!r}"
+            f"Unknown param 'bob' must produce exactly ['unknown parameter: bob']; " f"got {body['warnings']!r}"
         )
 
     def test_halt_dry_run_returns_200_no_halt_file_created(
@@ -291,9 +276,7 @@ class TestReferenceShapes:
         halt_file = project_root / "HALT"
 
         # Pre-condition: no HALT file before the call
-        assert not halt_file.exists(), (
-            "Pre-condition violated: HALT file must not exist before dry-run call."
-        )
+        assert not halt_file.exists(), "Pre-condition violated: HALT file must not exist before dry-run call."
 
         # POST /operations/halt calls ops.write.halt in process against the
         # API's own kanban root, so the API is rooted at the sandbox: a dry
@@ -316,13 +299,11 @@ class TestReferenceShapes:
         )
 
         assert "dry-run" in body["stdout"].lower(), (
-            f"dry_run halt stdout must describe the planned action (contain 'dry-run'); "
-            f"got: {body['stdout']!r}"
+            f"dry_run halt stdout must describe the planned action (contain 'dry-run'); " f"got: {body['stdout']!r}"
         )
 
         assert body["warnings"] == [], (
-            f"dry_run halt with no unknown fields must return warnings=[]; "
-            f"got {body['warnings']!r}"
+            f"dry_run halt with no unknown fields must return warnings=[]; " f"got {body['warnings']!r}"
         )
 
         # ON-DISK ASSERTION: the HALT file must NOT exist after the dry-run call.
@@ -384,8 +365,7 @@ class TestReferenceShapes:
 
             warning_text = " ".join(body["warnings"])
             assert "forse" in warning_text, (
-                f"Warning must name the unknown field 'forse'; "
-                f"got warnings={body['warnings']!r}"
+                f"Warning must name the unknown field 'forse'; " f"got warnings={body['warnings']!r}"
             )
         finally:
             # Cleanup: remove HALT file so subsequent tests see a clean state
@@ -634,8 +614,7 @@ class TestSeventeenOperationProbe:
             resp = client.post(spec.route, json=body)
 
         assert resp.status_code == 200, (
-            f"{spec.route}: dry_run=true must return HTTP 200; "
-            f"got {resp.status_code}.\nbody: {resp.text}"
+            f"{spec.route}: dry_run=true must return HTTP 200; " f"got {resp.status_code}.\nbody: {resp.text}"
         )
         response_body = resp.json()
 
@@ -669,10 +648,7 @@ class TestSeventeenOperationProbe:
         checksum_after = _dir_checksum(kanban_root)
         added = set(checksum_after) - set(checksum_before)
         removed = set(checksum_before) - set(checksum_after)
-        changed = {
-            p for p in set(checksum_before) & set(checksum_after)
-            if checksum_before[p] != checksum_after[p]
-        }
+        changed = {p for p in set(checksum_before) & set(checksum_after) if checksum_before[p] != checksum_after[p]}
         if added or removed or changed:
             lines = []
             for p in sorted(added):
@@ -725,7 +701,7 @@ _TEST_REPORT_PROBE_TASK = "TESTER-20260101-002-verify-1-0-0"
 _IN_PROCESS_READ_ROUTES = frozenset({"/show", "/status", "/test-report", "/rejected", "/verify-rc-state", "/costs"})
 
 
-def _seed_read_route_state(spec: "_ReadRouteSpec", kanban_root: pathlib.Path) -> None:
+def _seed_read_route_state(spec: _ReadRouteSpec, kanban_root: pathlib.Path) -> None:
     """Add the sandbox state an in-process read route needs to answer 200.
 
     /status and /rejected answer 200 from the minimal sandbox itself (a
@@ -851,10 +827,10 @@ _READ_ROUTE_IDS = [spec.path.replace("/", "_").lstrip("_") for spec in _ALL_READ
 
 
 def _make_client_for_route(
-    spec: "_ReadRouteSpec",
+    spec: _ReadRouteSpec,
     kanban_root: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> "TestClient":
+) -> TestClient:
     """Return a TestClient appropriate for the given route spec.
 
     Routes that perform pure Python registry/filesystem reads (like /projects/{name})
@@ -982,8 +958,7 @@ class TestReadRouteProbe:
                 resp = client.get(spec.path, params=spec.required_params)
 
         assert resp.status_code == 200, (
-            f"GET {spec.path} (clean call) must return 200; "
-            f"got {resp.status_code}.\nbody: {resp.text[:400]}"
+            f"GET {spec.path} (clean call) must return 200; " f"got {resp.status_code}.\nbody: {resp.text[:400]}"
         )
         body = resp.json()
         assert "warnings" in body, (
@@ -991,8 +966,7 @@ class TestReadRouteProbe:
             f"Got keys: {sorted(body.keys()) if isinstance(body, dict) else type(body)}"
         )
         assert body["warnings"] == [], (
-            f"GET {spec.path}: clean call must return warnings=[]; "
-            f"got {body['warnings']!r}"
+            f"GET {spec.path}: clean call must return warnings=[]; " f"got {body['warnings']!r}"
         )
 
 
@@ -1123,6 +1097,5 @@ class TestNativeDryRunRegression:
 
         # The 'stderr' field must be empty (no errors from the short-circuit path)
         assert response_body["stderr"] == "", (
-            f"{route}: dry_run=true must return empty stderr; "
-            f"got stderr={response_body['stderr']!r}"
+            f"{route}: dry_run=true must return empty stderr; " f"got stderr={response_body['stderr']!r}"
         )

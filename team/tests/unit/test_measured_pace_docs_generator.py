@@ -48,9 +48,7 @@ _GENERATOR = _TEAM_DIR / "scripts" / "generate_measured_pace_docs.py"
 # White-box import of the generator module itself (a script, not a package
 # member) for the function-level tests below -- same seam
 # test_operator_verb_docs_generator.py uses for its own generator.
-_spec = importlib.util.spec_from_file_location(
-    "generate_measured_pace_docs_under_test", _GENERATOR
-)
+_spec = importlib.util.spec_from_file_location("generate_measured_pace_docs_under_test", _GENERATOR)
 _gen = importlib.util.module_from_spec(_spec)
 assert _spec.loader is not None
 sys.modules[_spec.name] = _gen  # dataclass() needs the module registered to resolve types
@@ -86,9 +84,7 @@ def _write_rc_dir(tmp_path: pathlib.Path, rollups: list[dict]) -> pathlib.Path:
     rc_dir = tmp_path / "rc"
     rc_dir.mkdir()
     for rollup in rollups:
-        (rc_dir / f"{rollup['rc']}.json").write_text(
-            json.dumps(rollup), encoding="utf-8"
-        )
+        (rc_dir / f"{rollup['rc']}.json").write_text(json.dumps(rollup), encoding="utf-8")
     return rc_dir
 
 
@@ -151,16 +147,12 @@ def test_compute_pace_stats_composed_rc_uses_shared_averaging_module():
     from pgai_agent_kanban.lib.agent_metrics import compute_agent_averages
 
     expected = compute_agent_averages(rollups)
-    assert stats.agent_avg_tasks == {
-        agent: vals["avg_tasks"] for agent, vals in expected.items()
-    }
+    assert stats.agent_avg_tasks == {agent: vals["avg_tasks"] for agent, vals in expected.items()}
     assert stats.agent_avg_tasks["coder"] == 2.0
 
     # composed[agent] == avg_tasks[agent] * median (15.0)
     assert stats.composed["coder"] == pytest.approx(2.0 * 15.0, abs=0.05)
-    assert stats.composed_total == pytest.approx(
-        sum(stats.composed.values()), abs=0.05
-    )
+    assert stats.composed_total == pytest.approx(sum(stats.composed.values()), abs=0.05)
 
 
 def test_compute_pace_stats_skips_rc_with_no_wall_time_or_no_tasks():
@@ -230,9 +222,12 @@ def test_render_writes_block_and_check_passes(tmp_path: pathlib.Path):
 
     render = _run(
         [
-            "--rc-dir", str(rc_dir),
-            "--readme", str(readme),
-            "--how-to", str(how_to),
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
         ]
     )
     assert render.returncode == 0, render.stdout + render.stderr
@@ -242,9 +237,12 @@ def test_render_writes_block_and_check_passes(tmp_path: pathlib.Path):
     check = _run(
         [
             "--check",
-            "--rc-dir", str(rc_dir),
-            "--readme", str(readme),
-            "--how-to", str(how_to),
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
         ]
     )
     assert check.returncode == 0, check.stdout + check.stderr
@@ -261,17 +259,18 @@ def test_check_reports_drift_on_hand_edited_figure_and_writes_nothing(
 
     render = _run(
         [
-            "--rc-dir", str(rc_dir),
-            "--readme", str(readme),
-            "--how-to", str(how_to),
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
         ]
     )
     assert render.returncode == 0, render.stdout + render.stderr
 
     original = readme.read_text(encoding="utf-8")
-    assert "median 10.0" in original, (
-        "rendered figure literal changed -- update this test's expectation"
-    )
+    assert "median 10.0" in original, "rendered figure literal changed -- update this test's expectation"
     corrupted = original.replace("median 10.0", "median 999.0", 1)
     assert corrupted != original
     readme.write_text(corrupted, encoding="utf-8")
@@ -279,9 +278,12 @@ def test_check_reports_drift_on_hand_edited_figure_and_writes_nothing(
     check = _run(
         [
             "--check",
-            "--rc-dir", str(rc_dir),
-            "--readme", str(readme),
-            "--how-to", str(how_to),
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
         ]
     )
     assert check.returncode != 0
@@ -311,9 +313,12 @@ def test_render_reports_missing_marker_pair_as_usage_error(tmp_path: pathlib.Pat
 
     result = _run(
         [
-            "--rc-dir", str(rc_dir),
-            "--readme", str(readme),
-            "--how-to", str(how_to),
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
         ]
     )
     assert result.returncode == 2
@@ -357,9 +362,12 @@ def test_cli_prints_sample_size_as_rcs_and_tasks(tmp_path: pathlib.Path):
 
     result = _run(
         [
-            "--rc-dir", str(rc_dir),
-            "--readme", str(readme),
-            "--how-to", str(how_to),
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
         ]
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -380,10 +388,13 @@ def _render_into(tmp_path: pathlib.Path, rc_dir: pathlib.Path) -> tuple[pathlib.
 
 
 def test_freshness_narrates_stale_blocks_after_a_new_release_and_exits_zero(tmp_path: pathlib.Path):
-    rc_dir = _write_rc_dir(tmp_path, [
-        _rc_rollup("v1.0.1", 60.0, {"pm": 1, "coder": 2, "tester": 1}),
-        _rc_rollup("v1.0.0", 40.0, {"pm": 1, "coder": 2, "cm": 1}),
-    ])
+    rc_dir = _write_rc_dir(
+        tmp_path,
+        [
+            _rc_rollup("v1.0.1", 60.0, {"pm": 1, "coder": 2, "tester": 1}),
+            _rc_rollup("v1.0.0", 40.0, {"pm": 1, "coder": 2, "cm": 1}),
+        ],
+    )
     readme, how_to = _render_into(tmp_path, rc_dir)
     before = (readme.read_text(encoding="utf-8"), how_to.read_text(encoding="utf-8"))
 
@@ -393,11 +404,19 @@ def test_freshness_narrates_stale_blocks_after_a_new_release_and_exits_zero(tmp_
         encoding="utf-8",
     )
     findings_file = tmp_path / "lint" / "pace.json"
-    fresh = _run([
-        "--freshness", "--rc-dir", str(rc_dir),
-        "--readme", str(readme), "--how-to", str(how_to),
-        "--findings-file", str(findings_file),
-    ])
+    fresh = _run(
+        [
+            "--freshness",
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
 
     assert fresh.returncode == 0, fresh.stdout + fresh.stderr
     stale_lines = [l for l in fresh.stdout.splitlines() if "STALE" in l]
@@ -416,11 +435,19 @@ def test_freshness_is_quiet_when_blocks_end_at_the_newest_rollup(tmp_path: pathl
     rc_dir = _write_rc_dir(tmp_path, [_rc_rollup("v1.0.0", 40.0, {"pm": 1, "coder": 2, "cm": 1})])
     readme, how_to = _render_into(tmp_path, rc_dir)
     findings_file = tmp_path / "pace.json"
-    fresh = _run([
-        "--freshness", "--rc-dir", str(rc_dir),
-        "--readme", str(readme), "--how-to", str(how_to),
-        "--findings-file", str(findings_file),
-    ])
+    fresh = _run(
+        [
+            "--freshness",
+            "--rc-dir",
+            str(rc_dir),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
+            "--findings-file",
+            str(findings_file),
+        ]
+    )
     assert fresh.returncode == 0
     assert "STALE" not in fresh.stdout
     assert "OK" in fresh.stdout
@@ -430,10 +457,17 @@ def test_freshness_is_quiet_when_blocks_end_at_the_newest_rollup(tmp_path: pathl
 def test_freshness_with_no_rollups_skips_and_exits_zero(tmp_path: pathlib.Path):
     readme = _copy_real_doc(tmp_path, "README.md")
     how_to = _copy_real_doc(tmp_path, "HOW_TO.md")
-    fresh = _run([
-        "--freshness", "--rc-dir", str(tmp_path / "no-such-rc-dir"),
-        "--readme", str(readme), "--how-to", str(how_to),
-    ])
+    fresh = _run(
+        [
+            "--freshness",
+            "--rc-dir",
+            str(tmp_path / "no-such-rc-dir"),
+            "--readme",
+            str(readme),
+            "--how-to",
+            str(how_to),
+        ]
+    )
     assert fresh.returncode == 0
     assert "skipped" in fresh.stdout
 

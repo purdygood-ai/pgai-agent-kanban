@@ -98,8 +98,9 @@ def _failing_writer_path(tmp_path: pathlib.Path) -> pathlib.Path:
     return stub
 
 
-def _finalize(tmp_path: pathlib.Path, root: pathlib.Path, extra_env: dict | None = None,
-              script: pathlib.Path = _FINALIZE):
+def _finalize(
+    tmp_path: pathlib.Path, root: pathlib.Path, extra_env: dict | None = None, script: pathlib.Path = _FINALIZE
+):
     cwd = tmp_path / "elsewhere"
     cwd.mkdir(exist_ok=True)
     (tmp_path / "home").mkdir(exist_ok=True)
@@ -116,8 +117,13 @@ def _finalize(tmp_path: pathlib.Path, root: pathlib.Path, extra_env: dict | None
     )
     proc = subprocess.Popen(
         ["bash", str(script), "--project", _PROJECT, "--yes", _VERSION],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, cwd=str(cwd), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        start_new_session=True,
     )
     try:
         out, err = proc.communicate(timeout=_TIMEOUT_SECONDS)
@@ -232,8 +238,9 @@ def test_set_aside_patch_lands_under_the_temp_root(tmp_path: pathlib.Path) -> No
 def test_missing_temp_sh_refuses_before_touching_the_repository(tmp_path: pathlib.Path) -> None:
     repo, root = _build(tmp_path)
     scripts = tmp_path / "broken_install" / "scripts"
-    shutil.copytree(_TEAM_DIR / "scripts" / "lib", scripts / "lib",
-                    ignore=shutil.ignore_patterns("temp.sh", "__pycache__"))
+    shutil.copytree(
+        _TEAM_DIR / "scripts" / "lib", scripts / "lib", ignore=shutil.ignore_patterns("temp.sh", "__pycache__")
+    )
     (scripts / "cm").mkdir()
     broken = scripts / "cm" / _FINALIZE.name
     shutil.copy2(_FINALIZE, broken)

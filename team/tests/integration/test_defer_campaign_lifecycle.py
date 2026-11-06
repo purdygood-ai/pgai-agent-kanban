@@ -35,7 +35,6 @@ import os
 import pathlib
 import subprocess
 import textwrap
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Path constants (resolve from this file's own location)
@@ -167,17 +166,14 @@ def _add_bug_file(
     bug_id: str = "BUG-0001",
     slug: str = "test-fix",
     status: str = "open",
-    severity: Optional[str] = "low",
+    severity: str | None = "low",
 ) -> pathlib.Path:
     bugs_dir = kanban_root / "projects" / project_name / "bugs"
     bugs_dir.mkdir(parents=True, exist_ok=True)
     bug_file = bugs_dir / f"{bug_id}-{slug}.md"
     severity_line = f"**Severity:** {severity}\n\n" if severity is not None else ""
     bug_file.write_text(
-        f"# {bug_id}: {slug}\n\n"
-        f"{severity_line}"
-        f"## Status\n{status}\n\n"
-        "## Summary\nTest bug file.\n",
+        f"# {bug_id}: {slug}\n\n" f"{severity_line}" f"## Status\n{status}\n\n" "## Summary\nTest bug file.\n",
         encoding="utf-8",
     )
     return bug_file
@@ -205,9 +201,7 @@ def _add_requirements_file(
 
 
 def _bundle_files(kanban_root: pathlib.Path, project_name: str) -> list[pathlib.Path]:
-    return list(
-        (kanban_root / "projects" / project_name / "requirements").glob("*-bugfix-bundle-*.md")
-    )
+    return list((kanban_root / "projects" / project_name / "requirements").glob("*-bugfix-bundle-*.md"))
 
 
 def _bug_status(bug_file: pathlib.Path) -> str:
@@ -244,9 +238,7 @@ def _why_fields(result: subprocess.CompletedProcess) -> dict:
 
 
 class TestCampaignFileSpendArc:
-    def test_arming_honouring_spending_and_resuming_all_happen_in_one_run(
-        self, two_project_root: pathlib.Path
-    ) -> None:
+    def test_arming_honouring_spending_and_resuming_all_happen_in_one_run(self, two_project_root: pathlib.Path) -> None:
         root = two_project_root
         project_root = root / "projects" / "project-a"
         release_state = project_root / "release-state.md"
@@ -269,8 +261,7 @@ class TestCampaignFileSpendArc:
         disc_result = _run_discovery(root, "project-a")
         assert disc_result.returncode == 0, disc_result.stderr
         assert not _bundle_files(root, "project-a"), (
-            f"The armed campaign should defer the low bug -- no bundle expected.\n"
-            f"stderr:\n{disc_result.stderr}"
+            f"The armed campaign should defer the low bug -- no bundle expected.\n" f"stderr:\n{disc_result.stderr}"
         )
         assert _bug_status(bug) == "open"
 
@@ -287,9 +278,7 @@ class TestCampaignFileSpendArc:
 
         # --- Spent: ship a release at or past the until target through
         #     the real production spend entry point. ---
-        spend_result = _spend_campaign_file(
-            root, "project-a", "v0.1.0", project_root, release_state
-        )
+        spend_result = _spend_campaign_file(root, "project-a", "v0.1.0", project_root, release_state)
         assert spend_result.returncode == 0, spend_result.stderr
         assert not campaign_file.exists(), "a qualifying ship should remove the campaign file"
 
@@ -337,8 +326,7 @@ class TestUndeferLiftsDeferralEarly:
         honoured_result = _run_discovery(root, "project-a")
         assert honoured_result.returncode == 0, honoured_result.stderr
         assert not _bundle_files(root, "project-a"), (
-            f"The armed campaign should defer the low bug before undefer.\n"
-            f"stderr:\n{honoured_result.stderr}"
+            f"The armed campaign should defer the low bug before undefer.\n" f"stderr:\n{honoured_result.stderr}"
         )
         assert _bug_status(bug) == "open"
 

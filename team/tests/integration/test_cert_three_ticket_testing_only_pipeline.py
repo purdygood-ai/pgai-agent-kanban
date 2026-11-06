@@ -58,7 +58,6 @@ import re
 import shutil
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants derived from this file's location.
@@ -101,10 +100,7 @@ def _build_testing_only_kanban_root(
     )
 
     (root / "projects.cfg").write_text(
-        f"[project:{project_name}]\n"
-        "priority=1\n"
-        "description=certification fixture project\n"
-        "enabled=true\n",
+        f"[project:{project_name}]\n" "priority=1\n" "description=certification fixture project\n" "enabled=true\n",
         encoding="utf-8",
     )
 
@@ -127,10 +123,7 @@ def _build_testing_only_kanban_root(
     )
 
     (proj / "release-state.md").write_text(
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n" "## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
 
@@ -139,8 +132,7 @@ def _build_testing_only_kanban_root(
     (queues_dir / "plans").mkdir(parents=True, exist_ok=True)
     for agent in ("coder", "pm", "writer", "tester", "cm", "bug", "priority"):
         (queues_dir / f"{agent}_backlog.md").write_text(
-            f"# {agent.upper()} Backlog\n\n"
-            "<!-- Format: - [ ] TASK-ID -->\n",
+            f"# {agent.upper()} Backlog\n\n" "<!-- Format: - [ ] TASK-ID -->\n",
             encoding="utf-8",
         )
 
@@ -340,9 +332,7 @@ def _build_harness_kanban_root(
     Returns:
         pathlib.Path — the kanban root.
     """
-    root = _build_testing_only_kanban_root(
-        parent, project_name=project_name, source_branch=source_branch
-    )
+    root = _build_testing_only_kanban_root(parent, project_name=project_name, source_branch=source_branch)
     (root / "kanban.cfg").write_text(
         "[paths]\n\n"
         "[chain]\npm_mode = automatic\n\n"
@@ -394,9 +384,7 @@ def _run_wake_harness(
     # `python3 -m pgai_agent_kanban.ops close_item`, and the package lives
     # under team/ (two levels up from this test file).
     existing_pp = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (
-        f"{str(_TEAM_DIR)}:{existing_pp}" if existing_pp else str(_TEAM_DIR)
-    )
+    env["PYTHONPATH"] = f"{str(_TEAM_DIR)}:{existing_pp}" if existing_pp else str(_TEAM_DIR)
 
     cmd = [
         "bash",
@@ -507,9 +495,7 @@ class TestThreeTicketWakeDispatchClosure:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        mat_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        mat_result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert mat_result.returncode == 0, (
             f"pm_materialize.py exited {mat_result.returncode}.\n"
             f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
@@ -543,14 +529,8 @@ class TestThreeTicketWakeDispatchClosure:
 
         # Guard 3: at least one TESTER task artifact dir has report.md.
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
-        report_found = any(
-            (d / "artifacts" / "report.md").is_file()
-            for d in tester_dirs
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
+        report_found = any((d / "artifacts" / "report.md").is_file() for d in tester_dirs)
         assert report_found, (
             f"Expected at least one TESTER task artifacts/report.md; "
             f"found none under {tasks_root}.\n"
@@ -584,9 +564,7 @@ class TestThreeTicketWakeDispatchClosure:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        mat_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        mat_result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert mat_result.returncode == 0, (
             f"pm_materialize.py exited {mat_result.returncode}.\n"
             f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
@@ -594,13 +572,8 @@ class TestThreeTicketWakeDispatchClosure:
 
         # Pre-seed two TESTER siblings to WORKING.
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
-        assert len(tester_dirs) >= 3, (
-            f"Expected at least 3 TESTER task folders; found {len(tester_dirs)}"
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
+        assert len(tester_dirs) >= 3, f"Expected at least 3 TESTER task folders; found {len(tester_dirs)}"
         _plant_task_state(tester_dirs[1] / "status.md", "WORKING")
         _plant_task_state(tester_dirs[2] / "status.md", "WORKING")
 
@@ -624,8 +597,7 @@ class TestThreeTicketWakeDispatchClosure:
 
         # Guard 2: census skip must be logged.
         assert "census incomplete" in combined_log, (
-            f"Expected 'census incomplete' in wake log.\n"
-            f"Wake log:\n{combined_log}"
+            f"Expected 'census incomplete' in wake log.\n" f"Wake log:\n{combined_log}"
         )
 
     def test_wake_dispatch_closure_fires_with_wontdo_corpse_sibling(
@@ -656,9 +628,7 @@ class TestThreeTicketWakeDispatchClosure:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        mat_result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=str(req_path)
-        )
+        mat_result = _run_pm_materialize(plan_file, root, proj, requirements_path=str(req_path))
         assert mat_result.returncode == 0, (
             f"pm_materialize.py exited {mat_result.returncode}.\n"
             f"stdout: {mat_result.stdout}\nstderr: {mat_result.stderr}"
@@ -666,13 +636,8 @@ class TestThreeTicketWakeDispatchClosure:
 
         # Pre-seed one TESTER task as WONT-DO (prior-run corpse).
         tasks_root = proj / "tasks"
-        tester_dirs = sorted(
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        )
-        assert len(tester_dirs) >= 3, (
-            f"Expected at least 3 TESTER task folders; found {len(tester_dirs)}"
-        )
+        tester_dirs = sorted(d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-"))
+        assert len(tester_dirs) >= 3, f"Expected at least 3 TESTER task folders; found {len(tester_dirs)}"
         _plant_task_state(tester_dirs[2] / "status.md", "WONT-DO")
 
         # Run harness with max-tasks=10: processes all remaining BACKLOG tasks.
@@ -695,7 +660,4 @@ class TestThreeTicketWakeDispatchClosure:
         )
 
         # Guard 2: closure confirmation in wake log.
-        assert "closed done" in combined_log, (
-            f"Expected 'closed done' in wake log.\n"
-            f"Wake log:\n{combined_log}"
-        )
+        assert "closed done" in combined_log, f"Expected 'closed done' in wake log.\n" f"Wake log:\n{combined_log}"

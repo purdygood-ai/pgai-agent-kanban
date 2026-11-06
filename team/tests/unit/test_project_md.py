@@ -29,6 +29,7 @@ try:
     from pm_agent.lib.workflow_loader import InputsSpec, WorkflowDefinition, OutputsSpec
 except ImportError:
     import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib.project_md import (  # type: ignore[no-redef]
         read_project_md,
@@ -190,10 +191,7 @@ def test_read_project_md_plain_text_output_format_is_wrapped_in_list(
     tmp_path: pathlib.Path,
 ) -> None:
     """read_project_md wraps a plain-text (non-list) Output Formats value in a list."""
-    content = (
-        "# Project: Test\n\n"
-        "## Output Formats\nmarkdown\n"
-    )
+    content = "# Project: Test\n\n" "## Output Formats\nmarkdown\n"
     _write_project_md(tmp_path, content)
     meta = read_project_md(tmp_path)
     assert meta.output_formats == ["markdown"]

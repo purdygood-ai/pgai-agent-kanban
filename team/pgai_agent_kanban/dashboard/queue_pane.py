@@ -77,7 +77,7 @@ import dataclasses
 import pathlib
 import re
 import time
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 from pgai_agent_kanban.dashboard.halt_state import halt_flag_and_text
 from pgai_agent_kanban.dashboard.queue_details import AGENT_ORDER, STATE_ORDER
@@ -106,7 +106,7 @@ DEFAULT_PANE_WIDTH = 36
 
 # Colour roles read from the environment, then kanban.cfg [dashboard], then
 # the default: (environment variable, kanban.cfg key or None, default name).
-_COLOR_SETTINGS: dict[str, tuple[str, Optional[str], str]] = {
+_COLOR_SETTINGS: dict[str, tuple[str, str | None, str]] = {
     "done": ("PGAI_DASHBOARD_COLOR_DONE", "color_done", "green"),
     "working": ("PGAI_DASHBOARD_COLOR_WORKING", "color_working", "yellow"),
     "blocked": ("PGAI_DASHBOARD_COLOR_BLOCKED", "color_blocked", "red"),
@@ -220,10 +220,7 @@ def _compact_row(label: str, stats: Mapping[str, int], palette: PanePalette, wid
     shown_codes = " ".join(colored_codes) if p.use_color and codes else codes
 
     pad = max(width - (len(padded_label) + len(done_total) + 2 + len(codes)) - len(pct_str), 1)
-    return (
-        f"{p.label}{padded_label}{p.reset}{p.done}{done_total}{p.reset}  "
-        f"{shown_codes}{' ' * pad}{pct_str}\n"
-    )
+    return f"{p.label}{padded_label}{p.reset}{p.done}{done_total}{p.reset}  " f"{shown_codes}{' ' * pad}{pct_str}\n"
 
 
 def _elapsed(seconds: int) -> str:
@@ -234,9 +231,7 @@ def _elapsed(seconds: int) -> str:
     return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
 
 
-def render_compact_rows(
-    queues: "Mapping | None", palette: PanePalette, width: int, now: float
-) -> str:
+def render_compact_rows(queues: Mapping | None, palette: PanePalette, width: int, now: float) -> str:
     """Render the compact rows and the currently-working section.
 
     Args:
@@ -368,8 +363,7 @@ def plan_queue_pane(ctx: OpsContext, project: str, data_project: str, details: b
     if not details:
         # Compact rows are the data project's counters and nothing else, so
         # the data project is the one read -- whatever its name.
-        return PanePlan(details=False, project=project, data_project=data_project, listed=(),
-                        fetch=(data_project,))
+        return PanePlan(details=False, project=project, data_project=data_project, listed=(), fetch=(data_project,))
 
     def exists(name: str) -> bool:
         return bool(name) and ctx.project_root(name).is_dir()

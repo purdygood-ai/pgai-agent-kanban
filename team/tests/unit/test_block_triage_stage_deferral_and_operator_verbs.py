@@ -64,7 +64,7 @@ _CHECK = _TEAM_DIR / "scripts" / "lib" / "overwatch-checks" / "check-block-triag
 _PROJECT = "triage-proj"
 _TASK = "CODER-20260101-003-example-task"
 _VERSION = "v9.9.9"
-_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_NOW = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 _SHIP_POLICY_HALT = (
     "# HALT created by CM at 2026-01-01T00:00:00Z\n"
     "# Reason: TESTER systemic_risk=high in ai_rc/v9.9.9\n"
@@ -90,8 +90,9 @@ def _bug_text(name: str, status: str, fixed_in: str = "") -> str:
     )
 
 
-def _restamp_evidence(*, version: str = _VERSION, bugs: str = "BUG-0412,BUG-0413",
-                      project: str = _PROJECT, verb: str = "restamp-fixed-in") -> list:
+def _restamp_evidence(
+    *, version: str = _VERSION, bugs: str = "BUG-0412,BUG-0413", project: str = _PROJECT, verb: str = "restamp-fixed-in"
+) -> list:
     return [f"verb={verb}", f"project={project}", f"version={version}", f"bugs={bugs}"]
 
 
@@ -108,8 +109,16 @@ class Sandbox:
         self.bugs = self.project_root / "bugs"
         self.repo = tmp_path / "repo"
         self.home = tmp_path / "home"
-        for d in (self.project_root / "overwatch" / "backups", self.task_dir / "artifacts", self.task_dir / "logs",
-                  self.queue.parent, self.bugs, self.root / "locks", self.root / "tmp", self.home):
+        for d in (
+            self.project_root / "overwatch" / "backups",
+            self.task_dir / "artifacts",
+            self.task_dir / "logs",
+            self.queue.parent,
+            self.bugs,
+            self.root / "locks",
+            self.root / "tmp",
+            self.home,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project_root / "overwatch" / "actions.log").write_text("", encoding="utf-8")
         (self.project_root / "project.cfg").write_text(
@@ -122,8 +131,9 @@ class Sandbox:
             "# Release State\n\n## Active RC\nnone\n\n## RC Opened At\nnone\n\n## RC Opened By Task\nnone\n",
             encoding="utf-8",
         )
-        self.readme.write_text(f"# Task\n\n## Task ID\n{_TASK}\n\n## Role\nCODER\n\n## Goal\nDo the thing.\n",
-                               encoding="utf-8")
+        self.readme.write_text(
+            f"# Task\n\n## Task ID\n{_TASK}\n\n## Role\nCODER\n\n## Goal\nDo the thing.\n", encoding="utf-8"
+        )
         self.status.write_text(
             f"# Status\n\n## Task\n{_TASK}\n\n## State\nWORKING\n\n## Summary\nWorking.\n\n"
             "## Blockers\nnone\n\n## Needs Human\nno\n",
@@ -169,8 +179,9 @@ class Sandbox:
         path.write_text(_bug_text(path.stem, status, fixed_in), encoding="utf-8")
         return path
 
-    def block(self, reason_code: str, evidence: list, *, owner: str = "CODER",
-              now: "datetime.datetime | None" = None) -> None:
+    def block(
+        self, reason_code: str, evidence: list, *, owner: str = "CODER", now: datetime.datetime | None = None
+    ) -> None:
         """Block the task the way a block site does (a re-block keeps the epoch)."""
         text = self.text()
         for heading, body in (("State", "BLOCKED"), ("Needs Human", "yes"), ("Blockers", f"{reason_code} block")):
@@ -219,10 +230,16 @@ class Sandbox:
         script = (
             f"set -uo pipefail\ncd {shlex.quote(str(_TEAM_DIR))}\n"
             f"source {shlex.quote(str(_CHECK))}\nrc=0\noverwatch_check_block_triage || rc=$?\n"
-            "echo \"CHECK_EXIT=$rc\"\n"
+            'echo "CHECK_EXIT=$rc"\n'
         )
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=180,
-                                env=self.env(**extra_env), cwd=str(self.tmp))
+        result = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=self.env(**extra_env),
+            cwd=str(self.tmp),
+        )
         assert "CHECK_EXIT=0" in result.stdout, _diagnostic(result)
         return result
 
@@ -295,10 +312,30 @@ def test_an_agent_self_block_through_the_status_writer_reaches_the_verb(sandbox)
     # written typed arguments are stored canonically and run as such.
     bug = sandbox.add_bug("BUG-0412")
     wrote = subprocess.run(
-        ["bash", str(_TEAM_DIR / "scripts" / "task-status.sh"), "--project", _PROJECT, "--key", _TASK,
-         "--state", "BLOCKED", "--needs-human", "yes", "--reason-code", "agent_operator_data_action",
-         "--action-args", "verb=restamp-fixed-in.sh", f"project={_PROJECT}", "version=9.9.9", "bugs=bug-0412"],
-        capture_output=True, text=True, timeout=60, env=sandbox.env(), cwd=str(sandbox.tmp),
+        [
+            "bash",
+            str(_TEAM_DIR / "scripts" / "task-status.sh"),
+            "--project",
+            _PROJECT,
+            "--key",
+            _TASK,
+            "--state",
+            "BLOCKED",
+            "--needs-human",
+            "yes",
+            "--reason-code",
+            "agent_operator_data_action",
+            "--action-args",
+            "verb=restamp-fixed-in.sh",
+            f"project={_PROJECT}",
+            "version=9.9.9",
+            "bugs=bug-0412",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=sandbox.env(),
+        cwd=str(sandbox.tmp),
     )
     assert wrote.returncode == 0, _diagnostic(wrote)
     sandbox.set_marker("B")
@@ -399,8 +436,9 @@ def _acted_on_restamp(sb: Sandbox) -> None:
     sb.add_bug("BUG-0412")
     first_block = _NOW - datetime.timedelta(hours=2)
     sb.block("agent_operator_data_action", _restamp_evidence(bugs="BUG-0412"), now=first_block)
-    result = bt.apply_task(sb.status, sb.queue, project=_PROJECT, kanban_root=sb.root,
-                           now=_NOW - datetime.timedelta(hours=1))
+    result = bt.apply_task(
+        sb.status, sb.queue, project=_PROJECT, kanban_root=sb.root, now=_NOW - datetime.timedelta(hours=1)
+    )
     assert result.outcome == bt.OUTCOME_ACT and result.mutation == bt.MUTATION_PROMOTE, result
     sb.status.write_text(set_or_append_section(sb.text(), "State", "BACKLOG"), encoding="utf-8")
 
@@ -432,15 +470,16 @@ def test_a_different_next_block_passes_verification_and_restarts_the_epoch(sandb
 class _StageOutcome:
     status: str
     reason: str
-    ledger_entry_id: "str | None" = None
+    ledger_entry_id: str | None = None
 
 
 class _Stage:
     """A stand-in for the resolution stage that records each call and, when
     told to, appends a Decision event the way the stage does."""
 
-    def __init__(self, sb: Sandbox, status: str = "executed", *, decision_event: bool = True,
-                 raises: bool = False) -> None:
+    def __init__(
+        self, sb: Sandbox, status: str = "executed", *, decision_event: bool = True, raises: bool = False
+    ) -> None:
         self.sb, self.status, self.decision_event, self.raises = sb, status, decision_event, raises
         self.calls: list = []
 
@@ -450,12 +489,14 @@ class _Stage:
             raise RuntimeError("stage exploded")
         if self.decision_event:
             state = self.sb.project_root / "release-state.md"
-            state.write_text(state.read_text(encoding="utf-8") + "\n## OVERWATCH Decision\nLane: B\nOutcome: shipped\n",
-                             encoding="utf-8")
+            state.write_text(
+                state.read_text(encoding="utf-8") + "\n## OVERWATCH Decision\nLane: B\nOutcome: shipped\n",
+                encoding="utf-8",
+            )
         return _StageOutcome(self.status, "stage reason", ledger_entry_id="entry-1")
 
 
-def _ship_policy_block(sb: Sandbox, *, halt: "str | None" = _SHIP_POLICY_HALT) -> None:
+def _ship_policy_block(sb: Sandbox, *, halt: str | None = _SHIP_POLICY_HALT) -> None:
     if halt is not None:
         sb.halt.write_text(halt, encoding="utf-8")
     sb.block("ship_policy_halt", ["halt=projects/triage-proj/HALT"], owner="CM")
@@ -487,12 +528,22 @@ def test_a_stage_that_executes_is_verified_by_its_decision_event(sandbox):
     stage = _Stage(sandbox)
     before = sandbox.tree(skip=(f"projects/{_PROJECT}/release-state.md",))
 
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           defer_only=True, stage_runner=stage)
+    result = bt.apply_task(
+        sandbox.status,
+        sandbox.queue,
+        project=_PROJECT,
+        kanban_root=sandbox.root,
+        now=_NOW,
+        defer_only=True,
+        stage_runner=stage,
+    )
 
     assert stage.calls == [(_PROJECT, str(sandbox.root))]
-    assert (result.outcome, result.action, result.mutation) == (bt.OUTCOME_DEFER, "defer_to_resolution_stage",
-                                                                 bt.MUTATION_NONE)
+    assert (result.outcome, result.action, result.mutation) == (
+        bt.OUTCOME_DEFER,
+        "defer_to_resolution_stage",
+        bt.MUTATION_NONE,
+    )
     assert "verified by the stage's Decision event" in result.detail
     assert sandbox.tree(skip=(f"projects/{_PROJECT}/release-state.md",)) == before
 
@@ -500,8 +551,9 @@ def test_a_stage_that_executes_is_verified_by_its_decision_event(sandbox):
 def test_a_stage_that_executes_without_a_decision_event_is_unverified(sandbox):
     _ship_policy_block(sandbox)
     stage = _Stage(sandbox, decision_event=False)
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           stage_runner=stage)
+    result = bt.apply_task(
+        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW, stage_runner=stage
+    )
     assert result.outcome == bt.OUTCOME_DEFER
     assert "unverified" in result.detail and "entry-1" in result.detail
 
@@ -509,8 +561,14 @@ def test_a_stage_that_executes_without_a_decision_event_is_unverified(sandbox):
 def test_a_stage_that_raises_is_reported_and_nothing_is_written(sandbox):
     _ship_policy_block(sandbox)
     before = sandbox.tree()
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           stage_runner=_Stage(sandbox, raises=True))
+    result = bt.apply_task(
+        sandbox.status,
+        sandbox.queue,
+        project=_PROJECT,
+        kanban_root=sandbox.root,
+        now=_NOW,
+        stage_runner=_Stage(sandbox, raises=True),
+    )
     assert result.outcome == bt.OUTCOME_DEFER and "stage exploded" in result.detail
     assert "stays with a human" in result.detail
     assert sandbox.tree() == before
@@ -527,8 +585,9 @@ def test_without_a_ship_policy_halt_the_stage_is_not_called(sandbox, halt, fragm
     _ship_policy_block(sandbox, halt=halt)
     stage = _Stage(sandbox)
     before = sandbox.tree()
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           stage_runner=stage)
+    result = bt.apply_task(
+        sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW, stage_runner=stage
+    )
     assert result.outcome == bt.OUTCOME_SKIP and fragment in result.detail and "stays with a human" in result.detail
     assert stage.calls == [] and sandbox.tree() == before
 
@@ -536,8 +595,15 @@ def test_without_a_ship_policy_halt_the_stage_is_not_called(sandbox, halt, fragm
 def test_block_triage_false_does_not_route_to_the_stage(sandbox):
     _ship_policy_block(sandbox)
     stage = _Stage(sandbox)
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           triage_enabled=False, stage_runner=stage)
+    result = bt.apply_task(
+        sandbox.status,
+        sandbox.queue,
+        project=_PROJECT,
+        kanban_root=sandbox.root,
+        now=_NOW,
+        triage_enabled=False,
+        stage_runner=stage,
+    )
     assert result.outcome == bt.OUTCOME_SKIP and "block_triage is false" in result.detail
     assert stage.calls == []
 
@@ -545,8 +611,15 @@ def test_block_triage_false_does_not_route_to_the_stage(sandbox):
 def test_a_plan_that_is_no_longer_a_deferral_writes_nothing_under_defer_only(sandbox):
     sandbox.block("missing_readme", ["worktree=gone"])
     before = sandbox.tree()
-    result = bt.apply_task(sandbox.status, sandbox.queue, project=_PROJECT, kanban_root=sandbox.root, now=_NOW,
-                           defer_only=True, stage_runner=_Stage(sandbox))
+    result = bt.apply_task(
+        sandbox.status,
+        sandbox.queue,
+        project=_PROJECT,
+        kanban_root=sandbox.root,
+        now=_NOW,
+        defer_only=True,
+        stage_runner=_Stage(sandbox),
+    )
     assert result.outcome == bt.OUTCOME_SKIP and "planned as a deferral" in result.detail
     assert sandbox.tree() == before
 

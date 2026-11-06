@@ -111,7 +111,7 @@
 # INT/TERM handlers (which would risk swallowing a caller's own signal
 # handling). Any EXIT trap the caller already had installed (e.g.
 # upgrade.sh's own `_cleanup`) is chained, not clobbered — see
-# _version_resolve_chain_exit_trap.
+# lib/exit_trap.sh.
 #
 # No-argument back-compat:
 #   This module only acts when explicitly invoked with a requested
@@ -133,6 +133,12 @@ _VERSION_RESOLVE_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if ! command -v pgai_mktemp_d >/dev/null 2>&1; then
     # shellcheck source=temp.sh
     source "${_VERSION_RESOLVE_SH_DIR}/temp.sh"
+fi
+
+# exit_trap.sh: the chained EXIT cleanup for the clean-source worktree.
+if ! declare -F exit_trap_add >/dev/null 2>&1; then
+    # shellcheck source=exit_trap.sh
+    source "${_VERSION_RESOLVE_SH_DIR}/exit_trap.sh"
 fi
 
 # semver.sh: re-exported so any script that sources version_resolve.sh gets
@@ -435,35 +441,6 @@ version_resolve_prune() {
 }
 
 # ---------------------------------------------------------------------------
-# _version_resolve_chain_exit_trap <command>
-#
-# Internal helper. Registers <command> on the CALLING shell's EXIT trap
-# without clobbering whatever EXIT trap was already registered (e.g.
-# upgrade.sh's own `_cleanup`).  The new command runs FIRST, then the prior
-# trap (if any).
-#
-# Must be called directly (never via command substitution / a subshell) so
-# the trap takes effect in the caller's actual shell.
-# ---------------------------------------------------------------------------
-_version_resolve_chain_exit_trap() {
-    local new_cmd="${1:-}"
-    [[ -z "$new_cmd" ]] && return 0
-
-    local existing
-    existing="$(trap -p EXIT)"
-
-    if [[ -n "$existing" ]]; then
-        # `trap -p EXIT` prints: trap -- '<cmd>' EXIT
-        # Extract <cmd> so it can be chained after our new command.
-        local existing_cmd
-        existing_cmd="$(printf '%s' "$existing" | sed -E "s/^trap -- '(.*)' EXIT\$/\\1/")"
-        trap "${new_cmd}; ${existing_cmd}" EXIT
-    else
-        trap "${new_cmd}" EXIT
-    fi
-}
-
-# ---------------------------------------------------------------------------
 # version_resolve_run_with_clean_source \
 #     <repo_path> <requested_version> <branch_prefix> <callback> [args...]
 #
@@ -515,27 +492,19 @@ version_resolve_run_with_clean_source() {
     local clean_src
     clean_src="$(version_resolve_materialize "$repo_path" "$resolved_tag")" || return 1
 
-    # Preserve whatever EXIT trap already existed so it can be restored
-    # verbatim once our own cleanup has run on the ordinary return path.
-    local prior_trap
-    prior_trap="$(trap -p EXIT)"
-
-    _version_resolve_chain_exit_trap \
-        "version_resolve_prune '${repo_path}' '${clean_src}' >/dev/null 2>&1 || true"
+    # Chained on the caller's EXIT trap (lib/exit_trap.sh), never replacing it.
+    local prune_cmd
+    prune_cmd="version_resolve_prune $(printf '%q' "$repo_path") $(printf '%q' "$clean_src") >/dev/null 2>&1 || true"
+    exit_trap_add "$prune_cmd"
 
     local callback_status=0
     "$callback" "$clean_src" "$@" || callback_status=$?
 
-    # Ordinary return path: prune explicitly now (idempotent even if the
-    # chained EXIT trap also fires later) and restore the prior trap so this
-    # function's cleanup does not linger for the rest of the caller's
-    # process lifetime.
+    # Ordinary return path: prune explicitly now and drop the registered
+    # cleanup, so it does not linger for the rest of the caller's process
+    # lifetime; any other EXIT cleanup stays registered.
     version_resolve_prune "$repo_path" "$clean_src" >/dev/null 2>&1 || true
-    if [[ -n "$prior_trap" ]]; then
-        eval "$prior_trap"
-    else
-        trap - EXIT
-    fi
+    exit_trap_remove "$prune_cmd"
 
     return "$callback_status"
 }

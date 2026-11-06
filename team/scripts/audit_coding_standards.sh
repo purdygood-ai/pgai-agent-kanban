@@ -67,7 +67,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Resolve script directory and repo root
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 DEFAULT_REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 _ACS_SELF="${SCRIPT_DIR}/audit_coding_standards.sh"
 
@@ -238,7 +238,7 @@ fi
 source "${SCRIPT_DIR}/lib/temp.sh"
 # pp_run_ops from this script's own tree (the JSON reads below).
 # shellcheck source=lib/pp_run_ops.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/pp_run_ops.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/pp_run_ops.sh"
 
 # The default results file lives under the framework temp root (resolved
 # by temp.sh, sourced above), so a default run writes nothing into the
@@ -549,7 +549,7 @@ fi
 # ===========================================================================
 # D06 — Every script and CLI ships a --help
 # ===========================================================================
-# Automated: lint_help_presence.py (already covers team/scripts/ and cm/).
+# Automated: lint_help_presence.py (scans every executable script in the tree).
 echo "  [D06] checking --help presence (lint_help_presence.py)..."
 
 if [[ -f "${SCRIPTS_DIR}/lint_help_presence.py" ]]; then

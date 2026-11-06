@@ -42,7 +42,6 @@ import inspect
 import pathlib
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -70,8 +69,9 @@ _SKIP = "skipped-unresolved-project"
 class FakeGit:
     """Answers the git calls cancel_rc makes and records each one."""
 
-    def __init__(self, *, current: str = "main", local: bool = True, remote: bool = False,
-                 fail: Optional[tuple[str, int]] = None) -> None:
+    def __init__(
+        self, *, current: str = "main", local: bool = True, remote: bool = False, fail: tuple[str, int] | None = None
+    ) -> None:
         self.current = current
         self.local = local
         self.remote = remote
@@ -111,9 +111,7 @@ def board(tmp_path: pathlib.Path) -> pathlib.Path:
 def _register(root: pathlib.Path, *names: str) -> None:
     """Write projects.cfg with one [project:<name>] section per name."""
     root.mkdir(parents=True, exist_ok=True)
-    (root / "projects.cfg").write_text(
-        "".join(f"[project:{name}]\npriority=1\n\n" for name in names), encoding="utf-8"
-    )
+    (root / "projects.cfg").write_text("".join(f"[project:{name}]\npriority=1\n\n" for name in names), encoding="utf-8")
 
 
 def _board(root: pathlib.Path, *, active: str = _VERSION, push: str = "false") -> pathlib.Path:
@@ -132,7 +130,7 @@ def _board(root: pathlib.Path, *, active: str = _VERSION, push: str = "false") -
     return root
 
 
-def _add_task(root: pathlib.Path, task_id: str, release: str, state: Optional[str]) -> None:
+def _add_task(root: pathlib.Path, task_id: str, release: str, state: str | None) -> None:
     folder = root / "projects" / _PROJECT / "tasks" / task_id
     folder.mkdir(parents=True)
     (folder / "README.md").write_text(f"# {task_id}\n\n## Release Version\n{release}\n", encoding="utf-8")
@@ -164,8 +162,12 @@ def _cancel(root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git: FakeGit, *
     streams = Streams()
     try:
         result = cancel.cancel_rc(
-            OpsContext(kanban_root=root), _PROJECT, kwargs.pop("version", _VERSION),
-            out=streams.out.append, err=streams.err.append, **kwargs,
+            OpsContext(kanban_root=root),
+            _PROJECT,
+            kwargs.pop("version", _VERSION),
+            out=streams.out.append,
+            err=streams.err.append,
+            **kwargs,
         )
     except cancel.CancelRcError as exc:
         result = exc
@@ -219,7 +221,7 @@ def test_a_declined_or_unanswered_prompt_changes_nothing(board, monkeypatch, ans
     asked: list[str] = []
     git = FakeGit()
 
-    def prompt(question: str) -> Optional[str]:
+    def prompt(question: str) -> str | None:
         asked.append(question)
         return answer
 
@@ -359,8 +361,7 @@ def test_push_true_under_the_cm_role_runs_the_remote_steps_in_order(tmp_path, mo
         ["merge", "--ff-only", "origin/main"],
     ]
     assert streams.stdout.startswith(
-        "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed.\n"
-        "Fetching origin...\n"
+        "[cm-cancel-rc] Push policy: push_to_remote=true — origin branch delete will proceed.\n" "Fetching origin...\n"
     )
     assert f"Deleting {_RC} from origin...\n  Deleted {_RC} from origin.\n" in streams.stdout
 
@@ -401,9 +402,7 @@ _UNRESOLVED_SHAPES = [
 
 
 @pytest.mark.parametrize(("shape", "token"), _UNRESOLVED_SHAPES)
-def test_an_unresolved_project_cancels_locally_without_contacting_a_remote(
-    tmp_path, monkeypatch, shape, token
-) -> None:
+def test_an_unresolved_project_cancels_locally_without_contacting_a_remote(tmp_path, monkeypatch, shape, token) -> None:
     """A repository named directly (REPO_ROOT) and PGAI_DEV_TREE_PATH never make a project pushable."""
     root = _board(tmp_path / "root", push="true")
     _unresolve(root, shape)
@@ -420,7 +419,9 @@ def test_an_unresolved_project_cancels_locally_without_contacting_a_remote(
     assert skips[0].endswith("; nothing pushed and no remote contacted"), skips[0]
     assert "Push policy" not in streams.stdout
     assert streams.stdout.startswith(skips[0] + "\n")
-    assert f"[push_to_remote=false] skipping origin push for {_PROJECT}: git push origin --delete {_RC}" in streams.stdout
+    assert (
+        f"[push_to_remote=false] skipping origin push for {_PROJECT}: git push origin --delete {_RC}" in streams.stdout
+    )
     assert ["branch", "-D", _RC] in git.calls
 
 
@@ -496,9 +497,7 @@ def test_the_reminders_print_whether_or_not_tasks_are_pending(board, monkeypatch
     out = streams.stdout
     assert f"No pending tasks found for {_VERSION} in kanban root.\n" in out
     assert "Reminder: mark these tasks as WONT-DO" not in out
-    assert (
-        f"  close.sh --project {_PROJECT} --key {_VERSION}-bugfix-bundle-<YYYYMMDD> --state wont-do\n"
-    ) in out
+    assert (f"  close.sh --project {_PROJECT} --key {_VERSION}-bugfix-bundle-<YYYYMMDD> --state wont-do\n") in out
     assert "  Leaving the bundle live re-arms the discovery re-selection path.\n" in out
     assert out.endswith("You may now open a new RC with scripts/cm/open-rc.sh <version>.\n")
 

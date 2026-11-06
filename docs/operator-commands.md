@@ -146,6 +146,9 @@ scripts/reset.sh --project my-app --key WRITER-20260611-005
 scripts/reset.sh --project my-app --key TESTER-20260611-006
 scripts/reset.sh --project my-app --key CM-20260611-008
 
+# Throw away the work on an unmerged feature branch instead of resuming it
+scripts/reset.sh --project my-app --key CODER-20260611-002 --discard-branch
+
 # Intake resets (type inferred from key prefix)
 scripts/reset.sh --project my-app --key BUG-0042
 scripts/reset.sh --project my-app --key PRIORITY-0007
@@ -158,15 +161,31 @@ scripts/reset.sh --project my-app --key v0.1.2
 | `--key <key>` | yes | Task key (`ROLE-YYYYMMDD-NNN`) or intake key (`BUG-NNNN`, `PRIORITY-NNNN`, version). The prefix selects the reset mode. |
 | `--keep-artifacts` | no | Agent resets only: preserve `artifacts/` (default: clear). |
 | `--force` | no | Agent resets only: clear a stale worktree (registration and/or on-disk path left by a prior run) before resetting. Without `--force`, a detected stale worktree causes a warning with the manual removal recipe and exits 2. With `--force`, reset.sh performs the cleanup itself (git worktree remove, prune, rm -rf) narrating each step to stderr, then completes the reset. Use `--force` as the standard corpse-clearing step when a prior run left a zombie worktree. |
+| `--discard-branch` | no | Agent resets only: delete the task's feature branch even when it holds unmerged commits, warning `discarding N commits at <hash>` (default: keep it and resume from it). `--force` alone never discards the branch. |
 | `--help`/`-h` | no | Print usage and exit 0. |
 
-**Agent-task reset** returns the task to freshly-materialized state — total
-amnesia. The next wake picks it up as if it had never run: `status.md`
-regenerated to `BACKLOG`, `artifacts/` and task `logs/` cleared
-(`--keep-artifacts` opts out), the queue marker flipped to `[ ]`, and the prior
-attempt's `feature/<task-id>` branch deleted with stale worktrees pruned. The
-README (the work definition) and queue position are untouched. A TESTER task key
-also tears down a retained TESTER worktree.
+**Agent-task reset** returns the task to freshly-materialized state:
+`status.md` regenerated to `BACKLOG`, `artifacts/` cleared (`--keep-artifacts`
+opts out) and task `logs/` cleared, the queue marker flipped to `[ ]`, the
+task's feature branch (`<branch_prefix>feature/<task-id>`) deleted if it holds
+no unmerged work, and stale worktrees pruned. The README (the work definition)
+and queue position are untouched. A TESTER task key also tears down a retained
+TESTER worktree.
+
+**Committed work is kept by default.** When the feature branch holds commits
+that no other branch, tag, remote-tracking ref or the dev tree's `HEAD`
+reaches, the reset keeps the branch and the task's `logs/progress.log`, prints
+the branch's tip and commit count to stderr, and appends a line to the progress
+log naming the kept tip. The regenerated `status.md` carries `## Resume Mode`
+`branch`, so the requeued task's next dispatch attaches the branch at its tip
+and resumes from it. The rest of `logs/` and (without `--keep-artifacts`)
+`artifacts/` are still cleared.
+
+**`--discard-branch`** deletes an unmerged feature branch instead, warning
+`discarding N commits at <hash>` with the real count and tip, and clears
+`logs/` in full; the task then starts from scratch. Use it only when the work
+on the branch is not wanted. `--force` alone does not discard: its
+stale-worktree cleanup keeps an unmerged branch the same way.
 
 **Stale-worktree corpse clearing:** if a prior run left a zombie worktree
 (registration in `.git/worktrees/` and/or an on-disk directory), bare reset
@@ -1543,6 +1562,106 @@ under "Mutations (POST)" in [operator-api.md](operator-api.md).
 
 ---
 
+## install-skills — install staged skills into the provider CLI homes
+
+`install-skills.sh` copies every skill in a source directory into the skill
+homes Claude Code and Codex read. A skill is a directory `<skill-name>/`
+holding a `SKILL.md`, plus any `scripts/`, `references/` or `assets/` beside
+it. The default source is the staging directory, `$KANBAN_ROOT/skills/`.
+
+```bash
+scripts/install-skills.sh --list                              # each skill's state per provider (read-only)
+scripts/install-skills.sh --dry-run                           # the install plan; writes nothing
+scripts/install-skills.sh                                     # install into every provider home
+scripts/install-skills.sh --provider claude --force           # overwrite changed claude copies
+scripts/install-skills.sh --dir ./my-skills --provider codex  # a flat directory, codex only
+```
+
+| Flag | Effect |
+|---|---|
+| `--dir DIR` | Source directory. Default `$KANBAN_ROOT/skills`. Laid out `<provider>/<skill-name>/SKILL.md`, or, with one `--provider`, flat: `<skill-name>/SKILL.md` for that provider. |
+| `--provider P` | `claude`, `codex` or `all` (default `all`): which homes to install into. |
+| `--claude-home DIR` | The claude skill home. Default `$CLAUDE_CONFIG_DIR/skills`, or `~/.claude/skills` when `CLAUDE_CONFIG_DIR` is unset. |
+| `--codex-home DIR` | The codex skill home. Default `~/.codex/skills`. |
+| `--list` | Print each skill as `new`, `same`, `changed` or `invalid` per provider; write nothing. Does not combine with `--dry-run` or `--force`. |
+| `--json` | With `--list` only: print the list as JSON, the same object `GET /skills` returns. |
+| `--dry-run` | Print the install plan; write nothing. |
+| `--force` | Overwrite a changed skill in a provider home. |
+| `--help`/`-h` | Print usage and exit 0. |
+
+**States.** Each source skill is compared with `<home>/<skill-name>/`. `new`:
+no copy there. `same`: every source file is in the home copy, byte-identical.
+`changed`: a source file is missing or differs in the home copy — any file,
+not only `SKILL.md`. `invalid`: its `SKILL.md` breaks a front-matter rule; it
+is listed with the rule and never installed. A file only the home copy has is
+not a difference. On the default staging directory each skill is also marked
+`shipped` or `operator-added`.
+
+**Install removes nothing.** A `new` skill is copied as a whole directory and
+a `same` one is left alone. A `changed` one is left as is and reported,
+because you may have edited your copy; `--force` writes the differing files
+over it. Anything that exists only in a provider home stays. An install skips
+a provider whose CLI binary (`claude`, `codex`) is not on `PATH`, with a
+one-line notice; `--list` lists every requested provider either way.
+
+**Exit codes:** `0` everything installed or was already the same, the list or
+plan was printed, or help was shown · `1` a skill file could not be written
+into a provider home; skills written before it stay written · `2` usage
+error: an unknown argument, an option without its value, an unknown provider,
+`--json` without `--list`, `--list` with `--dry-run` or `--force`, a `--dir`
+that does not exist, or a flat `--dir` without one `--provider` · `3` a
+changed skill was left as is because `--force` was not given
+(`skills_install.changed_left`); the remedy is the same command with
+`--force`, and `--dry-run` predicts the same code. Exits 1, 2 and 3 print
+`error`, `message` and `remedy` on stderr. An invalid skill is reported but
+does not change the exit code.
+
+### The staging directory
+
+`$KANBAN_ROOT/skills/<provider>/<skill-name>/` holds the skills this verb
+installs. `install.sh` and `upgrade.sh` deposit the skills the kanban ships
+there and record them in `$KANBAN_ROOT/.installed-skills`. Every other skill
+in the staging directory is yours: install and upgrade never write, rename or
+delete it, even with `--force`. Neither script writes a provider home by
+itself: this verb does, and `--add-claude-skills` and `--add-codex-skills`
+on `install.sh` or `upgrade.sh` run it with `--provider <p> --force` after the
+deposit (`install.sh --help`, `scripts/upgrade.sh --help`).
+
+### Adding your own skill
+
+1. Create `$KANBAN_ROOT/skills/<provider>/<skill-name>/SKILL.md`. Its front
+   matter carries `name`, equal to the directory name, and a non-empty
+   `description` under 500 characters; the instructions follow in Markdown.
+   Put any `scripts/`, `references/` or `assets/` beside it. For both CLIs,
+   create it under `claude/` and under `codex/`.
+2. Run `scripts/install-skills.sh --list`. The skill shows as `new` and
+   `operator-added`; `invalid` names the rule it broke.
+3. Run `scripts/install-skills.sh` to install it.
+
+```bash
+# Example: a claude skill named release-check
+mkdir -p "$KANBAN_ROOT/skills/claude/release-check"
+cat > "$KANBAN_ROOT/skills/claude/release-check/SKILL.md" <<'EOF'
+---
+name: release-check
+description: Check a project's release state before shipping.
+---
+
+# Release check
+
+Run scripts/release-state.sh --project my-app and report the Active RC.
+EOF
+scripts/install-skills.sh --list --provider claude
+scripts/install-skills.sh --provider claude
+```
+
+A skill kept outside the staging directory installs the same way, with
+`--dir` naming that directory (a flat one with one `--provider`). Over HTTP, `GET /skills` lists the staging
+directory read-only; see the Structured reads table in
+[operator-api.md](operator-api.md).
+
+---
+
 ## Operator tools — reports, recovery, configuration and housekeeping
 
 The scripts in this section are operator tools that are not census verbs, so
@@ -2136,6 +2255,7 @@ before merging.
 | `lint_api_parity.py` | Every operator verb in the census against the tree: each declared REST twin, script and flag/body model exists and matches. | Unit runner. |
 | `lint_api_route_docs.py` | That every REST route has a hand-written row and a curl example in `docs/operator-api.md`, and that the page's list of routes that start a process matches the verb census. | Unit runner. |
 | `lint_api_route_impl.py` | That a verb's REST route and its script call the same Python function, and that the count of shell-only verbs never rises. | Unit and integration runners, pre-merge. |
+| `lint_bash_shared_blocks.py` | A copy of a bash block that lives once in `team/scripts/lib/` (the dashboard `--help` prelude, the OVERWATCH project resolution and bug numbering, the test runners' refusals and `--workers` flag contract, the verify harness, the checkout walk, the release verbs' repository load, the wake entry points' argument loop, the coloured status-line logger), pasted back into a script. | Unit runner, through its unit test. |
 | `lint_block_record_sites.py` | Code that sets a task `BLOCKED` without writing its `## Block Record`. | Unit runner. |
 | `lint_config_key_coverage.py` | That the `kanban.cfg` and `project.cfg` keys the code reads, the keys their templates (and the `project.cfg` `create-project.sh` writes) scaffold, and the keys the Key Registries accept agree, with each key's stated default, section and commented value matching its registry. | Unit runner. |
 | `lint_container_engine_free.py` | That no test in the per-RC suites invokes or probes docker or podman. | Unit and integration runners. |
@@ -2167,7 +2287,7 @@ before merging.
 | `lint_runnable_remedy.py` | Error-contract remedies that still carry an angle-bracket placeholder instead of a runnable command. | Unit runner. |
 | `lint_section_parsers.py` | Code that finds a markdown `## ` section by matching its heading itself instead of calling the one section reader (`task_status.read_section` or `read_md_field`); sites that read no value are listed in `team/config/section-parser-allowlist.txt`, a value-reading site never is. Reports only. | Unit and integration runners, pre-merge. |
 | `lint_skip_bug_gate.sh` | That every skipped test citing a follow-up bug names a bug file that exists. | Unit and integration runners. |
-| `lint_status_writer_bypass.py` | Scripts that edit a task's `## State`, `## Needs Human`, `## Summary` or `## Blockers` directly instead of through the status writer. | Unit runner. |
+| `lint_status_writer_bypass.py` | Scripts and `pgai_agent_kanban` package modules that edit a task's `## State`, `## Needs Human`, `## Summary` or `## Blockers` directly instead of through the status writer. | Unit runner. |
 | `lint_test_anti_patterns.py` | The two worst test anti-patterns in the TESTER guidelines, in tests and runtime scripts. | Unit and integration runners. |
 | `lint_tester_report_census.py` | Code that parses a TESTER report itself instead of calling the one report parser. | Unit runner. |
 | `lint_tracked_ignored.py` | Tracked files that a `.gitignore` rule matches, and tracked generated files (logs, locks, coverage output). | Pre-merge. |
@@ -2546,8 +2666,8 @@ Fire one or all agents immediately (--sleep=0).
 
 Options:
   --agent ROLE       Agent to fire: pm|coder|cm|writer|tester, or overwatch (runs overwatch-sweep.sh)
-  --all              Fire all pipeline agents backgrounded (pm coder cm writer tester)
-  --bg               Background the agent process instead of running in foreground
+  --all              Fire all pipeline agents backgrounded (pm coder cm writer tester), each detached into its own session
+  --bg               Background the agent process, detached into its own session, instead of running in foreground
   --help, -h         Show this help and exit
 ```
 <!-- OPERATOR-VERBS-GENERATED:END verb=wake-now -->
@@ -2839,11 +2959,18 @@ Options:
   --key KEY          Arbitrary key or identifier
   --keep-artifacts   Preserve the task's artifacts/ contents (default: clear them; agent-task resets only)
   --force            Override safety guards
+  --discard-branch   Delete the task's feature branch even when it holds unmerged commits (default: keep it and resume from it; agent-task resets only)
   --help, -h         Show this help and exit
   (--force is the stale-worktree cleanup flag: clears any residual
    worktree registration and on-disk path before resetting the task;
    without --force a detected stale worktree causes a warning and
    non-zero exit.  Agent-task resets only.)
+  (A feature branch holding commits no other branch has is kept by
+   default: the reset prints its tip and commit count, keeps the
+   task's logs/progress.log, and the next dispatch resumes from the
+   branch.  --discard-branch deletes it instead, printing
+   'discarding N commits at <hash>'.  A fully merged branch is always
+   deleted.  Agent-task resets only.)
 
          value: full item key (see formats):
                  Agent task:   ROLE-YYYYMMDD-NNN[-slug] (role in prefix)
@@ -2854,6 +2981,7 @@ Options:
 Examples:
   reset.sh --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN-some-slug
   reset.sh --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN
+  reset.sh --project pgai-agent-kanban --key ROLE-YYYYMMDD-NNN --discard-branch
   reset.sh --project pgai-agent-kanban --key BUG-NNNN
   reset.sh --project pgai-agent-kanban --key PRIORITY-NNNN
   reset.sh --project pgai-agent-kanban --key v0.1.2
@@ -3628,9 +3756,10 @@ Commands:
                                 closed ones (## Done).
   answer --id ID --answer TEXT  Record an answer on an open entry; it stays
                                 open until closed. A second answer replaces
-                                the first. Answering an entry about a
-                                needs-operator bug or priority also returns
-                                that item to open.
+                                the first. Answering an entry about a bug
+                                or priority also appends the answer to the
+                                item's ## Operator Answers section and returns
+                                a needs-operator item to open.
   close --id ID                 Move an open entry to Done, keeping its answer.
 
 Examples:
@@ -3651,6 +3780,53 @@ Exit codes:
 Every refusal prints error/message/remedy on stderr and writes nothing.
 ```
 <!-- OPERATOR-VERBS-GENERATED:END verb=inbox -->
+
+<!-- OPERATOR-VERBS-GENERATED:BEGIN verb=install-skills -->
+#### `install-skills`
+
+Generated from `scripts/install-skills.sh --help` and this verb's census row. Do not hand-edit between these markers; run `python3 team/scripts/generate_operator_verb_docs.py` (from the repo root) and commit the result instead.
+
+- **Script:** `scripts/install-skills.sh`
+- **Mutates state:** yes
+- **Idempotence:** idempotent
+- **Class:** read
+- **REST twin:** `GET /skills`
+- **Implementation:** `module:pgai_agent_kanban.lib.skills_install.list_skills`
+
+```text
+Usage: install-skills.sh [OPTIONS]
+
+Copy every skill (a directory holding a SKILL.md) under a source directory into the provider CLI skill homes.
+
+Options:
+  --dir DIR          Source directory (default: $KANBAN_ROOT/skills)
+  --provider P       claude, codex or all (default: all)
+  --claude-home DIR  The claude skill home (default: $CLAUDE_CONFIG_DIR/skills or ~/.claude/skills)
+  --codex-home DIR   The codex skill home (default: ~/.codex/skills)
+  --list             Print each skill as new, same, changed or invalid per provider; write nothing
+  --json             With --list: print the list as JSON (the GET /skills object)
+  --dry-run          Print the install plan; write nothing
+  --force            Overwrite a changed skill in a provider home
+  --help, -h         Show this help and exit
+
+--dir is laid out <provider>/<skill-name>/SKILL.md, or, with one --provider, a flat
+<skill-name>/SKILL.md directory for that provider. A new skill is copied as a whole
+directory; a changed one is left as is and reported unless --force is given. Nothing is
+removed from a provider home. An install skips a provider whose CLI binary is not on
+PATH, with a one-line notice; --list lists every requested provider.
+
+Examples:
+  install-skills.sh --list
+  install-skills.sh --dry-run
+  install-skills.sh --dir ./my-skills --provider codex
+
+Exit codes:
+  0  installed or already the same, list or plan printed, or help shown
+  1  a skill file could not be written (error / message / remedy on stderr)
+  2  usage error (error / message / remedy on stderr)
+  3  a changed skill was left as is; re-run with --force to overwrite it
+```
+<!-- OPERATOR-VERBS-GENERATED:END verb=install-skills -->
 <!-- OPERATOR-VERBS-GENERATED:END section=verb-reference -->
 
 ---

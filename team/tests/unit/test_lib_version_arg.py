@@ -55,7 +55,11 @@ def test_the_message_names_the_field_without_a_markdown_heading() -> None:
 def test_a_consequence_is_appended_to_the_message() -> None:
     with pytest.raises(_ExampleError) as caught:
         checked_release_version(
-            "nope", _ExampleError, "example.bad-version", _REMEDY, consequence="it cannot name a record",
+            "nope",
+            _ExampleError,
+            "example.bad-version",
+            _REMEDY,
+            consequence="it cannot name a record",
         )
     assert caught.value.message.endswith("names it), so it cannot name a record.")
 

@@ -42,9 +42,7 @@ def _backlog_path(fixture_kanban_root: pathlib.Path, project_name: str) -> pathl
 
 
 class TestOverwatchWakeNeedsNoQueueFile:
-    def test_halt_present_and_no_queue_file_still_classifies_the_block(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_halt_present_and_no_queue_file_still_classifies_the_block(self, tmp_path: pathlib.Path) -> None:
         fx = _build_golden_fixture(tmp_path, "wd-no-queue")
         backlog = _backlog_path(fx.kanban_root, fx.proj.name)
         assert not backlog.exists(), "Precondition: the fixture builds no OVERWATCH queue file."
@@ -55,13 +53,10 @@ class TestOverwatchWakeNeedsNoQueueFile:
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
-        assert not backlog.exists(), (
-            "The overwatch wake must not create a queue file.\n"
-            f"stderr:\n{result.stderr}"
-        )
-        assert "overwatch backlog not found" not in result.stderr, (
-            f"A missing OVERWATCH queue file must not skip the project.\nstderr:\n{result.stderr}"
-        )
+        assert not backlog.exists(), "The overwatch wake must not create a queue file.\n" f"stderr:\n{result.stderr}"
+        assert (
+            "overwatch backlog not found" not in result.stderr
+        ), f"A missing OVERWATCH queue file must not skip the project.\nstderr:\n{result.stderr}"
 
         # Not skipped past: the resolution stage ran to completion and
         # classified/resolved the block, exactly as
@@ -91,12 +86,10 @@ class TestOverwatchWakeNeedsNoQueueFile:
         assert not backlog.exists(), "An idle overwatch wake must not create a queue file."
 
         stage_log = _resolution_stage_log(kanban_root)
-        assert "no HALT file present" in stage_log or stage_log == "", (
-            f"Expected a quiet no-op with no HALT present.\nresolution-stage log:\n{stage_log}"
-        )
+        assert (
+            "no HALT file present" in stage_log or stage_log == ""
+        ), f"Expected a quiet no-op with no HALT present.\nresolution-stage log:\n{stage_log}"
 
         action_log_path = proj / "overwatch" / "actions.log"
         action_log_text = action_log_path.read_text(encoding="utf-8") if action_log_path.is_file() else ""
-        assert action_log_text == "", (
-            f"A no-HALT firing must write nothing to the action log.\n{action_log_text}"
-        )
+        assert action_log_text == "", f"A no-HALT firing must write nothing to the action log.\n{action_log_text}"

@@ -15,6 +15,8 @@ by name, in one hop, from the role file that sends you here.
 - The six authoring anti-patterns, each with a BAD/BETTER pair and the
   narrow conditions under which it is acceptable.
 - The version-named-test rule, and the lint class that enforces it.
+- Where a test goes: one test module per source module, parametrise
+  rather than duplicate, no ticket-named files.
 - The two rules every grep-zero sweep gate is held to.
 - The skip-cites-a-real-bug rule the gated runners enforce mechanically.
 - The five contracts binding a test that reaches outside its own process
@@ -40,6 +42,8 @@ Tests in this kanban must encode INTENT explicitly. A passing test should pass b
 This document is the canonical reference for what TESTER cross-references when judging test quality, and what CODER, WRITER, and any other agent authoring tests must follow. New tests violating it without a documented exception are gaps; TESTER flags them as such. Each guideline maps back to a real failure the operator absorbed. The common root: a test coupled to a naming convention rather than a specification fails spuriously when new code legitimately introduces a matching symbol — it passes for months, then breaks not because behavior was violated but because the scan scope was never bounded.
 
 ## Anti-pattern 1 — Pattern-scan universal invariants
+
+<!-- team-paths: example team/internal/ — the directory an example invariant forbids importing from -->
 
 A test enumerates every variable, file, or symbol matching a naming pattern and asserts each conforms to behavior X, coupling the assertion to the convention rather than to an explicit list of subjects.
 
@@ -205,6 +209,8 @@ Module-scoped fixtures are a milder form of the same anti-pattern: state shared 
 **When acceptable:** a multi-cycle integration test simulating a sequence of pipeline iterations may intentionally mutate state between steps, provided the whole sequence lives inside one test function and the docstring documents the step order. Cross-test ordering dependencies are never acceptable.
 
 ### Order independence is demonstrated, not assumed — and isolation is earned
+
+<!-- team-paths: example team/tests/unit/test_state_heavy.py — the suite a BAD example runs separately -->
 
 **Rule: every suite owes the same per-test verdict in any collection order, and a suite is moved into its own process only after a reversed-order run shows a verdict that differs. Isolation on suspicion is not authoring; it is a permanent cost paid for a coupling nobody has observed.**
 
@@ -507,6 +513,20 @@ A callee may defend itself — the git-boundary-guard shim arms a parent-death s
 **The observable a reviewer can check.** After the suite finishes, the set of live descendants of the test process must be empty. Assert it from inside the suite by walking `/proc` for every process whose parent chain reaches the test's own pid once the call has returned; check it from outside with `ps -eo pid,ppid,etimes,args`, where a stray shows up twice over — as a helper still alive with an age past the timeout that was supposed to bound it, and as `PPid` 1, the signature of a process whose spawner died without it. The coarse host-level tell is a load average climbing past the core count during a run and dropping when the strays are killed.
 
 **When acceptable:** a call whose child is a single binary that forks nothing leaks nothing, and a bare `subprocess.run` timeout is honest there. You rarely know that, though — a wrapper can be interposed between the test and the binary by the environment the suite runs under rather than by anything the test says — so the group is the default and the bare timeout is the exception you can justify.
+
+## Where a test goes
+
+One test module per source module: a change to a source module is proved
+in the test module that already covers it, named `test_<module>`. A new case whose
+only difference from an existing test is its input or expected value is
+parametrised onto that test, not written as a sibling. A new test file is
+created only when the change creates a new source module. A test file is
+never named after a ticket, a bug or a release. A test that a change makes
+meaningless is deleted with the change, in the same commit.
+
+**When acceptable:** a test that exercises several modules together
+(an integration or acceptance test) lives under the suite for that kind of
+test, named for the behaviour it proves.
 
 ## Rule of thumb
 

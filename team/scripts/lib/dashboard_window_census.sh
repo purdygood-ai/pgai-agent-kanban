@@ -17,8 +17,9 @@
 #
 #   dwc_window_names [census_path]
 #       Echoes one window name per line, in tmux creation order. A window
-#       with two variants (drill-N: release / document) is echoed once per
-#       variant, matching the Python reader's Window-per-variant model.
+#       with two variants (operator: merged / split; drill-N: release /
+#       document) is echoed once per variant, matching the Python reader's
+#       Window-per-variant model.
 #
 #   dwc_pane_count <tmux_index> <variant> [census_path]
 #       Echoes the pane_count field for the matching W record. Exits 1 with
@@ -32,12 +33,17 @@
 #   source "${SCRIPT_DIR}/lib/dashboard_window_census.sh"
 #   dwc_window_names
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_DWC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _DWC_LIB_DIR=""
+
 # ---------------------------------------------------------------------------
 # dwc_census_path
 # ---------------------------------------------------------------------------
 dwc_census_path() {
   local lib_dir
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  lib_dir="${_DWC_LIB_DIR}"
   # lib/ -> scripts/ -> team/ -> config/dashboard_windows.census
   echo "${lib_dir}/../../config/dashboard_windows.census"
 }

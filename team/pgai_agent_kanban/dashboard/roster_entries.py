@@ -7,7 +7,7 @@ Wraps cron_parser.next_firings() into the ordered, per-entry structure the
 roster band renderer (team/scripts/dashboard/lib/roster_band.sh) packs into
 either a compact columnar band or, when the hosting pane is too narrow, a
 vertical fallback list. Both next-fire homes -- next-cron-firings.sh's
-schedule-window band and show-header.sh's window-0 tile -- go through the
+drill-window CRON pane and show-header.sh's window-0 tile -- go through the
 same renderer, which goes through this same module, so the two never
 disagree about roster content or order: "one renderer, two call sites, no
 second copy of the fitting logic."
@@ -107,7 +107,7 @@ def _format_remaining(secs: int) -> str:
 def roster_entries(
     crontab_text: str,
     cron_parser_path: str,
-    now_ts: "float | None" = None,
+    now_ts: float | None = None,
 ) -> list:
     """Return the ordered roster as a list of entry dicts.
 
@@ -165,14 +165,12 @@ def roster_entries(
 def main() -> None:
     """CLI entry point: read args, call roster_entries(), print roster lines."""
     if len(sys.argv) < 3:
-        sys.stderr.write(
-            "Usage: roster_entries.py <crontab_text> <cron_parser_path> [<now_ts>]\n"
-        )
+        sys.stderr.write("Usage: roster_entries.py <crontab_text> <cron_parser_path> [<now_ts>]\n")
         return
 
     crontab_text = sys.argv[1]
     cron_parser_path = sys.argv[2]
-    now_ts: "float | None" = None
+    now_ts: float | None = None
     if len(sys.argv) > 3 and sys.argv[3]:
         try:
             now_ts = float(sys.argv[3])

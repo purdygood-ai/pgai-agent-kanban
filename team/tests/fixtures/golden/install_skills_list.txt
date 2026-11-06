@@ -1,0 +1,6 @@
+claude: $TMP/homes/claude
+  invalid  broken  (operator-added; description-missing: the front matter has no non-empty 'description')
+  new      my-skill  (operator-added)
+  same     pgai-agent-kanban  (shipped)
+codex: $TMP/homes/codex
+  changed  pgai-agent-kanban  (shipped)

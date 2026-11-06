@@ -109,6 +109,10 @@
 #   team/scripts/lib/cm/release_known_issue.sh — build_known_issue_notes_block
 #   team/scripts/lib/cm/release_ship_policy.sh — _cm_ship_policy_file_input_bug
 #     (called at run time, so it may be sourced after this file)
+# Sourced here: team/scripts/lib/operator_inbox_notice.sh —
+#   operator_inbox_notice (the inbox entry a failed notes or event write
+#   leaves; see cm_ship_posture_stamp_notes and
+#   cm_release_append_auto_ship_events)
 # Globals read: PROJECT_NAME, ACTIVE_RC, KANBAN_ROOT, RELEASE_STATE,
 # _CM_PROJECT_ROOT, and the _TESTER_* / _HAS_LARGE_FIX_EFFORT values Step 4d
 # sets. No inline Python: every Python call goes through a module.
@@ -117,6 +121,9 @@
 if declare -F cm_ship_posture_passes >/dev/null 2>&1; then
     return 0
 fi
+
+# shellcheck source=../operator_inbox_notice.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../operator_inbox_notice.sh"
 
 # The triggers the always posture ships through. Everything else halts.
 _CM_SHIP_POSTURE_COVERED_TRIGGERS=(2 3 8)
@@ -303,18 +310,47 @@ cm_ship_posture_resolve_known_issues() {
 # pgai_agent_kanban.cm.auto_ship_notes owns the wording and placement. The
 # caller commits the file afterwards. With no recorded event — always the
 # case under matrix — it prints nothing and leaves the file byte-identical.
-# A file it cannot update is a WARNING naming the line to add by hand,
-# never an exit: the release has passed every gate by then.
+# A file it cannot update is a WARNING naming the line to add by hand, and
+# one operator inbox entry naming the file and that command, never an exit:
+# the release has passed every gate by then.
 cm_ship_posture_stamp_notes() {
-  local notes_file="$1" entry timestamp trigger error_key filed_bug
+  local notes_file="$1" entry timestamp trigger error_key filed_bug stops=""
   local -a stop_args=()
   for entry in "${_CM_AUTO_SHIP_EVENTS[@]}"; do
     IFS=$'\t' read -r timestamp trigger error_key filed_bug <<< "$entry"
     stop_args+=(--stop "$trigger" "$error_key")
+    stops+="${stops:+, }trigger ${trigger} (${error_key})"
   done
   [[ ${#stop_args[@]} -gt 0 ]] || return 0
-  pp_run_ops pgai_agent_kanban.cm.auto_ship_notes "$notes_file" "${stop_args[@]}" \
-    || echo "[cm-release] WARNING: the auto-ship line(s) could not be added to ${notes_file}; the release continues. Add them by hand and commit the file: python3 $KANBAN_ROOT/pgai_agent_kanban/cm/auto_ship_notes.py ${notes_file} ${stop_args[*]}" >&2
+  pp_run_ops pgai_agent_kanban.cm.auto_ship_notes "$notes_file" "${stop_args[@]}" && return 0
+  local by_hand
+  by_hand="python3 $(printf '%q' "${KANBAN_ROOT:-}/pgai_agent_kanban/cm/auto_ship_notes.py") $(printf '%q' "$notes_file") $(printf '%q ' "${stop_args[@]}")"
+  _cm_ship_posture_inbox_notice \
+    "The release notes ${notes_file} for ${ACTIVE_RC:-this release} are missing the auto-ship line(s) for ${stops}. Add them by hand and commit the file?" \
+    "The release continued without the line(s): it had passed every gate by then, so a notes write that failed does not stop it." \
+    "Run \`${by_hand% }\` and commit ${notes_file} in its repository."
+  echo "[cm-release] WARNING: the auto-ship line(s) could not be added to ${notes_file}; the release continues. Add them by hand and commit the file: python3 $KANBAN_ROOT/pgai_agent_kanban/cm/auto_ship_notes.py ${notes_file} ${stop_args[*]}" >&2
+  return 0
+}
+
+# Helper: the one operator inbox entry a release write that failed after
+# the gates leaves (operator_inbox_notice), with Source rc:<version>.
+# Usage: _cm_ship_posture_inbox_notice <question> <meanwhile> <how_to_answer>
+# The how-to-answer text gains the inbox list command. Narrates the entry ID
+# on stdout, or why none was written on stderr; written before the caller's
+# own WARNING so that line, whose last clause is the by-hand command, stays
+# the last one printed. Always returns 0.
+_cm_ship_posture_inbox_notice() {
+  local root="${KANBAN_ROOT:-${PGAI_AGENT_KANBAN_ROOT_PATH:-}}" source="rc:${ACTIVE_RC:-}" entry
+  [[ -n "${ACTIVE_RC:-}" ]] || source="scripts/cm/release.sh"
+  local inbox_list
+  inbox_list="$(printf '%q' "${root}/scripts/inbox.sh") --project $(printf '%q' "${PROJECT_NAME:-}") list"
+  if entry="$(operator_inbox_notice "$root" "${PROJECT_NAME:-}" "$source" "$1" "$2" \
+      "$3 List this entry with \`${inbox_list}\` and close it with the same script's close command.")"; then
+    echo "[cm-release] Operator inbox: ${entry} records the write that failed."
+  else
+    echo "[cm-release] WARNING: ${entry}" >&2
+  fi
   return 0
 }
 
@@ -322,8 +358,9 @@ cm_ship_posture_stamp_notes() {
 # Auto-Ship Event to release-state.md through write_rc_state.py
 # auto-ship-event, in the order the events happened. The release has
 # already been tagged by then, so a writer failure is a WARNING naming the
-# command that appends the event by hand, never an exit — the remaining
-# steps still run. Prints nothing when no event was recorded. Then, at the
+# command that appends the event by hand, and one operator inbox entry
+# naming the file and that command, never an exit — the remaining steps
+# still run. Prints nothing when no event was recorded. Then, at the
 # same point, an unverified ship's operator inbox entry
 # (cm_verification_retry_after_ship, release_verification_retry.sh).
 cm_release_append_auto_ship_events() {
@@ -339,6 +376,12 @@ cm_release_append_auto_ship_events() {
         --timestamp "$timestamp" "${bug_args[@]}"; then
       echo "[cm-release] Auto-Ship Event appended to release-state.md (trigger ${trigger})."
     else
+      local by_hand
+      by_hand="python3 $(printf '%q' "${KANBAN_ROOT:-}/pgai_agent_kanban/cm/write_rc_state.py") auto-ship-event $(printf '%q' "$RELEASE_STATE") --version $(printf '%q' "$ACTIVE_RC") --trigger $(printf '%q' "$trigger") --error-key $(printf '%q' "$error_key") --ship-posture $(printf '%q' "${_SHIP_POSTURE:-always}") --tester-task $(printf '%q' "${_TESTER_TASK_ID:-none}") --timestamp $(printf '%q' "$timestamp")${filed_bug:+ --filed-bug $(printf '%q' "$filed_bug")}"
+      _cm_ship_posture_inbox_notice \
+        "${ACTIVE_RC:-The release} shipped, but its Auto-Ship Event for trigger ${trigger} (${error_key}) is missing from ${RELEASE_STATE}. Append it by hand?" \
+        "The release had already been tagged, so the remaining release steps ran; ${RELEASE_STATE} has no record that the ship posture shipped through this stop." \
+        "Run \`${by_hand}\`."
       echo "[cm-release] WARNING: the Auto-Ship Event for trigger ${trigger} could not be appended to ${RELEASE_STATE}; the release has shipped. Append it by hand: python3 $KANBAN_ROOT/pgai_agent_kanban/cm/write_rc_state.py auto-ship-event ${RELEASE_STATE} --version ${ACTIVE_RC} --trigger ${trigger} --error-key ${error_key} --ship-posture ${_SHIP_POSTURE:-always} --tester-task ${_TESTER_TASK_ID:-none} --timestamp ${timestamp}${filed_bug:+ --filed-bug ${filed_bug}}" >&2
     fi
   done

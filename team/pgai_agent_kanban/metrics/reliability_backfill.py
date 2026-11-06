@@ -101,7 +101,7 @@ import json
 import os
 import pathlib
 import sys
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path. Put this file's own package root -- the
@@ -199,8 +199,8 @@ class RcWindow:
 
     version: str
     key: tuple
-    opened_at: Optional[_Timestamp]
-    closed_at: Optional[_Timestamp]
+    opened_at: _Timestamp | None
+    closed_at: _Timestamp | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -210,8 +210,8 @@ class Triage:
     task_id: str
     recorded_at: _Timestamp
     outcome: str
-    reason_code: Optional[str]
-    epoch: Optional[_Timestamp]
+    reason_code: str | None
+    epoch: _Timestamp | None
     path: str
 
 
@@ -221,8 +221,8 @@ class TaskStatus:
 
     task_id: str
     state: str
-    reason_code: Optional[str]
-    last_blocked_at: Optional[_Timestamp]
+    reason_code: str | None
+    last_blocked_at: _Timestamp | None
     path: str
 
 
@@ -231,26 +231,26 @@ class Evidence:
     """Everything the rebuild reads besides the ledger."""
 
     rc_windows: list
-    active_rc: Optional[str]
-    active_opened_at: Optional[_Timestamp]
+    active_rc: str | None
+    active_opened_at: _Timestamp | None
     triage: list
     statuses: dict
     halt_cause: Callable[[str, _Timestamp], str]
 
 
-def _parse_ts(value: object) -> Optional[_Timestamp]:
+def _parse_ts(value: object) -> _Timestamp | None:
     if value is None:
         return None
     return try_parse_iso(str(value).strip())
 
 
-def _code(value: object) -> Optional[str]:
+def _code(value: object) -> str | None:
     """A reason code token, or None for blank / ``none``."""
     text = " ".join(str(value or "").split())
     return text if text and text.lower() != "none" else None
 
 
-def load_rc_windows(rc_dir: Union[str, os.PathLike]) -> list:
+def load_rc_windows(rc_dir: str | os.PathLike) -> list:
     """Every rollup under *rc_dir* with a semver version, ordered by version.
     A rollup that does not parse is skipped; an absent directory is none."""
     rc_dir = os.fspath(rc_dir)
@@ -261,7 +261,7 @@ def load_rc_windows(rc_dir: Union[str, os.PathLike]) -> list:
         if not name.endswith(".json"):
             continue
         try:
-            with open(os.path.join(rc_dir, name), "r", encoding="utf-8") as handle:
+            with open(os.path.join(rc_dir, name), encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, ValueError):
             continue
@@ -271,9 +271,7 @@ def load_rc_windows(rc_dir: Union[str, os.PathLike]) -> list:
         key = semver.parse_version(version)
         if key is None:
             continue
-        by_key[key] = RcWindow(
-            version, key, _parse_ts(payload.get("opened_at")), _parse_ts(payload.get("closed_at"))
-        )
+        by_key[key] = RcWindow(version, key, _parse_ts(payload.get("opened_at")), _parse_ts(payload.get("closed_at")))
     return [by_key[key] for key in sorted(by_key)]
 
 
@@ -285,14 +283,12 @@ def _task_dirs(kanban_root: str, project: str) -> list:
         if not tasks.is_dir():
             continue
         for child in sorted(tasks.iterdir()):
-            if child.is_dir() and (
-                (child / "status.md").is_file() or (child / EVIDENCE_DIR).is_dir()
-            ):
+            if child.is_dir() and ((child / "status.md").is_file() or (child / EVIDENCE_DIR).is_dir()):
                 dirs.append(child)
     return dirs
 
 
-def load_triage(task_dirs: list, kanban_root: Optional[str] = None) -> list:
+def load_triage(task_dirs: list, kanban_root: str | None = None) -> list:
     """Every parseable triage evidence file under *task_dirs*, by time. Each
     file's path is kept relative to *kanban_root* when given."""
     found = []
@@ -326,7 +322,7 @@ def load_triage(task_dirs: list, kanban_root: Optional[str] = None) -> list:
     return sorted(found, key=lambda t: (t.recorded_at, t.path))
 
 
-def load_statuses(task_dirs: list, kanban_root: Optional[str] = None) -> dict:
+def load_statuses(task_dirs: list, kanban_root: str | None = None) -> dict:
     """``{task_id: TaskStatus}`` for every readable status.md; a live folder
     wins over an archived one of the same name. Paths as in load_triage()."""
     statuses: dict = {}
@@ -392,21 +388,21 @@ class Block:
     version: str
     source: str
     start: _Timestamp
-    start_line: Optional[dict] = None
+    start_line: dict | None = None
     escalate_lines: list = dataclasses.field(default_factory=list)
-    end_line: Optional[dict] = None
+    end_line: dict | None = None
     triage: list = dataclasses.field(default_factory=list)
-    status: Optional[TaskStatus] = None
+    status: TaskStatus | None = None
     start_basis: str = "ledger"
     # Derived:
     cause: str = CAUSE_CHAIN
-    reason_code: Optional[str] = None
-    escalate_at: Optional[_Timestamp] = None
-    escalate_code: Optional[str] = None
+    reason_code: str | None = None
+    escalate_at: _Timestamp | None = None
+    escalate_code: str | None = None
     escalate_basis: str = ""
-    end: Optional[_Timestamp] = None
+    end: _Timestamp | None = None
     end_class: str = CLASS_ANY
-    end_code: Optional[str] = None
+    end_code: str | None = None
     end_basis: str = ""
     block_class: str = CLASS_ANY
 
@@ -418,14 +414,14 @@ class Block:
     @property
     def task_id(self) -> str:
         """The task ID of a task-level block; "" for any other source."""
-        return self.source[len(_TASK_PREFIX):].strip() if self.is_task else ""
+        return self.source[len(_TASK_PREFIX) :].strip() if self.is_task else ""
 
     @property
     def in_ledger(self) -> bool:
         """True when the ledger already has this block's start line."""
         return self.start_line is not None
 
-    def ledger_end(self) -> Optional[_Timestamp]:
+    def ledger_end(self) -> _Timestamp | None:
         """When the ledger's own end line closes the block; None while open."""
         return _parse_ts(self.end_line["timestamp"]) if self.end_line else None
 
@@ -469,7 +465,7 @@ def _version_at(moment: _Timestamp, evidence: Evidence) -> str:
     return NO_RC_VERSION
 
 
-def _rc_close(version: str, evidence: Evidence) -> Optional[_Timestamp]:
+def _rc_close(version: str, evidence: Evidence) -> _Timestamp | None:
     """When *version*'s RC closed: its rollup's closed_at, else the earliest
     opened_at of a later RC. None for a no-RC version or an RC not closed."""
     key = semver.parse_version(version)
@@ -482,10 +478,10 @@ def _rc_close(version: str, evidence: Evidence) -> Optional[_Timestamp]:
     return min(later) if later else None
 
 
-def _overlaps(block: Block, start: _Timestamp, end: Optional[_Timestamp]) -> bool:
+def _overlaps(block: Block, start: _Timestamp, end: _Timestamp | None) -> bool:
     """True when [start, end] (end None: open) meets *block*'s interval."""
     block_end = block.end or block.ledger_end()
-    far = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    far = datetime.datetime.max.replace(tzinfo=datetime.UTC)
     return start <= (block_end or far) and block.start <= (end or far)
 
 
@@ -502,7 +498,9 @@ def _attach_evidence(blocks: list, evidence: Evidence, notes: list) -> list:
         if target is None:
             target = Block(_version_at(epoch, evidence), source, epoch, start_basis=f"triage evidence {items[0].path}")
             last_seen = max(item.recorded_at for item in items)
-            if any(b.source == source and b.version == target.version and _overlaps(b, epoch, last_seen) for b in blocks):
+            if any(
+                b.source == source and b.version == target.version and _overlaps(b, epoch, last_seen) for b in blocks
+            ):
                 notes.append(f"skipped triage evidence for {source} at {format_iso(epoch)}: overlaps a recorded block")
                 continue
             blocks.append(target)
@@ -519,7 +517,9 @@ def _attach_evidence(blocks: list, evidence: Evidence, notes: list) -> list:
                 target = open_block
             elif status.last_blocked_at is not None:
                 target = Block(
-                    _version_at(status.last_blocked_at, evidence), source, status.last_blocked_at,
+                    _version_at(status.last_blocked_at, evidence),
+                    source,
+                    status.last_blocked_at,
                     start_basis=f"Block Record {status.path}",
                 )
                 blocks.append(target)
@@ -618,12 +618,14 @@ def _derive_other(block: Block, tasks: list, evidence: Evidence) -> None:
         block.start_basis += f"; class from {', '.join(sorted({t.source for t in companions}))}"
 
 
-def _vocab(value: object, vocabulary: tuple) -> Optional[str]:
+def _vocab(value: object, vocabulary: tuple) -> str | None:
     word = str(value or "").strip().lower()
     return word if word in vocabulary else None
 
 
-def _record(block: Block, kind: str, moment: _Timestamp, fields: dict, *, line: Optional[dict], basis: str, number: int) -> dict:
+def _record(
+    block: Block, kind: str, moment: _Timestamp, fields: dict, *, line: dict | None, basis: str, number: int
+) -> dict:
     """One sidecar line. A line the ledger has keeps its own version, kind,
     source and timestamp text."""
     record = {
@@ -645,30 +647,55 @@ def _record(block: Block, kind: str, moment: _Timestamp, fields: dict, *, line: 
 def _block_records(block: Block, number: int) -> list:
     lines = [
         _record(
-            block, KIND_START, block.start,
-            {"class": record_class(block.start_line) if block.start_line else CLASS_ANY,
-             "cause": block.cause, "reason_code": block.reason_code},
-            line=block.start_line, basis=block.start_basis, number=number,
+            block,
+            KIND_START,
+            block.start,
+            {
+                "class": record_class(block.start_line) if block.start_line else CLASS_ANY,
+                "cause": block.cause,
+                "reason_code": block.reason_code,
+            },
+            line=block.start_line,
+            basis=block.start_basis,
+            number=number,
         )
     ]
     for line in block.escalate_lines:
-        lines.append(_record(
-            block, KIND_ESCALATE, _parse_ts(line["timestamp"]),
-            {"class": CLASS_HUMAN, "reason_code": record_reason_code(line)},
-            line=line, basis="ledger", number=number,
-        ))
+        lines.append(
+            _record(
+                block,
+                KIND_ESCALATE,
+                _parse_ts(line["timestamp"]),
+                {"class": CLASS_HUMAN, "reason_code": record_reason_code(line)},
+                line=line,
+                basis="ledger",
+                number=number,
+            )
+        )
     if block.escalate_at is not None:
-        lines.append(_record(
-            block, KIND_ESCALATE, block.escalate_at,
-            {"class": CLASS_HUMAN, "reason_code": block.escalate_code},
-            line=None, basis=block.escalate_basis, number=number,
-        ))
+        lines.append(
+            _record(
+                block,
+                KIND_ESCALATE,
+                block.escalate_at,
+                {"class": CLASS_HUMAN, "reason_code": block.escalate_code},
+                line=None,
+                basis=block.escalate_basis,
+                number=number,
+            )
+        )
     if block.end is not None:
-        lines.append(_record(
-            block, KIND_END, block.end,
-            {"class": block.end_class, "cause": block.cause, "reason_code": block.end_code},
-            line=block.end_line, basis=block.end_basis, number=number,
-        ))
+        lines.append(
+            _record(
+                block,
+                KIND_END,
+                block.end,
+                {"class": block.end_class, "cause": block.cause, "reason_code": block.end_code},
+                line=block.end_line,
+                basis=block.end_basis,
+                number=number,
+            )
+        )
     return lines
 
 
@@ -725,7 +752,7 @@ def read_sidecar(path: str, project: str) -> list:
             f"there is no sidecar to apply at {path}; --apply merges a sidecar written and reviewed earlier",
             f"{_SCRIPT} --project {project}",
         )
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         lines = handle.read().splitlines()
     records = []
     for lineno, raw in enumerate(lines, start=1):
@@ -748,7 +775,7 @@ def read_sidecar(path: str, project: str) -> list:
     return records
 
 
-def _sidecar_problem(record: object) -> Optional[str]:
+def _sidecar_problem(record: object) -> str | None:
     if not isinstance(record, dict):
         return "is not a JSON object"
     missing = [f for f in ("version", "kind", "source", "timestamp") if not record.get(f)]
@@ -787,13 +814,15 @@ def _write(ledger_path: str, record: dict) -> None:
     kind = record["kind"]
     args = (ledger_path, record["version"], record["source"], record["timestamp"])
     if kind == KIND_START:
-        append_block_start(*args, block_class=record.get("class"), cause=record.get("cause"),
-                           reason_code=record.get("reason_code"))
+        append_block_start(
+            *args, block_class=record.get("class"), cause=record.get("cause"), reason_code=record.get("reason_code")
+        )
     elif kind == KIND_ESCALATE:
         mark_block_escalated(*args, reason_code=record.get("reason_code"))
     else:
-        append_block_end(*args, block_class=record.get("class"), cause=record.get("cause"),
-                         reason_code=record.get("reason_code"))
+        append_block_end(
+            *args, block_class=record.get("class"), cause=record.get("cause"), reason_code=record.get("reason_code")
+        )
 
 
 def apply_sidecar(ledger_path: str, records: list) -> ApplyResult:
@@ -840,8 +869,10 @@ def _open_block_is(ledger_path: str, start: dict) -> bool:
     the block *start* opened."""
     when = _parse_ts(start["timestamp"])
     return any(
-        b["version"] == start["version"] and b["source"] == start["source"]
-        and b["end"] is None and _parse_ts(b["start"]) == when
+        b["version"] == start["version"]
+        and b["source"] == start["source"]
+        and b["end"] is None
+        and _parse_ts(b["start"]) == when
         for b in block_intervals(ledger_path)
     )
 
@@ -895,8 +926,11 @@ def run(kanban_root: str, project: str, *, apply: bool, out=None) -> int:
         fresh = [r for r in records if not r[ANNOTATION_KEY]["in_ledger"]]
         blocks = len({r[ANNOTATION_KEY]["block"] for r in records})
         print(f"sidecar: {sidecar}", file=out)
-        print(f"blocks: {blocks}; records: {len(records)} ({len(fresh)} new, "
-              f"{len(records) - len(fresh)} already in the ledger)", file=out)
+        print(
+            f"blocks: {blocks}; records: {len(records)} ({len(fresh)} new, "
+            f"{len(records) - len(fresh)} already in the ledger)",
+            file=out,
+        )
         for record in fresh:
             print(f"  new {_describe(record)}", file=out)
         for note in notes:
@@ -906,8 +940,10 @@ def run(kanban_root: str, project: str, *, apply: bool, out=None) -> int:
 
     result = apply_sidecar(ledger, records)
     print(f"ledger: {ledger}", file=out)
-    print(f"appended: {len(result.appended)}; already present: {result.present}; "
-          f"skipped: {len(result.skipped)}", file=out)
+    print(
+        f"appended: {len(result.appended)}; already present: {result.present}; " f"skipped: {len(result.skipped)}",
+        file=out,
+    )
     for record in result.appended:
         print(f"  appended {_describe(record)}", file=out)
     for record, why in result.skipped:
@@ -918,13 +954,16 @@ def run(kanban_root: str, project: str, *, apply: bool, out=None) -> int:
         path = write_reliability(project, kanban_root=kanban_root)
         print(f"reliability: {path}", file=out)
     except LedgerError as exc:
-        print(f"[reliability-backfill] WARNING: reliability.json was not refreshed: {exc.message}. "
-              f"Re-run: PYTHONPATH={kanban_root} python3 -m pgai_agent_kanban.metrics.reliability "
-              f"refresh --project {project} --kanban-root {kanban_root}", file=sys.stderr)
+        print(
+            f"[reliability-backfill] WARNING: reliability.json was not refreshed: {exc.message}. "
+            f"Re-run: PYTHONPATH={kanban_root} python3 -m pgai_agent_kanban.metrics.reliability "
+            f"refresh --project {project} --kanban-root {kanban_root}",
+            file=sys.stderr,
+        )
     return EXIT_OK
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point; see the module docstring for output and exit codes."""
     import argparse
 
@@ -938,7 +977,9 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument("--project", required=True, help="project name, e.g. pgai-agent-kanban")
     parser.add_argument(
-        "--kanban-root", dest="kanban_root", default=None,
+        "--kanban-root",
+        dest="kanban_root",
+        default=None,
         help="kanban root holding projects/ (default: PGAI_AGENT_KANBAN_ROOT_PATH)",
     )
     parser.add_argument("--apply", action="store_true", help="merge the sidecar into the ledger")

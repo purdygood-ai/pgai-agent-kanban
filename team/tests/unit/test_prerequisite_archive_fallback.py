@@ -82,8 +82,7 @@ def _archive_tasks(root: pathlib.Path) -> pathlib.Path:
 def _write_status(task_dir: pathlib.Path, state: str) -> pathlib.Path:
     task_dir.mkdir(parents=True, exist_ok=True)
     status = task_dir / "status.md"
-    status.write_text(f"# Status\n\n## State\n{state}\n\n## Summary\nfixture.\n\n## Blockers\nnone\n",
-                      encoding="utf-8")
+    status.write_text(f"# Status\n\n## State\n{state}\n\n## Summary\nfixture.\n\n## Blockers\nnone\n", encoding="utf-8")
     return status
 
 
@@ -99,8 +98,9 @@ def _archive_task(root: pathlib.Path, task_id: str, state: str = "DONE") -> path
     return _write_status(_archive_tasks(root) / task_id, state).parent
 
 
-def _bash_header(root: pathlib.Path, tasks_root: pathlib.Path, backlog: pathlib.Path | None = None,
-                 before_source: str = "") -> str:
+def _bash_header(
+    root: pathlib.Path, tasks_root: pathlib.Path, backlog: pathlib.Path | None = None, before_source: str = ""
+) -> str:
     """Point every inherited root at the sandbox, then source the real gate.
 
     The two pre-resolved exports are cleared rather than repointed, per the
@@ -127,12 +127,19 @@ def _bash_header(root: pathlib.Path, tasks_root: pathlib.Path, backlog: pathlib.
 def _run(tmp_path: pathlib.Path, script: str) -> subprocess.CompletedProcess:
     script_path = tmp_path / "run_script.sh"
     script_path.write_text(script, encoding="utf-8")
-    return subprocess.run(["bash", str(script_path)], capture_output=True, text=True,
-                          timeout=60, cwd=str(tmp_path), stdin=subprocess.DEVNULL)
+    return subprocess.run(
+        ["bash", str(script_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tmp_path),
+        stdin=subprocess.DEVNULL,
+    )
 
 
-def _check(tmp_path: pathlib.Path, root: pathlib.Path, readme: pathlib.Path, prelude: str = "",
-           before_source: str = "") -> tuple[list[str], str]:
+def _check(
+    tmp_path: pathlib.Path, root: pathlib.Path, readme: pathlib.Path, prelude: str = "", before_source: str = ""
+) -> tuple[list[str], str]:
     """Run check_prerequisites on *readme*; return (stdout lines, stderr)."""
     script = _bash_header(root, _live_tasks(root), before_source=before_source) + prelude + textwrap.dedent(f"""\
         check_prerequisites "{readme}"
@@ -156,7 +163,13 @@ def test_live_tasks_directory_maps_to_its_own_kanban_roots_archive(tmp_path: pat
 
 @pytest.mark.parametrize(
     "relative",
-    ["tasks", "projects/tasks", f"elsewhere/{_PROJECT}/tasks", f"projects/{_PROJECT}/queues", "projects/Bad_Name/tasks"],
+    [
+        "tasks",
+        "projects/tasks",
+        f"elsewhere/{_PROJECT}/tasks",
+        f"projects/{_PROJECT}/queues",
+        "projects/Bad_Name/tasks",
+    ],
     ids=["single-project-root", "no-project", "not-under-projects", "not-tasks", "unsafe-project-name"],
 )
 def test_tasks_directory_outside_the_live_project_shape_has_no_archive(tmp_path: pathlib.Path, relative: str) -> None:
@@ -176,9 +189,9 @@ def test_live_folder_without_status_is_never_answered_from_the_archive(tmp_path:
     root = _kanban(tmp_path)
     (_live_tasks(root) / _ARCHIVED_ID).mkdir()
     _archive_task(root, _ARCHIVED_ID)
-    assert archived_task_ids(_live_tasks(root), [_ARCHIVED_ID]) == [], (
-        "a live folder whose status.md is missing is unreadable live state; fail closed, not DONE"
-    )
+    assert (
+        archived_task_ids(_live_tasks(root), [_ARCHIVED_ID]) == []
+    ), "a live folder whose status.md is missing is unreadable live state; fail closed, not DONE"
 
 
 def test_archived_task_ids_with_no_archive_directory_is_empty(tmp_path: pathlib.Path) -> None:
@@ -190,12 +203,24 @@ def test_archived_tasks_cli_prints_archived_ids_one_per_line(tmp_path: pathlib.P
     root = _kanban(tmp_path)
     _archive_task(root, _ARCHIVED_ID)
     env = {k: v for k, v in os.environ.items() if k not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT")}
-    env.update({"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-                "PYTHONPATH": str(_TEAM_DIR)})
+    env.update({"KANBAN_ROOT": str(root), "PGAI_AGENT_KANBAN_ROOT_PATH": str(root), "PYTHONPATH": str(_TEAM_DIR)})
     result = subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.archive", "archived_tasks",
-         "--tasks-root", str(_live_tasks(root)), _GONE_ID, _ARCHIVED_ID],
-        capture_output=True, text=True, timeout=60, env=env, cwd=str(tmp_path), stdin=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.archive",
+            "archived_tasks",
+            "--tasks-root",
+            str(_live_tasks(root)),
+            _GONE_ID,
+            _ARCHIVED_ID,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        cwd=str(tmp_path),
+        stdin=subprocess.DEVNULL,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == f"{_ARCHIVED_ID}\n"
@@ -221,9 +246,10 @@ def test_live_prerequisite_is_read_from_live_status_before_the_archive(tmp_path:
     _archive_task(root, _ARCHIVED_ID)
     readme = _write_readme(_live_tasks(root) / _WAITER_ID, [_ARCHIVED_ID, _LIVE_ID])
     lines, stderr = _check(tmp_path, root, readme)
-    assert lines == [f"{_LIVE_ID}:WORKING", "rc=1"], (
-        f"the live WORKING state must win over an archived DONE copy\nstderr={stderr}"
-    )
+    assert lines == [
+        f"{_LIVE_ID}:WORKING",
+        "rc=1",
+    ], f"the live WORKING state must win over an archived DONE copy\nstderr={stderr}"
 
 
 def test_prerequisite_neither_live_nor_archived_is_still_missing(tmp_path: pathlib.Path) -> None:
@@ -275,12 +301,12 @@ def test_loading_the_gate_keeps_an_already_defined_pp_run_ops(tmp_path: pathlib.
     result = _run(tmp_path, script)
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     lines = result.stdout.splitlines()
-    assert lines[0] == f"{_STUB_MARKER} pgai_agent_kanban.archive archived_tasks", (
-        f"sourcing the gate must leave the caller's pp_run_ops active\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
-    assert _STUB_MARKER in result.stdout.split("pp_run_ops ()", 1)[1], (
-        f"the active pp_run_ops definition must still be the stub\nstdout={result.stdout}"
-    )
+    assert (
+        lines[0] == f"{_STUB_MARKER} pgai_agent_kanban.archive archived_tasks"
+    ), f"sourcing the gate must leave the caller's pp_run_ops active\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert (
+        _STUB_MARKER in result.stdout.split("pp_run_ops ()", 1)[1]
+    ), f"the active pp_run_ops definition must still be the stub\nstdout={result.stdout}"
 
 
 def test_archive_lookup_goes_through_a_pp_run_ops_defined_before_the_gate(tmp_path: pathlib.Path) -> None:
@@ -302,9 +328,7 @@ def test_archived_prerequisite_resolves_as_done_when_pp_run_ops_was_not_loaded_f
         if declare -F pp_run_ops >/dev/null; then echo "pp_run_ops defined before the gate"; exit 99; fi
     """)
     lines, stderr = _check(tmp_path, root, readme, before_source=no_helper)
-    assert lines == ["rc=0"], (
-        f"the gate must load pp_run_ops itself when no caller defined it\nstderr={stderr}"
-    )
+    assert lines == ["rc=0"], f"the gate must load pp_run_ops itself when no caller defined it\nstderr={stderr}"
 
 
 def test_waiting_task_with_archived_prerequisite_is_promoted_to_backlog(tmp_path: pathlib.Path) -> None:
@@ -317,16 +341,19 @@ def test_waiting_task_with_archived_prerequisite_is_promoted_to_backlog(tmp_path
     held_status = _write_status(tasks / held_id, "WAITING")
     _write_readme(tasks / held_id, [_GONE_ID])
     backlog = tasks / "queues" / "coder_backlog.md"
-    backlog.write_text(f"# Coder Backlog\n\n- [W] {_WAITER_ID} — waits on an archived task\n"
-                       f"- [W] {held_id} — waits on a task that never existed\n", encoding="utf-8")
+    backlog.write_text(
+        f"# Coder Backlog\n\n- [W] {_WAITER_ID} — waits on an archived task\n"
+        f"- [W] {held_id} — waits on a task that never existed\n",
+        encoding="utf-8",
+    )
 
     result = _run(tmp_path, _bash_header(root, tasks, backlog) + "recheck_waiting_tasks\n")
 
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     assert "## State\nBACKLOG" in waiting_status.read_text(encoding="utf-8"), result.stdout + result.stderr
-    assert "## State\nWAITING" in held_status.read_text(encoding="utf-8"), (
-        "a prerequisite that is neither live nor archived must keep its task WAITING"
-    )
+    assert "## State\nWAITING" in held_status.read_text(
+        encoding="utf-8"
+    ), "a prerequisite that is neither live nor archived must keep its task WAITING"
     queue = backlog.read_text(encoding="utf-8")
     assert f"- [ ] {_WAITER_ID}" in queue and f"- [W] {held_id}" in queue, queue
     assert "promoted 1 task(s)" in result.stdout

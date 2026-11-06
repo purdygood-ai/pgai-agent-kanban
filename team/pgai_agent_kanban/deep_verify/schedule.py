@@ -108,8 +108,7 @@ WEEKLY_INTERVAL = datetime.timedelta(days=7)
 DEFAULT_OFFHOURS_WINDOW = "03:00-03:59"
 
 _WINDOW_RE = re.compile(
-    r"^(?P<start_h>[01]?\d|2[0-3]):(?P<start_m>[0-5]\d)-"
-    r"(?P<end_h>[01]?\d|2[0-3]):(?P<end_m>[0-5]\d)$"
+    r"^(?P<start_h>[01]?\d|2[0-3]):(?P<start_m>[0-5]\d)-" r"(?P<end_h>[01]?\d|2[0-3]):(?P<end_m>[0-5]\d)$"
 )
 
 
@@ -163,10 +162,7 @@ def parse_offhours_window(raw: str | None) -> tuple[datetime.time, datetime.time
     value = (raw or "").strip() or DEFAULT_OFFHOURS_WINDOW
     match = _WINDOW_RE.match(value)
     if not match:
-        raise ValueError(
-            f"deep_verify_offhours_window: {value!r} does not match the "
-            "required HH:MM-HH:MM shape"
-        )
+        raise ValueError(f"deep_verify_offhours_window: {value!r} does not match the " "required HH:MM-HH:MM shape")
     start = datetime.time(int(match.group("start_h")), int(match.group("start_m")))
     end = datetime.time(int(match.group("end_h")), int(match.group("end_m")))
     return start, end
@@ -184,9 +180,7 @@ def resolve_offhours_window(raw: str | None) -> tuple[tuple[datetime.time, datet
     try:
         return parse_offhours_window(raw), None
     except ValueError as exc:
-        return parse_offhours_window(None), (
-            f"{exc}; falling back to the default window {DEFAULT_OFFHOURS_WINDOW}"
-        )
+        return parse_offhours_window(None), (f"{exc}; falling back to the default window {DEFAULT_OFFHOURS_WINDOW}")
 
 
 def _within_window(now: datetime.datetime, window: tuple[datetime.time, datetime.time]) -> bool:
@@ -248,8 +242,7 @@ def evaluate_due(
     if elapsed >= WEEKLY_INTERVAL:
         return DueDecision(
             True,
-            f"deep-verify: project={project} last run {format_days_hours(elapsed)} ago "
-            "(>= 7 days); running now",
+            f"deep-verify: project={project} last run {format_days_hours(elapsed)} ago " "(>= 7 days); running now",
         )
 
     next_due = last_run + WEEKLY_INTERVAL
@@ -307,8 +300,7 @@ def main(argv: list | None = None) -> int:
         return 0
     if len(argv) != 5:
         print(
-            "usage: schedule.py <project> <mode> <last_run_iso_or_empty> "
-            "<now_iso> <offhours_window_raw_or_empty>",
+            "usage: schedule.py <project> <mode> <last_run_iso_or_empty> " "<now_iso> <offhours_window_raw_or_empty>",
             file=sys.stderr,
         )
         return 2

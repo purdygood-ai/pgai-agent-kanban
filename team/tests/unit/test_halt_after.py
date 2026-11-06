@@ -20,7 +20,6 @@ All tests use tmp_path; no live filesystem paths.
 
 from __future__ import annotations
 
-import pathlib
 from pathlib import Path
 
 import pytest
@@ -38,7 +37,6 @@ from pgai_agent_kanban.halt_after.drain import (
     _parse_status_md,
     check_drain,
 )
-
 
 # ---------------------------------------------------------------------------
 # halt_after/token — parse_token
@@ -154,9 +152,7 @@ def test_promote_removes_halt_after_sentinel(tmp_path: Path) -> None:
 def test_promote_appends_audit_entry_to_release_state_md(tmp_path: Path) -> None:
     """promote appends a ## HALT Event audit block to release-state.md."""
     (tmp_path / "HALT-AFTER").write_text("rc\n", encoding="utf-8")
-    (tmp_path / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nnone\n", encoding="utf-8"
-    )
+    (tmp_path / "release-state.md").write_text("# Release State\n\n## Active RC\nnone\n", encoding="utf-8")
     promote(tmp_path, "rc")
     content = (tmp_path / "release-state.md").read_text(encoding="utf-8")
     assert "## HALT Event" in content
@@ -214,9 +210,7 @@ def test_parse_status_md_returns_empty_strings_when_headings_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _write_task_status(
-    tasks_dir: Path, task_id: str, state: str, role: str
-) -> None:
+def _write_task_status(tasks_dir: Path, task_id: str, state: str, role: str) -> None:
     """Write a minimal status.md for a task under tasks_dir."""
     task_dir = tasks_dir / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -320,13 +314,9 @@ def test_check_drain_versioned_rc_returns_false_when_not_yet_released(
         ("rc:v1.1.0", "v1.0.0", False),  # released below captured
     ],
 )
-def test_check_drain_versioned_rc(
-    tmp_path: Path, captured_token: str, last_released: str, expected: bool
-) -> None:
+def test_check_drain_versioned_rc(tmp_path: Path, captured_token: str, last_released: str, expected: bool) -> None:
     """check_drain for a versioned rc token compares Last Released against the captured version with >=."""
-    root = _make_project_root_with_release_state(
-        tmp_path, active_rc="none", last_released=last_released
-    )
+    root = _make_project_root_with_release_state(tmp_path, active_rc="none", last_released=last_released)
     result = check_drain(captured_token, root)
     assert result is expected
 

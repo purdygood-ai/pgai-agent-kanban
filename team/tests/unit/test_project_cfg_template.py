@@ -213,8 +213,13 @@ def _bash(tmp_path: pathlib.Path, root: pathlib.Path, script: str) -> subprocess
         },
     )
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=env,
-        cwd=str(_TEAM_DIR), stdin=subprocess.DEVNULL, timeout=60,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(_TEAM_DIR),
+        stdin=subprocess.DEVNULL,
+        timeout=60,
     )
 
 
@@ -222,7 +227,8 @@ def _uncomment_stale_lock_seven(text: str) -> str:
     out, count = re.subn(
         r"^# stale_lock_reap_after_wake_periods = \S+$",
         "stale_lock_reap_after_wake_periods = 7",
-        text, flags=re.MULTILINE,
+        text,
+        flags=re.MULTILINE,
     )
     assert count == 1, "expected exactly one commented stale_lock_reap_after_wake_periods line"
     return out
@@ -265,8 +271,15 @@ def _create_flagged_lane(root: pathlib.Path, dev_tree: pathlib.Path) -> str:
     """create_project ``flagged-lane`` with every project-specific flag set; its project.cfg text."""
     dev_tree.mkdir(parents=True)
     ops_projects.create_project(
-        _ctx(root), "flagged-lane", workflow_type="document", max_patch=3, max_minor=4, max_major=1,
-        git_remote="upstream", dev_tree=str(dev_tree), git_repo="git@git.example.com:org/flagged.git",
+        _ctx(root),
+        "flagged-lane",
+        workflow_type="document",
+        max_patch=3,
+        max_minor=4,
+        max_major=1,
+        git_remote="upstream",
+        dev_tree=str(dev_tree),
+        git_repo="git@git.example.com:org/flagged.git",
     )
     return (root / "projects" / "flagged-lane" / "project.cfg").read_text(encoding="utf-8")
 
@@ -304,7 +317,10 @@ def test_an_example_name_in_a_supplied_dev_tree_path_is_not_a_template_leak(tmp_
     [
         ("\nbranch_prefix = ai_\n", "\nbranch_prefix = my-project_\n"),
         ("# Example: /srv/checkouts/flagged-lane\n", "# Example: /srv/checkouts/pgai-agent-kanban\n"),
-        ("\ngit_repo_url = git@git.example.com:org/flagged.git\n", "\ngit_repo_url = git@git.example.com:myorg/x.git\n"),
+        (
+            "\ngit_repo_url = git@git.example.com:org/flagged.git\n",
+            "\ngit_repo_url = git@git.example.com:myorg/x.git\n",
+        ),
     ],
     ids=["template-key-value", "template-comment", "supplied-key-overwritten"],
 )
@@ -338,7 +354,7 @@ def test_generated_body_is_the_template_body_with_the_name_substituted(tmp_path,
 
     text = (root / "projects" / "body-lane" / "project.cfg").read_text(encoding="utf-8")
     template = _TEMPLATE.read_text(encoding="utf-8")
-    body = lambda cfg: cfg[cfg.index("\n# ---"):]  # noqa: E731 -- from the first section banner on
+    body = lambda cfg: cfg[cfg.index("\n# ---") :]  # noqa: E731 -- from the first section banner on
     expected = body(template).replace(ops_projects.PROJECT_NAME_PLACEHOLDER, "body-lane")
     expected = expected.replace("\nproject_name =\n", "\nproject_name = body-lane\n")
     assert body(text) == expected
@@ -460,7 +476,9 @@ def test_uncommented_stale_lock_override_reaches_its_reader(tmp_path, capsys, so
     text = cfg.read_text(encoding="utf-8") if source == "generated" else _ROOT_EXAMPLE.read_text(encoding="utf-8")
     cfg.write_text(_uncomment_stale_lock_seven(text), encoding="utf-8")
 
-    run = _bash(tmp_path, root, "source scripts/lib/project_paths.sh && pp_stale_lock_reap_after_wake_periods lock-lane")
+    run = _bash(
+        tmp_path, root, "source scripts/lib/project_paths.sh && pp_stale_lock_reap_after_wake_periods lock-lane"
+    )
 
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "7"
@@ -471,7 +489,9 @@ def test_commented_stale_lock_override_leaves_the_default_in_force(tmp_path, cap
     ops_projects.create_project(_ctx(root), "quiet-lane")
     capsys.readouterr()
 
-    run = _bash(tmp_path, root, "source scripts/lib/project_paths.sh && pp_stale_lock_reap_after_wake_periods quiet-lane")
+    run = _bash(
+        tmp_path, root, "source scripts/lib/project_paths.sh && pp_stale_lock_reap_after_wake_periods quiet-lane"
+    )
 
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "3"
@@ -487,8 +507,11 @@ def _example() -> str:
 
 
 def test_example_puts_the_stale_lock_key_under_an_active_locks_header():
-    hits = [(section, active) for _, section, key, active in _key_lines(_example())
-            if key == "stale_lock_reap_after_wake_periods"]
+    hits = [
+        (section, active)
+        for _, section, key, active in _key_lines(_example())
+        if key == "stale_lock_reap_after_wake_periods"
+    ]
     assert hits == [("locks", False)]
     assert re.search(r"^\[locks\]$", _example(), re.MULTILINE)
 
@@ -531,7 +554,8 @@ def test_example_carries_no_stale_text(pattern):
 
 def test_example_workflow_type_names_every_ready_workflow_plugin():
     ready = sorted(
-        cfg.parent.name for cfg in (_TEAM_DIR / "workflows").glob("*/workflow.cfg")
+        cfg.parent.name
+        for cfg in (_TEAM_DIR / "workflows").glob("*/workflow.cfg")
         if re.search(r"^\s*status\s*=\s*ready\s*$", cfg.read_text(encoding="utf-8"), re.MULTILINE)
     )
     lines = _example().splitlines()
@@ -570,7 +594,8 @@ def test_root_example_is_the_canonical_template():
 def test_an_installed_package_renders_from_its_own_config_directory(tmp_path):
     installed = tmp_path / "installed"
     shutil.copytree(
-        _TEAM_DIR / "pgai_agent_kanban", installed / "pgai_agent_kanban",
+        _TEAM_DIR / "pgai_agent_kanban",
+        installed / "pgai_agent_kanban",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     (installed / "config").mkdir()
@@ -584,7 +609,10 @@ def test_an_installed_package_renders_from_its_own_config_directory(tmp_path):
 
     run = subprocess.run(
         [sys.executable, "-I", "-c", probe, str(installed)],
-        capture_output=True, text=True, cwd=str(tmp_path), timeout=60,
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=60,
     )
 
     assert run.returncode == 0, run.stderr

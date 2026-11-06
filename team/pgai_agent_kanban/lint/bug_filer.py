@@ -207,7 +207,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 # Run by file path (``python3 .../bug_filer.py``) or loaded from a file
@@ -248,7 +248,7 @@ _LINT_HYGIENE_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "lint_h
 _REPO_ROOT = _LINT_HYGIENE_SCRIPT.parents[2]
 
 
-def _resolve_repo_root(repo_root: "str | Path | None") -> Path:
+def _resolve_repo_root(repo_root: str | Path | None) -> Path:
     """Resolve the checkout whose commits this run's findings should be
     observed against. See the module docstring's "Repository root
     resolution" section for the full reasoning; this is the mechanism:
@@ -327,7 +327,7 @@ _HYGIENE_CLASS_HEADING = "Hygiene Lint Class"
 # ---------------------------------------------------------------------------
 
 
-def _load_hygiene_findings(findings_path: str) -> "dict[str, list[dict]]":
+def _load_hygiene_findings(findings_path: str) -> dict[str, list[dict]]:
     """Read the gated-runner findings file at *findings_path* and group
     every finding whose "lint" field is "hygiene" by its own "class" field
     (lint_hygiene.py's per-finding dict shape -- see its module docstring's
@@ -341,13 +341,13 @@ def _load_hygiene_findings(findings_path: str) -> "dict[str, list[dict]]":
     this filer's.
     """
     try:
-        with open(findings_path, "r", encoding="utf-8") as handle:
+        with open(findings_path, encoding="utf-8") as handle:
             doc = json.load(handle)
     except (OSError, json.JSONDecodeError):
         return {}
 
     findings = doc.get("findings", []) if isinstance(doc, dict) else []
-    grouped: "dict[str, list[dict]]" = defaultdict(list)
+    grouped: dict[str, list[dict]] = defaultdict(list)
     for finding in findings:
         if not isinstance(finding, dict):
             continue
@@ -376,7 +376,7 @@ def _load_hygiene_findings(findings_path: str) -> "dict[str, list[dict]]":
 # ---------------------------------------------------------------------------
 
 
-def _git_head_commit(repo_root: Path) -> "str | None":
+def _git_head_commit(repo_root: Path) -> str | None:
     """Return the full HEAD commit hash of the git repository at
     *repo_root*, or None when it cannot be determined (not a git
     repository, detached with no commits yet, or git missing from PATH).
@@ -402,7 +402,7 @@ def _git_head_commit(repo_root: Path) -> "str | None":
     return commit or None
 
 
-def _dirty_relative_paths(repo_root: Path, paths: "set[str]") -> "set[str]":
+def _dirty_relative_paths(repo_root: Path, paths: set[str]) -> set[str]:
     """Return the subset of *paths* (each a POSIX-style path relative to
     *repo_root*, the same string lint_hygiene.py writes into a finding's
     "file" field) that carry an uncommitted change relative to HEAD --
@@ -430,7 +430,7 @@ def _dirty_relative_paths(repo_root: Path, paths: "set[str]") -> "set[str]":
     if result.returncode != 0:
         return set()
 
-    dirty: "set[str]" = set()
+    dirty: set[str] = set()
     for line in result.stdout.splitlines():
         # Porcelain v1 format: two status characters, one separating space,
         # then the path (a rename reports "orig -> new"; take the new
@@ -453,7 +453,7 @@ def _dirty_relative_paths(repo_root: Path, paths: "set[str]") -> "set[str]":
 # ---------------------------------------------------------------------------
 
 
-def _read_file_at_commit(repo_root: Path, commit: str, rel_path: str) -> "str | None":
+def _read_file_at_commit(repo_root: Path, commit: str, rel_path: str) -> str | None:
     """Return *rel_path*'s full text content as committed at *commit* in the
     git repository at *repo_root*, or None when it cannot be read -- *commit*
     does not resolve, *rel_path* is not present in that commit's tree,
@@ -475,9 +475,7 @@ def _read_file_at_commit(repo_root: Path, commit: str, rel_path: str) -> "str | 
     return result.stdout
 
 
-def _finding_provable_at_commit(
-    repo_root: Path, commit: str, finding: dict, file_cache: "dict[str, str | None]"
-) -> bool:
+def _finding_provable_at_commit(repo_root: Path, commit: str, finding: dict, file_cache: dict[str, str | None]) -> bool:
     """Return False only when *finding*'s own file resolves at *commit* but
     the cited line does not carry the token the finding names -- a real,
     resolvable commit whose tree disagrees with the finding. Returns True
@@ -576,10 +574,10 @@ def _slug_for_class(cls: str) -> str:
     return f"hygiene-lint-{flavor_slug}"
 
 
-_registered_lint_classes_cache: "list[str] | None | bool" = False  # False = not yet queried
+_registered_lint_classes_cache: list[str] | None | bool = False  # False = not yet queried
 
 
-def _registered_lint_classes() -> "list[str] | None":
+def _registered_lint_classes() -> list[str] | None:
     """Return the class tokens team/scripts/lint_hygiene.py's own --classes
     parser accepts, read live from the script itself (the same
     importlib.util.spec_from_file_location load team/tests/unit/
@@ -655,10 +653,7 @@ def _record_for_class(
     count = len(findings)
     finding_lines = "\n".join(_finding_line(f) for f in findings)
     remedy_lines = "\n".join(_remedy_line(i, f) for i, f in enumerate(findings, start=1))
-    files_involved = "\n".join(
-        f"- {path}"
-        for path in sorted({f.get("file", "(unknown file)") for f in findings})
-    )
+    files_involved = "\n".join(f"- {path}" for path in sorted({f.get("file", "(unknown file)") for f in findings}))
     return BugRecord(
         slug=slug,
         filed_by=f"hygiene-lint (autonomous) — {count} '{cls}' hygiene finding(s) in {project}.",
@@ -721,7 +716,7 @@ class FilingResult:
     cls: str
     outcome: str
     bug_id: str
-    bug_path: "str | None"
+    bug_path: str | None
     count: int
 
 
@@ -730,8 +725,8 @@ def file_or_cite_hygiene_bugs(
     *,
     project: str,
     findings_path: str,
-    filed_at: "str | None" = None,
-    repo_root: "str | Path | None" = None,
+    filed_at: str | None = None,
+    repo_root: str | Path | None = None,
 ) -> list:
     """File at most one aggregated bug per hygiene class present in the
     findings file at *findings_path*, or cite an existing live bug (open,
@@ -794,15 +789,13 @@ def file_or_cite_hygiene_bugs(
         _note_unresolvable_commit(root)
         return []
 
-    all_files = {
-        f.get("file") for findings in grouped.values() for f in findings if f.get("file")
-    }
+    all_files = {f.get("file") for findings in grouped.values() for f in findings if f.get("file")}
     dirty_files = _dirty_relative_paths(root, all_files)
 
     os.makedirs(bugs_dir, exist_ok=True)
-    filed_at = filed_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filed_at = filed_at or datetime.now(UTC).strftime("%Y-%m-%d")
 
-    proof_cache: "dict[str, str | None]" = {}
+    proof_cache: dict[str, str | None] = {}
     results: list = []
     for cls in sorted(grouped):
         findings = [f for f in grouped[cls] if f.get("file") not in dirty_files]
@@ -812,9 +805,7 @@ def file_or_cite_hygiene_bugs(
             # skipped exactly as if it had no findings this run.
             continue
 
-        provable = [
-            f for f in findings if _finding_provable_at_commit(root, commit, f, proof_cache)
-        ]
+        provable = [f for f in findings if _finding_provable_at_commit(root, commit, f, proof_cache)]
         if len(provable) != len(findings):
             _note_unprovable_findings(cls, commit, len(findings) - len(provable))
         findings = provable
@@ -872,7 +863,7 @@ Exit codes: 0 done; 2 wrong argument list.
 """
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI: bug_filer.py <bugs_dir> <project> <findings_file>
 
     Prints one block of "key=value" lines per hygiene class this run

@@ -108,7 +108,7 @@ _TIMEOUT_SECONDS = 60
 #: 100-character cut of the runaway question falls before the kanban.cfg
 #: path in it, so the golden holds no tree path.
 WAKE_PROJECT = "decision-wake-fixture"
-WAKE_NOW = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.timezone.utc)
+WAKE_NOW = datetime.datetime(2026, 1, 1, 12, 0, tzinfo=datetime.UTC)
 WAKE_BLOCKED_AT = "2026-01-01T11:00:00+00:00"
 FAILED_VERB_TASK = "CODER-20260101-001-reset-raises"
 DECLINED_TASK = "CODER-20260101-002-left-blocked"
@@ -128,7 +128,7 @@ CLI_CASES: dict[str, tuple[str, ...]] = {
 
 
 def _at(day: int, hour: int) -> datetime.datetime:
-    return datetime.datetime(2026, 10, day, hour, tzinfo=datetime.timezone.utc)
+    return datetime.datetime(2026, 10, day, hour, tzinfo=datetime.UTC)
 
 
 def _ask(ctx: OpsContext, project: str, question: str, when: datetime.datetime, source: str) -> str:
@@ -153,8 +153,7 @@ def build_root(base: pathlib.Path) -> pathlib.Path:
     for name in PROJECTS:
         (root / "projects" / name / "metrics" / "day").mkdir(parents=True, exist_ok=True)
         (root / "projects" / name / "metrics" / "day" / f"{DAY}.json").write_text(
-            json.dumps({"date": DAY, "project": name, "rcs_included": ["v1.2.0"]}, indent=2, sort_keys=True)
-            + "\n",
+            json.dumps({"date": DAY, "project": name, "rcs_included": ["v1.2.0"]}, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
     return root
@@ -164,8 +163,7 @@ def write_inboxes(root: pathlib.Path) -> None:
     """alpha: two open entries and one closed; beta: one closed; gamma: none."""
     ctx = OpsContext(kanban_root=root)
     _ask(ctx, "alpha", "Cancel the RC or keep it open for the late fix?", _at(17, 9), "rc:v1.2.0")
-    _ask(ctx, "alpha", "Requeue the docs task once the provider is back?", _at(18, 10),
-         "WRITER-20261018-004-docs")
+    _ask(ctx, "alpha", "Requeue the docs task once the provider is back?", _at(18, 10), "WRITER-20261018-004-docs")
     closed = _ask(ctx, "alpha", "Which release carries the hotfix?", _at(18, 11), "rc:v1.2.0")
     close_entry(ctx, "alpha", closed, now=_at(18, 12))
     old = _ask(ctx, "beta", "Keep the stale bundle?", _at(16, 8), "rc:v0.4.0")
@@ -199,8 +197,12 @@ def run_report(root: pathlib.Path, home: pathlib.Path, *args: str) -> subprocess
     """metrics-report.sh over *root* with *args*."""
     return subprocess.run(
         ["bash", str(_METRICS_REPORT_SH), "--kanban-root", str(root), *args],
-        capture_output=True, text=True, env=_env(root, home), cwd=str(root),
-        timeout=_TIMEOUT_SECONDS, check=False,
+        capture_output=True,
+        text=True,
+        env=_env(root, home),
+        cwd=str(root),
+        timeout=_TIMEOUT_SECONDS,
+        check=False,
     )
 
 
@@ -226,6 +228,7 @@ def without_inbox_block(stdout: str) -> str:
 
 def cli_outcome(root: pathlib.Path, result: subprocess.CompletedProcess) -> dict:
     """One CLI run as a golden outcome, tree paths as placeholders."""
+
     def scrub(text: str) -> str:
         return text.replace(str(root), "{ROOT}").replace(str(_TEAM_DIR), "{TEAM}")
 
@@ -289,8 +292,7 @@ def test_no_open_entry_hides_the_block_and_leaves_the_pane_unchanged(
     # Only closed entries: still no block, and the pane is byte-identical.
     ctx = OpsContext(kanban_root=bare_root)
     for project in ("alpha", "beta"):
-        close_entry(ctx, project, _ask(ctx, project, "Closed already?", _at(15, 8), "rc:v1.0.0"),
-                    now=_at(15, 9))
+        close_entry(ctx, project, _ask(ctx, project, "Closed already?", _at(15, 8), "rc:v1.0.0"), now=_at(15, 9))
     only_closed = run_pane(bare_root, home)
     assert only_closed.returncode == 0, _diagnostic(only_closed)
     assert only_closed.stdout == no_inbox.stdout
@@ -376,8 +378,14 @@ def build_decision_wake_root(base: pathlib.Path) -> pathlib.Path:
         "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
     }
     with mock.patch.dict(os.environ, sandbox):
-        for name in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "PGAI_PROJECT_NAME", "HALT_OVERWATCH",
-                     "OVERWATCH_FIRING_TIMESTAMP", "OVERWATCH_LOCK_WAIT_SECONDS"):
+        for name in (
+            "PGAI_TASKS_DIR",
+            "PGAI_PROJECT_ROOT",
+            "PGAI_PROJECT_NAME",
+            "HALT_OVERWATCH",
+            "OVERWATCH_FIRING_TIMESTAMP",
+            "OVERWATCH_LOCK_WAIT_SECONDS",
+        ):
             os.environ.pop(name, None)
         _block_task(project_dir, FAILED_VERB_TASK, "invalid_state")
         with mock.patch.dict(dx._VERB_RUNNERS, {"reset-to-backlog": _executor_raises}):
@@ -397,9 +405,7 @@ def wake_root(tmp_path: pathlib.Path) -> pathlib.Path:
     return build_decision_wake_root(tmp_path)
 
 
-def test_each_decision_wake_failure_gets_exactly_one_pane_line(
-    wake_root: pathlib.Path, home: pathlib.Path
-) -> None:
+def test_each_decision_wake_failure_gets_exactly_one_pane_line(wake_root: pathlib.Path, home: pathlib.Path) -> None:
     entries = list_open(OpsContext(kanban_root=wake_root), WAKE_PROJECT)
     assert len(entries) == 3, entries
     by_source = {}

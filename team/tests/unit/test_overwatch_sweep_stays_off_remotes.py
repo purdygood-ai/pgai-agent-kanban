@@ -106,9 +106,10 @@ def test_full_sweep_makes_no_push_or_ls_remote_call(tmp_path):
     assert "running push-lag" in result.stderr, "the full sweep did not reach the push-lag check:\n" + result.stderr
     assert "running block-triage" in result.stderr, result.stderr
     calls = _remote_calls(log_file)
-    assert calls == [], (
-        "the full sweep reached for a remote from a test sandbox whose project.cfg names no dev tree:\n"
-        + "\n".join(calls)
+    assert (
+        calls == []
+    ), "the full sweep reached for a remote from a test sandbox whose project.cfg names no dev tree:\n" + "\n".join(
+        calls
     )
     assert _origin_tags(origin) == "", "a local-only tag reached the throwaway origin"
 

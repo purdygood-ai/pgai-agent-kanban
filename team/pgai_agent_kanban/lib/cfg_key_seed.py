@@ -41,7 +41,7 @@ import dataclasses
 import pathlib
 import shlex
 import sys
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 # Started by file path (python3 .../lib/cfg_key_seed.py) there is no parent
 # package: put the package root this file sits in -- the directory holding
@@ -111,7 +111,7 @@ class SeedOutcome:
     existing: str = ""
 
 
-def seed_cfg_keys(cfg_path: pathlib.Path, keys: Sequence[SeedKey], *, dry_run: bool = False) -> "list[SeedOutcome]":
+def seed_cfg_keys(cfg_path: pathlib.Path, keys: Sequence[SeedKey], *, dry_run: bool = False) -> list[SeedOutcome]:
     """Add every absent key in *keys* to *cfg_path*; return one outcome per key.
 
     Raises:
@@ -136,7 +136,7 @@ def seed_cfg_keys(cfg_path: pathlib.Path, keys: Sequence[SeedKey], *, dry_run: b
     return outcomes
 
 
-def render_outcomes(label: str, outcomes: Sequence[SeedOutcome], *, dry_run: bool = False) -> "list[str]":
+def render_outcomes(label: str, outcomes: Sequence[SeedOutcome], *, dry_run: bool = False) -> list[str]:
     """One operator line per outcome, naming *label* (the project or file)."""
     lines = []
     for item in outcomes:
@@ -180,7 +180,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point; returns the exit code."""
     try:
         args = _build_parser().parse_args(argv)

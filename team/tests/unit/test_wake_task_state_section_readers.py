@@ -167,7 +167,9 @@ def test_pending_scan_serves_empty_state_task_instead_of_skipping_it(tmp_path: p
     assert proc.stdout.strip().splitlines()[-1] == _TASK_ID, _explain(proc)
 
 
-@pytest.mark.parametrize(("state", "served"), [("BACKLOG", True), ("WAITING", False), ("BLOCKED", False), ("WORKING", False)])
+@pytest.mark.parametrize(
+    ("state", "served"), [("BACKLOG", True), ("WAITING", False), ("BLOCKED", False), ("WORKING", False)]
+)
 def test_pending_scan_reads_populated_state_unchanged(tmp_path: pathlib.Path, state: str, served: bool) -> None:
     _task(tmp_path, _TASK_ID, f"## State\n{state}\n\n## Summary\nBACKLOG\n")
     _queue(tmp_path, f"- [ ] {_TASK_ID}")
@@ -189,7 +191,9 @@ def test_waiting_scan_does_not_promote_empty_state_task(tmp_path: pathlib.Path) 
     assert "no WAITING tasks to re-check" in proc.stdout, _explain(proc)
 
 
-@pytest.mark.parametrize(("state", "promoted"), [("WAITING", True), ("BACKLOG", False), ("BLOCKED", False), ("WORKING", False)])
+@pytest.mark.parametrize(
+    ("state", "promoted"), [("WAITING", True), ("BACKLOG", False), ("BLOCKED", False), ("WORKING", False)]
+)
 def test_waiting_scan_reads_populated_state_unchanged(tmp_path: pathlib.Path, state: str, promoted: bool) -> None:
     status_file = _task(tmp_path, _TASK_ID, f"## State\n{state}\n\n## Summary\nx\n\n## Blockers\nnone\n")
     _queue(tmp_path, f"- [ ] {_TASK_ID}")
@@ -222,7 +226,9 @@ def test_blocked_scan_does_not_promote_empty_state_task(tmp_path: pathlib.Path) 
     assert "no BLOCKED tasks to re-check" in proc.stdout, _explain(proc)
 
 
-@pytest.mark.parametrize(("state", "promoted"), [("BLOCKED", True), ("BACKLOG", False), ("WAITING", False), ("WORKING", False)])
+@pytest.mark.parametrize(
+    ("state", "promoted"), [("BLOCKED", True), ("BACKLOG", False), ("WAITING", False), ("WORKING", False)]
+)
 def test_blocked_scan_reads_populated_state_unchanged(tmp_path: pathlib.Path, state: str, promoted: bool) -> None:
     status_file = _task(tmp_path, _TASK_ID, _blocked_status(state, "no", "waiting on Active RC"))
     _queue(tmp_path, f"- [B] {_TASK_ID}")

@@ -54,6 +54,12 @@
 #
 # --dry-run: scans and logs findings but does NOT kill any processes.
 
+# This file's directory, and the lib directory above it, as absolute paths
+# resolved once at load: no function depends on the caller's current
+# directory or on whether this file was named by a relative path.
+_CLL_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || _CLL_SELF_DIR=""
+_CLL_LIB_DIR="${_CLL_SELF_DIR%/*}"
+
 # overwatch_registered_projects: the shared projects.cfg reader.
 # shellcheck source=../overwatch_config.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
@@ -65,29 +71,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../overwatch_config.sh"
 # Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 _cll_resolve_env() {
-    if [[ -z "${KANBAN_ROOT:-}" ]]; then
-        KANBAN_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH:-${HOME}/pgai_agent_kanban}"
-    fi
-    if [[ ! -d "${KANBAN_ROOT}" ]]; then
-        echo "check-leaked-listeners: KANBAN_ROOT does not exist: ${KANBAN_ROOT}" >&2
-        return 1
-    fi
-
-    if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-        local _all_projects=""
-        _all_projects="$(overwatch_registered_projects)"
-        local _project_count
-        _project_count="$(echo "${_all_projects}" | grep -c '[^[:space:]]' 2>/dev/null)" || _project_count=0
-        if [[ "${_project_count}" -gt 1 ]]; then
-            echo "check-leaked-listeners: ERROR: OVERWATCH_PROJECT not set and multiple projects registered." >&2
-            return 1
-        fi
-        OVERWATCH_PROJECT="$(echo "${_all_projects}" | grep '[^[:space:]]' | head -n1)"
-        if [[ -z "${OVERWATCH_PROJECT:-}" ]]; then
-            echo "check-leaked-listeners: ERROR: no project specified and none resolvable from projects.cfg" >&2
-            return 1
-        fi
-    fi
+    overwatch_resolve_check_project check-leaked-listeners || return 1
 
     _cll_resolve_temp_root
 }
@@ -102,7 +86,8 @@ _cll_resolve_temp_root() {
     # module is invoked standalone rather than through the sweep runner).
     if ! declare -f pgai_temp_dir >/dev/null 2>&1; then
         local _cll_lib_dir
-        _cll_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+        _cll_lib_dir="${_CLL_SELF_DIR}"
+        [[ -n "${_cll_lib_dir}" ]] || {
             echo "check-leaked-listeners: cannot resolve lib dir for temp.sh sourcing" >&2
             return 1
         }
@@ -130,7 +115,8 @@ _cll_load_protocol() {
         return 0
     fi
     local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" || {
+    lib_dir="${_CLL_SELF_DIR}"
+    [[ -n "${lib_dir}" ]] || {
         echo "check-leaked-listeners: cannot resolve lib dir" >&2
         return 1
     }
@@ -199,7 +185,7 @@ _CLL_DEFAULT_MIN_AGE_SECONDS=3600
 _cll_min_age_seconds() {
     if ! declare -F read_ini >/dev/null 2>&1; then
         local _cll_ini
-        _cll_ini="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/ini_parser.sh"
+        _cll_ini="${_CLL_LIB_DIR}/ini_parser.sh"
         # shellcheck source=../ini_parser.sh
         [[ -f "${_cll_ini}" ]] && source "${_cll_ini}"
     fi
@@ -237,7 +223,7 @@ _cll_process_age_seconds() {
 _cll_load_task_ids() {
     declare -F kanban_task_ids_in_files >/dev/null 2>&1 && return 0
     local ids_lib
-    ids_lib="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/task_ids.sh"
+    ids_lib="${_CLL_LIB_DIR}/task_ids.sh"
     [[ -f "${ids_lib}" ]] || return 1
     # shellcheck source=../task_ids.sh
     source "${ids_lib}"
@@ -306,7 +292,7 @@ overwatch_leaked_listener_scan() {
     _cll_load_task_ids || { echo "check-leaked-listeners: task_ids.sh not found" >&2; return 1; }
     if ! declare -F pp_run_ops >/dev/null 2>&1; then
         local _cll_ops
-        _cll_ops="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/pp_run_ops.sh"
+        _cll_ops="${_CLL_LIB_DIR}/pp_run_ops.sh"
         # shellcheck source=../pp_run_ops.sh
         [[ -f "${_cll_ops}" ]] && source "${_cll_ops}"
     fi

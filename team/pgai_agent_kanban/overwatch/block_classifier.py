@@ -114,7 +114,8 @@ import pathlib
 import re
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any
+from collections.abc import Mapping
 
 import yaml
 
@@ -227,9 +228,7 @@ _ACTION_PARAMS: dict[str, tuple[frozenset, frozenset]] = {
     ESCALATE: (frozenset(), frozenset()),
 }
 
-_ROW_REQUIRED_KEYS = frozenset(
-    {"action", "max_attempts", "cooldown_s", "backoff", "verification", "preconditions"}
-)
+_ROW_REQUIRED_KEYS = frozenset({"action", "max_attempts", "cooldown_s", "backoff", "verification", "preconditions"})
 #: Required on every row; checked by _validate_rule itself, so a row with an
 #: action passes it to _validate_step as an accepted key.
 _DECISION_KEY = "decision"
@@ -244,9 +243,7 @@ _BACKOFF_KEYS = frozenset({"factor", "cap_s"})
 _TOP_LEVEL_KEY = "reason_codes"
 #: The optional top-level key holding the pipeline ladder.
 PIPELINE_LADDER_KEY = "pipeline_ladder"
-_PIPELINE_LADDER_KEYS = frozenset(
-    {"roles", "note", "max_attempts", "cooldown_s", "backoff", "cooldown_before_first"}
-)
+_PIPELINE_LADDER_KEYS = frozenset({"roles", "note", "max_attempts", "cooldown_s", "backoff", "cooldown_before_first"})
 #: The action every pipeline-ladder step takes.
 PIPELINE_LADDER_ACTION = "requeue_owner"
 
@@ -299,7 +296,7 @@ class Step:
     action: str
     params: Mapping[str, Any]
     preconditions: tuple[str, ...]
-    otherwise: Optional["Step"] = None
+    otherwise: Step | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -318,7 +315,7 @@ class RowDecision:
 
     inbox: str
     answer: str
-    verb: Optional[str] = None
+    verb: str | None = None
     budget: int = 0
 
 
@@ -328,12 +325,12 @@ class Rule:
 
     reason_code: str
     step: Step
-    max_attempts: Union[int, str]
+    max_attempts: int | str
     cooldown_s: int
-    backoff: Optional[Backoff]
-    verification: Optional[str]
+    backoff: Backoff | None
+    verification: str | None
     cooldown_before_first: bool = False
-    decision: Optional[RowDecision] = None
+    decision: RowDecision | None = None
     #: True for the stand-in a pipeline ladder makes of a decision-only row.
     pipeline_ladder: bool = False
 
@@ -351,7 +348,7 @@ class Rule:
         """Seconds of cool-down before attempt ``completed_attempts + 1``."""
         if self.backoff is None:
             return self.cooldown_s
-        grown = self.cooldown_s * (self.backoff.factor ** completed_attempts)
+        grown = self.cooldown_s * (self.backoff.factor**completed_attempts)
         return int(min(grown, self.backoff.cap_s))
 
 
@@ -368,7 +365,7 @@ class PipelineLadder:
     note: str
     max_attempts: int
     cooldown_s: int
-    backoff: Optional[Backoff]
+    backoff: Backoff | None
     cooldown_before_first: bool
 
     def applies_to(self, rule: Rule, owner_role: str) -> bool:
@@ -398,7 +395,7 @@ class ClassifierTable:
 
     path: str
     rules: Mapping[str, Rule]
-    pipeline_ladder: Optional[PipelineLadder] = None
+    pipeline_ladder: PipelineLadder | None = None
 
 
 def default_table_path() -> str:
@@ -487,9 +484,7 @@ def _validate_preconditions(where: str, raw: Any, problems: list) -> tuple[str, 
         return ()
     unknown = [p for p in raw if p not in PRECONDITIONS]
     if unknown:
-        problems.append(
-            f"{where}: unknown precondition(s) {', '.join(unknown)} (accepted: {', '.join(PRECONDITIONS)})"
-        )
+        problems.append(f"{where}: unknown precondition(s) {', '.join(unknown)} (accepted: {', '.join(PRECONDITIONS)})")
     if len(set(raw)) != len(raw):
         problems.append(f"{where}: preconditions repeat a name")
     return tuple(raw)
@@ -519,7 +514,7 @@ def _validate_step(where: str, raw: Mapping, required: frozenset, optional: froz
         action = ESCALATE
     params = _validate_params(where, action, raw.get("params"), problems)
     preconditions = _validate_preconditions(where, raw.get("preconditions", []), problems)
-    otherwise: Optional[Step] = None
+    otherwise: Step | None = None
     if "otherwise" in raw:
         fallback = raw["otherwise"]
         if not isinstance(fallback, dict):
@@ -531,7 +526,7 @@ def _validate_step(where: str, raw: Mapping, required: frozenset, optional: froz
     return Step(action=action, params=params, preconditions=preconditions, otherwise=otherwise)
 
 
-def _validate_backoff(where: str, raw: Any, cooldown_s: int, problems: list) -> Optional[Backoff]:
+def _validate_backoff(where: str, raw: Any, cooldown_s: int, problems: list) -> Backoff | None:
     if _is_none(raw):
         return None
     if not isinstance(raw, dict) or set(raw) != _BACKOFF_KEYS:
@@ -542,7 +537,9 @@ def _validate_backoff(where: str, raw: Any, cooldown_s: int, problems: list) -> 
         problems.append(f"{where}: backoff factor {factor!r} must be a number of 1 or more")
         return None
     if not _is_whole(cap_s) or cap_s < cooldown_s:
-        problems.append(f"{where}: backoff cap_s {cap_s!r} must be a whole number of at least cooldown_s ({cooldown_s})")
+        problems.append(
+            f"{where}: backoff cap_s {cap_s!r} must be a whole number of at least cooldown_s ({cooldown_s})"
+        )
         return None
     return Backoff(factor=factor, cap_s=cap_s)
 
@@ -550,7 +547,7 @@ def _validate_backoff(where: str, raw: Any, cooldown_s: int, problems: list) -> 
 _DECISION_SHAPE = "{inbox: QUESTION, answer: TEXT} or {verb: NAME, budget: N, inbox: QUESTION, answer: TEXT}"
 
 
-def _validate_decision(where: str, raw: Any, problems: list) -> Optional[RowDecision]:
+def _validate_decision(where: str, raw: Any, problems: list) -> RowDecision | None:
     """Validate a row's ``decision``; None (with a problem recorded) when it is unusable."""
     where = f"{where} decision"
     if not isinstance(raw, dict):
@@ -603,7 +600,7 @@ def _validate_decision(where: str, raw: Any, problems: list) -> Optional[RowDeci
     )
 
 
-def _validate_rule(reason_code: Any, raw: Any, problems: list) -> Optional[Rule]:
+def _validate_rule(reason_code: Any, raw: Any, problems: list) -> Rule | None:
     where = f"row {reason_code!r}"
     if reason_code not in REASON_CODES:
         problems.append(f"{where}: not a Block Record reason_code (accepted: {', '.join(REASON_CODES)})")
@@ -664,7 +661,7 @@ def _validate_rule(reason_code: Any, raw: Any, problems: list) -> Optional[Rule]
     )
 
 
-def _validate_pipeline_ladder(raw: Any, problems: list) -> Optional[PipelineLadder]:
+def _validate_pipeline_ladder(raw: Any, problems: list) -> PipelineLadder | None:
     """Validate the table's ``pipeline_ladder``; None (with a problem recorded) when unusable."""
     where = PIPELINE_LADDER_KEY
     if not isinstance(raw, dict):
@@ -716,7 +713,7 @@ def _validate_pipeline_ladder(raw: Any, problems: list) -> Optional[PipelineLadd
     )
 
 
-def load_table(table_path: "str | Path | None" = None) -> ClassifierTable:
+def load_table(table_path: str | Path | None = None) -> ClassifierTable:
     """Load and validate the classifier table.
 
     Args:
@@ -736,9 +733,15 @@ def load_table(table_path: "str | Path | None" = None) -> ClassifierTable:
         data = yaml.load(text, Loader=_UniqueKeyLoader)  # noqa: S506 — a SafeLoader subclass
     except yaml.YAMLError as exc:
         raise TableError(f"classifier table {path} is not valid YAML: {exc}") from exc
-    if not isinstance(data, dict) or _TOP_LEVEL_KEY not in data or not set(data) <= {
-        _TOP_LEVEL_KEY, PIPELINE_LADDER_KEY,
-    }:
+    if (
+        not isinstance(data, dict)
+        or _TOP_LEVEL_KEY not in data
+        or not set(data)
+        <= {
+            _TOP_LEVEL_KEY,
+            PIPELINE_LADDER_KEY,
+        }
+    ):
         raise TableError(
             f"classifier table {path} must be a mapping with the key {_TOP_LEVEL_KEY!r} and, optionally, "
             f"{PIPELINE_LADDER_KEY!r}"
@@ -794,15 +797,15 @@ class Decision:
     action: str
     why: str
     detail: str
-    reason_code: Optional[str] = None
+    reason_code: str | None = None
     params: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    attempt: Optional[int] = None
-    max_attempts: Union[int, str, None] = None
-    cooldown_s: Optional[int] = None
-    backoff: Optional[Backoff] = None
-    verification: Optional[str] = None
-    cooldown_until: Optional[str] = None
-    not_before: Optional[str] = None
+    attempt: int | None = None
+    max_attempts: int | str | None = None
+    cooldown_s: int | None = None
+    backoff: Backoff | None = None
+    verification: str | None = None
+    cooldown_until: str | None = None
+    not_before: str | None = None
     pipeline_ladder: bool = False
 
     @property
@@ -818,11 +821,11 @@ class Decision:
         return out
 
 
-def _escalate(why: str, detail: str, record: Optional[BlockRecord] = None, rule: Optional[Rule] = None) -> Decision:
+def _escalate(why: str, detail: str, record: BlockRecord | None = None, rule: Rule | None = None) -> Decision:
     return Decision(action=ESCALATE, why=why, detail=detail, **_rule_fields(record, rule))
 
 
-def _rule_fields(record: Optional[BlockRecord], rule: Optional[Rule]) -> dict:
+def _rule_fields(record: BlockRecord | None, rule: Rule | None) -> dict:
     fields: dict = {"reason_code": (record.reason_code or None) if record is not None else None}
     if rule is not None:
         fields.update(
@@ -840,11 +843,11 @@ def _ladder_phrase(rule: Rule, record: BlockRecord) -> str:
     return f" on the pipeline ladder ({record.owner_role} task)" if rule.pipeline_ladder else ""
 
 
-def _as_utc(now: "datetime.datetime | str | None") -> datetime.datetime:
+def _as_utc(now: datetime.datetime | str | None) -> datetime.datetime:
     if now is None:
-        return datetime.datetime.now(datetime.timezone.utc)
+        return datetime.datetime.now(datetime.UTC)
     if isinstance(now, datetime.datetime):
-        return now if now.tzinfo is not None else now.replace(tzinfo=datetime.timezone.utc)
+        return now if now.tzinfo is not None else now.replace(tzinfo=datetime.UTC)
     parsed = try_parse_iso(now)
     if parsed is None:
         raise ValueError(f"now {now!r} is not an ISO-8601 time (expected e.g. 2026-01-01T00:00:00+00:00)")
@@ -875,7 +878,7 @@ def _precondition_holds(name: str, record: BlockRecord, evidence: Mapping[str, s
 def render_note(template: str, evidence: Mapping[str, str], facts: Mapping[str, Any]) -> str:
     """Fill ``{key}`` in *template*: the caller's fact first, then the evidence, else ``unknown``."""
 
-    def _value(match: "re.Match[str]") -> str:
+    def _value(match: re.Match[str]) -> str:
         key = match.group(1)
         supplied = facts.get(key)
         if isinstance(supplied, (str, int, float)) and not isinstance(supplied, bool) and str(supplied).strip():
@@ -886,11 +889,11 @@ def render_note(template: str, evidence: Mapping[str, str], facts: Mapping[str, 
 
 
 def decide(
-    record: Optional[BlockRecord],
+    record: BlockRecord | None,
     table: ClassifierTable,
     *,
-    facts: Optional[Mapping[str, Any]] = None,
-    now: "datetime.datetime | str | None" = None,
+    facts: Mapping[str, Any] | None = None,
+    now: datetime.datetime | str | None = None,
 ) -> Decision:
     """Decide what block triage may do about *record* (see the module docstring).
 
@@ -978,7 +981,7 @@ def decide(
         )
 
     unmet: list = []
-    step: Optional[Step] = rule.step
+    step: Step | None = rule.step
     while step is not None:
         missing = [p for p in step.preconditions if not _precondition_holds(p, record, evidence, facts)]
         if not missing:
@@ -1000,9 +1003,7 @@ def decide(
         params["note"] = render_note(params["note"], evidence, facts)
     next_window = rule.window_s(record.attempts + 1)
     ceiling = (
-        "under the resolution stage's own ceiling"
-        if rule.max_attempts == STAGE_CEILING
-        else f"of {rule.max_attempts}"
+        "under the resolution stage's own ceiling" if rule.max_attempts == STAGE_CEILING else f"of {rule.max_attempts}"
     )
     return Decision(
         action=step.action,
@@ -1023,10 +1024,10 @@ def decide(
 def classify(
     status_text: str,
     *,
-    facts: Optional[Mapping[str, Any]] = None,
-    now: "datetime.datetime | str | None" = None,
-    table_path: "str | Path | None" = None,
-    status_file: "str | Path | None" = None,
+    facts: Mapping[str, Any] | None = None,
+    now: datetime.datetime | str | None = None,
+    table_path: str | Path | None = None,
+    status_file: str | Path | None = None,
 ) -> Decision:
     """Decide from a status.md's text, failing closed on anything unreadable.
 
@@ -1046,11 +1047,11 @@ def classify(
 
 
 def classify_status_file(
-    status_file: "str | Path",
+    status_file: str | Path,
     *,
-    facts: Optional[Mapping[str, Any]] = None,
-    now: "datetime.datetime | str | None" = None,
-    table_path: "str | Path | None" = None,
+    facts: Mapping[str, Any] | None = None,
+    now: datetime.datetime | str | None = None,
+    table_path: str | Path | None = None,
 ) -> Decision:
     """:func:`classify` for a status.md on disk (read only); unreadable decides escalate."""
     try:
@@ -1086,14 +1087,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     c.add_argument("status_file", metavar="STATUS_FILE", help="the blocked task's status.md")
     c.add_argument(
-        "--facts", metavar="JSON_FILE",
+        "--facts",
+        metavar="JSON_FILE",
         help=(
             "a JSON object of facts the caller gathered: precondition names mapped to "
             "true/false, and note placeholder values mapped to text; default: none"
         ),
     )
     c.add_argument("--now", metavar="ISO", help="the decision time (ISO-8601); default: the current UTC time")
-    c.add_argument("--table", metavar="YAML_FILE", help="the classifier table; default: the shipped block-classifier.yaml")
+    c.add_argument(
+        "--table", metavar="YAML_FILE", help="the classifier table; default: the shipped block-classifier.yaml"
+    )
     return parser
 
 
@@ -1104,7 +1108,7 @@ def _read_facts(path: str) -> Mapping[str, Any]:
     return data
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point; returns the exit code."""
     parser = _parser()
     args = parser.parse_args(argv)
@@ -1113,7 +1117,7 @@ def main(argv: Optional[list] = None) -> int:
         return 0
     if args.now is not None and try_parse_iso(args.now) is None:
         parser.error(f"--now {args.now!r} is not an ISO-8601 time (e.g. 2026-01-01T00:00:00+00:00)")
-    decision: Optional[Decision] = None
+    decision: Decision | None = None
     facts: Mapping[str, Any] = {}
     if args.facts:
         try:

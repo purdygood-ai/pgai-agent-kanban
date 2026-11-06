@@ -80,7 +80,7 @@ from __future__ import annotations
 
 import pathlib
 import re
-from typing import Optional, Union
+from typing import Union
 
 from pgai_agent_kanban.lib import ini
 from pgai_agent_kanban.lib.project_cfg import (
@@ -197,7 +197,7 @@ def prefixed_main_branch(
     return f"{resolve_branch_prefix(project_name=project_name, default=default)}main"
 
 
-def branch_prefix_from_cfg(cfg_file: Optional[pathlib.Path]) -> str:
+def branch_prefix_from_cfg(cfg_file: pathlib.Path | None) -> str:
     """Return the ``[project] branch_prefix`` *cfg_file* configures, by ``pp_branch_prefix``'s rules.
 
     The Python twin of ``pp_branch_prefix``'s read in
@@ -257,7 +257,7 @@ def validate_branch_prefix(value: str, source: str = "") -> str:
     return value
 
 
-def _validated_branch_prefix_from_cfg(cfg_file: Optional[PathLike]) -> str:
+def _validated_branch_prefix_from_cfg(cfg_file: PathLike | None) -> str:
     """:func:`branch_prefix_from_cfg` on *cfg_file*, then :func:`validate_branch_prefix`."""
     if not cfg_file:
         return ""
@@ -265,7 +265,7 @@ def _validated_branch_prefix_from_cfg(cfg_file: Optional[PathLike]) -> str:
     return validate_branch_prefix(branch_prefix_from_cfg(path), str(path))
 
 
-def ini_branch_prefix_from_cfg(cfg_file: Optional[PathLike]) -> str:
+def ini_branch_prefix_from_cfg(cfg_file: PathLike | None) -> str:
     """Return the ``[project] branch_prefix`` *cfg_file* sets, as ``pp_branch_prefix`` answers it.
 
     Read by :func:`branch_prefix_from_cfg` and validated by
@@ -307,7 +307,7 @@ def ini_branch_prefix_for_project_root(project_root: PathLike) -> str:
     return _validated_branch_prefix_from_cfg(project_cfg_file(pathlib.Path(project_root)))
 
 
-def bare_branch_prefix_from_cfg(cfg_file: Optional[PathLike]) -> str:
+def bare_branch_prefix_from_cfg(cfg_file: PathLike | None) -> str:
     """Return the prefix *cfg_file* configures; the same answer as :func:`ini_branch_prefix_from_cfg`.
 
     Args:

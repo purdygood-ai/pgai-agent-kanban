@@ -166,6 +166,7 @@ if not __package__:
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
 from pgai_agent_kanban.lib.text import lf_to_spaces  # noqa: E402
 from pgai_agent_kanban.lib.timeutil import utc_now_iso  # noqa: E402
+from pgai_agent_kanban.lib.dataclass_records import from_known_fields  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Errors
@@ -184,8 +185,7 @@ class RefusalLedgerError(Exception):
 # ---------------------------------------------------------------------------
 
 _RECORD_HEADER_RE = re.compile(
-    r"^##\s+Refusal:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+"
-    r"(?P<surface>.+?)\s*$"
+    r"^##\s+Refusal:\s*(?P<timestamp>\S+)\s+—\s+(?P<project>\S+)\s+—\s+" r"(?P<surface>.+?)\s*$"
 )
 _CONTEXT_RE = re.compile(r"^-\s*Context:\s*(?P<value>.*)$")
 _ERROR_RE = re.compile(r"^-\s*Error:\s*(?P<value>.*)$")
@@ -232,10 +232,9 @@ class RefusalRecord:
     context: str
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RefusalRecord":
+    def from_dict(cls, data: dict) -> RefusalRecord:
         """Build a record from a plain dict (parsed JSON, say), ignoring unknown keys."""
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        return from_known_fields(cls, data)
 
     def to_dict(self) -> dict:
         """Return the record as a dict keyed by field name: timestamp, project, surface, error, message, remedy, context."""
@@ -243,9 +242,7 @@ class RefusalRecord:
 
 
 def _validate_record(record: RefusalRecord) -> None:
-    blank = [
-        name for name in _WRITE_REQUIRED_FIELDS if not str(getattr(record, name) or "").strip()
-    ]
+    blank = [name for name in _WRITE_REQUIRED_FIELDS if not str(getattr(record, name) or "").strip()]
     if blank:
         raise RefusalLedgerError(
             "refusal_ledger: refusing to write a record with blank/missing "
@@ -264,8 +261,7 @@ def format_record(record: RefusalRecord) -> str:
     trailing blank lines -- the caller controls spacing)."""
     return "\n".join(
         [
-            f"## Refusal: {record.timestamp} — {record.project} — "
-            f"{lf_to_spaces(record.surface)}",
+            f"## Refusal: {record.timestamp} — {record.project} — " f"{lf_to_spaces(record.surface)}",
             f"- Context: {lf_to_spaces(record.context)}",
             f"- Error: {lf_to_spaces(record.error)}",
             f"- Message: {lf_to_spaces(record.message)}",
@@ -389,7 +385,7 @@ def read_latest(ledger_path: str) -> dict | None:
     """
     if not os.path.isfile(ledger_path):
         return None
-    with open(ledger_path, "r", encoding="utf-8") as handle:
+    with open(ledger_path, encoding="utf-8") as handle:
         text = handle.read()
     if not text.strip():
         return None
@@ -459,7 +455,7 @@ def _colon_legacy_names(registry: str) -> set[str] | None:
     section) or cannot be read. Liberal on whitespace around the name, as
     the bash registry helpers are."""
     try:
-        with open(registry, "r", encoding="utf-8") as handle:
+        with open(registry, encoding="utf-8") as handle:
             lines = handle.read().splitlines()
     except (OSError, UnicodeDecodeError):
         return None
@@ -682,7 +678,7 @@ def main() -> int:
             "Read or replace the most-recent-refusal record for one project. "
             "'record' REPLACES the ledger's entire content with the given "
             "record (overwrite, not append). 'latest' prints the current "
-            "record as JSON, or {\"found\": false} when the project has "
+            'record as JSON, or {"found": false} when the project has '
             "never recorded a refusal."
         )
     )

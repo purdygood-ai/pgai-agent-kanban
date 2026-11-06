@@ -47,13 +47,13 @@ import pytest
 # Four parent levels: tests/ → api/ → pgai_agent_kanban/ → team/ → project_root/
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent.parent.parent      # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent                        # project_root/
+_TEAM_DIR = _THIS_FILE.parent.parent.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _ICD_VERSION_FILE = _DEV_TREE_ROOT / "docs" / "api" / "ICD_VERSION"
 _ICD_ARTIFACT = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
 
 # Package-data copy — lives alongside app.py in the api/ package directory.
-_PACKAGE_API_DIR = _THIS_FILE.parent.parent             # team/pgai_agent_kanban/api/
+_PACKAGE_API_DIR = _THIS_FILE.parent.parent  # team/pgai_agent_kanban/api/
 _PACKAGE_DATA_VERSION_FILE = _PACKAGE_API_DIR / "ICD_VERSION"
 
 
@@ -165,9 +165,7 @@ class TestIcdGeneratorDeterminism:
             "The generator must append '\\n' to the JSON output."
         )
         # Must not end with double newline.
-        assert not raw_bytes.endswith(b"\n\n"), (
-            "Generator output ends with more than one trailing newline."
-        )
+        assert not raw_bytes.endswith(b"\n\n"), "Generator output ends with more than one trailing newline."
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +198,7 @@ class TestIcdVersionSource:
             "The app factory must read info.version from docs/api/ICD_VERSION."
         )
 
-    def test_generator_stamps_icd_version_file_contents(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generator_stamps_icd_version_file_contents(self, tmp_path: pathlib.Path) -> None:
         """The generator stamps info.version from ICD_VERSION, not from elsewhere.
 
         Verifies that the generated artifact's info.version equals the contents
@@ -226,9 +222,7 @@ class TestIcdVersionSource:
             "The generator must stamp info.version from docs/api/ICD_VERSION."
         )
 
-    def test_generator_version_matches_served_version(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generator_version_matches_served_version(self, tmp_path: pathlib.Path) -> None:
         """Artifact info.version equals the live app's served OpenAPI info.version.
 
         Three witnesses — ICD_VERSION file, served /openapi.json, and the
@@ -272,7 +266,7 @@ class TestIcdVersionSource:
             f"The file must be created at docs/api/ICD_VERSION with content '{expected}\\n'."
         )
         raw = _ICD_VERSION_FILE.read_bytes()
-        assert raw == f"{expected}\n".encode("utf-8"), (
+        assert raw == f"{expected}\n".encode(), (
             f"ICD_VERSION file content is {raw!r}; expected {expected!r} followed by a newline.\n"
             f"The file must contain exactly '{expected}' (the package-data ICD_VERSION) "
             "followed by a single newline."
@@ -411,9 +405,7 @@ class TestIcdWrapperCwdRegression:
             "Ensure PYTHONPATH includes team/ before the exec python3 -m call."
         )
 
-    def test_wrapper_output_matches_committed_artifact(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_wrapper_output_matches_committed_artifact(self, tmp_path: pathlib.Path) -> None:
         """Wrapper output from the repo root is byte-identical to the committed artifact.
 
         This verifies that the fix does not alter the generator output — the
@@ -432,9 +424,7 @@ class TestIcdWrapperCwdRegression:
             text=True,
         )
 
-        assert result.returncode == 0, (
-            f"Wrapper exited {result.returncode}; stderr: {result.stderr!r}"
-        )
+        assert result.returncode == 0, f"Wrapper exited {result.returncode}; stderr: {result.stderr!r}"
         assert out.exists(), f"Wrapper exited 0 but --output file was not created at {out}"
 
         generated_bytes = out.read_bytes()
@@ -448,9 +438,7 @@ class TestIcdWrapperCwdRegression:
             "docs/api/icd.json if the schema changed."
         )
 
-    def test_wrapper_two_runs_byte_identical_from_repo_root(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_wrapper_two_runs_byte_identical_from_repo_root(self, tmp_path: pathlib.Path) -> None:
         """Two consecutive wrapper invocations from the repo root produce byte-identical output.
 
         Verifies that determinism holds end-to-end through the wrapper, not only
@@ -471,8 +459,7 @@ class TestIcdWrapperCwdRegression:
                 text=True,
             )
             assert result.returncode == 0, (
-                f"Wrapper exited {result.returncode} on run to {out}; "
-                f"stderr: {result.stderr!r}"
+                f"Wrapper exited {result.returncode} on run to {out}; " f"stderr: {result.stderr!r}"
             )
 
         assert out1.read_bytes() == out2.read_bytes(), (
@@ -649,7 +636,7 @@ class TestIcdLiveInstallShape:
 
         # Build a live-install-shaped tree: copy the package to a temp dir
         # without any surrounding team/ prefix or docs/ directory.
-        src_package = _PACKAGE_API_DIR.parent   # team/pgai_agent_kanban/
+        src_package = _PACKAGE_API_DIR.parent  # team/pgai_agent_kanban/
         dst_package = tmp_path / "pgai_agent_kanban"
         shutil.copytree(str(src_package), str(dst_package))
 
@@ -735,9 +722,7 @@ class TestIcdBaselineImmutability:
         (root / "pkg").mkdir()
         version_file = root / "docs" / "api" / "ICD_VERSION"
         version_file.write_text(version + "\n", encoding="utf-8")
-        (baselines_dir / "SUPPORTED").write_text(
-            "\n".join(supported) + "\n", encoding="utf-8"
-        )
+        (baselines_dir / "SUPPORTED").write_text("\n".join(supported) + "\n", encoding="utf-8")
         for bl_version, data in baselines.items():
             (baselines_dir / f"icd-v{bl_version}.json").write_bytes(data)
         output = root / "docs" / "api" / "icd.json"
@@ -808,8 +793,7 @@ class TestIcdBaselineImmutability:
             generate_icd(**kw)
 
         assert excinfo.value.code == 1, (
-            f"generate_icd exited {excinfo.value.code!r} on a published-baseline "
-            "conflict; the refusal must exit 1."
+            f"generate_icd exited {excinfo.value.code!r} on a published-baseline " "conflict; the refusal must exit 1."
         )
         assert baseline.read_bytes() == published, (
             f"Published baseline {baseline} was rewritten by regeneration.\n"
@@ -821,30 +805,21 @@ class TestIcdBaselineImmutability:
         )
 
         contract = parse_error_contract(capsys.readouterr().err)
-        assert contract is not None, (
-            "Refusal did not print the error/message/remedy house shape on stderr."
-        )
+        assert contract is not None, "Refusal did not print the error/message/remedy house shape on stderr."
         assert contract["error"] == PUBLISHED_BASELINE_ERROR_KEY
         assert str(baseline) in contract["message"], (
-            f"Refusal message does not name the baseline file {baseline}:\n"
-            f"{contract['message']}"
+            f"Refusal message does not name the baseline file {baseline}:\n" f"{contract['message']}"
         )
-        assert "ICD_VERSION" in contract["message"], (
-            "Refusal message does not name the ICD_VERSION bump step."
-        )
+        assert "ICD_VERSION" in contract["message"], "Refusal message does not name the ICD_VERSION bump step."
         assert str(kw["icd_version_file"]) in contract["remedy"], (
-            f"Remedy does not edit the ICD_VERSION file {kw['icd_version_file']}:\n"
-            f"{contract['remedy']}"
+            f"Remedy does not edit the ICD_VERSION file {kw['icd_version_file']}:\n" f"{contract['remedy']}"
         )
         assert "generate-icd.sh" in contract["remedy"]
         assert "<" not in contract["remedy"], (
-            f"Remedy carries an angle-bracket placeholder; it must be runnable as "
-            f"printed: {contract['remedy']}"
+            f"Remedy carries an angle-bracket placeholder; it must be runnable as " f"printed: {contract['remedy']}"
         )
 
-    def test_bump_creates_new_baseline_and_leaves_older_ones_byte_identical(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_bump_creates_new_baseline_and_leaves_older_ones_byte_identical(self, tmp_path: pathlib.Path) -> None:
         """ICD_VERSION bumped above every existing baseline -> new baseline frozen, old untouched.
 
         The older baseline is seeded with bytes that differ from anything the
@@ -855,20 +830,16 @@ class TestIcdBaselineImmutability:
         old_version = self._current_version()
         new_version = self._next_minor(old_version)
         old_bytes = self._published_before_route(old_version)
-        kw = self._scratch_tree(
-            tmp_path, new_version, [old_version], {old_version: old_bytes}
-        )
+        kw = self._scratch_tree(tmp_path, new_version, [old_version], {old_version: old_bytes})
 
         generate_icd(**kw)
 
         new_baseline = kw["baselines_dir"] / f"icd-v{new_version}.json"
         old_baseline = kw["baselines_dir"] / f"icd-v{old_version}.json"
-        assert new_baseline.exists(), (
-            f"Bumping ICD_VERSION to {new_version} did not create {new_baseline}."
-        )
-        assert new_baseline.read_bytes() == kw["output_path"].read_bytes(), (
-            "New baseline is not byte-identical to the freshly written icd.json."
-        )
+        assert new_baseline.exists(), f"Bumping ICD_VERSION to {new_version} did not create {new_baseline}."
+        assert (
+            new_baseline.read_bytes() == kw["output_path"].read_bytes()
+        ), "New baseline is not byte-identical to the freshly written icd.json."
         assert old_baseline.read_bytes() == old_bytes, (
             f"Older baseline {old_baseline} was modified by a bump regeneration; "
             "every older baseline must stay byte-identical."
@@ -888,13 +859,11 @@ class TestIcdBaselineImmutability:
 
         generate_icd(refreeze=True, **kw)
 
-        assert baseline.read_bytes() == kw["output_path"].read_bytes(), (
-            "--refreeze did not rewrite the published baseline to the new artifact."
-        )
+        assert (
+            baseline.read_bytes() == kw["output_path"].read_bytes()
+        ), "--refreeze did not rewrite the published baseline to the new artifact."
         assert baseline.read_bytes() != published
-        assert "--refreeze" in capsys.readouterr().err, (
-            "Re-freezing a published baseline must be narrated on stderr."
-        )
+        assert "--refreeze" in capsys.readouterr().err, "Re-freezing a published baseline must be narrated on stderr."
 
     def test_regenerate_at_published_version_with_identical_bytes_is_not_a_refusal(
         self, tmp_path: pathlib.Path
@@ -910,38 +879,28 @@ class TestIcdBaselineImmutability:
         frozen = baseline.read_bytes()
 
         # Publish it, then regenerate at the same version with nothing changed.
-        (kw["baselines_dir"] / "SUPPORTED").write_text(
-            f"{old_version}\n{new_version}\n", encoding="utf-8"
-        )
+        (kw["baselines_dir"] / "SUPPORTED").write_text(f"{old_version}\n{new_version}\n", encoding="utf-8")
         generate_icd(**kw)
 
-        assert baseline.read_bytes() == frozen, (
-            "An identical regeneration changed the published baseline's bytes."
-        )
+        assert baseline.read_bytes() == frozen, "An identical regeneration changed the published baseline's bytes."
 
-    def test_unpublished_existing_baseline_is_refreshed(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_unpublished_existing_baseline_is_refreshed(self, tmp_path: pathlib.Path) -> None:
         """A baseline frozen by a bump but not yet in SUPPORTED follows the artifact."""
         from pgai_agent_kanban.api.generate_icd import generate_icd
 
         old_version = self._current_version()
         new_version = self._next_minor(old_version)
         stale = b'{"info": {"version": "' + new_version.encode() + b'"}, "paths": {}}\n'
-        kw = self._scratch_tree(
-            tmp_path, new_version, [old_version], {new_version: stale}
-        )
+        kw = self._scratch_tree(tmp_path, new_version, [old_version], {new_version: stale})
 
         generate_icd(**kw)
 
         baseline = kw["baselines_dir"] / f"icd-v{new_version}.json"
-        assert baseline.read_bytes() == kw["output_path"].read_bytes(), (
-            f"Unpublished baseline {baseline} (not in SUPPORTED) was not refreshed."
-        )
+        assert (
+            baseline.read_bytes() == kw["output_path"].read_bytes()
+        ), f"Unpublished baseline {baseline} (not in SUPPORTED) was not refreshed."
 
-    def test_non_canonical_output_never_touches_baselines(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_non_canonical_output_never_touches_baselines(self, tmp_path: pathlib.Path) -> None:
         """--output PATH (a scratch regeneration) applies no baseline policy at all.
 
         The freshness gate regenerates to a temp path; with a published,
@@ -960,9 +919,7 @@ class TestIcdBaselineImmutability:
         assert baseline.read_bytes() == published
         assert kw["output_path"].exists()
 
-    def test_wrapper_help_documents_refreeze_and_accepts_the_flag(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_wrapper_help_documents_refreeze_and_accepts_the_flag(self, tmp_path: pathlib.Path) -> None:
         """generate-icd.sh forwards --refreeze and its --help names the flag.
 
         Runs with a non-canonical --output so no baseline in the dev tree is
@@ -970,13 +927,13 @@ class TestIcdBaselineImmutability:
         """
         wrapper = _TEAM_DIR / "scripts" / "generate-icd.sh"
         header = wrapper.read_text(encoding="utf-8")
-        assert "--refreeze" in header, (
-            "generate-icd.sh's usage header does not document --refreeze."
-        )
+        assert "--refreeze" in header, "generate-icd.sh's usage header does not document --refreeze."
 
         help_run = subprocess.run(
             ["bash", str(wrapper), "--help"],
-            cwd=str(_DEV_TREE_ROOT), capture_output=True, text=True,
+            cwd=str(_DEV_TREE_ROOT),
+            capture_output=True,
+            text=True,
         )
         assert help_run.returncode == 0
         assert "--refreeze" in help_run.stdout
@@ -984,10 +941,11 @@ class TestIcdBaselineImmutability:
         out = tmp_path / "icd_refreeze_flag.json"
         run = subprocess.run(
             ["bash", str(wrapper), "--refreeze", "--output", str(out)],
-            cwd=str(_DEV_TREE_ROOT), capture_output=True, text=True,
+            cwd=str(_DEV_TREE_ROOT),
+            capture_output=True,
+            text=True,
         )
         assert run.returncode == 0, (
-            f"generate-icd.sh --refreeze --output exited {run.returncode}; "
-            f"stderr: {run.stderr!r}"
+            f"generate-icd.sh --refreeze --output exited {run.returncode}; " f"stderr: {run.stderr!r}"
         )
         assert out.exists()

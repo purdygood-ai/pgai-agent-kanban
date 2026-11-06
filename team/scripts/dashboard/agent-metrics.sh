@@ -67,10 +67,16 @@
 # same compute_agent_averages GET /agent-metrics calls); this script
 # resolves the project list and validates arguments.
 
-# shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/env_bootstrap.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # shellcheck source=lib/project_paths.sh
 source "${SCRIPT_DIR}/../lib/project_paths.sh"
@@ -128,14 +134,6 @@ while [[ $_i -lt ${#_args[@]} ]]; do
       ;;
     --no-color)
       NO_COLOR_ARG=true
-      ;;
-    -h|--help)
-      # The help text is this file's leading comment block: every '#' line
-      # after the shebang up to the first blank line. One sed reads it
-      # (no pipe stage that could close early and SIGPIPE a writer).
-      mapfile -t __help_lines < <(sed -n '2,/^$/{/^#/s/^# \{0,1\}//p}' "$0")
-      printf '%s\n' "${__help_lines[@]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $arg" >&2

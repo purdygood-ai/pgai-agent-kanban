@@ -51,9 +51,7 @@ from tests.fixtures.git_network_stub import (
 
 def _write_executable(path: pathlib.Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
-    path.chmod(
-        path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def _write_fake_guard_shim(bin_dir: pathlib.Path) -> pathlib.Path:
@@ -102,15 +100,13 @@ def test_resolves_past_a_guard_shaped_executable_ahead_on_path(
     finally:
         os.environ["PATH"] = old_path
 
-    assert resolved == str(real_git_path.resolve()), (
-        f"expected the unshimmed real git ({real_git_path}), got {resolved!r}"
-    )
-    result = subprocess.run(
-        [resolved], capture_output=True, text=True, timeout=10
-    )
-    assert result.stdout.strip() == "REAL-GIT-INVOKED", (
-        "resolved binary must be the real one, never the guard-shaped stand-in"
-    )
+    assert resolved == str(
+        real_git_path.resolve()
+    ), f"expected the unshimmed real git ({real_git_path}), got {resolved!r}"
+    result = subprocess.run([resolved], capture_output=True, text=True, timeout=10)
+    assert (
+        result.stdout.strip() == "REAL-GIT-INVOKED"
+    ), "resolved binary must be the real one, never the guard-shaped stand-in"
 
 
 def test_resolves_normally_when_no_shim_is_on_path(tmp_path: pathlib.Path) -> None:

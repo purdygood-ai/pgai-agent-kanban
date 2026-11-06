@@ -29,10 +29,10 @@ import pytest
 
 from pgai_agent_kanban.dashboard.status_priority_cap import status_priority_cap as _status_priority_cap
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_item(status: str, sort_key: int) -> dict:
     """Build a minimal entry dict matching the column-render.sh item schema."""
@@ -59,6 +59,7 @@ def _sort_keys(items: list[dict]) -> list[int]:
 #     and must be pinned.
 # ---------------------------------------------------------------------------
 
+
 def _build_ten_task_fixture() -> list[dict]:
     """10 tasks DESC by ID, WORKING (running) at position 009 (lowest ID)."""
     items = []
@@ -73,6 +74,7 @@ def _build_ten_task_fixture() -> list[dict]:
 # ---------------------------------------------------------------------------
 # Test 1 — 10 tasks / cap-8 / WORKING at lowest ID
 # ---------------------------------------------------------------------------
+
 
 def test_working_row_pinned_when_at_tail_of_sorted_list() -> None:
     """WORKING row at the lowest ID is included even when naive slice would drop it.
@@ -95,15 +97,11 @@ def test_working_row_pinned_when_at_tail_of_sorted_list() -> None:
     )
 
     # Result count: 1 running + 7 open = 8 (exactly cap)
-    assert len(result) == 8, (
-        f"Expected 8 items (cap), got {len(result)}: {_sort_keys(result)}"
-    )
+    assert len(result) == 8, f"Expected 8 items (cap), got {len(result)}: {_sort_keys(result)}"
 
     # Result must be sorted DESC by id_sort_key.
     keys = _sort_keys(result)
-    assert keys == sorted(keys, reverse=True), (
-        f"Result is not sorted DESC by id_sort_key: {keys}"
-    )
+    assert keys == sorted(keys, reverse=True), f"Result is not sorted DESC by id_sort_key: {keys}"
 
 
 def test_working_row_pinned_with_blocked_also_present() -> None:
@@ -137,6 +135,7 @@ def test_working_row_pinned_with_blocked_also_present() -> None:
 # Test 2 — BLOCKED-pinning branch (WORKING absent, BLOCKED at lowest ID)
 # ---------------------------------------------------------------------------
 
+
 def test_blocked_row_pinned_when_working_is_absent() -> None:
     """BLOCKED row at the lowest ID is included when no WORKING row exists.
 
@@ -169,22 +168,21 @@ def test_multiple_blocked_rows_filled_to_cap() -> None:
     fill remaining cap slots and the lowest-key blocked rows are dropped.
     """
     # 5 blocked (sort_keys 5..1) + 5 open (sort_keys 10..6), cap=6
-    items = [_make_item("open",    k) for k in range(10, 5, -1)]  # 10,9,8,7,6
+    items = [_make_item("open", k) for k in range(10, 5, -1)]  # 10,9,8,7,6
     items += [_make_item("blocked", k) for k in range(5, 0, -1)]  # 5,4,3,2,1
 
     result = _status_priority_cap(items, cap=6)
 
     # All 5 blocked fit within cap=6 (0 running + 5 blocked = 5 pinned, 1 open slot)
     statuses = _statuses(result)
-    assert statuses.count("blocked") == 5, (
-        f"Expected 5 blocked rows, got {statuses.count('blocked')}: {statuses}"
-    )
+    assert statuses.count("blocked") == 5, f"Expected 5 blocked rows, got {statuses.count('blocked')}: {statuses}"
     assert len(result) == 6, f"Expected 6 items (cap), got {len(result)}"
 
 
 # ---------------------------------------------------------------------------
 # Test 3 — Under-cap fast path (regression check)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "items, cap",
@@ -225,9 +223,7 @@ def test_under_cap_output_byte_identical_to_naive_slice(items: list, cap: int) -
     expected = items[:cap]
 
     assert result == expected, (
-        f"Under-cap result differs from items[:cap].\n"
-        f"  expected: {expected}\n"
-        f"  got:      {result}"
+        f"Under-cap result differs from items[:cap].\n" f"  expected: {expected}\n" f"  got:      {result}"
     )
 
 
@@ -247,6 +243,7 @@ def test_under_cap_returns_copy_not_same_object() -> None:
 # Test 4 — slots_after_pin < 0 branch (pinned rows exceed cap)
 # ---------------------------------------------------------------------------
 
+
 def test_pinned_running_exceeds_cap_returns_all_running() -> None:
     """When running rows alone exceed cap, all running rows are returned.
 
@@ -260,9 +257,7 @@ def test_pinned_running_exceeds_cap_returns_all_running() -> None:
     result = _status_priority_cap(items, cap=3)
 
     running_count = sum(1 for e in result if e["status"] == "running")
-    assert running_count == 5, (
-        f"All 5 running rows must be returned; got {running_count}: {_statuses(result)}"
-    )
+    assert running_count == 5, f"All 5 running rows must be returned; got {running_count}: {_statuses(result)}"
     # Result exceeds cap — this is intentional: WORKING rows are never evicted.
     assert len(result) >= 3, "Result must have at least cap items when running >= cap"
 
@@ -284,35 +279,30 @@ def test_running_and_blocked_both_exceed_cap_running_wins() -> None:
     running_count = statuses.count("running")
     blocked_count = statuses.count("blocked")
 
-    assert running_count == 2, (
-        f"Both running rows must survive; got {running_count}: {statuses}"
-    )
+    assert running_count == 2, f"Both running rows must survive; got {running_count}: {statuses}"
     # cap - len(running) = 3 - 2 = 1 slot for blocked
-    assert blocked_count == 1, (
-        f"Expected 1 blocked row to fill remaining slot; got {blocked_count}: {statuses}"
-    )
+    assert blocked_count == 1, f"Expected 1 blocked row to fill remaining slot; got {blocked_count}: {statuses}"
     assert len(result) == 3, f"Expected 3 items total, got {len(result)}: {statuses}"
 
 
 def test_slots_after_pin_negative_no_blocked_rows() -> None:
     """When running rows alone exceed cap and no blocked rows exist, only running returned."""
     items = [_make_item("running", k) for k in range(4, 0, -1)]  # 4,3,2,1
-    items += [_make_item("open",   k) for k in range(8, 4, -1)]  # 8,7,6,5
+    items += [_make_item("open", k) for k in range(8, 4, -1)]  # 8,7,6,5
 
     result = _status_priority_cap(items, cap=2)
 
     statuses = _statuses(result)
-    assert all(s == "running" for s in statuses), (
-        f"Only running rows should be present when they exceed cap; got: {statuses}"
-    )
-    assert len(result) == 4, (
-        f"All 4 running rows retained (never evicted); got {len(result)}"
-    )
+    assert all(
+        s == "running" for s in statuses
+    ), f"Only running rows should be present when they exceed cap; got: {statuses}"
+    assert len(result) == 4, f"All 4 running rows retained (never evicted); got {len(result)}"
 
 
 # ---------------------------------------------------------------------------
 # Test 5 — Edge cases
 # ---------------------------------------------------------------------------
+
 
 def test_empty_input_returns_empty() -> None:
     """Empty input list returns empty list regardless of cap."""
@@ -333,27 +323,23 @@ def test_cap_zero_with_running_returns_running() -> None:
     result = _status_priority_cap(items, cap=0)
     statuses = _statuses(result)
     # slots_after_pin = 0 - 1 - 0 = -1 → all running kept
-    assert "running" in statuses, (
-        f"Running row must survive even at cap=0; got: {statuses}"
-    )
+    assert "running" in statuses, f"Running row must survive even at cap=0; got: {statuses}"
 
 
 def test_result_sorted_desc_by_id_sort_key() -> None:
     """Result is always sorted DESC by id_sort_key regardless of bucket composition."""
     items = [
-        _make_item("open",    10),
-        _make_item("open",     9),
-        _make_item("open",     8),
-        _make_item("running",  3),  # pinned but low sort_key
-        _make_item("blocked",  2),  # pinned but low sort_key
-        _make_item("open",     1),
+        _make_item("open", 10),
+        _make_item("open", 9),
+        _make_item("open", 8),
+        _make_item("running", 3),  # pinned but low sort_key
+        _make_item("blocked", 2),  # pinned but low sort_key
+        _make_item("open", 1),
     ]
     result = _status_priority_cap(items, cap=4)
 
     keys = _sort_keys(result)
-    assert keys == sorted(keys, reverse=True), (
-        f"Result must be sorted DESC by id_sort_key; got: {keys}"
-    )
+    assert keys == sorted(keys, reverse=True), f"Result must be sorted DESC by id_sort_key; got: {keys}"
     # 1 running + 1 blocked + 2 open = 4 == cap
     assert len(result) == 4
 

@@ -83,8 +83,7 @@ _GOLDEN_DIR = _TEAM_DIR / "tests" / "fixtures" / "helloworld-flow"
 # the operator's real, on-disk install — the thing this module's autouse
 # fixture below asserts the harness never touches.
 _LIVE_KANBAN_ROOT = pathlib.Path(
-    os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-    or str(pathlib.Path.home() / "pgai_agent_kanban")
+    os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH") or str(pathlib.Path.home() / "pgai_agent_kanban")
 )
 _LIVE_PROJECTS_CFG = _LIVE_KANBAN_ROOT / "projects.cfg"
 
@@ -143,10 +142,7 @@ def _require_golden_outcomes() -> None:
     it is reported distinctly from a real diff failure.
     """
     if not _GOLDEN_DIR.is_dir() or not any(_GOLDEN_DIR.iterdir()):
-        pytest.fail(
-            f"Golden outcomes missing at {_GOLDEN_DIR}. "
-            f"Run: bash {_HARNESS} --capture {_GOLDEN_DIR}"
-        )
+        pytest.fail(f"Golden outcomes missing at {_GOLDEN_DIR}. " f"Run: bash {_HARNESS} --capture {_GOLDEN_DIR}")
 
 
 @pytest.fixture(autouse=True)
@@ -195,9 +191,7 @@ def test_compare_against_golden_is_clean_on_unmodified_flow(tmp_path: pathlib.Pa
         f"Expected a clean compare against {_GOLDEN_DIR} to exit 0.\n"
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert "FAIL" not in result.stdout, (
-        f"Expected no diff output on an unmodified flow.\nstdout: {result.stdout}"
-    )
+    assert "FAIL" not in result.stdout, f"Expected no diff output on an unmodified flow.\nstdout: {result.stdout}"
 
 
 def test_compare_detects_and_recovers_from_a_seeded_outcome_change(
@@ -228,9 +222,7 @@ def test_compare_detects_and_recovers_from_a_seeded_outcome_change(
 
     ship_path = scratch / "ship.txt"
     original = ship_path.read_text(encoding="utf-8")
-    assert "release_tag:" in original, (
-        f"{ship_path} must contain a release_tag line to seed a change into."
-    )
+    assert "release_tag:" in original, f"{ship_path} must contain a release_tag line to seed a change into."
 
     mutated = original.replace("ai_v0.1.0", "ai_v9.9.9", 1)
     assert mutated != original, "Seed mutation produced no change — captured content shifted."
@@ -241,12 +233,10 @@ def test_compare_detects_and_recovers_from_a_seeded_outcome_change(
         f"Expected --compare to fail after seeding a release-tag change.\n"
         f"stdout: {compare_result.stdout}\nstderr: {compare_result.stderr}"
     )
-    assert "ship.txt" in compare_result.stdout, (
-        f"Expected the differing file name in --compare output.\nstdout: {compare_result.stdout}"
-    )
-    assert "@@" in compare_result.stdout, (
-        f"Expected a diff hunk locating the change.\nstdout: {compare_result.stdout}"
-    )
+    assert (
+        "ship.txt" in compare_result.stdout
+    ), f"Expected the differing file name in --compare output.\nstdout: {compare_result.stdout}"
+    assert "@@" in compare_result.stdout, f"Expected a diff hunk locating the change.\nstdout: {compare_result.stdout}"
 
     # Revert the seed and confirm the failure clears — this is what proves
     # the earlier non-zero exit was caused by the seeded content and not by

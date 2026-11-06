@@ -40,7 +40,6 @@ import pathlib
 import pytest
 from fastapi.testclient import TestClient
 
-
 # ---------------------------------------------------------------------------
 # Fixture: a TestClient with a synthetic VERSION file
 # ---------------------------------------------------------------------------
@@ -104,23 +103,18 @@ class TestHealthSchemaSuperset:
         with _make_client(kanban_root, monkeypatch) as client:
             resp = client.get("/health")
 
-        assert resp.status_code == 200, (
-            f"GET /health returned HTTP {resp.status_code}; expected 200."
-        )
+        assert resp.status_code == 200, f"GET /health returned HTTP {resp.status_code}; expected 200."
         body = resp.json()
 
         # Original fields that must remain.
         assert "service" in body, (
-            f"Original field 'service' missing from /health response.\n"
-            f"Got: {sorted(body.keys())}"
+            f"Original field 'service' missing from /health response.\n" f"Got: {sorted(body.keys())}"
         )
         assert "kanban_root" in body, (
-            f"Original field 'kanban_root' missing from /health response.\n"
-            f"Got: {sorted(body.keys())}"
+            f"Original field 'kanban_root' missing from /health response.\n" f"Got: {sorted(body.keys())}"
         )
         assert "version" in body, (
-            f"Original field 'version' missing from /health response.\n"
-            f"Got: {sorted(body.keys())}"
+            f"Original field 'version' missing from /health response.\n" f"Got: {sorted(body.keys())}"
         )
 
     def test_new_version_fields_present(
@@ -147,13 +141,9 @@ class TestHealthSchemaSuperset:
         body = resp.json()
 
         assert "installed" in body, (
-            f"New field 'installed' missing from /health response.\n"
-            f"Got: {sorted(body.keys())}"
+            f"New field 'installed' missing from /health response.\n" f"Got: {sorted(body.keys())}"
         )
-        assert "running" in body, (
-            f"New field 'running' missing from /health response.\n"
-            f"Got: {sorted(body.keys())}"
-        )
+        assert "running" in body, f"New field 'running' missing from /health response.\n" f"Got: {sorted(body.keys())}"
 
 
 # ---------------------------------------------------------------------------
@@ -195,12 +185,12 @@ class TestRunningVersionBakedAtStartup:
             pre_resp = client.get("/health")
             assert pre_resp.status_code == 200
             pre_body = pre_resp.json()
-            assert pre_body["installed"] == "v1.0.0", (
-                f"Before mutation: expected installed='v1.0.0', got {pre_body['installed']!r}"
-            )
-            assert pre_body["running"] == "v1.0.0", (
-                f"Before mutation: expected running='v1.0.0', got {pre_body['running']!r}"
-            )
+            assert (
+                pre_body["installed"] == "v1.0.0"
+            ), f"Before mutation: expected installed='v1.0.0', got {pre_body['installed']!r}"
+            assert (
+                pre_body["running"] == "v1.0.0"
+            ), f"Before mutation: expected running='v1.0.0', got {pre_body['running']!r}"
 
             # Step 3 — mutate VERSION on disk (simulating an in-place upgrade).
             version_file.write_text("v2.0.0\n", encoding="utf-8")
@@ -294,15 +284,9 @@ class TestInitialValuesAgree:
         assert resp.status_code == 200
         body = resp.json()
 
-        assert body["version"] == "v3.14.0", (
-            f"Expected version='v3.14.0', got {body['version']!r}"
-        )
-        assert body["installed"] == "v3.14.0", (
-            f"Expected installed='v3.14.0', got {body['installed']!r}"
-        )
-        assert body["running"] == "v3.14.0", (
-            f"Expected running='v3.14.0', got {body['running']!r}"
-        )
+        assert body["version"] == "v3.14.0", f"Expected version='v3.14.0', got {body['version']!r}"
+        assert body["installed"] == "v3.14.0", f"Expected installed='v3.14.0', got {body['installed']!r}"
+        assert body["running"] == "v3.14.0", f"Expected running='v3.14.0', got {body['running']!r}"
         assert body["version"] == body["installed"], (
             f"version and installed must be equal at startup; "
             f"version={body['version']!r}, installed={body['installed']!r}"
@@ -335,15 +319,12 @@ class TestInitialValuesAgree:
             resp = client.get("/health")
 
         assert resp.status_code == 200, (
-            f"GET /health must return 200 even without a VERSION file; "
-            f"got {resp.status_code}."
+            f"GET /health must return 200 even without a VERSION file; " f"got {resp.status_code}."
         )
         body = resp.json()
         assert body["installed"] == "unknown", (
-            f"Expected installed='unknown' when VERSION is absent; "
-            f"got {body['installed']!r}"
+            f"Expected installed='unknown' when VERSION is absent; " f"got {body['installed']!r}"
         )
         assert body["running"] == "unknown", (
-            f"Expected running='unknown' when VERSION is absent at startup; "
-            f"got {body['running']!r}"
+            f"Expected running='unknown' when VERSION is absent at startup; " f"got {body['running']!r}"
         )

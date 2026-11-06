@@ -46,6 +46,12 @@
 # was holding when the first one finished; those checks are quality-class
 # findings and never change an exit code.
 #
+# Interrupts: each runner starts in its own session and process group
+# (setsid). On SIGINT, SIGTERM or SIGHUP this script sends SIGTERM to every
+# process group in each running runner's process tree -- the runner's own
+# and any its children started in a session of their own -- then SIGKILL
+# to whatever is left 10 seconds later, and exits 128 + the signal number.
+#
 # Coverage: --coverage is passed to both runners unchanged; each runner's
 # own gate decides whether it is honoured ([testing] coverage = true, or
 # PGAI_TESTING_COVERAGE=1 outside an agent wake). This script adds no other
@@ -68,9 +74,9 @@
 # BLOCK-WORTHY: an unreachable bootstrap prelude leaves the kanban root and
 # temp root undefined, so neither the budget nor the evidence paths resolve.
 # CENSUS-ANCHOR: run-gated-suites-env-bootstrap-01
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh" || exit 1
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh" || exit 1
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TEAM_ROOT="${PGAI_AGENT_KANBAN_ROOT_PATH}"
 
 # shellcheck source=lib/temp.sh
@@ -152,6 +158,11 @@ also gets its own COVERAGE_FILE so the two suites' coverage data never mix.
 A post-suite bare-/tmp or TCP-listener check in one suite can report
 something the other suite still held; those are quality-class findings and
 never change an exit code.
+
+Each runner starts in its own process group. Interrupted (SIGINT,
+SIGTERM or SIGHUP), this script stops every process group in each running
+runner's process tree -- SIGTERM, then SIGKILL 10 seconds later -- and
+exits 128 + the signal number, so no runner or pytest outlives it.
 
 Targeted runs are not offered here: use run-unit-tests.sh --files or
 run-integration-tests.sh --files.
@@ -343,17 +354,41 @@ SUITE_EXITS=()
 _rgs_exit_file() { printf '%s/%s.exit' "$OUT_DIR" "${SUITE_NAMES[$1]}"; }
 _rgs_log_file() { printf '%s/%s.log' "$OUT_DIR" "${SUITE_NAMES[$1]}"; }
 
+# Each runner starts in its own session and process group (setsid), so its
+# pid is its group id and an interrupt can stop everything it started.
+# Without setsid on PATH the runners stay in this script's group, which is
+# narrated once; the interrupt path then signals their processes one by one.
+_RGS_SETSID=true
+if ! command -v setsid >/dev/null 2>&1; then
+  _RGS_SETSID=false
+  echo "[gated-suites] setsid is not on PATH; the runners start in this script's own process group and an interrupt stops their processes one by one (install util-linux to get setsid)." >&2
+fi
+
+# Seconds an interrupted run gives the runners' processes to exit after
+# SIGTERM before it sends SIGKILL to whatever is left.
+_RGS_STOP_GRACE_SECONDS=10
+
 # Start suite <index> in the background; its pid goes to SUITE_PIDS[index].
+# Started from this non-interactive shell (no job control) the child is not
+# a process-group leader, so setsid makes it the leader of a new session
+# and group without forking: the recorded pid is the runner's group id.
 _rgs_start() {
   local index="$1"
   local -a env_pairs=("${SUITE_ENV[@]:${SUITE_ENV_STARTS[index]}:${SUITE_ENV_COUNTS[index]}}")
   local -a args=("${SUITE_ARGS[@]:${SUITE_ARG_STARTS[index]}:${SUITE_ARG_COUNTS[index]}}")
   local runner="${SCRIPT_DIR}/${SUITE_RUNNERS[index]}"
-  local log
+  local log group_note
+  local -a launcher=()
   log="$(_rgs_log_file "$index")"
-  env "${env_pairs[@]}" bash "$runner" "${args[@]}" > "$log" 2>&1 &
+  if [[ "$_RGS_SETSID" == "true" ]]; then
+    launcher=(setsid)
+    group_note="own process group"
+  else
+    group_note="this script's process group"
+  fi
+  "${launcher[@]}" env "${env_pairs[@]}" bash "$runner" "${args[@]}" > "$log" 2>&1 &
   SUITE_PIDS[index]=$!
-  echo "${SUITE_NAMES[index]}: started ${SUITE_RUNNERS[index]} ${args[*]} (pid ${SUITE_PIDS[index]}${env_pairs[*]:+; ${env_pairs[*]}}); log: ${log}"
+  echo "${SUITE_NAMES[index]}: started ${SUITE_RUNNERS[index]} ${args[*]} (pid ${SUITE_PIDS[index]}, ${group_note}${env_pairs[*]:+; ${env_pairs[*]}}); log: ${log}"
 }
 
 # Record suite <index>'s exit code <rc> and write its exit file.
@@ -368,21 +403,82 @@ _rgs_record() {
   echo "${SUITE_NAMES[index]}: exit ${rc}; exit file: ${exit_file}; findings: ${PGAI_AGENT_KANBAN_TEMP_DIR}/lint/findings-${SUITE_NAMES[index]}.json; coverage: ${PGAI_AGENT_KANBAN_TEMP_DIR}/coverage/${SUITE_NAMES[index]}.json"
 }
 
+# _rgs_tree_targets <pid> <own-pgid> -- what to signal to stop <pid> and
+# everything descended from it, from one ps snapshot: "g <pgid>" for each
+# distinct process group in that tree other than <own-pgid>, and "p <pid>"
+# for each process in it that shares <own-pgid> (signalled alone, because
+# signalling that group would signal this script). The tree is walked
+# rather than only the runner's own group because a runner may start its
+# children in a session of their own (run-integration-tests.sh starts
+# pytest with setsid), where the runner's group never reaches them.
+_rgs_tree_targets() {
+  ps -e -o pid=,ppid=,pgid= 2>/dev/null | awk -v root="$1" -v own="$2" '
+    { pgid[$1] = $3; kids[$2] = kids[$2] " " $1 }
+    END {
+      n = 1; queue[1] = root; seen[root] = 1
+      for (i = 1; i <= n; i++) {
+        p = queue[i]
+        if (p in pgid) {
+          if (pgid[p] == own) print "p " p
+          else if (pgid[p] > 1 && !(pgid[p] in done)) { done[pgid[p]] = 1; print "g " pgid[p] }
+        }
+        m = split(kids[p], c, " ")
+        for (j = 1; j <= m; j++) if (!(c[j] in seen)) { seen[c[j]] = 1; queue[++n] = c[j] }
+      }
+    }'
+}
+
 # Stop any suite still running when this script is interrupted, so no
-# runner (or the pytest it started) outlives the command that started it.
+# runner, nor the pytest and workers it started, outlives the command that
+# started it: SIGTERM to every process group in each runner's tree (each
+# runner leads its own), then SIGKILL to whatever is still alive after
+# _RGS_STOP_GRACE_SECONDS.
 _rgs_stop_children() {
-  local pid
+  local pid own_pgid kind id signal i alive
+  local -a groups=() pids=()
+  own_pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '[:space:]')"
   for pid in "${SUITE_PIDS[@]}"; do
     [[ -n "$pid" ]] || continue
-    pkill -TERM -P "$pid" 2>/dev/null || true
-    kill -TERM "$pid" 2>/dev/null || true
+    # The runner itself, even if ps missed it (it may still be exec'ing).
+    if [[ "$_RGS_SETSID" == "true" && "$pid" != "$own_pgid" ]]; then
+      groups+=("$pid")
+    else
+      pids+=("$pid")
+    fi
+    while read -r kind id; do
+      case "$kind" in
+        g) groups+=("$id") ;;
+        p) pids+=("$id") ;;
+      esac
+    done < <(_rgs_tree_targets "$pid" "${own_pgid:-0}")
+  done
+  (( ${#groups[@]} + ${#pids[@]} > 0 )) || return 0
+
+  for signal in TERM KILL; do
+    for id in "${groups[@]}"; do kill "-${signal}" -- "-${id}" 2>/dev/null || true; done
+    for id in "${pids[@]}"; do kill "-${signal}" "$id" 2>/dev/null || true; done
+    [[ "$signal" == "KILL" ]] && break
+    for (( i = 0; i < _RGS_STOP_GRACE_SECONDS * 10; i++ )); do
+      alive=false
+      for id in "${groups[@]}"; do kill -0 -- "-${id}" 2>/dev/null && { alive=true; break; }; done
+      if [[ "$alive" == "false" ]]; then
+        for id in "${pids[@]}"; do kill -0 "$id" 2>/dev/null && { alive=true; break; }; done
+      fi
+      [[ "$alive" == "true" ]] || return 0
+      sleep 0.1
+    done
+    echo "[gated-suites] runner processes were still alive ${_RGS_STOP_GRACE_SECONDS}s after SIGTERM; sending SIGKILL." >&2
   done
 }
 # Exit with the shell's conventional status for the signal (128 + number).
+# SIGHUP is trapped as well: a runner in its own session no longer receives
+# the hangup of the terminal this script was started from, so this script
+# passes it on as a stop.
 _rgs_on_signal() {
   _rgs_stop_children
   exit "$((128 + $1))"
 }
+trap '_rgs_on_signal 1' HUP
 trap '_rgs_on_signal 2' INT
 trap '_rgs_on_signal 15' TERM
 
@@ -445,7 +541,7 @@ else
   done
 fi
 unset _rgs_index
-trap - INT TERM
+trap - HUP INT TERM
 
 # --- Combined exit code ---
 if ! FINAL_EXIT="$(python3 "$_RGS_PLANNER" combine "${SUITE_EXITS[@]}")" || [[ ! "$FINAL_EXIT" =~ ^[0-9]+$ ]]; then

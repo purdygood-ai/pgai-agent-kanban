@@ -61,7 +61,7 @@ import pathlib
 import re
 import sys
 import tempfile
-from typing import BinaryIO, Optional, Union
+from typing import BinaryIO, Union
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path: put the package root this file sits in first,
@@ -117,7 +117,7 @@ def copy_stream_to_temp_file(stream: BinaryIO, prefix: str = DEFAULT_CAPTURE_PRE
         return handle.name
 
 
-def preflight_error_message(model: str, cli_exit: int, jsonl_path: Optional[PathLike]) -> Optional[str]:
+def preflight_error_message(model: str, cli_exit: int, jsonl_path: PathLike | None) -> str | None:
     """Return why a codex model preflight failed, or None when it passed.
 
     Reads the JSONL a ``codex exec --json`` preflight wrote to *jsonl_path*
@@ -257,7 +257,8 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Copy stdin into a new file in the kanban temp root and print its path.",
     )
     capture.add_argument(
-        "--prefix", default=DEFAULT_CAPTURE_PREFIX,
+        "--prefix",
+        default=DEFAULT_CAPTURE_PREFIX,
         help=f"File-name prefix of the new file (default: {DEFAULT_CAPTURE_PREFIX}).",
     )
     capture.set_defaults(func=_cmd_capture_stdin)
@@ -270,7 +271,9 @@ def _build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("model", help="The model name the message quotes.")
     preflight.add_argument("cli_exit", type=int, help="The preflight CLI's exit status.")
     preflight.add_argument(
-        "jsonl_file", nargs="?", default="",
+        "jsonl_file",
+        nargs="?",
+        default="",
         help="The preflight's captured JSONL output (empty or omitted reads as no output).",
     )
     preflight.set_defaults(func=_cmd_preflight_error)

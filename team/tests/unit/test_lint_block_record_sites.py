@@ -66,7 +66,10 @@ def _write(tmp_path: pathlib.Path, name: str, text: str) -> pathlib.Path:
 
 def _run_cli(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(_LINT_SCRIPT), *args], capture_output=True, text=True, timeout=300,
+        [sys.executable, str(_LINT_SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
 
 
@@ -95,7 +98,7 @@ def test_fixture_blocked_write_with_helper_is_clean(tmp_path: pathlib.Path) -> N
     "line",
     [
         'set_state "$task_status" "BLOCKED"',
-        "set_state \"$status\" BLOCKED",
+        'set_state "$status" BLOCKED',
         'transition_task_state "$task_id" "$task_status" "BLOCKED" \\',
         'if transition_task_state "$task_id" "$task_status" "BLOCKED"; then',
         'set_block "$task_status" "State" "BLOCKED"',
@@ -109,7 +112,7 @@ def test_each_shell_blocked_write_shape_is_recognised(line: str) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        'bash team/scripts/task-status.sh --project demo --key T-1 --state BLOCKED',
+        "bash team/scripts/task-status.sh --project demo --key T-1 --state BLOCKED",
         'transition_task_state "$task_id" "$task_status" "$new_state"',
         'set_state "$task_status" "DONE"',
         '# set_state "$task_status" "BLOCKED"',
@@ -125,7 +128,7 @@ def test_python_blocked_write_is_recognised_and_reads_are_not() -> None:
     source = (
         'set_sections(path, {"State": "BLOCKED", "Needs Human": "yes"})\n'
         'if section_value(text, "State") == "BLOCKED":\n'
-        '    pass\n'
+        "    pass\n"
         'write_task_status(path, state="BLOCKED")\n'
         '"""A docstring naming "State" and "BLOCKED" is prose."""\n'
     )

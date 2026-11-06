@@ -369,7 +369,12 @@ def _run_cli(tmp_path: Path, root: Path, *args: str) -> subprocess.CompletedProc
     )
     return subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.metrics.blocked_ledger", *args],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=60,
+        check=False,
     )
 
 
@@ -382,8 +387,15 @@ def test_cli_no_op_end_for_another_project_is_recorded_in_no_refusal_ledger(tmp_
     ledger = root / "projects" / "beta" / "metrics" / "blocked-intervals.jsonl"
 
     result = _run_cli(
-        tmp_path, root, "end", str(ledger), "v0.30.8", "halt:project",
-        "2026-10-18T02:40:29+00:00", "--project", "beta",
+        tmp_path,
+        root,
+        "end",
+        str(ledger),
+        "v0.30.8",
+        "halt:project",
+        "2026-10-18T02:40:29+00:00",
+        "--project",
+        "beta",
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
@@ -399,8 +411,15 @@ def test_cli_genuine_refusal_is_recorded_against_the_named_project(tmp_path: Pat
     ledger.write_text("not json\n", encoding="utf-8")
 
     result = _run_cli(
-        tmp_path, root, "start", str(ledger), "v0.30.8", "halt:project",
-        "2026-10-18T02:40:29+00:00", "--project", "beta",
+        tmp_path,
+        root,
+        "start",
+        str(ledger),
+        "v0.30.8",
+        "halt:project",
+        "2026-10-18T02:40:29+00:00",
+        "--project",
+        "beta",
     )
 
     assert result.returncode == 1, result.stdout + result.stderr
@@ -422,20 +441,36 @@ def test_writers_preserve_class_cause_and_reason_code_through_parse_records(
     source = "task:example-task"
 
     append_block_start(
-        ledger_path, version, source, "2026-09-18T09:00:00+00:00",
-        block_class="any", cause="chain", reason_code="agent_unclassified",
+        ledger_path,
+        version,
+        source,
+        "2026-09-18T09:00:00+00:00",
+        block_class="any",
+        cause="chain",
+        reason_code="agent_unclassified",
     )
     append_block_end(
-        ledger_path, version, source, "2026-09-18T09:30:00+00:00",
-        block_class="human", cause="operator", reason_code="reset",
+        ledger_path,
+        version,
+        source,
+        "2026-09-18T09:30:00+00:00",
+        block_class="human",
+        cause="operator",
+        reason_code="reset",
     )
 
     start, end = parse_records(ledger_path)
     assert (start["kind"], start["class"], start["cause"], start["reason_code"]) == (
-        "block-start", "any", "chain", "agent_unclassified",
+        "block-start",
+        "any",
+        "chain",
+        "agent_unclassified",
     )
     assert (end["kind"], end["class"], end["cause"], end["reason_code"]) == (
-        "block-end", "human", "operator", "reset",
+        "block-end",
+        "human",
+        "operator",
+        "reset",
     )
     assert [record_class(r) for r in (start, end)] == ["any", "human"]
     assert [record_cause(r) for r in (start, end)] == ["chain", "operator"]
@@ -455,10 +490,25 @@ def test_writer_without_optional_fields_writes_the_original_four_field_shape(
 def test_old_shape_records_read_as_cause_chain_and_class_any(tmp_path: Path) -> None:
     ledger_path = tmp_path / "blocked-intervals.jsonl"
     old_shape = [
-        {"kind": "block-start", "source": "halt:project", "timestamp": "2026-09-20T02:22:14+00:00", "version": "v2.24.7"},
-        {"kind": "block-start", "source": "task:example-task", "timestamp": "2026-09-20T02:22:32+00:00", "version": "v2.24.7"},
+        {
+            "kind": "block-start",
+            "source": "halt:project",
+            "timestamp": "2026-09-20T02:22:14+00:00",
+            "version": "v2.24.7",
+        },
+        {
+            "kind": "block-start",
+            "source": "task:example-task",
+            "timestamp": "2026-09-20T02:22:32+00:00",
+            "version": "v2.24.7",
+        },
         {"kind": "block-end", "source": "halt:project", "timestamp": "2026-09-20T13:02:15+00:00", "version": "v2.24.7"},
-        {"kind": "block-end", "source": "task:example-task", "timestamp": "2026-09-20T13:05:00+00:00", "version": "v2.24.7"},
+        {
+            "kind": "block-end",
+            "source": "task:example-task",
+            "timestamp": "2026-09-20T13:05:00+00:00",
+            "version": "v2.24.7",
+        },
     ]
     ledger_path.write_text("".join(json.dumps(r) + "\n" for r in old_shape), encoding="utf-8")
 
@@ -479,8 +529,12 @@ def test_old_shape_records_read_as_cause_chain_and_class_any(tmp_path: Path) -> 
 def test_out_of_vocabulary_optional_field_on_disk_reads_as_its_default(tmp_path: Path) -> None:
     ledger_path = tmp_path / "blocked-intervals.jsonl"
     record = {
-        "version": "v2.24.0", "kind": "block-start", "source": "halt:project",
-        "timestamp": "2026-09-18T09:00:00+00:00", "class": "maybe", "cause": " Operator ",
+        "version": "v2.24.0",
+        "kind": "block-start",
+        "source": "halt:project",
+        "timestamp": "2026-09-18T09:00:00+00:00",
+        "class": "maybe",
+        "cause": " Operator ",
     }
     ledger_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
@@ -491,13 +545,18 @@ def test_out_of_vocabulary_optional_field_on_disk_reads_as_its_default(tmp_path:
 
 @pytest.mark.parametrize("field, value", [("block_class", "sometimes"), ("cause", "weather")])
 def test_writer_refuses_out_of_vocabulary_class_or_cause_and_writes_nothing(
-    tmp_path: Path, field: str, value: str,
+    tmp_path: Path,
+    field: str,
+    value: str,
 ) -> None:
     ledger_path = tmp_path / "blocked-intervals.jsonl"
 
     with pytest.raises(LedgerError) as excinfo:
         append_block_start(
-            str(ledger_path), "v2.24.0", "halt:project", "2026-09-18T09:00:00+00:00",
+            str(ledger_path),
+            "v2.24.0",
+            "halt:project",
+            "2026-09-18T09:00:00+00:00",
             **{field: value},
         )
 
@@ -517,12 +576,20 @@ def test_new_fields_and_escalation_never_change_blocked_minutes(tmp_path: Path) 
     append_block_start(plain, version, "task:example-task", "2026-09-18T23:40:00+00:00")
 
     append_block_start(
-        rich, version, "halt:project", "2026-09-18T09:00:00+00:00", cause="operator",
+        rich,
+        version,
+        "halt:project",
+        "2026-09-18T09:00:00+00:00",
+        cause="operator",
     )
     append_block_end(rich, version, "halt:project", "2026-09-18T09:40:00+00:00", block_class="human")
     append_block_start(
-        rich, version, "task:example-task", "2026-09-18T23:40:00+00:00",
-        block_class="any", reason_code="agent_unclassified",
+        rich,
+        version,
+        "task:example-task",
+        "2026-09-18T23:40:00+00:00",
+        block_class="any",
+        reason_code="agent_unclassified",
     )
     mark_block_escalated(rich, version, "task:example-task", "2026-09-18T23:50:00+00:00")
 
@@ -557,7 +624,8 @@ def test_block_with_no_active_rc_never_counts_toward_an_rc_total(tmp_path: Path)
     (block,) = block_intervals(ledger_path)
     assert block["version"] == NO_RC_VERSION
     assert (block["start"], block["end"]) == (
-        "2026-09-18T09:00:00+00:00", "2026-09-18T09:30:00+00:00",
+        "2026-09-18T09:00:00+00:00",
+        "2026-09-18T09:30:00+00:00",
     )
 
 
@@ -574,7 +642,10 @@ def test_marking_an_open_block_escalated_reads_human_and_leaves_earlier_lines_un
     source = "task:example-task"
     append_block_start(str(ledger_path), "v2.23.0", "halt:project", "2026-09-17T08:00:00+00:00")
     append_block_start(
-        str(ledger_path), version, source, "2026-09-18T09:00:00+00:00",
+        str(ledger_path),
+        version,
+        source,
+        "2026-09-18T09:00:00+00:00",
         reason_code="agent_unclassified",
     )
     (block,) = block_intervals(str(ledger_path), version)
@@ -582,12 +653,16 @@ def test_marking_an_open_block_escalated_reads_human_and_leaves_earlier_lines_un
     before = ledger_path.read_bytes()
 
     mark_block_escalated(
-        str(ledger_path), version, source, "2026-09-18T09:20:00+00:00", reason_code="escalate",
+        str(ledger_path),
+        version,
+        source,
+        "2026-09-18T09:20:00+00:00",
+        reason_code="escalate",
     )
 
     after = ledger_path.read_bytes()
     assert after.startswith(before)
-    assert after[len(before):].count(b"\n") == 1
+    assert after[len(before) :].count(b"\n") == 1
     (block,) = block_intervals(str(ledger_path), version)
     assert block["class"] == "human"
     assert block["escalated"] is True
@@ -618,7 +693,11 @@ def test_escalating_a_block_that_already_reads_human_is_a_no_op_and_writes_nothi
     append_block_start(str(ledger_path), version, "task:a", "2026-09-18T09:00:00+00:00")
     mark_block_escalated(str(ledger_path), version, "task:a", "2026-09-18T09:05:00+00:00")
     append_block_start(
-        str(ledger_path), version, "task:b", "2026-09-18T09:00:00+00:00", block_class="human",
+        str(ledger_path),
+        version,
+        "task:b",
+        "2026-09-18T09:00:00+00:00",
+        block_class="human",
     )
     before = ledger_path.read_bytes()
 
@@ -635,13 +714,21 @@ def test_block_class_follows_its_resolution_class(tmp_path: Path) -> None:
     version = "v2.24.0"
     append_block_start(ledger_path, version, "task:requeued", "2026-09-18T09:00:00+00:00")
     append_block_end(
-        ledger_path, version, "task:requeued", "2026-09-18T09:10:00+00:00",
-        block_class="any", reason_code="requeue",
+        ledger_path,
+        version,
+        "task:requeued",
+        "2026-09-18T09:10:00+00:00",
+        block_class="any",
+        reason_code="requeue",
     )
     append_block_start(ledger_path, version, "task:reset", "2026-09-18T10:00:00+00:00")
     append_block_end(
-        ledger_path, version, "task:reset", "2026-09-18T10:10:00+00:00",
-        block_class="human", reason_code="reset",
+        ledger_path,
+        version,
+        "task:reset",
+        "2026-09-18T10:10:00+00:00",
+        block_class="human",
+        reason_code="reset",
     )
 
     blocks = {b["source"]: b for b in block_intervals(ledger_path, version)}
@@ -656,8 +743,11 @@ def test_block_class_follows_its_resolution_class(tmp_path: Path) -> None:
 def test_orphaned_escalation_line_refuses_block_intervals_as_malformed(tmp_path: Path) -> None:
     ledger_path = tmp_path / "blocked-intervals.jsonl"
     record = {
-        "version": "v2.24.0", "kind": "block-escalate", "source": "task:a",
-        "timestamp": "2026-09-18T09:00:00+00:00", "class": "human",
+        "version": "v2.24.0",
+        "kind": "block-escalate",
+        "source": "task:a",
+        "timestamp": "2026-09-18T09:00:00+00:00",
+        "class": "human",
     }
     ledger_path.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
@@ -672,12 +762,31 @@ def test_cli_writes_optional_fields_and_the_escalation_mark(tmp_path: Path) -> N
     common = [str(ledger), NO_RC_VERSION, "task:example-task"]
 
     steps = [
-        ["start", *common, "2026-10-18T02:00:00+00:00", "--class", "ANY", "--cause", "chain",
-         "--reason-code", "agent_unclassified", "--project", "beta"],
-        ["escalate", *common, "2026-10-18T02:10:00+00:00", "--reason-code", "escalate",
-         "--project", "beta"],
-        ["end", *common, "2026-10-18T02:40:00+00:00", "--class", "human",
-         "--reason-code", "reset", "--project", "beta"],
+        [
+            "start",
+            *common,
+            "2026-10-18T02:00:00+00:00",
+            "--class",
+            "ANY",
+            "--cause",
+            "chain",
+            "--reason-code",
+            "agent_unclassified",
+            "--project",
+            "beta",
+        ],
+        ["escalate", *common, "2026-10-18T02:10:00+00:00", "--reason-code", "escalate", "--project", "beta"],
+        [
+            "end",
+            *common,
+            "2026-10-18T02:40:00+00:00",
+            "--class",
+            "human",
+            "--reason-code",
+            "reset",
+            "--project",
+            "beta",
+        ],
     ]
     for step in steps:
         result = _run_cli(tmp_path, root, *step)
@@ -698,8 +807,17 @@ def test_cli_refuses_an_out_of_vocabulary_class_as_a_usage_error(tmp_path: Path)
     ledger = root / "projects" / "beta" / "metrics" / "blocked-intervals.jsonl"
 
     result = _run_cli(
-        tmp_path, root, "start", str(ledger), "v0.30.8", "halt:project",
-        "2026-10-18T02:40:29+00:00", "--class", "sometimes", "--project", "beta",
+        tmp_path,
+        root,
+        "start",
+        str(ledger),
+        "v0.30.8",
+        "halt:project",
+        "2026-10-18T02:40:29+00:00",
+        "--class",
+        "sometimes",
+        "--project",
+        "beta",
     )
 
     assert result.returncode == 2

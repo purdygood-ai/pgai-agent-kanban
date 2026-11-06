@@ -99,7 +99,7 @@ def _write_caller(root: pathlib.Path, *, extra_lines: str = "") -> pathlib.Path:
     caller_text = (
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        '# shellcheck source=lib/env_bootstrap.sh\n'
+        "# shellcheck source=lib/env_bootstrap.sh\n"
         'source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"\n'
     )
     if extra_lines:
@@ -209,8 +209,7 @@ def test_claude_env_value_wins_over_shell_env_for_same_variable(
     root = _make_root(
         tmp_path,
         shell_env_text=(
-            'export PGAI_AGENT_KANBAN_ROOT_PATH="${_eb_candidate}"\n'
-            'export SHARED_TUNING_VAR="from-shell-env"\n'
+            'export PGAI_AGENT_KANBAN_ROOT_PATH="${_eb_candidate}"\n' 'export SHARED_TUNING_VAR="from-shell-env"\n'
         ),
         claude_env_text='export SHARED_TUNING_VAR="from-claude-env"\n',
     )
@@ -223,9 +222,9 @@ def test_claude_env_value_wins_over_shell_env_for_same_variable(
     )
 
     assert result.returncode == 0, f"unexpected failure:\n{result.stderr}"
-    assert "SHARED=from-claude-env" in result.stdout, (
-        f"claude-env value did not win over shell-env; got:\n{result.stdout!r}"
-    )
+    assert (
+        "SHARED=from-claude-env" in result.stdout
+    ), f"claude-env value did not win over shell-env; got:\n{result.stdout!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -254,12 +253,9 @@ def test_claude_env_syntax_error_refuses_with_dual_channel_contract(
     )
 
     assert result.returncode != 0, (
-        f"expected non-zero exit on claude-env syntax error;\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected non-zero exit on claude-env syntax error;\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
-    assert "should not reach here" not in result.stdout, (
-        "caller continued execution after the prelude refused"
-    )
+    assert "should not reach here" not in result.stdout, "caller continued execution after the prelude refused"
 
     claude_env_path = str(root / "claude-env")
     assert claude_env_path in result.stderr, (
@@ -267,8 +263,7 @@ def test_claude_env_syntax_error_refuses_with_dual_channel_contract(
         f"Expected path: {claude_env_path!r}\nActual stderr: {result.stderr!r}"
     )
     assert f"bash -n {claude_env_path}" in result.stderr, (
-        f"error message does not carry the runnable bash -n remedy.\n"
-        f"Actual stderr: {result.stderr!r}"
+        f"error message does not carry the runnable bash -n remedy.\n" f"Actual stderr: {result.stderr!r}"
     )
 
     # Dual-channel house shape: error:/message:/remedy: fields.
@@ -284,10 +279,7 @@ def test_claude_env_syntax_error_does_not_half_source(tmp_path: pathlib.Path) ->
     caller's environment."""
     root = _make_root(
         tmp_path,
-        claude_env_text=(
-            'export SHOULD_NOT_BE_SET="leaked"\n'
-            'export BROKEN_CLAUDE_ENV="unterminated\n'
-        ),
+        claude_env_text=('export SHOULD_NOT_BE_SET="leaked"\n' 'export BROKEN_CLAUDE_ENV="unterminated\n'),
     )
     caller = _write_caller(
         root,
@@ -355,9 +347,7 @@ def test_prelude_source_code_never_prints_claude_env_values() -> None:
     for line in block.splitlines():
         stripped = line.strip()
         if not (
-            stripped.startswith("pgai_emit_error_contract")
-            or stripped.startswith('"')
-            or stripped.startswith("echo")
+            stripped.startswith("pgai_emit_error_contract") or stripped.startswith('"') or stripped.startswith("echo")
         ):
             continue
         assert "$(" not in stripped or "_eb_candidate" in stripped or "dirname" in stripped

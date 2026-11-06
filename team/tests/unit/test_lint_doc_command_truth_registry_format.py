@@ -87,12 +87,18 @@ def _key_parity_clean(out: str) -> bool:
 def _run(tmp_path: Path, doc: Path, config_loader: Path, project_registry: Path) -> int:
     return _lint.main(
         [
-            "--repo-root", str(_REPO_ROOT),
-            "--doc", str(doc),
-            "--config-loader", str(config_loader),
-            "--project-key-registry", str(project_registry),
-            "--census", str(_empty_census(tmp_path)),
-            "--help-timeout", "5",
+            "--repo-root",
+            str(_REPO_ROOT),
+            "--doc",
+            str(doc),
+            "--config-loader",
+            str(config_loader),
+            "--project-key-registry",
+            str(project_registry),
+            "--census",
+            str(_empty_census(tmp_path)),
+            "--help-timeout",
+            "5",
         ]
     )
 
@@ -152,9 +158,9 @@ def test_real_registry_records_each_provider_shipped_model() -> None:
         shipped = registry[(f"models.{provider}", "default")].default
         assert shipped, f"[models.{provider}] default records no shipped value"
         section = template.split(f"[models.{provider}]", 1)[1]
-        assert re.search(rf"^default = {re.escape(shipped)}$", section, re.MULTILINE), (
-            f"kanban.cfg_example [models.{provider}] does not ship default = {shipped}"
-        )
+        assert re.search(
+            rf"^default = {re.escape(shipped)}$", section, re.MULTILINE
+        ), f"kanban.cfg_example [models.{provider}] does not ship default = {shipped}"
         assert registry[(f"models.{provider}", "coder")].default == ""
 
 
@@ -169,7 +175,7 @@ def _template_registries(tmp_path: Path) -> tuple[Path, Path]:
         "cl.sh",
         [
             "# [paths]",
-            "#   dev_tree_path           OPTIONAL  \"\"",
+            '#   dev_tree_path           OPTIONAL  ""',
             "#   tmp_root                OPTIONAL  /tmp",
         ],
     )
@@ -178,7 +184,7 @@ def _template_registries(tmp_path: Path) -> tuple[Path, Path]:
         "pp.sh",
         [
             "# [project]",
-            "#   dev_tree_path           OPTIONAL  \"\"",
+            '#   dev_tree_path           OPTIONAL  ""',
             "#   temp_dir                OPTIONAL  N/A",
         ],
     )
@@ -240,4 +246,3 @@ def test_commented_template_line_is_never_an_unknown_key_or_mismatch(tmp_path, c
     assert "invented_key" not in out, out
     assert "CONFIG DEFAULT MISMATCH" not in out, out
     assert _key_parity_clean(out), out
-

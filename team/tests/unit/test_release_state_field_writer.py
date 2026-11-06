@@ -111,22 +111,25 @@ def test_only_named_field_lines_change_and_events_are_kept(tmp_path: pathlib.Pat
     path = tmp_path / "release-state.md"
     path.write_text(_FIELDS_IDLE + _EVENT_BLOCKS, encoding="utf-8")
 
-    update_release_state_fields(str(path), {
-        "Active RC": "v0.1.0",
-        "RC Opened At": "2026-02-01T00:00:00+00:00",
-        "RC Opened By Task": "CM-fixture-open",
-        "Last Released": "v0.0.9",
-    })
+    update_release_state_fields(
+        str(path),
+        {
+            "Active RC": "v0.1.0",
+            "RC Opened At": "2026-02-01T00:00:00+00:00",
+            "RC Opened By Task": "CM-fixture-open",
+            "Last Released": "v0.0.9",
+        },
+    )
 
     text = path.read_text(encoding="utf-8")
     assert text.endswith(_EVENT_BLOCKS), text
-    assert text == _FIELDS_IDLE.replace(
-        "## Active RC\nnone\n", "## Active RC\nv0.1.0\n"
-    ).replace(
-        "## RC Opened At\nnone\n", "## RC Opened At\n2026-02-01T00:00:00+00:00\n"
-    ).replace(
-        "## RC Opened By Task\nnone\n", "## RC Opened By Task\nCM-fixture-open\n"
-    ) + _EVENT_BLOCKS
+    assert (
+        text
+        == _FIELDS_IDLE.replace("## Active RC\nnone\n", "## Active RC\nv0.1.0\n")
+        .replace("## RC Opened At\nnone\n", "## RC Opened At\n2026-02-01T00:00:00+00:00\n")
+        .replace("## RC Opened By Task\nnone\n", "## RC Opened By Task\nCM-fixture-open\n")
+        + _EVENT_BLOCKS
+    )
     assert load_release_state(str(path)) == {
         "Active RC": "v0.1.0",
         "RC Opened At": "2026-02-01T00:00:00+00:00",
@@ -162,12 +165,15 @@ def test_unnamed_fields_are_left_exactly_as_found(tmp_path: pathlib.Path) -> Non
 def test_missing_file_is_created_in_canonical_shape(tmp_path: pathlib.Path) -> None:
     """A file that does not exist yet is created with the title and all named fields."""
     path = tmp_path / "release-state.md"
-    update_release_state_fields(str(path), {
-        "Active RC": "none",
-        "RC Opened At": "none",
-        "RC Opened By Task": "none",
-        "Last Released": "none",
-    })
+    update_release_state_fields(
+        str(path),
+        {
+            "Active RC": "none",
+            "RC Opened At": "none",
+            "RC Opened By Task": "none",
+            "Last Released": "none",
+        },
+    )
     assert path.read_text(encoding="utf-8") == _FIELDS_IDLE.replace("v0.0.9", "none")
     assert stat.S_IMODE(path.stat().st_mode) & 0o600 == 0o600
 
@@ -194,7 +200,10 @@ def test_cli_refuses_an_empty_value_and_leaves_the_file_untouched(tmp_path: path
     path.write_text(_FIELDS_IDLE + _EVENT_BLOCKS, encoding="utf-8")
     result = subprocess.run(
         [sys.executable, str(_WRITER), "release-state", str(path), "--active-rc", ""],
-        capture_output=True, text=True, timeout=30, cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(tmp_path),
     )
     assert result.returncode == 2, _diagnostic(result.returncode, result.stdout, result.stderr)
     assert "use 'none' for an unset field" in result.stderr
@@ -343,8 +352,11 @@ def test_auto_ship_event_keeps_mode_and_leaves_no_temp_file(tmp_path: pathlib.Pa
 @pytest.mark.parametrize(
     "override, message_part",
     [
-        pytest.param({"version": "v0.1.0\n## Last Released\nv9.9.9"}, "'Version' needs a single-line",
-                     id="multi_line_value_could_plant_a_heading"),
+        pytest.param(
+            {"version": "v0.1.0\n## Last Released\nv9.9.9"},
+            "'Version' needs a single-line",
+            id="multi_line_value_could_plant_a_heading",
+        ),
         pytest.param({"error_key": "   "}, "'Error Key' needs a single-line", id="blank_value"),
         pytest.param({"tester_task": None}, "'TESTER Task' needs a single-line", id="missing_value"),
         pytest.param({"filed_bug": ""}, "'Filed Bug' needs a single-line", id="empty_filed_bug"),
@@ -373,16 +385,28 @@ def test_auto_ship_event_refuses_a_missing_file_and_creates_nothing(tmp_path: pa
 def _event_cli(tmp_path: pathlib.Path, path: pathlib.Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_WRITER), "auto-ship-event", str(path), *extra],
-        capture_output=True, text=True, timeout=30, cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(tmp_path),
     )
 
 
 _TRIGGER_8_ARGV = (
-    "--version", "v0.2.0", "--trigger", "8",
-    "--error-key", "cm-release.trigger-8.last-3-rcs-non-functional",
-    "--ship-posture", "always", "--tester-task", "TESTER-fixture-verify-2",
-    "--filed-bug", "BUG-fixture-repeated-non-functional.md",
-    "--timestamp", "2026-03-04T05:06:07Z",
+    "--version",
+    "v0.2.0",
+    "--trigger",
+    "8",
+    "--error-key",
+    "cm-release.trigger-8.last-3-rcs-non-functional",
+    "--ship-posture",
+    "always",
+    "--tester-task",
+    "TESTER-fixture-verify-2",
+    "--filed-bug",
+    "BUG-fixture-repeated-non-functional.md",
+    "--timestamp",
+    "2026-03-04T05:06:07Z",
 )
 
 
@@ -430,7 +454,9 @@ def test_cli_auto_ship_event_refuses_a_missing_file(tmp_path: pathlib.Path) -> N
 def _git(repo: pathlib.Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 
@@ -459,12 +485,8 @@ def _build_kanban_root(tmp_path: pathlib.Path, repo: pathlib.Path) -> pathlib.Pa
     for sub in ("logs", "locks", "tmp"):
         (root / sub).mkdir()
 
-    (root / "kanban.cfg").write_text(
-        "[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8"
-    )
-    (root / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text("[paths]\n\n[chain]\npm_mode = automatic\n", encoding="utf-8")
+    (root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
     (proj / "project.cfg").write_text(
         "[project]\n"
         f"project_name = {_PROJECT}\n"
@@ -500,9 +522,7 @@ def _add_passing_tester_task(root: pathlib.Path, version: str) -> None:
         f"# {task_id}\n\n## Role\nTESTER\n\n## Release Version\n{version}\n",
         encoding="utf-8",
     )
-    (task_dir / "status.md").write_text(
-        "# Status\n\n## State\nDONE\n\n## Summary\nfixture\n", encoding="utf-8"
-    )
+    (task_dir / "status.md").write_text("# Status\n\n## State\nDONE\n\n## Summary\nfixture\n", encoding="utf-8")
     (task_dir / "artifacts" / "report.md").write_text(
         f"# TESTER Report for {version}\n\n"
         "## Recommendation\nPASS\n\n"
@@ -540,8 +560,13 @@ def _run(tmp_path: pathlib.Path, root: pathlib.Path, repo: pathlib.Path, argv: l
         },
     )
     proc = subprocess.Popen(
-        ["bash", *argv], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, env=env, cwd=str(foreign_cwd),
+        ["bash", *argv],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=str(foreign_cwd),
         start_new_session=True,
     )
     try:
@@ -564,17 +589,16 @@ def _assert_step_result(state_path: pathlib.Path, step: str, run, expected: dict
     assert rc == 0, f"{step} failed\n{diag}"
     text = state_path.read_text(encoding="utf-8")
     assert _EVENT_BLOCKS in text, (
-        f"{step} did not keep the appended event blocks byte-for-byte\n"
-        f"--- release-state.md ---\n{text}\n{diag}"
+        f"{step} did not keep the appended event blocks byte-for-byte\n" f"--- release-state.md ---\n{text}\n{diag}"
     )
     assert text.index("## Active RC") < text.index("## HALT Event"), text
     loaded = load_release_state(str(state_path))
     for heading, want in expected.items():
         got = loaded[heading]
         if want is _TIMESTAMP:
-            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)?", got), (
-                f"{step}: '## {heading}' is {got!r}, expected a timestamp\n{text}"
-            )
+            assert re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)?", got
+            ), f"{step}: '## {heading}' is {got!r}, expected a timestamp\n{text}"
         else:
             assert got == want, f"{step}: '## {heading}' is {got!r}, expected {want!r}\n{text}"
 
@@ -591,34 +615,41 @@ def test_open_release_open_cancel_keep_event_blocks(tmp_path: pathlib.Path) -> N
     state = root / "projects" / _PROJECT / "release-state.md"
 
     _assert_step_result(
-        state, "open-rc v0.1.0",
-        _run(tmp_path, root, repo,
-             [str(_OPEN_RC), "--project", _PROJECT, "v0.1.0", "CM-fixture-open-1"]),
-        {"Active RC": "v0.1.0", "RC Opened At": _TIMESTAMP,
-         "RC Opened By Task": "CM-fixture-open-1", "Last Released": "v0.0.9"},
+        state,
+        "open-rc v0.1.0",
+        _run(tmp_path, root, repo, [str(_OPEN_RC), "--project", _PROJECT, "v0.1.0", "CM-fixture-open-1"]),
+        {
+            "Active RC": "v0.1.0",
+            "RC Opened At": _TIMESTAMP,
+            "RC Opened By Task": "CM-fixture-open-1",
+            "Last Released": "v0.0.9",
+        },
     )
 
     _commit_on_rc_branch(repo, "v0.1.0")
     _add_passing_tester_task(root, "v0.1.0")
     _assert_step_result(
-        state, "release v0.1.0",
+        state,
+        "release v0.1.0",
         _run(tmp_path, root, repo, [str(_RELEASE), "--project", _PROJECT]),
-        {"Active RC": "none", "RC Opened At": "none",
-         "RC Opened By Task": "none", "Last Released": "v0.1.0"},
+        {"Active RC": "none", "RC Opened At": "none", "RC Opened By Task": "none", "Last Released": "v0.1.0"},
     )
 
     _assert_step_result(
-        state, "open-rc v0.2.0",
-        _run(tmp_path, root, repo,
-             [str(_OPEN_RC), "--project", _PROJECT, "v0.2.0", "CM-fixture-open-2"]),
-        {"Active RC": "v0.2.0", "RC Opened At": _TIMESTAMP,
-         "RC Opened By Task": "CM-fixture-open-2", "Last Released": "v0.1.0"},
+        state,
+        "open-rc v0.2.0",
+        _run(tmp_path, root, repo, [str(_OPEN_RC), "--project", _PROJECT, "v0.2.0", "CM-fixture-open-2"]),
+        {
+            "Active RC": "v0.2.0",
+            "RC Opened At": _TIMESTAMP,
+            "RC Opened By Task": "CM-fixture-open-2",
+            "Last Released": "v0.1.0",
+        },
     )
 
     _assert_step_result(
-        state, "cancel-rc v0.2.0",
-        _run(tmp_path, root, repo,
-             [str(_CANCEL_RC), "--project", _PROJECT, "--key", "v0.2.0", "--yes"]),
-        {"Active RC": "none", "RC Opened At": "none",
-         "RC Opened By Task": "none", "Last Released": "v0.1.0"},
+        state,
+        "cancel-rc v0.2.0",
+        _run(tmp_path, root, repo, [str(_CANCEL_RC), "--project", _PROJECT, "--key", "v0.2.0", "--yes"]),
+        {"Active RC": "none", "RC Opened At": "none", "RC Opened By Task": "none", "Last Released": "v0.1.0"},
     )

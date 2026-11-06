@@ -32,7 +32,7 @@ Execute in order. Do not skip.
 
 Operators may configure `max_major`, `max_minor`, or `max_patch` ceilings in `project.cfg`, but discovery enforces them before PM is ever invoked. PO does not validate the target version against a ceiling.
 
-**2 — Check the release state.** Read `## Active RC` from `$PGAI_PROJECT_ROOT/release-state.md` — one of its four fields, with `RC Opened At`, `RC Opened By Task`, and `Last Released`. An open RC is a **warning, not a block**: note in `## Summary` that `<rc-name>` is open and that `<target-version>` cannot enter the pipeline until it closes, then keep expanding. (If you need the last released version, derive it from tags with `pp_last_released_version`, not from this file.)
+**2 — Check the release state.** Read `## Active RC` from `$PGAI_PROJECT_ROOT/release-state.md` — one of its four fields, with `RC Opened At`, `RC Opened By Task`, and `Last Released`. An open RC is a **warning, not a block**: note in `## Summary` that `<rc-name>` is open and that `<target-version>` cannot enter the pipeline until it closes, then keep expanding. (If you need the last released version, call `pp_last_released_version`, not this file.)
 
 **3 — Read the brief in full.** Extract `## Goal`, the validated `## Target Version`, `## Version Bump Rationale`, `## Constraints`, `## Human Approval Required` (default `auto`), `## Model Overrides`, `## Context`, and `## Notes`. A missing or blank `## Goal`, or a `## Constraints` section with no substantive content, is a `BLOCKED` with the gap named precisely.
 

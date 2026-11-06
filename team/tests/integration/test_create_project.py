@@ -38,7 +38,6 @@ import os
 import pathlib
 import re
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -96,8 +95,8 @@ def _run_create_project(
     project_name: str,
     *,
     workflow_type: str = "release",
-    extra_args: Optional[list[str]] = None,
-    extra_env: Optional[dict] = None,
+    extra_args: list[str] | None = None,
+    extra_env: dict | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess:
     """Run create-project.sh against a temporary kanban root.
@@ -124,9 +123,12 @@ def _run_create_project(
         base_env.update(extra_env)
 
     cmd = [
-        "bash", str(_CREATE_PROJECT_SCRIPT),
-        "--project", project_name,
-        "--workflow-type", workflow_type,
+        "bash",
+        str(_CREATE_PROJECT_SCRIPT),
+        "--project",
+        project_name,
+        "--workflow-type",
+        workflow_type,
     ]
     if extra_args:
         cmd.extend(extra_args)
@@ -148,16 +150,12 @@ def _project_dir(kanban_root: pathlib.Path, project_name: str) -> pathlib.Path:
 
 def _read_project_cfg(kanban_root: pathlib.Path, project_name: str) -> str:
     """Read and return the content of the project's project.cfg."""
-    return _project_dir(kanban_root, project_name).joinpath("project.cfg").read_text(
-        encoding="utf-8"
-    )
+    return _project_dir(kanban_root, project_name).joinpath("project.cfg").read_text(encoding="utf-8")
 
 
 def _read_release_state(kanban_root: pathlib.Path, project_name: str) -> str:
     """Read and return the content of the project's release-state.md."""
-    return _project_dir(kanban_root, project_name).joinpath("release-state.md").read_text(
-        encoding="utf-8"
-    )
+    return _project_dir(kanban_root, project_name).joinpath("release-state.md").read_text(encoding="utf-8")
 
 
 def _read_projects_cfg(kanban_root: pathlib.Path) -> str:
@@ -173,14 +171,12 @@ def _extract_release_section(cfg_text: str) -> str:
     inside a preceding comment line) to the next section header or EOF.
     """
     release_header = re.search(r"^\[release\]\s*$", cfg_text, re.MULTILINE)
-    assert release_header is not None, (
-        f"Expected a [release] section header in generated project.cfg.\ncfg content:\n{cfg_text}"
-    )
+    assert (
+        release_header is not None
+    ), f"Expected a [release] section header in generated project.cfg.\ncfg content:\n{cfg_text}"
     release_start = release_header.end()
     next_section = re.search(r"^\[\w+\]\s*$", cfg_text[release_start:], re.MULTILINE)
-    release_end = (
-        release_start + next_section.start() if next_section else len(cfg_text)
-    )
+    release_end = release_start + next_section.start() if next_section else len(cfg_text)
     return cfg_text[release_start:release_end]
 
 
@@ -199,9 +195,7 @@ def _extract_deep_verify_comment(release_section: str) -> str:
         if line.strip().startswith("# deep_verify:"):
             start = i
             break
-    assert start is not None, (
-        f"Expected a '# deep_verify:' comment line in the [release] section.\n{release_section}"
-    )
+    assert start is not None, f"Expected a '# deep_verify:' comment line in the [release] section.\n{release_section}"
     collected = []
     for line in lines[start:]:
         stripped = line.strip()
@@ -253,9 +247,7 @@ def _parse_accepted_deep_verify_values(comment_text: str) -> list[str]:
 class TestReleaseWorkflowProjectLayout:
     """create-project with workflow_type=release produces the expected on-disk layout."""
 
-    def test_release_project_directory_is_created(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_directory_is_created(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh creates the project directory under projects/<name>/.
 
         The script must produce a directory at $KANBAN_ROOT/projects/<name>/
@@ -264,18 +256,14 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "my-release-proj", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         assert _project_dir(root, "my-release-proj").is_dir(), (
             f"Expected project directory to exist at {_project_dir(root, 'my-release-proj')}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_release_project_has_tasks_queues_subdirectory(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_has_tasks_queues_subdirectory(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh creates tasks/queues/ for a release project.
 
         Queue files for all agents land here; the directory must exist for the
@@ -284,19 +272,14 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-queues-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         queues_dir = _project_dir(root, "release-queues-test") / "tasks" / "queues"
         assert queues_dir.is_dir(), (
-            f"Expected tasks/queues/ to exist at {queues_dir}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected tasks/queues/ to exist at {queues_dir}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_release_project_has_coder_backlog_queue(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_has_coder_backlog_queue(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds coder_backlog.md for a release workflow project.
 
         The release workflow includes a CODER agent; its queue file must be
@@ -305,22 +288,16 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-coder-queue", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        coder_backlog = (
-            _project_dir(root, "release-coder-queue") / "tasks" / "queues" / "coder_backlog.md"
-        )
+        coder_backlog = _project_dir(root, "release-coder-queue") / "tasks" / "queues" / "coder_backlog.md"
         assert coder_backlog.is_file(), (
             f"Expected coder_backlog.md to be seeded for a release project at {coder_backlog}.\n"
             f"Queue dir contents: {list(coder_backlog.parent.iterdir()) if coder_backlog.parent.exists() else '(missing)'}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_release_project_cfg_records_release_workflow_type(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_cfg_records_release_workflow_type(self, tmp_path: pathlib.Path) -> None:
         """project.cfg written by create-project.sh records workflow_type = release.
 
         The discovery pipeline and wake script read workflow_type from project.cfg
@@ -329,19 +306,14 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-cfg-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "release-cfg-test")
         assert "workflow_type = release" in cfg_text, (
-            f"Expected 'workflow_type = release' in project.cfg.\n"
-            f"project.cfg content:\n{cfg_text}"
+            f"Expected 'workflow_type = release' in project.cfg.\n" f"project.cfg content:\n{cfg_text}"
         )
 
-    def test_release_project_cfg_records_versioning_ceilings(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_cfg_records_versioning_ceilings(self, tmp_path: pathlib.Path) -> None:
         """project.cfg written by create-project.sh includes [versioning] section with defaults.
 
         The discovery pipeline reads max_patch, max_minor, and max_major from
@@ -350,24 +322,14 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-versioning-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "release-versioning-test")
-        assert "[versioning]" in cfg_text, (
-            f"Expected [versioning] section in project.cfg.\ncfg content:\n{cfg_text}"
-        )
-        assert "max_patch" in cfg_text, (
-            f"Expected 'max_patch' in project.cfg [versioning].\ncfg content:\n{cfg_text}"
-        )
-        assert "max_minor" in cfg_text, (
-            f"Expected 'max_minor' in project.cfg [versioning].\ncfg content:\n{cfg_text}"
-        )
+        assert "[versioning]" in cfg_text, f"Expected [versioning] section in project.cfg.\ncfg content:\n{cfg_text}"
+        assert "max_patch" in cfg_text, f"Expected 'max_patch' in project.cfg [versioning].\ncfg content:\n{cfg_text}"
+        assert "max_minor" in cfg_text, f"Expected 'max_minor' in project.cfg [versioning].\ncfg content:\n{cfg_text}"
 
-    def test_release_project_has_seeded_release_state(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_has_seeded_release_state(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds release-state.md with Active RC=none.
 
         The discovery pipeline reads Active RC from release-state.md to determine
@@ -376,21 +338,13 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-state-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         state_text = _read_release_state(root, "release-state-test")
-        assert "## Active RC" in state_text, (
-            f"Expected '## Active RC' in release-state.md.\nContent:\n{state_text}"
-        )
-        assert "none" in state_text, (
-            f"Expected Active RC to be 'none' in release-state.md.\nContent:\n{state_text}"
-        )
+        assert "## Active RC" in state_text, f"Expected '## Active RC' in release-state.md.\nContent:\n{state_text}"
+        assert "none" in state_text, f"Expected Active RC to be 'none' in release-state.md.\nContent:\n{state_text}"
 
-    def test_release_project_has_requirements_directory_with_templates(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_has_requirements_directory_with_templates(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds requirements/templates/ for a release project.
 
         A REQUIREMENTS-TEMPLATE.md under requirements/templates/ is how operators
@@ -399,22 +353,17 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-req-tmpl-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         req_template = (
-            _project_dir(root, "release-req-tmpl-test")
-            / "requirements" / "templates" / "REQUIREMENTS-TEMPLATE.md"
+            _project_dir(root, "release-req-tmpl-test") / "requirements" / "templates" / "REQUIREMENTS-TEMPLATE.md"
         )
         assert req_template.is_file(), (
             f"Expected REQUIREMENTS-TEMPLATE.md at {req_template}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_release_project_is_registered_in_projects_cfg(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_release_project_is_registered_in_projects_cfg(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh registers the new release project in projects.cfg.
 
         The wake script reads projects.cfg to enumerate which projects to run the
@@ -423,23 +372,18 @@ class TestReleaseWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "release-reg-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_projects_cfg(root)
         assert "release-reg-test" in cfg_text, (
-            f"Expected 'release-reg-test' to be registered in projects.cfg.\n"
-            f"projects.cfg content:\n{cfg_text}"
+            f"Expected 'release-reg-test' to be registered in projects.cfg.\n" f"projects.cfg content:\n{cfg_text}"
         )
 
 
 class TestDocumentWorkflowProjectLayout:
     """create-project with workflow_type=document produces the expected on-disk layout."""
 
-    def test_document_project_directory_is_created(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_directory_is_created(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh creates the project directory under projects/<name>/.
 
         The script must produce a directory at $KANBAN_ROOT/projects/<name>/
@@ -448,18 +392,14 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "my-doc-proj", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         assert _project_dir(root, "my-doc-proj").is_dir(), (
             f"Expected project directory to exist at {_project_dir(root, 'my-doc-proj')}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_document_project_cfg_records_document_workflow_type(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_cfg_records_document_workflow_type(self, tmp_path: pathlib.Path) -> None:
         """project.cfg written by create-project.sh records workflow_type = document.
 
         The wake script and discovery pipeline dispatch differently for document
@@ -468,19 +408,14 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-cfg-test", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "doc-cfg-test")
         assert "workflow_type = document" in cfg_text, (
-            f"Expected 'workflow_type = document' in project.cfg.\n"
-            f"project.cfg content:\n{cfg_text}"
+            f"Expected 'workflow_type = document' in project.cfg.\n" f"project.cfg content:\n{cfg_text}"
         )
 
-    def test_document_project_has_writer_backlog_queue(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_has_writer_backlog_queue(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds writer_backlog.md for a document workflow project.
 
         The document workflow's primary agent is WRITER; its queue file must be
@@ -489,22 +424,16 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-writer-queue", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        writer_backlog = (
-            _project_dir(root, "doc-writer-queue") / "tasks" / "queues" / "writer_backlog.md"
-        )
+        writer_backlog = _project_dir(root, "doc-writer-queue") / "tasks" / "queues" / "writer_backlog.md"
         assert writer_backlog.is_file(), (
             f"Expected writer_backlog.md to be seeded for a document project at {writer_backlog}.\n"
             f"Queue dir contents: {list(writer_backlog.parent.iterdir()) if writer_backlog.parent.exists() else '(missing)'}\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_document_project_does_not_have_coder_backlog_queue(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_does_not_have_coder_backlog_queue(self, tmp_path: pathlib.Path) -> None:
         """Document workflow projects do not seed coder_backlog.md.
 
         The CODER agent is not part of the document pipeline; seeding its queue
@@ -514,21 +443,15 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-no-coder-queue", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        coder_backlog = (
-            _project_dir(root, "doc-no-coder-queue") / "tasks" / "queues" / "coder_backlog.md"
-        )
+        coder_backlog = _project_dir(root, "doc-no-coder-queue") / "tasks" / "queues" / "coder_backlog.md"
         assert not coder_backlog.exists(), (
             f"Expected coder_backlog.md NOT to be seeded for a document project.\n"
             f"Found unexpectedly at {coder_backlog}."
         )
 
-    def test_document_project_has_artifacts_directory(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_has_artifacts_directory(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh creates artifacts/ for a document project.
 
         The document pipeline's finalize step publishes the deliverable to
@@ -537,9 +460,7 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-artifacts-test", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         artifacts_dir = _project_dir(root, "doc-artifacts-test") / "artifacts"
         assert artifacts_dir.is_dir(), (
@@ -547,9 +468,7 @@ class TestDocumentWorkflowProjectLayout:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_document_project_has_seeded_release_state(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_has_seeded_release_state(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds release-state.md with Active RC=none for document projects.
 
         Document projects use release-state.md to track the active document version
@@ -558,21 +477,13 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-state-test", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         state_text = _read_release_state(root, "doc-state-test")
-        assert "## Active RC" in state_text, (
-            f"Expected '## Active RC' in release-state.md.\nContent:\n{state_text}"
-        )
-        assert "none" in state_text, (
-            f"Expected Active RC to be 'none' in release-state.md.\nContent:\n{state_text}"
-        )
+        assert "## Active RC" in state_text, f"Expected '## Active RC' in release-state.md.\nContent:\n{state_text}"
+        assert "none" in state_text, f"Expected Active RC to be 'none' in release-state.md.\nContent:\n{state_text}"
 
-    def test_document_project_is_registered_in_projects_cfg(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_is_registered_in_projects_cfg(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh registers the new document project in projects.cfg.
 
         The wake script reads projects.cfg to enumerate which projects to run the
@@ -581,19 +492,14 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-reg-test", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_projects_cfg(root)
         assert "doc-reg-test" in cfg_text, (
-            f"Expected 'doc-reg-test' to be registered in projects.cfg.\n"
-            f"projects.cfg content:\n{cfg_text}"
+            f"Expected 'doc-reg-test' to be registered in projects.cfg.\n" f"projects.cfg content:\n{cfg_text}"
         )
 
-    def test_document_project_has_requirements_directory_with_templates(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_project_has_requirements_directory_with_templates(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds requirements/templates/ for a document project.
 
         A requirements file in the project's requirements/ directory is the entry
@@ -602,13 +508,10 @@ class TestDocumentWorkflowProjectLayout:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "doc-req-tmpl-test", workflow_type="document")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         req_template = (
-            _project_dir(root, "doc-req-tmpl-test")
-            / "requirements" / "templates" / "REQUIREMENTS-TEMPLATE.md"
+            _project_dir(root, "doc-req-tmpl-test") / "requirements" / "templates" / "REQUIREMENTS-TEMPLATE.md"
         )
         assert req_template.is_file(), (
             f"Expected REQUIREMENTS-TEMPLATE.md at {req_template}.\n"
@@ -619,9 +522,7 @@ class TestDocumentWorkflowProjectLayout:
 class TestCreateProjectGuardBehavior:
     """create-project.sh guard conditions: missing project, duplicate, invalid workflow."""
 
-    def test_create_project_refuses_duplicate_project_directory(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_create_project_refuses_duplicate_project_directory(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh exits non-zero when the project directory already exists.
 
         Re-running create-project.sh for an existing project name must be rejected
@@ -644,9 +545,7 @@ class TestCreateProjectGuardBehavior:
             f"stdout: {result_second.stdout}\nstderr: {result_second.stderr}"
         )
 
-    def test_create_project_refuses_invalid_workflow_type(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_create_project_refuses_invalid_workflow_type(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh exits non-zero when an unknown workflow type is given.
 
         The script only accepts 'release' and 'document'; any other value must be
@@ -692,21 +591,15 @@ class TestCreateProjectQueueMarkerLegend:
     table -- the canonical five-row reference the legend must match.
     """
 
-    def test_coder_backlog_legend_names_the_blocked_marker(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_coder_backlog_legend_names_the_blocked_marker(self, tmp_path: pathlib.Path) -> None:
         """grep -q '\\[B\\]' <root>/projects/<name>/tasks/queues/coder_backlog.md
         succeeds -- the wake layer's documented BLOCKED escalation marker is
         present in the legend a freshly created project ships with."""
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "marker-legend-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        coder_backlog = (
-            _project_dir(root, "marker-legend-test") / "tasks" / "queues" / "coder_backlog.md"
-        )
+        coder_backlog = _project_dir(root, "marker-legend-test") / "tasks" / "queues" / "coder_backlog.md"
         assert coder_backlog.is_file(), f"Expected coder_backlog.md at {coder_backlog}"
 
         grep_result = subprocess.run(
@@ -719,21 +612,15 @@ class TestCreateProjectQueueMarkerLegend:
             f"Content:\n{coder_backlog.read_text(encoding='utf-8')}"
         )
 
-    def test_generated_legend_names_the_same_markers_as_sop_core_table(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generated_legend_names_the_same_markers_as_sop_core_table(self, tmp_path: pathlib.Path) -> None:
         """The five markers the generated queue-file legend documents are
         exactly the five markers team/SOP-core.md's own marker table names
         -- the legend must never drift from the canonical reference."""
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "marker-legend-binding", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        coder_backlog = (
-            _project_dir(root, "marker-legend-binding") / "tasks" / "queues" / "coder_backlog.md"
-        )
+        coder_backlog = _project_dir(root, "marker-legend-binding") / "tasks" / "queues" / "coder_backlog.md"
         legend_markers = _markers_in_text(coder_backlog.read_text(encoding="utf-8"))
 
         sop_text = _SOP_CORE_MD.read_text(encoding="utf-8")
@@ -746,9 +633,13 @@ class TestCreateProjectQueueMarkerLegend:
         # Pin down the expected five explicitly too, so a table edit that
         # accidentally drops a row (making both sides agree on a WRONG,
         # smaller set) still fails this test.
-        assert legend_markers == {" ", "W", "A", "B", "x"}, (
-            f"Expected exactly the five documented markers, got {sorted(legend_markers)}"
-        )
+        assert legend_markers == {
+            " ",
+            "W",
+            "A",
+            "B",
+            "x",
+        }, f"Expected exactly the five documented markers, got {sorted(legend_markers)}"
 
 
 class TestCreateProjectDevTreeAndGitRepoFlags:
@@ -764,13 +655,17 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
         "dev_tree_flag, git_repo_flag, dir_name, project_name",
         [
             pytest.param(
-                "--dev-tree", "--git-repo",
-                "some-dev-tree", "flags-verbatim-test",
+                "--dev-tree",
+                "--git-repo",
+                "some-dev-tree",
+                "flags-verbatim-test",
                 id="canonical_spellings",
             ),
             pytest.param(
-                "--dev-tree-path", "--git-repo-url",
-                "aliased-dev-tree", "flags-alias-test",
+                "--dev-tree-path",
+                "--git-repo-url",
+                "aliased-dev-tree",
+                "flags-alias-test",
                 id="documented_aliases",
             ),
         ],
@@ -801,25 +696,23 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
             project_name,
             workflow_type="release",
             extra_args=[
-                dev_tree_flag, str(dev_tree),
-                git_repo_flag, git_repo_url,
+                dev_tree_flag,
+                str(dev_tree),
+                git_repo_flag,
+                git_repo_url,
             ],
         )
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, project_name)
-        assert f"dev_tree_path = {dev_tree}" in cfg_text, (
-            f"Expected dev_tree_path = {dev_tree} in project.cfg.\ncfg content:\n{cfg_text}"
-        )
-        assert f"git_repo_url = {git_repo_url}" in cfg_text, (
-            f"Expected git_repo_url to carry the supplied URL verbatim.\ncfg content:\n{cfg_text}"
-        )
+        assert (
+            f"dev_tree_path = {dev_tree}" in cfg_text
+        ), f"Expected dev_tree_path = {dev_tree} in project.cfg.\ncfg content:\n{cfg_text}"
+        assert (
+            f"git_repo_url = {git_repo_url}" in cfg_text
+        ), f"Expected git_repo_url to carry the supplied URL verbatim.\ncfg content:\n{cfg_text}"
 
-    def test_omitted_flags_produce_empty_fields_with_edit_manually_guidance(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_omitted_flags_produce_empty_fields_with_edit_manually_guidance(self, tmp_path: pathlib.Path) -> None:
         """With neither flag, dev_tree_path/git_repo_url stay empty (back-compat).
 
         This is the byte-identical-to-today contract: omitting the flags must
@@ -829,27 +722,21 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
         root = _build_minimal_kanban_root(tmp_path)
 
         result = _run_create_project(root, "flags-omitted-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "flags-omitted-test")
         assert "dev_tree_path =\n" in cfg_text, (
-            f"Expected dev_tree_path to be written empty when --dev-tree is omitted.\n"
-            f"cfg content:\n{cfg_text}"
+            f"Expected dev_tree_path to be written empty when --dev-tree is omitted.\n" f"cfg content:\n{cfg_text}"
         )
         assert "git_repo_url =\n" in cfg_text, (
-            f"Expected git_repo_url to be written empty when --git-repo is omitted.\n"
-            f"cfg content:\n{cfg_text}"
+            f"Expected git_repo_url to be written empty when --git-repo is omitted.\n" f"cfg content:\n{cfg_text}"
         )
         assert "IMPORTANT: dev_tree_path and git_repo_url are intentionally empty." in cfg_text, (
             f"Expected the edit-manually guidance comment to be retained for the "
             f"omitted-flag case.\ncfg content:\n{cfg_text}"
         )
 
-    def test_nonexistent_dev_tree_path_warns_but_still_writes_and_exits_zero(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_nonexistent_dev_tree_path_warns_but_still_writes_and_exits_zero(self, tmp_path: pathlib.Path) -> None:
         """A --dev-tree path that does not exist yet still succeeds, with a WARN.
 
         Projects are often registered before their dev tree is cloned, so a
@@ -869,12 +756,12 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
             f"Expected exit 0 for a nonexistent --dev-tree path (WARN, not fail).\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "WARN" in result.stderr.upper(), (
-            f"Expected a WARN naming the nonexistent path on stderr.\nstderr: {result.stderr}"
-        )
-        assert str(missing_path) in result.stderr, (
-            f"Expected the WARN to name the nonexistent path.\nstderr: {result.stderr}"
-        )
+        assert (
+            "WARN" in result.stderr.upper()
+        ), f"Expected a WARN naming the nonexistent path on stderr.\nstderr: {result.stderr}"
+        assert (
+            str(missing_path) in result.stderr
+        ), f"Expected the WARN to name the nonexistent path.\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "flags-missing-path-test")
         assert f"dev_tree_path = {missing_path}" in cfg_text, (
@@ -882,9 +769,7 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
             f"cfg content:\n{cfg_text}"
         )
 
-    def test_empty_dev_tree_flag_value_is_rejected(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_empty_dev_tree_flag_value_is_rejected(self, tmp_path: pathlib.Path) -> None:
         """--dev-tree= (explicit empty value) is rejected -- non-empty check only.
 
         The acceptance criteria call for "no validation beyond non-empty";
@@ -902,13 +787,11 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
             f"Expected create-project.sh to reject an explicitly empty --dev-tree value.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "non-empty" in result.stderr.lower(), (
-            f"Expected the error to name the non-empty requirement.\nstderr: {result.stderr}"
-        )
+        assert (
+            "non-empty" in result.stderr.lower()
+        ), f"Expected the error to name the non-empty requirement.\nstderr: {result.stderr}"
 
-    def test_help_names_all_four_dev_tree_and_git_repo_flag_spellings(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_help_names_all_four_dev_tree_and_git_repo_flag_spellings(self, tmp_path: pathlib.Path) -> None:
         """--help documents --dev-tree, --dev-tree-path, --git-repo, --git-repo-url.
 
         The flags must be documented as real (not silently
@@ -926,13 +809,9 @@ class TestCreateProjectDevTreeAndGitRepoFlags:
             env=base_env,
             timeout=30,
         )
-        assert result.returncode == 0, (
-            f"--help must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"--help must exit 0.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         for flag in ("--dev-tree", "--dev-tree-path", "--git-repo", "--git-repo-url"):
-            assert flag in result.stdout, (
-                f"Expected --help to name {flag}.\nstdout: {result.stdout}"
-            )
+            assert flag in result.stdout, f"Expected --help to name {flag}.\nstdout: {result.stdout}"
 
 
 class TestCreateProjectDeepVerifyReleaseSection:
@@ -953,9 +832,7 @@ class TestCreateProjectDeepVerifyReleaseSection:
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "deep-verify-cfg-test", workflow_type="release")
 
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "deep-verify-cfg-test")
 
@@ -964,23 +841,21 @@ class TestCreateProjectDeepVerifyReleaseSection:
         # like "# [release] -- DEEP-VERIFY ..."). A real INI header sits
         # alone on its own line.
         release_header = re.search(r"^\[release\]\s*$", cfg_text, re.MULTILINE)
-        assert release_header is not None, (
-            f"Expected a [release] section header in generated project.cfg.\ncfg content:\n{cfg_text}"
-        )
+        assert (
+            release_header is not None
+        ), f"Expected a [release] section header in generated project.cfg.\ncfg content:\n{cfg_text}"
 
         # Both keys must land inside [release] specifically, not merely
         # appear somewhere in the file -- slice from the [release] header to
         # the next section header (or EOF) and search only there.
         release_start = release_header.end()
         next_section = re.search(r"^\[\w+\]\s*$", cfg_text[release_start:], re.MULTILINE)
-        release_end = (
-            release_start + next_section.start() if next_section else len(cfg_text)
-        )
+        release_end = release_start + next_section.start() if next_section else len(cfg_text)
         release_section = cfg_text[release_start:release_end]
 
-        assert "# deep_verify" in release_section, (
-            f"Expected a commented 'deep_verify' key inside [release].\n[release] content:\n{release_section}"
-        )
+        assert (
+            "# deep_verify" in release_section
+        ), f"Expected a commented 'deep_verify' key inside [release].\n[release] content:\n{release_section}"
         assert "# deep_verify_offhours_window" in release_section, (
             f"Expected a commented 'deep_verify_offhours_window' key inside [release].\n"
             f"[release] content:\n{release_section}"
@@ -988,17 +863,15 @@ class TestCreateProjectDeepVerifyReleaseSection:
         # Neither key may be written uncommented -- an uncommented key would
         # change resolution for every newly created project, which is out of
         # scope for a discoverability fix.
-        assert "\ndeep_verify = " not in release_section, (
-            f"deep_verify must be commented out in the generated [release] section.\n{release_section}"
-        )
+        assert (
+            "\ndeep_verify = " not in release_section
+        ), f"deep_verify must be commented out in the generated [release] section.\n{release_section}"
         assert "\ndeep_verify_offhours_window = " not in release_section, (
             f"deep_verify_offhours_window must be commented out in the generated [release] section.\n"
             f"{release_section}"
         )
 
-    def test_generated_deep_verify_comment_names_accepted_values_and_default(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generated_deep_verify_comment_names_accepted_values_and_default(self, tmp_path: pathlib.Path) -> None:
         """The generated comments name weekly|off / 03:00-03:59 defaults verbatim.
 
         These must agree with what pp_deep_verify_mode and
@@ -1007,36 +880,30 @@ class TestCreateProjectDeepVerifyReleaseSection:
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "deep-verify-comment-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "deep-verify-comment-test")
-        assert "weekly|off" in cfg_text, (
-            f"Expected accepted values 'weekly|off' named in the generated comment.\ncfg content:\n{cfg_text}"
-        )
-        assert "Default: weekly" in cfg_text, (
-            f"Expected 'Default: weekly' named in the generated comment.\ncfg content:\n{cfg_text}"
-        )
-        assert "HH:MM-HH:MM" in cfg_text, (
-            f"Expected the HH:MM-HH:MM (UTC) form named in the generated comment.\ncfg content:\n{cfg_text}"
-        )
-        assert "Default: 03:00-03:59" in cfg_text, (
-            f"Expected 'Default: 03:00-03:59' named in the generated comment.\ncfg content:\n{cfg_text}"
-        )
+        assert (
+            "weekly|off" in cfg_text
+        ), f"Expected accepted values 'weekly|off' named in the generated comment.\ncfg content:\n{cfg_text}"
+        assert (
+            "Default: weekly" in cfg_text
+        ), f"Expected 'Default: weekly' named in the generated comment.\ncfg content:\n{cfg_text}"
+        assert (
+            "HH:MM-HH:MM" in cfg_text
+        ), f"Expected the HH:MM-HH:MM (UTC) form named in the generated comment.\ncfg content:\n{cfg_text}"
+        assert (
+            "Default: 03:00-03:59" in cfg_text
+        ), f"Expected 'Default: 03:00-03:59' named in the generated comment.\ncfg content:\n{cfg_text}"
 
-    def test_deep_verify_resolvers_return_shipped_defaults_for_generated_project(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_deep_verify_resolvers_return_shipped_defaults_for_generated_project(self, tmp_path: pathlib.Path) -> None:
         """pp_deep_verify_mode/pp_deep_verify_offhours_window resolve to the
         shipped defaults for a project created by the modified script --
         proving the newly commented-out keys changed no resolution behavior.
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "deep-verify-resolve-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
@@ -1050,12 +917,12 @@ class TestCreateProjectDeepVerifyReleaseSection:
             cwd=str(_TEAM_DIR),
             timeout=30,
         )
-        assert mode_result.returncode == 0, (
-            f"pp_deep_verify_mode failed.\nstdout: {mode_result.stdout}\nstderr: {mode_result.stderr}"
-        )
-        assert mode_result.stdout.strip() == "weekly", (
-            f"Expected pp_deep_verify_mode to resolve to 'weekly'.\nstdout: {mode_result.stdout}"
-        )
+        assert (
+            mode_result.returncode == 0
+        ), f"pp_deep_verify_mode failed.\nstdout: {mode_result.stdout}\nstderr: {mode_result.stderr}"
+        assert (
+            mode_result.stdout.strip() == "weekly"
+        ), f"Expected pp_deep_verify_mode to resolve to 'weekly'.\nstdout: {mode_result.stdout}"
 
         window_result = subprocess.run(
             ["bash", "-c", "source scripts/lib/project_paths.sh && pp_deep_verify_offhours_window"],
@@ -1070,8 +937,7 @@ class TestCreateProjectDeepVerifyReleaseSection:
             f"stdout: {window_result.stdout}\nstderr: {window_result.stderr}"
         )
         assert window_result.stdout.strip() == "03:00-03:59", (
-            f"Expected pp_deep_verify_offhours_window to resolve to '03:00-03:59'.\n"
-            f"stdout: {window_result.stdout}"
+            f"Expected pp_deep_verify_offhours_window to resolve to '03:00-03:59'.\n" f"stdout: {window_result.stdout}"
         )
 
     def test_every_value_the_generated_deep_verify_comment_advertises_resolves_through_the_reader(
@@ -1089,9 +955,7 @@ class TestCreateProjectDeepVerifyReleaseSection:
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "deep-verify-alias-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "deep-verify-alias-test")
         release_section = _extract_release_section(cfg_text)
@@ -1175,46 +1039,37 @@ class TestCreateProjectOverwatchResolveScaffolding:
     project.cfg AND adding a real entry to INTENT.md.
     """
 
-    def test_generated_project_cfg_has_commented_overwatch_resolve_key(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generated_project_cfg_has_commented_overwatch_resolve_key(self, tmp_path: pathlib.Path) -> None:
         """The generated [release] section names overwatch_resolve, commented out."""
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "overwatch-cfg-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "overwatch-cfg-test")
         release_section = _extract_release_section(cfg_text)
 
         assert "# overwatch_resolve" in release_section, (
-            f"Expected a commented 'overwatch_resolve' key inside [release].\n"
-            f"[release] content:\n{release_section}"
+            f"Expected a commented 'overwatch_resolve' key inside [release].\n" f"[release] content:\n{release_section}"
         )
         assert "\noverwatch_resolve = " not in release_section, (
             f"overwatch_resolve must be commented out in a freshly generated "
             f"[release] section -- a fresh project must never ship live.\n{release_section}"
         )
-        assert "Accepted: true|false" in release_section, (
-            f"Expected 'Accepted: true|false' named in the generated comment.\n{release_section}"
-        )
-        assert "Default: false" in release_section, (
-            f"Expected 'Default: false' named in the generated comment.\n{release_section}"
-        )
+        assert (
+            "Accepted: true|false" in release_section
+        ), f"Expected 'Accepted: true|false' named in the generated comment.\n{release_section}"
+        assert (
+            "Default: false" in release_section
+        ), f"Expected 'Default: false' named in the generated comment.\n{release_section}"
 
-    def test_overwatch_resolve_resolves_false_for_a_freshly_created_project(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_overwatch_resolve_resolves_false_for_a_freshly_created_project(self, tmp_path: pathlib.Path) -> None:
         """pp_overwatch_resolve resolves to 'false' for a project create-project.sh
         just generated -- proving the commented-out key changes no resolution
         behavior, exactly like the deep_verify keys beside it.
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "overwatch-resolve-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         env = dict(os.environ)
         env["KANBAN_ROOT"] = str(root)
@@ -1228,45 +1083,34 @@ class TestCreateProjectOverwatchResolveScaffolding:
             cwd=str(_TEAM_DIR),
             timeout=30,
         )
-        assert resolve_result.returncode == 0, (
-            f"pp_overwatch_resolve failed.\nstdout: {resolve_result.stdout}\nstderr: {resolve_result.stderr}"
-        )
+        assert (
+            resolve_result.returncode == 0
+        ), f"pp_overwatch_resolve failed.\nstdout: {resolve_result.stdout}\nstderr: {resolve_result.stderr}"
         assert resolve_result.stdout.strip() == "false", (
             f"Expected pp_overwatch_resolve to resolve to 'false' for a freshly "
             f"created project.\nstdout: {resolve_result.stdout}"
         )
 
-    def test_generated_project_has_intent_md_at_project_root(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generated_project_has_intent_md_at_project_root(self, tmp_path: pathlib.Path) -> None:
         """create-project.sh seeds INTENT.md at the project root (not a subdir)."""
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "intent-file-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         intent_path = _project_dir(root, "intent-file-test") / "INTENT.md"
         assert intent_path.is_file(), (
-            f"Expected INTENT.md to be seeded at {intent_path}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected INTENT.md to be seeded at {intent_path}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_generated_intent_md_has_zero_live_entries(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generated_intent_md_has_zero_live_entries(self, tmp_path: pathlib.Path) -> None:
         """The shipped INTENT.md carries its worked example fenced -- outside
         the fence, there is no bullet matching the live-entry grammar.
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "intent-zero-entries-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        intent_text = (
-            _project_dir(root, "intent-zero-entries-test") / "INTENT.md"
-        ).read_text(encoding="utf-8")
+        intent_text = (_project_dir(root, "intent-zero-entries-test") / "INTENT.md").read_text(encoding="utf-8")
 
         live_entries = _live_intent_entry_lines(intent_text)
         assert live_entries == [], (
@@ -1274,42 +1118,30 @@ class TestCreateProjectOverwatchResolveScaffolding:
             f"found: {live_entries}\nfull text:\n{intent_text}"
         )
 
-    def test_generated_intent_md_marks_its_worked_example_unmistakably(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_generated_intent_md_marks_its_worked_example_unmistakably(self, tmp_path: pathlib.Path) -> None:
         """The one worked example in INTENT.md is fenced and labeled as an example,
         so a human reader (or a parser of live entries) cannot mistake it for a
         live, operator-authored entry.
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "intent-example-test", workflow_type="release")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        intent_text = (
-            _project_dir(root, "intent-example-test") / "INTENT.md"
-        ).read_text(encoding="utf-8")
+        intent_text = (_project_dir(root, "intent-example-test") / "INTENT.md").read_text(encoding="utf-8")
 
-        assert "```" in intent_text, (
-            f"Expected the worked example to be fenced with a code block.\n{intent_text}"
-        )
-        assert re.search(r"EXAMPLE", intent_text), (
-            f"Expected the worked example to be labeled unmistakably as an example.\n{intent_text}"
-        )
+        assert "```" in intent_text, f"Expected the worked example to be fenced with a code block.\n{intent_text}"
+        assert re.search(
+            r"EXAMPLE", intent_text
+        ), f"Expected the worked example to be labeled unmistakably as an example.\n{intent_text}"
 
-    def test_document_workflow_project_also_gets_overwatch_scaffolding(
-        self, tmp_path: pathlib.Path
-    ) -> None:
+    def test_document_workflow_project_also_gets_overwatch_scaffolding(self, tmp_path: pathlib.Path) -> None:
         """A document-workflow project gets the same commented key and INTENT.md
         as a release-workflow project -- OVERWATCH's CM-block resolution is not
         release-workflow-specific scaffolding.
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "intent-doc-test", workflow_type="document")
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
         cfg_text = _read_project_cfg(root, "intent-doc-test")
         release_section = _extract_release_section(cfg_text)
@@ -1320,14 +1152,11 @@ class TestCreateProjectOverwatchResolveScaffolding:
 
         intent_path = _project_dir(root, "intent-doc-test") / "INTENT.md"
         assert intent_path.is_file(), (
-            f"Expected INTENT.md to be seeded for a document-workflow project too "
-            f"at {intent_path}."
+            f"Expected INTENT.md to be seeded for a document-workflow project too " f"at {intent_path}."
         )
 
     @pytest.mark.parametrize("workflow_type", ["release", "document"])
-    def test_generated_project_has_no_overwatch_queue_file(
-        self, tmp_path: pathlib.Path, workflow_type: str
-    ) -> None:
+    def test_generated_project_has_no_overwatch_queue_file(self, tmp_path: pathlib.Path, workflow_type: str) -> None:
         """create-project.sh seeds no tasks/queues/overwatch_backlog.md.
 
         OVERWATCH has no model queue: its firings are the hourly sweep and
@@ -1335,15 +1164,10 @@ class TestCreateProjectOverwatchResolveScaffolding:
         """
         root = _build_minimal_kanban_root(tmp_path)
         result = _run_create_project(root, "overwatch-queue-test", workflow_type=workflow_type)
-        assert result.returncode == 0, (
-            f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"create-project.sh failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
 
-        backlog_path = (
-            _project_dir(root, "overwatch-queue-test") / "tasks" / "queues" / "overwatch_backlog.md"
-        )
+        backlog_path = _project_dir(root, "overwatch-queue-test") / "tasks" / "queues" / "overwatch_backlog.md"
         assert not backlog_path.exists(), (
-            f"Expected no OVERWATCH queue file at {backlog_path}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"Expected no OVERWATCH queue file at {backlog_path}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "overwatch_backlog" not in result.stdout, result.stdout

@@ -49,7 +49,7 @@
 # ----------------------------
 # When pp_load_config has been called for a project, PP_TEMP_DIR holds the
 # absolute per-project temp path (<root>/<temp_dir>).  Use the project-aware
-# helpers to place files there:
+# helper to find it:
 #
 #   pgai_project_temp_dir [project_name]
 #                      — echo the per-project temp dir and create it if needed.
@@ -57,10 +57,6 @@
 #                        falls back to PP_TEMP_DIR (exported by pp_load_config)
 #                        and then to the install-wide root.  When called with a
 #                        project name, computes <root>/tmp.<name>.
-#   pgai_mktemp_p [prefix] [project_name]
-#                      — mktemp a file inside the per-project temp dir.
-#   pgai_mktemp_d_p [prefix] [project_name]
-#                      — mktemp -d a directory inside the per-project temp dir.
 #
 # Install-wide (no project context) functions
 # -------------------------------------------
@@ -624,48 +620,6 @@ pgai_project_temp_dir() {
 
     mkdir -p "$dir"
     echo "$dir"
-}
-
-# ---------------------------------------------------------------------------
-# pgai_mktemp_p [prefix] [project_name]
-# Create a uniquely named temp FILE inside the per-project temp directory.
-#
-# Arguments:
-#   prefix        — optional name prefix (default: "pgai_tmp")
-#   project_name  — optional project name passed to pgai_project_temp_dir.
-#                   When omitted, PP_TEMP_DIR is used if available.
-#
-# Usage:
-#   local f; f="$(pgai_mktemp_p my_script)"
-#   local f; f="$(pgai_mktemp_p my_script my-project)"
-# ---------------------------------------------------------------------------
-pgai_mktemp_p() {
-    local prefix="${1:-pgai_tmp}"
-    local project_name="${2:-}"
-    local dir
-    dir="$(pgai_project_temp_dir "$project_name")"
-    mktemp "${dir}/${prefix}.XXXXXX"
-}
-
-# ---------------------------------------------------------------------------
-# pgai_mktemp_d_p [prefix] [project_name]
-# Create a uniquely named temp DIRECTORY inside the per-project temp directory.
-#
-# Arguments:
-#   prefix        — optional name prefix (default: "pgai_tmp")
-#   project_name  — optional project name passed to pgai_project_temp_dir.
-#                   When omitted, PP_TEMP_DIR is used if available.
-#
-# Usage:
-#   local d; d="$(pgai_mktemp_d_p scratch)"
-#   local d; d="$(pgai_mktemp_d_p scratch my-project)"
-# ---------------------------------------------------------------------------
-pgai_mktemp_d_p() {
-    local prefix="${1:-pgai_tmp}"
-    local project_name="${2:-}"
-    local dir
-    dir="$(pgai_project_temp_dir "$project_name")"
-    mktemp -d "${dir}/${prefix}.XXXXXX"
 }
 
 # ---------------------------------------------------------------------------
@@ -1234,9 +1188,56 @@ pgai_listener_cleanliness_check() {
 }
 
 # ---------------------------------------------------------------------------
+# _wake_tmp_litter_record_key <out_var> <basename>
+# The key the litter snapshot records <basename> under, assigned to
+# <out_var> through printf -v: `r:<basename>` for a name without a line
+# feed, `e:<escaped>` for one holding a line feed, where <escaped> is the
+# name with each backslash written `\\` and each line feed `\n`. The two
+# prefixes keep the forms apart, so a raw name spelled like an escaped one
+# never collides with it. Snapshot writer and reader both key through here,
+# as does the OVERWATCH bare-/tmp litter check
+# (overwatch-checks/check-bare-tmp-litter.sh), which sources this file.
+# ---------------------------------------------------------------------------
+_wake_tmp_litter_record_key() {
+    local _name="$2"
+    if [[ "$_name" == *$'\n'* ]]; then
+        _name="${_name//\\/\\\\}"
+        printf -v "$1" 'e:%s' "${_name//$'\n'/\\n}"
+    else
+        printf -v "$1" 'r:%s' "$_name"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# _wake_tmp_litter_snapshot_record_key <out_var> <record_line>
+# The record key (_wake_tmp_litter_record_key) of the entry one snapshot
+# record line names, assigned to <out_var> through printf -v. A line
+# `<mtime>\t<basename>` gives `r:<basename>`, a line
+# `esc=<mtime>\t<escaped>` gives `e:<escaped>`. The name is everything after
+# the first tab, split by parameter expansion rather than read's field
+# splitting, which would trim tabs at the name's ends. Returns 1, leaving
+# <out_var> untouched, for a line that names no entry: one without a tab
+# (the epoch= header) or with nothing after its first tab. Every reader of
+# the wake_tmp_litter_take_snapshot format keys its records through here.
+# ---------------------------------------------------------------------------
+_wake_tmp_litter_snapshot_record_key() {
+    local _wtlsrk_line="$2" _wtlsrk_mt
+    [[ "$_wtlsrk_line" == *$'\t'* ]] || return 1
+    _wtlsrk_mt="${_wtlsrk_line%%$'\t'*}"
+    _wtlsrk_line="${_wtlsrk_line#*$'\t'}"
+    [[ -n "$_wtlsrk_line" ]] || return 1
+    if [[ "$_wtlsrk_mt" == esc=* ]]; then
+        printf -v "$1" 'e:%s' "$_wtlsrk_line"
+    else
+        printf -v "$1" 'r:%s' "$_wtlsrk_line"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # wake_tmp_litter_take_snapshot <snapshot_file> [session_epoch]
-# Capture the current top-level entries under /tmp (names + mtimes) to a
-# state file so the post-session check can diff against them.
+# Capture every current top-level entry under /tmp, dot-named entries
+# included (names + mtimes), to a state file so the post-session check can
+# diff against them.
 #
 # Called pre-dispatch, before the provider CLI runs. The state file lives
 # under the task's own temp subtree — never under bare /tmp.
@@ -1247,10 +1248,17 @@ pgai_listener_cleanliness_check() {
 #       to "$(date +%s)".  Stored as a header line so the post-check can
 #       apply the age filter.
 #
-# Output format (written to the snapshot file):
+# Output format (written to the snapshot file), one LF-terminated line each:
 #   Line 1: epoch=<N>          — session start epoch
-#   Lines 2+: <mtime_epoch>\t<basename>  — one entry per /tmp top-level item
-#             sorted by basename so comm(1) can be used on the name column.
+#   Lines 2+: one record per /tmp top-level entry, sorted with sort -k2:
+#     <mtime_epoch>\t<basename>      — a basename without a line feed,
+#                                       written byte for byte
+#     esc=<mtime_epoch>\t<escaped>   — a basename holding a line feed, with
+#                                       each backslash written `\\` and each
+#                                       line feed `\n`
+#   Everything after the first tab of a record is the name, so a name may
+#   hold tabs, CRs or leading and trailing whitespace; no record spans two
+#   lines, whatever the name holds.
 #
 # Returns 0 on success; non-zero (and writes an error to stderr) on failure.
 # The wake bracket calls this inside a fire-and-forget guard: failure here
@@ -1280,16 +1288,26 @@ wake_tmp_litter_take_snapshot() {
     # Write header and mtime+name pairs for all current /tmp top-level entries.
     {
         echo "epoch=${session_epoch}"
-        # stat -c '%Y\t%n' reads mtime epoch and basename in one pass.
-        # Use find to enumerate, then stat each; fall back gracefully when /tmp
-        # is inaccessible or empty.
-        for _f in /tmp/*; do
-            [[ -e "$_f" || -L "$_f" ]] || continue
-            local _bn _mt
-            _bn="$(basename "$_f")"
-            _mt="$(stat -c '%Y' "$_f" 2>/dev/null || echo 0)"
-            printf '%s\t%s\n' "$_mt" "$_bn"
-        done | sort -k2
+        # The glob runs in its own subshell with dotglob set, so dot-named
+        # entries are enumerated without changing the caller's shell options
+        # (`.` and `..` never match). The basename is cut from the path by
+        # parameter expansion, which keeps a trailing line feed that
+        # $(basename ...) would strip. An unreadable /tmp yields no records.
+        (
+            shopt -s dotglob
+            for _f in /tmp/*; do
+                [[ -e "$_f" || -L "$_f" ]] || continue
+                local _bn _mt _key
+                _bn="${_f#/tmp/}"
+                _mt="$(stat -c '%Y' "$_f" 2>/dev/null || echo 0)"
+                _wake_tmp_litter_record_key _key "$_bn"
+                if [[ "$_key" == e:* ]]; then
+                    printf 'esc=%s\t%s\n' "$_mt" "${_key#e:}"
+                else
+                    printf '%s\t%s\n' "$_mt" "$_bn"
+                fi
+            done
+        ) | sort -k2
     } > "$snapshot_file" || {
         echo "temp.sh: wake_tmp_litter_take_snapshot: failed to write ${snapshot_file}" >&2
         return 1
@@ -1302,19 +1320,26 @@ wake_tmp_litter_take_snapshot() {
 #     <snapshot_file> <task_status_path> <task_id> \
 #     <log_func_name> <project_name> <kanban_root>
 #
-# Post-session litter check: diff /tmp top-level entries against the
-# pre-dispatch snapshot and report new entries that are not on the allowlist
-# or under the framework temp root.
+# Post-session litter check: diff every /tmp top-level entry, dot-named
+# entries included, against the pre-dispatch snapshot and report new entries
+# that are not on the allowlist or under the framework temp root. The
+# snapshot is read in the record format wake_tmp_litter_take_snapshot
+# documents: `<mtime>\t<basename>` lines name an entry byte for byte,
+# `esc=<mtime>\t<escaped>` lines an entry whose basename holds a line feed,
+# so a pre-existing entry is recognised whatever its name holds.
 #
 # Never deletes anything itself — an arbitrary bare-/tmp entry could be
 # something another concurrent process still needs, so unilateral removal
-# from a fire-and-forget teardown step is its own hazard. Instead, every
-# report (status.md, the log line, and the OVERWATCH actions.log entry)
-# carries a runnable `rm -f` remedy naming the exact entries found, so the
-# violation does not simply persist narrated-and-ignored: the operator or
-# the next session has a copy-pasteable command rather than having to
-# reconstruct one from the file list. Fire-and-forget: any internal error is
-# logged and the function returns 0 so the wake tail is unaffected.
+# from a fire-and-forget teardown step is its own hazard. Instead, the
+# status.md section and the log line both carry a runnable `rm -f` remedy
+# naming the exact entries found, so the violation does not simply persist
+# narrated-and-ignored: the operator or the next session has a
+# copy-pasteable command rather than having to reconstruct one from the
+# file list. The remedy shell-quotes each entry with printf %q, so it is
+# one physical line that removes exactly the reported entries whatever
+# their names hold (a space, a tab, a newline). Fire-and-forget: any
+# internal error is logged and the function returns 0 so the wake tail is
+# unaffected.
 #
 # Arguments:
 #   $1  snapshot_file        — path written by wake_tmp_litter_take_snapshot
@@ -1326,11 +1351,18 @@ wake_tmp_litter_take_snapshot() {
 #   $6  kanban_root          — kanban root directory (for overwatch actions.log)
 #
 # Side effects when litter is found:
-#   - Appends a `## Temp Litter` section to status.md naming each file and
-#     a `remedy:` line carrying the runnable `rm -f` command
-#   - Calls log_func_name with a one-line summary that also carries the
-#     remedy command
-#   - Appends one info entry to <kanban_root>/projects/<project_name>/overwatch/actions.log
+#   - Appends a `## Temp Litter` section to status.md: one `created ...`
+#     line per entry and a `remedy:` line carrying the runnable `rm -f`
+#     command. Each name shown on a `created ...` line is flattened by
+#     overwatch_flatten_field (overwatch_protocol.sh) -- a tab, CR or LF
+#     in it collapses to a space -- so no name can split its line or start
+#     one with `## `
+#   - Calls log_func_name with a one-line summary, the task ID and names
+#     flattened the same way, that also carries the remedy command
+#   - Appends one info entry to <kanban_root>/projects/<project_name>/overwatch/actions.log,
+#     built by overwatch_action_record (overwatch_protocol.sh): one line of
+#     six tab-separated fields, a tab, CR or LF in the task ID or an entry
+#     name flattened to a space
 #
 # Allowlist (entries created during the session are NOT flagged):
 #   systemd-*   — systemd runtime artifacts
@@ -1383,24 +1415,32 @@ wake_tmp_litter_check_and_report() {
     local fw_root_basename
     fw_root_basename="$(basename "$fw_root")"
 
-    # Build the set of basenames that existed before the session (from snapshot).
-    # Snapshot lines 2+ have format: <mtime>\t<basename>
-    declare -A _pre_names
-    while IFS=$'\t' read -r _mt _bn; do
-        [[ -z "$_bn" || "$_bn" == epoch=* ]] && continue
-        _pre_names["$_bn"]=1
+    # Build the set of record keys (_wake_tmp_litter_record_key) for the
+    # entries that existed before the session. Each snapshot line after the
+    # header is `<mtime>\t<basename>` or `esc=<mtime>\t<escaped>`, keyed by
+    # _wake_tmp_litter_snapshot_record_key.
+    declare -A _pre_keys
+    local _rec _rec_key
+    while IFS= read -r _rec; do
+        _wake_tmp_litter_snapshot_record_key _rec_key "$_rec" || continue
+        _pre_keys["$_rec_key"]=1
     done < <(tail -n +2 "$snapshot_file" 2>/dev/null)
 
-    # Scan current /tmp top-level and identify litter.
+    # Scan current /tmp top-level, dot-named entries included (this function
+    # body is a subshell, so dotglob does not reach the caller), and identify
+    # litter. The basename is cut by parameter expansion, as the snapshot
+    # cuts it, so a trailing line feed survives into the report and remedy.
+    shopt -s dotglob
     local litter=()
     for _f in /tmp/*; do
         [[ -e "$_f" || -L "$_f" ]] || continue
-        local _bn _mt
-        _bn="$(basename "$_f")"
+        local _bn _mt _key
+        _bn="${_f#/tmp/}"
         _mt="$(stat -c '%Y' "$_f" 2>/dev/null || echo 0)"
 
         # Skip if it was present before the session.
-        [[ -n "${_pre_names[$_bn]+_}" ]] && continue
+        _wake_tmp_litter_record_key _key "$_bn"
+        [[ -n "${_pre_keys[$_key]+_}" ]] && continue
 
         # Skip the framework temp root.
         [[ "$_bn" == "$fw_root_basename" ]] && continue
@@ -1425,6 +1465,18 @@ wake_tmp_litter_check_and_report() {
         exit 0
     fi
 
+    # Load overwatch_protocol.sh for its one-line flattening rule
+    # (overwatch_flatten_field) and its actions.log record builder
+    # (overwatch_action_record). It is sourced here, inside this function's
+    # subshell, only when either is not already loaded -- so sourcing temp.sh
+    # stays side-effect free and adds no sourcing cycle (project_paths.sh
+    # sources temp.sh).
+    if ! declare -F overwatch_flatten_field >/dev/null 2>&1 \
+        || ! declare -F overwatch_action_record >/dev/null 2>&1; then
+        # shellcheck source=overwatch_protocol.sh
+        source "${_PGAI_TEMP_SH_DIR}/overwatch_protocol.sh" 2>/dev/null || true
+    fi
+
     # Build the runnable removal remedy up front so both the status.md
     # section and the log summary carry the identical command. The check
     # stays report-only -- it never deletes anything itself (a fire-and-forget
@@ -1432,14 +1484,42 @@ wake_tmp_litter_check_and_report() {
     # its own hazard) -- but a violation that is only narrated and never
     # acted on just persists, which is the gap this remedy closes: the
     # operator (or the next session) has a copy-pasteable command instead of
-    # having to reconstruct one from the file list.
-    local _remedy="rm -f ${litter[*]}"
+    # having to reconstruct one from the file list. Each entry is one
+    # printf %q word: a plain name prints as itself, a space is
+    # backslash-escaped, and a tab, CR or LF is written in $'...' form, so
+    # the command stays one physical line and bash runs it as rm -f with
+    # exactly the reported paths. Every entry starts with /tmp/, so none
+    # can be read as an option and no `--` is needed.
+    local _remedy
+    printf -v _remedy ' %q' "${litter[@]}"
+    _remedy="rm -f${_remedy}"
+
+    # Names and the task ID as shown on status.md and in the log line: one
+    # line each, through the shared flattening rule. Should
+    # overwatch_protocol.sh not load, each is shown in its printf %q form
+    # instead, which is one line as well, so a name can never split a line
+    # or plant a `## ` heading in status.md.
+    local _shown _shown_id _lf
+    local -a _shown_names=()
+    if declare -F overwatch_flatten_field >/dev/null 2>&1; then
+        overwatch_flatten_field _shown_id "$task_id"
+        for _lf in "${litter[@]}"; do
+            overwatch_flatten_field _shown "$_lf"
+            _shown_names+=("$_shown")
+        done
+    else
+        printf -v _shown_id '%q' "$task_id"
+        for _lf in "${litter[@]}"; do
+            printf -v _shown '%q' "$_lf"
+            _shown_names+=("$_shown")
+        done
+    fi
 
     # --- Report to status.md ---
     if [[ -f "$task_status_path" ]]; then
         {
             printf '\n## Temp Litter\n'
-            for _lf in "${litter[@]}"; do
+            for _lf in "${_shown_names[@]}"; do
                 printf 'created %s — SOP Temporary File Convention\n' "$_lf"
             done
             printf 'remedy: %s\n' "$_remedy"
@@ -1448,7 +1528,8 @@ wake_tmp_litter_check_and_report() {
 
     # --- Log one summary line ---
     local _count="${#litter[@]}"
-    local _summary="litter check: ${task_id} left ${_count} bare /tmp entry(ies): ${litter[*]} — remedy: ${_remedy}"
+    local _summary="litter check: ${_shown_id} left ${_count} bare /tmp entry(ies): ${_shown_names[*]}"
+    _summary+=" — remedy: ${_remedy}"
     if [[ -n "$log_func" ]] && command -v "$log_func" >/dev/null 2>&1; then
         "$log_func" "$_summary"
     else
@@ -1456,15 +1537,25 @@ wake_tmp_litter_check_and_report() {
     fi
 
     # --- Surface to OVERWATCH actions.log ---
+    # The record is built by overwatch_action_record (overwatch_protocol.sh),
+    # the one builder every bash actions.log writer uses: one LF-terminated
+    # line of six tab-separated fields, whatever the task ID or the /tmp entry
+    # names hold. Without the builder the record is skipped with a stderr
+    # note; the check stays fire-and-forget.
     if [[ -n "$project_name" && -n "$kanban_root" ]]; then
-        local _ow_log_dir="${kanban_root}/projects/${project_name}/overwatch"
-        local _ow_log="${_ow_log_dir}/actions.log"
-        mkdir -p "$_ow_log_dir" 2>/dev/null || true
-        local _ts
-        _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")"
-        # Format: timestamp<TAB>name<TAB>target<TAB>action<TAB>backup<TAB>reason
-        printf '%s\tcheck-bare-tmp-litter\t%s\tlitter-reported\tnone\t%d bare /tmp entry(ies) created during session: %s\n' \
-            "$_ts" "$task_id" "$_count" "${litter[*]}" >> "$_ow_log" 2>/dev/null || true
+        if declare -F overwatch_action_record >/dev/null 2>&1; then
+            local _ow_log_dir="${kanban_root}/projects/${project_name}/overwatch"
+            local _ow_log="${_ow_log_dir}/actions.log"
+            mkdir -p "$_ow_log_dir" 2>/dev/null || true
+            local _ts
+            _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "unknown")"
+            overwatch_action_record "$_ts" "check-bare-tmp-litter" "$task_id" "litter-reported" "none" \
+                "${_count} bare /tmp entry(ies) created during session: ${litter[*]}" \
+                >> "$_ow_log" 2>/dev/null || true
+        else
+            echo "temp.sh: wake_tmp_litter_check_and_report: overwatch_action_record unavailable" \
+                "(${_PGAI_TEMP_SH_DIR}/overwatch_protocol.sh not loadable); actions.log record skipped" >&2
+        fi
     fi
 
     exit 0

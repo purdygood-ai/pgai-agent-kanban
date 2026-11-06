@@ -25,7 +25,8 @@ other route runs its script:
   POST /operations/halt-global           → ops: halt_global     (CLI: halt-global.sh)
   POST /operations/unhalt-global         → ops: unhalt_global   (CLI: unhalt-global.sh)
   POST /operations/reset                 → ops: reset_item      (CLI: reset.sh --project <name>
-                                                    --key <resolved-key> [--keep-artifacts] [--force])
+                                                    --key <resolved-key> [--keep-artifacts] [--force]
+                                                    [--discard-branch])
   POST /operations/close                 → ops: close_item      (CLI: close.sh --project <name> --key <key>
                                                     [--state ...] [--note ...])
   POST /operations/wontdo                → ops: wontdo_item     (CLI: wontdo.sh --project <name> --key <key>)
@@ -224,7 +225,7 @@ Long-running verbs (deep-verify, cold-build-now, wake-now):
     like every other operation (no subprocess spawned at all).
   - wake-now.sh's --bg/--all modes need the SAME detached treatment as
     deep-verify, for a subtler reason: fire_one_bg() backgrounds the fired
-    agent's wake cycle with a bare `&` WITHOUT redirecting its stdout/stderr,
+    agent's wake cycle (setsid, `&`) WITHOUT redirecting its stdout/stderr,
     so the backgrounded grandchild inherits shell_out()'s own capture pipes.
     subprocess.run(capture_output=True) does not return until BOTH ends of
     those pipes close -- and the backgrounded grandchild keeps its end open
@@ -334,7 +335,6 @@ import pathlib
 import shlex
 import subprocess
 import uuid
-from typing import Optional, Union
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -451,7 +451,6 @@ def _levenshtein_distance(a: str, b: str) -> int:
     return dp[len_b]
 
 
-
 # Common alternative names and typo targets for known API fields.  When a submitted
 # unknown field is within edit-distance 2 of an alias, the canonical field name is
 # surfaced in the 'did you mean' message.  This lets ``forse`` (distance-1 typo of
@@ -497,25 +496,17 @@ def _capture_unknown_fields(
         # Case-insensitive exact match against a known field.
         candidate = known_lower.get(bad_lower)
         if candidate is not None:
-            warnings.append(
-                f"unknown field: {bad_name} — did you mean {candidate}? (operation executed)"
-            )
+            warnings.append(f"unknown field: {bad_name} — did you mean {candidate}? (operation executed)")
             continue
 
         # Levenshtein near-miss: edit distance ≤ 2 against any known field.
-        near_misses = [
-            f
-            for f in known_fields
-            if _levenshtein_distance(bad_lower, f.lower()) <= 2
-        ]
+        near_misses = [f for f in known_fields if _levenshtein_distance(bad_lower, f.lower()) <= 2]
         if near_misses:
             best = min(
                 near_misses,
                 key=lambda f: _levenshtein_distance(bad_lower, f.lower()),
             )
-            warnings.append(
-                f"unknown field: {bad_name} — did you mean {best}? (operation executed)"
-            )
+            warnings.append(f"unknown field: {bad_name} — did you mean {best}? (operation executed)")
             continue
 
         # Alias-based near-miss: edit distance ≤ 2 against a known alias.
@@ -532,9 +523,7 @@ def _capture_unknown_fields(
                     alias_candidate = canonical
 
         if alias_candidate is not None:
-            warnings.append(
-                f"unknown field: {bad_name} — did you mean {alias_candidate}? (operation executed)"
-            )
+            warnings.append(f"unknown field: {bad_name} — did you mean {alias_candidate}? (operation executed)")
         else:
             warnings.append(f"unknown field: {bad_name}")
 
@@ -760,9 +749,8 @@ def _cli_remedy(request: Request, script_rel: str, planned_argv: list[str]) -> s
     command is the text ``halt_provenance.halt_command`` (and its unhalt and
     global siblings) gives for the same root.
     """
-    return (
-        "Fix the condition the message names, then re-run the CLI form: "
-        + _installed_command(request, script_rel, *planned_argv[1:])
+    return "Fix the condition the message names, then re-run the CLI form: " + _installed_command(
+        request, script_rel, *planned_argv[1:]
     )
 
 
@@ -788,10 +776,7 @@ def _missing_field_refusal(
     verb_key = verb.replace("-", "_")
     if exc.key:
         error = f"{verb_key}.{exc.key}_required"
-        message = (
-            f"{verb} requires '{exc.key}', which the body did not carry or left "
-            "empty; nothing was run."
-        )
+        message = f"{verb} requires '{exc.key}', which the body did not carry or left " "empty; nothing was run."
     else:
         error = f"{verb_key}.required_field_missing"
         message = f"{verb} refused the body before running anything: {exc.detail}"
@@ -821,7 +806,7 @@ _PROJECT_VALUE_EXAMPLES = {
 
 def _project_value_refusal(
     request: Request,
-    exc: "ops_projects.ProjectValueRefused",
+    exc: ops_projects.ProjectValueRefused,
     warnings: list[str],
 ) -> JSONResponse:
     """Return a registry verb's value refusal as HTTP 422, dual-channel.
@@ -863,7 +848,7 @@ def _ops_context(request: Request) -> OpsContext:
     return OpsContext(kanban_root=request.app.state.api_cfg.kanban_root)
 
 
-def _resolve_project(ctx: OpsContext, typed: str) -> tuple[Optional[str], OpsOutcome]:
+def _resolve_project(ctx: OpsContext, typed: str) -> tuple[str | None, OpsOutcome]:
     """Resolve the body's ``project`` the way the CLI script's first step does.
 
     Returns ``(name, outcome)``: the registered project name and a clean
@@ -912,11 +897,13 @@ def _routable_intake_example_curl(request: Request, project: str, refused_name: 
     example_id = example_name.removesuffix("-example.md")
     return _example_curl(
         request,
-        json.dumps({
-            "project": project,
-            "filename": example_name,
-            "content": f"# {example_id} example",
-        }),
+        json.dumps(
+            {
+                "project": project,
+                "filename": example_name,
+                "content": f"# {example_id} example",
+            }
+        ),
     )
 
 
@@ -926,7 +913,7 @@ def _routable_intake_example_curl(request: Request, project: str, refused_name: 
 # ---------------------------------------------------------------------------
 
 
-def _image_entries(image: Union[list[str], str, None]) -> list[str]:
+def _image_entries(image: list[str] | str | None) -> list[str]:
     """Return the body's ``image`` value as a list of ``--image`` entries.
 
     ``None`` (field omitted) and ``[]`` give no entries; a bare string --
@@ -1017,7 +1004,7 @@ class HaltBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
+    project: str | None = None
     dry_run: bool = False
 
 
@@ -1044,8 +1031,8 @@ class HaltAfterBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
+    project: str | None = None
+    key: str | None = None
     until: str = ""
     dry_run: bool = False
 
@@ -1074,7 +1061,7 @@ class DeferBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
+    project: str | None = None
     until: str = ""
     dry_run: bool = False
 
@@ -1093,7 +1080,7 @@ class UndeferBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
+    project: str | None = None
     dry_run: bool = False
 
 
@@ -1130,9 +1117,9 @@ class DeepVerifyBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
+    project: str | None = None
     scheduled: bool = False
-    image: Optional[Union[list[str], str]] = None
+    image: list[str] | str | None = None
     dry_run: bool = False
 
 
@@ -1141,10 +1128,12 @@ class WakeNowBody(BaseModel):
 
     See the module docstring's "Long-running verbs" note: ``bg``/``all`` are
     launched detached (like deep-verify), NOT via the blocking shell_out()
-    dispatch every other endpoint uses -- wake-now.sh backgrounds the fired
-    agent with a bare ``&`` that inherits shell_out()'s capture pipes rather
-    than closing them, so a naive shell_out() call would block for the fired
-    agent's entire wake cycle despite wake-now.sh's own near-instant exit.
+    dispatch every other endpoint uses -- wake-now.sh detaches the fired
+    agent into its own session with ``setsid`` (stdin from /dev/null) but
+    leaves its stdout/stderr inherited, so it holds shell_out()'s capture
+    pipes open rather than closing them, and a naive shell_out() call would
+    block for the fired agent's entire wake cycle despite wake-now.sh's own
+    near-instant exit.
 
     Fields:
         agent:   Agent role to wake (``pm``, ``coder``, ``cm``, ``writer``,
@@ -1165,7 +1154,7 @@ class WakeNowBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    agent: Optional[str] = None
+    agent: str | None = None
     all: bool = False
     bg: bool = False
     dry_run: bool = False
@@ -1211,6 +1200,11 @@ class ResetBody(BaseModel):
                         (reset.sh's ``--force``).  Without force, a detected
                         stale worktree is refused with a non-zero exit and the
                         removal recipe in stderr.  Agent-task resets only.
+        discard_branch: When True, a feature branch holding unmerged commits
+                        is deleted ("discarding N commits at <hash>") instead
+                        of kept for the next dispatch to resume from
+                        (reset.sh's ``--discard-branch``).  Agent-task resets
+                        only.
         dry_run:        When True, short-circuits dispatch — nothing is reset.
 
     Required fields are declared Optional so a body that omits one is refused
@@ -1220,14 +1214,15 @@ class ResetBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
-    agent: Optional[str] = None
-    bug: Optional[str] = None
-    priority: Optional[str] = None
-    requirement: Optional[str] = None
-    keep_artifacts: Optional[bool] = None
-    force: Optional[bool] = None
+    project: str | None = None
+    key: str | None = None
+    agent: str | None = None
+    bug: str | None = None
+    priority: str | None = None
+    requirement: str | None = None
+    keep_artifacts: bool | None = None
+    force: bool | None = None
+    discard_branch: bool | None = None
     dry_run: bool = False
 
 
@@ -1253,10 +1248,10 @@ class CloseBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
-    state: Optional[str] = None
-    note: Optional[str] = None
+    project: str | None = None
+    key: str | None = None
+    state: str | None = None
+    note: str | None = None
     dry_run: bool = False
 
 
@@ -1275,8 +1270,8 @@ class WontdoBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
+    project: str | None = None
+    key: str | None = None
     dry_run: bool = False
 
 
@@ -1296,9 +1291,9 @@ class DeleteBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
-    force: Optional[bool] = None
+    project: str | None = None
+    key: str | None = None
+    force: bool | None = None
     dry_run: bool = False
 
 
@@ -1320,9 +1315,9 @@ class IntakeBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    filename: Optional[str] = None
-    content: Optional[str] = None
+    project: str | None = None
+    filename: str | None = None
+    content: str | None = None
     dry_run: bool = False
 
 
@@ -1361,11 +1356,11 @@ class UnwindRcBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
-    confirm: Optional[Union[bool, str]] = None
+    project: str | None = None
+    key: str | None = None
+    confirm: bool | str | None = None
     dry_run: bool = False
-    force: Optional[bool] = None
+    force: bool | None = None
 
 
 class SetVersionCeilingBody(BaseModel):
@@ -1395,12 +1390,12 @@ class SetVersionCeilingBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    show: Optional[bool] = None
-    minor: Optional[int] = None
-    major: Optional[int] = None
-    no_minor: Optional[bool] = None
-    no_major: Optional[bool] = None
+    project: str | None = None
+    show: bool | None = None
+    minor: int | None = None
+    major: int | None = None
+    no_minor: bool | None = None
+    no_major: bool | None = None
     dry_run: bool = False
 
 
@@ -1421,7 +1416,7 @@ class SwitchProviderBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    provider: Optional[str] = None
+    provider: str | None = None
     dry_run: bool = False
 
 
@@ -1467,18 +1462,18 @@ class CreateProjectBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    workflow_type: Optional[str] = None
-    max_patch: Optional[int] = None
-    max_minor: Optional[int] = None
-    max_major: Optional[int] = None
-    git_remote: Optional[str] = None
-    priority: Optional[int] = None
-    color: Optional[str] = None
-    no_migrate: Optional[bool] = None
+    project: str | None = None
+    workflow_type: str | None = None
+    max_patch: int | None = None
+    max_minor: int | None = None
+    max_major: int | None = None
+    git_remote: str | None = None
+    priority: int | None = None
+    color: str | None = None
+    no_migrate: bool | None = None
     dry_run: bool = False
-    dev_tree: Optional[str] = None
-    git_repo: Optional[str] = None
+    dev_tree: str | None = None
+    git_repo: str | None = None
 
 
 class AddProjectBody(BaseModel):
@@ -1505,10 +1500,10 @@ class AddProjectBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    priority: Optional[int] = None
-    color: Optional[str] = None
-    no_migrate: Optional[bool] = None
+    project: str | None = None
+    priority: int | None = None
+    color: str | None = None
+    no_migrate: bool | None = None
     dry_run: bool = False
 
 
@@ -1544,9 +1539,9 @@ class RemoveProjectBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    force: Optional[bool] = None
-    confirm: Optional[str] = None
+    project: str | None = None
+    force: bool | None = None
+    confirm: str | None = None
     dry_run: bool = False
 
 
@@ -1581,9 +1576,9 @@ class ShipRcBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
-    confirm: Optional[str] = None
+    project: str | None = None
+    key: str | None = None
+    confirm: str | None = None
     dry_run: bool = False
 
 
@@ -1616,8 +1611,8 @@ class ColdBuildNowBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    image: Optional[Union[list[str], str]] = None
+    project: str | None = None
+    image: list[str] | str | None = None
     dry_run: bool = False
 
 
@@ -1647,8 +1642,8 @@ class CancelRcBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    key: Optional[str] = None
+    project: str | None = None
+    key: str | None = None
     yes: bool = False
     force: bool = False
     dry_run: bool = False
@@ -1678,7 +1673,7 @@ class ReleaseLocksBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    release: Optional[str] = None
+    release: str | None = None
     force: bool = False
     dry_run: bool = False
 
@@ -1715,10 +1710,10 @@ class ArchiveBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
+    project: str | None = None
     dry_run: bool = False
-    count: Optional[Union[int, str]] = None
-    restore: Optional[str] = None
+    count: int | str | None = None
+    restore: str | None = None
     reconcile_queues: bool = False
 
 
@@ -1750,9 +1745,9 @@ class InboxAnswerBody(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    project: Optional[str] = None
-    id: Optional[str] = None
-    answer: Optional[str] = None
+    project: str | None = None
+    id: str | None = None
+    answer: str | None = None
     dry_run: bool = False
 
 
@@ -1809,13 +1804,9 @@ def post_halt(body: HaltBody, request: Request) -> JSONResponse:
     try:
         validate_required({"project": body.project}, required_keys=["project"])
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "halt", exc, '{"project": "my-app"}', warnings
-        )
+        return _missing_field_refusal(request, "halt", exc, '{"project": "my-app"}', warnings)
 
-    refused = _component_refusal(
-        request, "halt", {"project": body.project}, '{"project": "my-app"}', warnings
-    )
+    refused = _component_refusal(request, "halt", {"project": body.project}, '{"project": "my-app"}', warnings)
     if refused is not None:
         return refused
 
@@ -1833,9 +1824,7 @@ def post_halt(body: HaltBody, request: Request) -> JSONResponse:
         project_root = ctx.project_root(project)
         halt_path = project_root / "HALT"
         if halt_path.is_file():
-            outcome.stdout += (
-                f"halt: project {project} already halted ({halt_path} exists; no change made)\n"
-            )
+            outcome.stdout += f"halt: project {project} already halted ({halt_path} exists; no change made)\n"
         else:
             with ops_call() as outcome:
                 ops_write.halt(ctx, project)
@@ -1902,13 +1891,9 @@ def post_unhalt(body: HaltBody, request: Request) -> JSONResponse:
     try:
         validate_required({"project": body.project}, required_keys=["project"])
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "unhalt", exc, '{"project": "my-app"}', warnings
-        )
+        return _missing_field_refusal(request, "unhalt", exc, '{"project": "my-app"}', warnings)
 
-    refused = _component_refusal(
-        request, "unhalt", {"project": body.project}, '{"project": "my-app"}', warnings
-    )
+    refused = _component_refusal(request, "unhalt", {"project": body.project}, '{"project": "my-app"}', warnings)
     if refused is not None:
         return refused
 
@@ -1926,16 +1911,12 @@ def post_unhalt(body: HaltBody, request: Request) -> JSONResponse:
         project_root = ctx.project_root(project)
         halt_path = project_root / "HALT"
         if not halt_path.is_file():
-            outcome.stdout += (
-                f"unhalt: project {project} was not halted (no {halt_path} found; no change made)\n"
-            )
+            outcome.stdout += f"unhalt: project {project} was not halted (no {halt_path} found; no change made)\n"
         else:
             with ops_call() as outcome:
                 ops_write.unhalt(ctx, project)
             if outcome.ok:
-                outcome.stdout += (
-                    f"unhalt: HALT signal cleared for project {project} ({project_root}/HALT removed)\n"
-                )
+                outcome.stdout += f"unhalt: HALT signal cleared for project {project} ({project_root}/HALT removed)\n"
             else:
                 outcome.stderr += f"unhalt: failed to clear HALT signal for project {project}\n"
                 outcome.exit_code = 1
@@ -2218,9 +2199,7 @@ def post_defer(body: DeferBody, request: Request) -> JSONResponse:
     try:
         validate_required({"project": body.project}, required_keys=["project"])
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "defer", exc, '{"project": "my-app", "until": "v1.2.3"}', warnings
-        )
+        return _missing_field_refusal(request, "defer", exc, '{"project": "my-app", "until": "v1.2.3"}', warnings)
 
     refused = _component_refusal(
         request,
@@ -2311,13 +2290,9 @@ def post_undefer(body: UndeferBody, request: Request) -> JSONResponse:
     try:
         validate_required({"project": body.project}, required_keys=["project"])
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "undefer", exc, '{"project": "my-app"}', warnings
-        )
+        return _missing_field_refusal(request, "undefer", exc, '{"project": "my-app"}', warnings)
 
-    refused = _component_refusal(
-        request, "undefer", {"project": body.project}, '{"project": "my-app"}', warnings
-    )
+    refused = _component_refusal(request, "undefer", {"project": body.project}, '{"project": "my-app"}', warnings)
     if refused is not None:
         return refused
 
@@ -2402,9 +2377,7 @@ def _unhalt_global_result(request: Request) -> ShellResult:
     with ops_call() as outcome:
         ops_write.unhalt_global(ctx)
     if outcome.ok:
-        outcome.stdout += (
-            f"global HALT cleared: {halt_path} removed — all projects will resume at next wake\n"
-        )
+        outcome.stdout += f"global HALT cleared: {halt_path} removed — all projects will resume at next wake\n"
         return outcome.as_shell_result()
     # BLOCK-WORTHY (docs/blocking-site-census.md): the sentinel removal
     # failed, so the operator cannot rely on the HALT being cleared --
@@ -2577,6 +2550,10 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
     - ``keep_artifacts`` (optional, bool) — when True, passes ``--keep-artifacts``.
     - ``force``          (optional, bool) — when True, passes ``--force`` to perform
                                             stale-worktree cleanup before the reset.
+    - ``discard_branch`` (optional, bool) — when True, passes ``--discard-branch``: a
+                                            feature branch holding unmerged commits is
+                                            deleted instead of kept for the task to
+                                            resume from.
     - ``dry_run``        (optional, bool) — when True, returns the planned action description
                                             without resetting anything.
 
@@ -2640,11 +2617,7 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
 
     # Exactly-one-of constraint across the five kind selectors.
     _KIND_FIELDS = ("key", "agent", "bug", "priority", "requirement")
-    supplied = [
-        field
-        for field in _KIND_FIELDS
-        if getattr(body, field) not in (None, "")
-    ]
+    supplied = [field for field in _KIND_FIELDS if getattr(body, field) not in (None, "")]
 
     if len(supplied) == 0:
         # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
@@ -2655,8 +2628,7 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
         return _refusal_response(
             HTTP_UNPROCESSABLE_ENTITY,
             "reset.selector_required",
-            f"Exactly one of {{{', '.join(_KIND_FIELDS)}}} must be supplied; "
-            "none provided.",
+            f"Exactly one of {{{', '.join(_KIND_FIELDS)}}} must be supplied; " "none provided.",
             _example_curl(
                 request,
                 json.dumps({"project": body.project, "key": "v1.2.3"}),
@@ -2690,6 +2662,8 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
         flags["keep-artifacts"] = True
     if body.force:
         flags["force"] = True
+    if body.discard_branch:
+        flags["discard-branch"] = True
     planned_argv = build_argv(script, flags)
 
     short_circuit = _dry_run_envelope(body.dry_run, planned_argv, warnings)
@@ -2706,6 +2680,7 @@ def post_reset(body: ResetBody, request: Request) -> JSONResponse:
                 resolved_key,
                 keep_artifacts=bool(body.keep_artifacts),
                 force=bool(body.force),
+                discard_branch=bool(body.discard_branch),
             )
 
     return _make_dual_channel_envelope(
@@ -2784,9 +2759,7 @@ def post_close(body: CloseBody, request: Request) -> JSONResponse:
             required_keys=["project", "key"],
         )
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "close", exc, '{"project": "my-app", "key": "v1.2.3"}', warnings
-        )
+        return _missing_field_refusal(request, "close", exc, '{"project": "my-app", "key": "v1.2.3"}', warnings)
 
     refused = _component_refusal(
         request,
@@ -2916,13 +2889,10 @@ def post_wontdo(body: WontdoBody, request: Request) -> JSONResponse:
             outcome.stdout += f"wontdo: task {body.key} marked WONT-DO\n"
         elif outcome.exit_code == 2:
             outcome.stderr += (
-                f"wontdo: ambiguous task prefix {body.key} — multiple matches; "
-                "task NOT marked WONT-DO\n"
+                f"wontdo: ambiguous task prefix {body.key} — multiple matches; " "task NOT marked WONT-DO\n"
             )
         else:
-            outcome.stderr += (
-                f"wontdo: failed to mark task {body.key} as WONT-DO (rc={outcome.exit_code})\n"
-            )
+            outcome.stderr += f"wontdo: failed to mark task {body.key} as WONT-DO (rc={outcome.exit_code})\n"
 
     return _make_dual_channel_envelope(
         outcome.as_shell_result(),
@@ -3058,13 +3028,15 @@ def _refuse_unconfined_intake_path(intake_dir: pathlib.Path, path: pathlib.Path)
     # the temp file must sit inside the intake temp directory; a path that
     # resolves elsewhere (through a symlink) is never created or written.
     # CENSUS-ANCHOR: operations-intake-temp-path-unconfined-01
-    raise Refused(format_error_contract(
-        "intake.temp_path_unconfined",
-        f"intake refused to write its temp file: {path} resolves to {resolved}, "
-        f"outside the intake temp directory {root}. Nothing was written.",
-        "Inspect the intake temp directory for a symlink, then re-send the request: "
-        + shlex.join(["ls", "-la", str(intake_dir)]),
-    ))
+    raise Refused(
+        format_error_contract(
+            "intake.temp_path_unconfined",
+            f"intake refused to write its temp file: {path} resolves to {resolved}, "
+            f"outside the intake temp directory {root}. Nothing was written.",
+            "Inspect the intake temp directory for a symlink, then re-send the request: "
+            + shlex.join(["ls", "-la", str(intake_dir)]),
+        )
+    )
 
 
 def _write_intake_temp_file(intake_dir: pathlib.Path, temp_file: pathlib.Path, content: str) -> None:
@@ -3161,8 +3133,7 @@ def post_intake(body: IntakeBody, request: Request) -> JSONResponse:
             request,
             "intake",
             exc,
-            '{"project": "my-app", "filename": "v1.2.3.md", '
-            '"content": "# Requirements v1.2.3"}',
+            '{"project": "my-app", "filename": "v1.2.3.md", ' '"content": "# Requirements v1.2.3"}',
             warnings,
         )
 
@@ -3231,8 +3202,7 @@ def post_intake(body: IntakeBody, request: Request) -> JSONResponse:
         # routing prefix to keep, so the example is BUG-0001-example.md.
         fallback_remedy = (
             "Nothing was written. Re-send the request with a filename that routes, "
-            "for example: "
-            + _routable_intake_example_curl(request, project or body.project, body.filename)
+            "for example: " + _routable_intake_example_curl(request, project or body.project, body.filename)
         )
     else:
         fallback_remedy = _cli_remedy(request, "intake.sh", planned_argv)
@@ -3868,9 +3838,7 @@ def post_add_project(body: AddProjectBody, request: Request) -> JSONResponse:
     try:
         validate_required({"project": body.project}, required_keys=["project"])
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "add-project", exc, '{"project": "my-app", "dry_run": true}', warnings
-        )
+        return _missing_field_refusal(request, "add-project", exc, '{"project": "my-app", "dry_run": true}', warnings)
 
     refused = _component_refusal(
         request,
@@ -3882,9 +3850,7 @@ def post_add_project(body: AddProjectBody, request: Request) -> JSONResponse:
     if refused is not None:
         return refused
     try:
-        ops_projects.check_project_name(
-            "add_project", body.project, request.app.state.api_cfg.kanban_root
-        )
+        ops_projects.check_project_name("add_project", body.project, request.app.state.api_cfg.kanban_root)
     except ops_projects.ProjectValueRefused as exc:
         return _project_value_refusal(request, exc, warnings)
 
@@ -4014,9 +3980,7 @@ def post_remove_project(body: RemoveProjectBody, request: Request) -> JSONRespon
     # gate and the dry run, so a dry run refuses exactly the names the real
     # call refuses (422 in both modes).
     try:
-        ops_projects.check_project_name(
-            "remove_project", body.project, request.app.state.api_cfg.kanban_root
-        )
+        ops_projects.check_project_name("remove_project", body.project, request.app.state.api_cfg.kanban_root)
     except ops_projects.ProjectValueRefused as exc:
         return _project_value_refusal(request, exc, warnings)
 
@@ -4150,8 +4114,7 @@ def post_ship_rc(body: ShipRcBody, request: Request) -> JSONResponse:
             request,
             "ship-rc",
             exc,
-            '{"project": "my-app", "key": "v1.2.3", '
-            '"confirm": "ship-rc my-app v1.2.3", "dry_run": true}',
+            '{"project": "my-app", "key": "v1.2.3", ' '"confirm": "ship-rc my-app v1.2.3", "dry_run": true}',
             warnings,
         )
 
@@ -4236,9 +4199,7 @@ def post_ship_rc(body: ShipRcBody, request: Request) -> JSONResponse:
 @router.post(
     "/deep-verify",
     summary="Run the DEEP-VERIFY tier for a project on demand (backgrounded)",
-    response_description=(
-        "JSON envelope confirming the backgrounded run started; NEVER a verdict."
-    ),
+    response_description=("JSON envelope confirming the backgrounded run started; NEVER a verdict."),
 )
 def post_deep_verify(body: DeepVerifyBody, request: Request) -> JSONResponse:
     """Start the DEEP-VERIFY tier's on-demand run for a project.
@@ -4329,9 +4290,7 @@ def post_deep_verify(body: DeepVerifyBody, request: Request) -> JSONResponse:
     example_body["image"] = container_images.SELECT_ALL
     if body.dry_run:
         example_body["dry_run"] = True
-    refusal = _unknown_image_refusal(
-        request, "deep-verify.sh", image_entries, example_body, warnings
-    )
+    refusal = _unknown_image_refusal(request, "deep-verify.sh", image_entries, example_body, warnings)
     if refusal is not None:
         return refusal
 
@@ -4376,9 +4335,7 @@ def post_deep_verify(body: DeepVerifyBody, request: Request) -> JSONResponse:
 @router.post(
     "/wake-now",
     summary="Fire one or all agents' wake cycle immediately",
-    response_description=(
-        "JSON envelope with exit_code, stdout, and stderr from wake-now.sh."
-    ),
+    response_description=("JSON envelope with exit_code, stdout, and stderr from wake-now.sh."),
 )
 def post_wake_now(body: WakeNowBody, request: Request) -> JSONResponse:
     """Fire one or all pipeline agents' wake cycle outside their cron cadence.
@@ -4390,8 +4347,9 @@ def post_wake_now(body: WakeNowBody, request: Request) -> JSONResponse:
 
     See the module docstring's "Long-running verbs" note for WHY ``bg``/
     ``all`` take a different dispatch path than every other endpoint in this
-    router: wake-now.sh's own backgrounding (a bare ``&``) inherits
-    shell_out()'s capture pipes instead of closing them, so a plain
+    router: wake-now.sh's own backgrounding (``setsid``, stdin from
+    /dev/null, stdout/stderr left inherited) keeps shell_out()'s capture
+    pipes open instead of closing them, so a plain
     shell_out() call on ``bg``/``all`` would silently block for the fired
     agent's ENTIRE wake cycle -- exactly the many-minutes-blocking case this
     ticket exists to avoid. ``bg``/``all`` therefore launch wake-now.sh
@@ -4575,9 +4533,7 @@ def post_cold_build_now(body: ColdBuildNowBody, request: Request) -> JSONRespons
     example_body: dict = {"project": body.project, "image": container_images.SELECT_ALL}
     if body.dry_run:
         example_body["dry_run"] = True
-    refusal = _unknown_image_refusal(
-        request, "cold-build-now.sh", image_entries, example_body, warnings
-    )
+    refusal = _unknown_image_refusal(request, "cold-build-now.sh", image_entries, example_body, warnings)
     if refusal is not None:
         return refusal
 
@@ -4589,9 +4545,7 @@ def post_cold_build_now(body: ColdBuildNowBody, request: Request) -> JSONRespons
     if short_circuit is not None:
         return short_circuit
 
-    log_path = (
-        route_temp_root(request) / "cold_build_now" / f"{body.project}-{uuid.uuid4().hex[:12]}.log"
-    )
+    log_path = route_temp_root(request) / "cold_build_now" / f"{body.project}-{uuid.uuid4().hex[:12]}.log"
     pid = _spawn_detached(planned_argv, log_path)
 
     return JSONResponse(
@@ -4691,9 +4645,7 @@ def post_cancel_rc(body: CancelRcBody, request: Request) -> JSONResponse:
             HTTP_UNPROCESSABLE_ENTITY,
             "cancel_rc.required_field_missing",
             f"cancel-rc requires both 'project' and 'key': {exc.detail}",
-            _example_curl(
-                request, '{"project": "my-app", "key": "v1.2.3", "dry_run": true}'
-            ),
+            _example_curl(request, '{"project": "my-app", "key": "v1.2.3", "dry_run": true}'),
             warnings,
         )
 
@@ -4880,9 +4832,7 @@ def post_release_locks(body: ReleaseLocksBody, request: Request) -> JSONResponse
     # so a force call waiting on its holder holds no process-wide lock.
     lines: list[str] = []
     with ops_call(capture=False) as outcome:
-        ops_locks.release_lock(
-            _ops_context(request), body.release, force=bool(body.force), say=lines.append
-        )
+        ops_locks.release_lock(_ops_context(request), body.release, force=bool(body.force), say=lines.append)
     outcome.stdout = "".join(f"{line}\n" for line in lines)
     if not outcome.ok:
         outcome.exit_code = ops_locks.locks_exit_code(outcome.error)
@@ -4982,9 +4932,7 @@ def post_archive(body: ArchiveBody, request: Request) -> JSONResponse:
     try:
         validate_required({"project": body.project}, required_keys=["project"])
     except ValidationError as exc:
-        return _missing_field_refusal(
-            request, "archive", exc, '{"project": "my-app", "dry_run": true}', warnings
-        )
+        return _missing_field_refusal(request, "archive", exc, '{"project": "my-app", "dry_run": true}', warnings)
 
     refused = _component_refusal(
         request,

@@ -32,11 +32,9 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path constants derived from this file's location.
@@ -113,10 +111,7 @@ def _build_testing_only_kanban_root(
     )
 
     (proj / "release-state.md").write_text(
-        "# Release State\n\n"
-        "## Active RC\nnone\n\n"
-        "## RC Opened At\nnone\n\n"
-        "## RC Opened By Task\nnone\n",
+        "# Release State\n\n" "## Active RC\nnone\n\n" "## RC Opened At\nnone\n\n" "## RC Opened By Task\nnone\n",
         encoding="utf-8",
     )
 
@@ -151,16 +146,12 @@ def _build_testing_only_kanban_root(
 
     # Build the requirements doc; omit ## Source Branch field when
     # source_branch is empty so the materializer has no plan-level ref to use.
-    source_branch_section = (
-        f"## Source Branch\n{source_branch}\n\n" if source_branch else ""
-    )
+    source_branch_section = f"## Source Branch\n{source_branch}\n\n" if source_branch else ""
     req_file.write_text(
         "# v20260714-guard-ordering-run: guard ordering certification run\n\n"
         "## Status\nrunning\n\n"
         "## Target Version\nv20260714-guard-ordering-run\n\n"
-        "## Workflow Type\ntesting-only\n\n"
-        + source_branch_section
-        + "## PM Task\nnone\n\n"
+        "## Workflow Type\ntesting-only\n\n" + source_branch_section + "## PM Task\nnone\n\n"
         "## Summary\n"
         "Certification requirements doc for source-ref guard ordering test.\n",
         encoding="utf-8",
@@ -319,9 +310,7 @@ class TestSourceRefGuardOrdering:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
 
         # Guard must refuse with non-zero exit.
         assert result.returncode != 0, (
@@ -330,18 +319,17 @@ class TestSourceRefGuardOrdering:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert result.returncode == 1, (
-            f"Expected exit code 1 (sys.exit(1) from guard); "
-            f"got {result.returncode}.\n"
-            f"stderr: {result.stderr}"
+            f"Expected exit code 1 (sys.exit(1) from guard); " f"got {result.returncode}.\n" f"stderr: {result.stderr}"
         )
 
         # No task folders must exist on disk — the guard fired before any
         # folder was created.
         tasks_root = proj / "tasks"
-        tester_dirs = [
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        ] if tasks_root.is_dir() else []
+        tester_dirs = (
+            [d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-")]
+            if tasks_root.is_dir()
+            else []
+        )
 
         assert len(tester_dirs) == 0, (
             f"Expected zero TESTER task folders on disk after guard fired; "
@@ -376,23 +364,18 @@ class TestSourceRefGuardOrdering:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode != 0
 
         # Diagnostic must mention source_branch or Source Branch.
-        assert "Source Branch" in result.stderr or \
-               "source_branch" in result.stderr.lower(), (
-            f"Expected source_branch mentioned in guard diagnostic.\n"
-            f"stderr: {result.stderr}"
+        assert "Source Branch" in result.stderr or "source_branch" in result.stderr.lower(), (
+            f"Expected source_branch mentioned in guard diagnostic.\n" f"stderr: {result.stderr}"
         )
 
         # Diagnostic must name the TESTER role or the slug so the operator
         # can identify the offending task without additional lookups.
         assert "TESTER" in result.stderr or "verify-the-implementation" in result.stderr, (
-            f"Expected the offending TESTER task to be identified in stderr.\n"
-            f"stderr: {result.stderr}"
+            f"Expected the offending TESTER task to be identified in stderr.\n" f"stderr: {result.stderr}"
         )
 
     def test_guard_does_not_fire_when_source_branch_is_resolvable(
@@ -448,9 +431,7 @@ class TestSourceRefGuardOrdering:
         plan_file = tmp_path / "plan.json"
         plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = _run_pm_materialize(
-            plan_file, root, proj, requirements_path=req_path
-        )
+        result = _run_pm_materialize(plan_file, root, proj, requirements_path=req_path)
         assert result.returncode == 0, (
             f"Expected pm_materialize.py to exit 0 when source_branch is "
             f"resolvable via propagation; got {result.returncode}.\n"
@@ -459,10 +440,7 @@ class TestSourceRefGuardOrdering:
 
         # Task folders must be created when the guard passes.
         tasks_root = proj / "tasks"
-        tester_dirs = [
-            d for d in tasks_root.iterdir()
-            if d.is_dir() and d.name.startswith("TESTER-")
-        ]
+        tester_dirs = [d for d in tasks_root.iterdir() if d.is_dir() and d.name.startswith("TESTER-")]
         assert len(tester_dirs) >= 1, (
             f"Expected at least 1 TESTER task folder after successful materialization; "
             f"found: {[d.name for d in tester_dirs]}\n"

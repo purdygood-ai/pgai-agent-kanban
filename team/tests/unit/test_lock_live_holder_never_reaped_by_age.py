@@ -116,9 +116,7 @@ def _live_holder(
         while [[ ! -f "{done_file}" ]]; do sleep 0.05; done
         pgai_lock_release "{lock_file}" "$fd"
     """)
-    holder = subprocess.Popen(
-        ["bash", "-c", holder_script], cwd=str(_TEAM_DIR), env={**os.environ, **env}
-    )
+    holder = subprocess.Popen(["bash", "-c", holder_script], cwd=str(_TEAM_DIR), env={**os.environ, **env})
     _wait_for(ready_file)
     return holder, done_file
 
@@ -157,16 +155,15 @@ def test_live_holder_past_old_limit_but_within_real_budget_is_deferred_not_reape
             f"a live holder within its real budget must be deferred.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert "stale_reaped" not in result.stderr, (
-            f"no reap of any kind against a live holder.\nstderr: {result.stderr}"
-        )
-        assert "holder_overdue" not in result.stderr, (
-            f"a holder inside its budget is not overdue.\nstderr: {result.stderr}"
-        )
+        assert (
+            "stale_reaped" not in result.stderr
+        ), f"no reap of any kind against a live holder.\nstderr: {result.stderr}"
+        assert (
+            "holder_overdue" not in result.stderr
+        ), f"a holder inside its budget is not overdue.\nstderr: {result.stderr}"
         assert "lock.provenance.contended" in result.stderr
         assert f"holder=writer pid={holder.pid} op=real-op task=TASK-LIVE" in result.stderr, (
-            f"the contention must name the holder's four provenance fields.\n"
-            f"stderr: {result.stderr}"
+            f"the contention must name the holder's four provenance fields.\n" f"stderr: {result.stderr}"
         )
         assert lock_file.stat().st_ino == inode_before, "the holder's file was replaced"
         assert lock_file.read_text() == record_before, "the holder's record was rewritten"
@@ -191,12 +188,12 @@ def test_live_holder_past_real_budget_is_narrated_overdue_and_still_deferred(
         assert "lock.provenance.holder_overdue" in result.stderr, result.stderr
         assert f"holder=writer pid={holder.pid} op=real-op task=TASK-LIVE" in result.stderr
         assert "kill -0" in result.stderr and "derivation:" in result.stderr, result.stderr
-        assert "max_task_seconds 600s" in result.stderr, (
-            f"the derivation must show max_task_seconds as an addend.\nstderr: {result.stderr}"
-        )
-        assert f"--release repo-wake-demo --force" in result.stderr, (
-            f"the overdue remedy must name release-locks --force.\nstderr: {result.stderr}"
-        )
+        assert (
+            "max_task_seconds 600s" in result.stderr
+        ), f"the derivation must show max_task_seconds as an addend.\nstderr: {result.stderr}"
+        assert (
+            f"--release repo-wake-demo --force" in result.stderr
+        ), f"the overdue remedy must name release-locks --force.\nstderr: {result.stderr}"
         assert "lock.provenance.contended" in result.stderr
         assert lock_file.stat().st_ino == inode_before, "the overdue holder's file was replaced"
         assert f"pid={holder.pid}" in lock_file.read_text()
@@ -311,9 +308,9 @@ def test_refresh_leaves_a_path_taken_over_by_another_holder_untouched(
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     values = dict(re.findall(r"^(\w+)=(.*)$", result.stdout, re.M))
     assert values["RC"] == "0"
-    assert values["AFTER"] == values["BEFORE"], (
-        f"a chain that lost the lock must never freshen the new holder's file: {result.stdout}"
-    )
+    assert (
+        values["AFTER"] == values["BEFORE"]
+    ), f"a chain that lost the lock must never freshen the new holder's file: {result.stdout}"
 
 
 def test_refresh_is_a_silent_noop_without_a_held_lock(tmp_path: pathlib.Path) -> None:
@@ -416,8 +413,13 @@ pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
 """
     proc = subprocess.Popen(
         ["bash", "-c", harness],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, cwd=str(tmp_path), env=dict(os.environ), start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(tmp_path),
+        env=dict(os.environ),
+        start_new_session=True,
     )
     try:
         stdout, stderr = proc.communicate(timeout=MAX_HARNESS_SECONDS)
@@ -429,12 +431,12 @@ pgai_lock_release "$_project_lock_file" "$_project_lock_fd"
     assert proc.returncode == 0, f"harness failed rc={proc.returncode}\nstdout:\n{stdout}\nstderr:\n{stderr}"
     values = dict(re.findall(r"^(\w+)=(.*)$", stdout, re.M))
     assert values["TASK_KILLED"] == "false" and values["FINAL_EXIT"] == "0", stdout
-    assert int(values["MTIME_AFTER"]) > int(values["MTIME_BEFORE"]), (
-        f"the lock mtime must be refreshed while the provider runs.\n{stdout}\n{stderr}"
-    )
-    assert int(values["MTIME_AFTER"]) >= int(values["START_EPOCH"]), (
-        f"the refreshed mtime must be at or after the task started.\n{stdout}"
-    )
+    assert int(values["MTIME_AFTER"]) > int(
+        values["MTIME_BEFORE"]
+    ), f"the lock mtime must be refreshed while the provider runs.\n{stdout}\n{stderr}"
+    assert int(values["MTIME_AFTER"]) >= int(
+        values["START_EPOCH"]
+    ), f"the refreshed mtime must be at or after the task started.\n{stdout}"
     assert values["INODE_AFTER"] == values["INODE_BEFORE"], "the refresh replaced the file"
     assert values["CONTENDER_RC"] == "1", f"the flock must still be held after refreshes.\n{stdout}"
     assert "RECORD:holder=coder" in stdout, "provenance must survive the refresh"
@@ -498,8 +500,13 @@ def _start_holder(tmp_path: pathlib.Path, lock_file: pathlib.Path, *, honours_si
 
 def _run_release_locks(root: pathlib.Path, *args: str, grace: int = 3) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(_RELEASE_LOCKS_SH), *args], capture_output=True, text=True, timeout=60,
-        cwd=str(_TEAM_DIR), env=_release_locks_env(root, grace), stdin=subprocess.DEVNULL,
+        [str(_RELEASE_LOCKS_SH), *args],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(_TEAM_DIR),
+        env=_release_locks_env(root, grace),
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -516,9 +523,7 @@ def test_force_signals_a_cooperative_live_holder_which_releases_its_own_lock(
         assert "let go of it" in result.stdout or "exited" in result.stdout, result.stdout
         assert term_marker.exists(), "the holder never received SIGTERM"
         holder.wait(timeout=5)
-        assert not lock_file.exists(), (
-            "the holder's own release path removes the file; the script must not have to"
-        )
+        assert not lock_file.exists(), "the holder's own release path removes the file; the script must not have to"
         assert "holder_not_released" not in result.stderr
     finally:
         _end(holder)
@@ -534,9 +539,9 @@ def test_force_never_unlinks_a_live_holder_that_ignores_sigterm(tmp_path: pathli
         result = _run_release_locks(root, "--release", "repo-wake-demo", "--force", grace=2)
         assert result.returncode == 5, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         assert "error:   release_locks.holder_not_released" in result.stderr, result.stderr
-        assert f"kill -KILL {holder.pid}" in result.stderr, (
-            f"the remedy must name the escalation with the real pid.\nstderr: {result.stderr}"
-        )
+        assert (
+            f"kill -KILL {holder.pid}" in result.stderr
+        ), f"the remedy must name the escalation with the real pid.\nstderr: {result.stderr}"
         assert term_marker.exists(), "the holder never received SIGTERM"
         assert holder.poll() is None, "the script must not kill the holder itself"
         assert lock_file.exists(), "the live holder's file was unlinked"
@@ -571,22 +576,18 @@ def test_watchdog_block_calls_the_refresh_wrapper_inside_its_poll_loop() -> None
     loop_start = block.index('while kill -0 "$_provider_pgid" 2>/dev/null; do')
     refresh_at = block.index("_wd_refresh_project_lock_mtime", loop_start)
     loop_end = block.index("done", refresh_at)
-    assert loop_start < refresh_at < loop_end, (
-        "the refresh must run inside the per-task poll loop, not after it"
-    )
-    assert "pgai_lock_refresh_held_mtime" in _extract_function(
-        "_wd_refresh_project_lock_mtime", _DRIVER_INVOKE
-    )
+    assert loop_start < refresh_at < loop_end, "the refresh must run inside the per-task poll loop, not after it"
+    assert "pgai_lock_refresh_held_mtime" in _extract_function("_wd_refresh_project_lock_mtime", _DRIVER_INVOKE)
 
 
 def test_no_age_alone_reap_key_survives_in_the_lock_library() -> None:
     text = _LOCK_PROVENANCE_SH.read_text(encoding="utf-8")
-    assert "stale_reaped.aged_out" not in text, (
-        "a live holder is never reaped on age; the aged-out reap must not come back"
-    )
-    assert "flock" not in _extract_function("pgai_lock_refresh_held_mtime", _LOCK_PROVENANCE_SH), (
-        "the refresh must never take or release the flock"
-    )
+    assert (
+        "stale_reaped.aged_out" not in text
+    ), "a live holder is never reaped on age; the aged-out reap must not come back"
+    assert "flock" not in _extract_function(
+        "pgai_lock_refresh_held_mtime", _LOCK_PROVENANCE_SH
+    ), "the refresh must never take or release the flock"
 
 
 @pytest.mark.parametrize("script", [_LOCK_PROVENANCE_SH, _DRIVER_INVOKE, _RELEASE_LOCKS_SH])

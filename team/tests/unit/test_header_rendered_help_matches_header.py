@@ -2,15 +2,15 @@ r"""
 test_header_rendered_help_matches_header.py
 ===========================================
 Every script under team/scripts/ that renders ``--help`` from its own
-header -- every caller of ``header_help_print`` from
-team/scripts/lib/header_help.sh -- prints exactly its leading comment
-block and exits 0.
+header -- every caller of ``header_help_print`` or
+``header_help_exit_if_requested`` from team/scripts/lib/header_help.sh --
+prints exactly its leading comment block and exits 0.
 
 The scripts are discovered by reading every ``*.sh`` under team/scripts/
-for a ``header_help_print`` call on a non-comment line, never from a
+for a call to either function on a non-comment line, never from a
 hand list, so a script that adopts the helper is covered the moment it
 lands. Files under any ``lib/`` directory are sourced helpers, not entry
-points (lib/header_help.sh itself names the function only in comments),
+points (lib/header_help.sh itself defines them),
 and are out of scope.
 
 The expected text is computed here, independently of the helper, from
@@ -54,13 +54,14 @@ _SCRIPTS_DIR = _TEAM_DIR / "scripts"
 _PER_SCRIPT_TIMEOUT_S = 15
 
 # A call on a line whose first non-blank character is not '#'.
-_CALL_RE = re.compile(r"^(?![ \t]*#)[^\n]*\bheader_help_print\b", re.MULTILINE)
+_CALL_RE = re.compile(r"^(?![ \t]*#)[^\n]*\bheader_help_(?:print|exit_if_requested)\b", re.MULTILINE)
 _SHELLCHECK_DIRECTIVE_RE = re.compile(r"^#\s*shellcheck\s")
 
 
 def _discover_header_help_scripts() -> list[pathlib.Path]:
     """Every ``*.sh`` under team/scripts/, outside ``lib/`` directories,
-    that calls ``header_help_print`` from code."""
+    that calls ``header_help_print`` or ``header_help_exit_if_requested``
+    from code."""
     found = []
     for path in sorted(_SCRIPTS_DIR.rglob("*.sh")):
         if not path.is_file():
@@ -129,15 +130,11 @@ def test_header_help_discovery_is_not_vacuous() -> None:
         "verify-visibility-pane-widths.sh",
     ):
         assert expected in names, f"discovery missed {expected}: {sorted(names)}"
-    assert not any("lib/" in name for name in names), (
-        f"discovery swept in a sourced lib/ helper: {sorted(names)}"
-    )
+    assert not any("lib/" in name for name in names), f"discovery swept in a sourced lib/ helper: {sorted(names)}"
 
 
 @pytest.mark.parametrize("script", _HEADER_HELP_SCRIPTS, ids=_relative)
-def test_help_output_equals_leading_comment_block(
-    script: pathlib.Path, tmp_path: pathlib.Path
-) -> None:
+def test_help_output_equals_leading_comment_block(script: pathlib.Path, tmp_path: pathlib.Path) -> None:
     """``<script> --help`` exits 0 and its stdout is exactly the script's
     leading comment block."""
     expected = _expected_help(script)
@@ -149,8 +146,7 @@ def test_help_output_equals_leading_comment_block(
     foreign_cwd.mkdir()
     try:
         result = run_dashboard_script(
-            ["bash", "-c", 'cd "$1" && exec bash "$2" --help', "probe",
-             str(foreign_cwd), str(script)],
+            ["bash", "-c", 'cd "$1" && exec bash "$2" --help', "probe", str(foreign_cwd), str(script)],
             env=env,
             timeout=_PER_SCRIPT_TIMEOUT_S,
         )
@@ -163,9 +159,7 @@ def test_help_output_equals_leading_comment_block(
         )
 
     diagnostic = f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-    assert result.returncode == 0, (
-        f"{_relative(script)} --help exited {result.returncode}, expected 0.\n{diagnostic}"
-    )
+    assert result.returncode == 0, f"{_relative(script)} --help exited {result.returncode}, expected 0.\n{diagnostic}"
     if result.stdout != expected:
         printed = result.stdout.splitlines()
         wanted = expected.splitlines()
@@ -179,7 +173,7 @@ def test_help_output_equals_leading_comment_block(
             f"line {first + 1}: printed "
             f"{printed[first] if first < len(printed) else '(end)'!r}, header "
             f"{wanted[first] if first < len(wanted) else '(end)'!r}. Fix: the "
-            f"--help arm should call header_help_print \"${{BASH_SOURCE[0]}}\" "
+            f'--help arm should call header_help_print "${{BASH_SOURCE[0]}}" '
             f"and print nothing else.\n{diagnostic}",
             pytrace=False,
         )

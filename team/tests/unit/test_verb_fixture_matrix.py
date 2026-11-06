@@ -121,7 +121,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pytest
 
@@ -142,9 +142,7 @@ from pgai_agent_kanban.lib.operator_verb_manifest import (  # noqa: E402
 )
 
 _MANIFEST: dict[str, Verb] = load_manifest()
-_ACTIVE_VERB_NAMES: list[str] = [
-    name for name, v in _MANIFEST.items() if v.status == "active"
-]
+_ACTIVE_VERB_NAMES: list[str] = [name for name, v in _MANIFEST.items() if v.status == "active"]
 
 # The full flag universe declared anywhere in the manifest -- used by the
 # help column to assert a verb's help text carries no OTHER verb's flag.
@@ -180,7 +178,7 @@ def _declared_flag_listed_re(flag: str) -> re.Pattern:
 # ---------------------------------------------------------------------------
 
 
-def _env_for(kanban_root: pathlib.Path, extra: Optional[dict] = None) -> dict[str, str]:
+def _env_for(kanban_root: pathlib.Path, extra: dict | None = None) -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PGAI_PROJECT_NAME", None)
     env.pop("PGAI_DEV_TREE_PATH", None)
@@ -195,7 +193,7 @@ def _run(
     script: pathlib.Path,
     args: list[str],
     kanban_root: pathlib.Path,
-    extra_env: Optional[dict] = None,
+    extra_env: dict | None = None,
     timeout: int = 20,
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -238,9 +236,7 @@ def _write_task(project_dir: pathlib.Path, task_id: str, state: str, role: str =
         "## Artifacts\nnone\n\n## Blockers\nnone\n\n## Needs Human\nno\n",
         encoding="utf-8",
     )
-    (task_dir / "README.md").write_text(
-        f"## Owner\nClaude\n\n## Role\n{role}\n", encoding="utf-8"
-    )
+    (task_dir / "README.md").write_text(f"## Owner\nClaude\n\n## Role\n{role}\n", encoding="utf-8")
     queues_dir = project_dir / "tasks" / "queues"
     queues_dir.mkdir(parents=True, exist_ok=True)
     backlog = queues_dir / f"{role.lower()}_backlog.md"
@@ -268,7 +264,7 @@ def _hash_tree(root: pathlib.Path, exclude: frozenset[str] = frozenset()) -> dic
     return hashes
 
 
-def _extract_dual_channel(stderr: str) -> Optional[dict[str, str]]:
+def _extract_dual_channel(stderr: str) -> dict[str, str] | None:
     """Parse the three dual-channel fields from *stderr*, tolerant of the
     house shape's colon-alignment whitespace. Returns None if any of the
     three fields is absent."""
@@ -282,9 +278,7 @@ def _extract_dual_channel(stderr: str) -> Optional[dict[str, str]]:
     return fields
 
 
-def _make_client(
-    sandbox_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, *, in_process: bool = False
-):
+def _make_client(sandbox_root: pathlib.Path, monkeypatch: pytest.MonkeyPatch, *, in_process: bool = False):
     """FastAPI TestClient whose data resolves against sandbox_root.
 
     For a route that shells to its script, scripts resolve to the real team/
@@ -338,8 +332,8 @@ class DualChannelCase:
 
     error_key: str
     extra_args: tuple[str, ...] = ()
-    build_args: Optional[Callable[[str, str], list[str]]] = None
-    setup: Optional[Callable[[pathlib.Path], None]] = None
+    build_args: Callable[[str, str], list[str]] | None = None
+    setup: Callable[[pathlib.Path], None] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -362,11 +356,11 @@ class RestParityCase:
     rest_fields: dict = dataclasses.field(default_factory=dict)
     error_key: str = "project_resolve.not_found"
     is_query: bool = False  # GET verbs pass rest_fields as query params
-    rest_fields_builder: Optional[Callable[[str], dict]] = None
+    rest_fields_builder: Callable[[str], dict] | None = None
     # When set, overrides extra_args entirely to build the CLI argv (ghost
     # project name in) -- used by verbs whose refusal trigger needs a
     # positional argument rather than a flag (intake.sh's source file).
-    build_cli_args: Optional[Callable[[str], list[str]]] = None
+    build_cli_args: Callable[[str], list[str]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +431,7 @@ def _dual_channel_setup_unhalt_global(root: pathlib.Path) -> None:
     _dual_channel_restore_writable_at_exit(root)
 
 
-_DUAL_CHANNEL_SCENARIOS: dict[str, "DualChannelCase | NotApplicable"] = {
+_DUAL_CHANNEL_SCENARIOS: dict[str, DualChannelCase | NotApplicable] = {
     "halt": DualChannelCase(error_key="project_resolve.not_found"),
     "unhalt": DualChannelCase(error_key="project_resolve.not_found"),
     "halt-global": DualChannelCase(
@@ -450,12 +444,8 @@ _DUAL_CHANNEL_SCENARIOS: dict[str, "DualChannelCase | NotApplicable"] = {
         build_args=lambda ghost, real: [],
         setup=_dual_channel_setup_unhalt_global,
     ),
-    "halt-after": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "rc")
-    ),
-    "defer": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--until", "v9.9.9")
-    ),
+    "halt-after": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "rc")),
+    "defer": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--until", "v9.9.9")),
     "undefer": DualChannelCase(error_key="project_resolve.not_found"),
     "deep-verify": DualChannelCase(error_key="project_resolve.not_found"),
     "cold-build-now": DualChannelCase(error_key="project_resolve.not_found"),
@@ -467,41 +457,27 @@ _DUAL_CHANNEL_SCENARIOS: dict[str, "DualChannelCase | NotApplicable"] = {
         # one of the verb's five distinct argument-validation causes.
         build_args=lambda ghost, real: [],
     ),
-    "show": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "anything")
-    ),
+    "show": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "anything")),
     "show-queues": DualChannelCase(error_key="project_resolve.not_found"),
     "why": DualChannelCase(error_key="project_resolve.not_found"),
     "release-locks": DualChannelCase(
         error_key="release_locks.not_found",
         build_args=lambda ghost, real: ["--release", "no-such-lock-in-matrix"],
     ),
-    "unwind-rc": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "v9.9.9")
-    ),
+    "unwind-rc": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "v9.9.9")),
     "verify-rc-state": DualChannelCase(
         error_key="project_resolve.not_found",
         build_args=lambda ghost, real: [ghost],
     ),
-    "reset": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "anything")
-    ),
-    "close": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "anything")
-    ),
-    "wontdo": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "anything")
-    ),
-    "delete": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "anything")
-    ),
+    "reset": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "anything")),
+    "close": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "anything")),
+    "wontdo": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "anything")),
+    "delete": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "anything")),
     "intake": DualChannelCase(
         error_key="project_resolve.not_found",
         build_args=lambda ghost, real: ["--project", ghost, "/nonexistent/intake-source-file.md"],
     ),
-    "set-version-ceiling": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--minor", "5")
-    ),
+    "set-version-ceiling": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--minor", "5")),
     "switch-provider": DualChannelCase(
         error_key="switch_provider.unknown_provider",
         build_args=lambda ghost, real: ["--provider", "nobody"],
@@ -509,15 +485,9 @@ _DUAL_CHANNEL_SCENARIOS: dict[str, "DualChannelCase | NotApplicable"] = {
     "create-project": NotApplicable(_NO_DUAL_CHANNEL.format(script="create-project.sh")),
     "add-project": NotApplicable(_NO_DUAL_CHANNEL.format(script="add-project.sh")),
     "remove-project": NotApplicable(_NO_DUAL_CHANNEL.format(script="remove-project.sh")),
-    "ship-rc": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--key", "v9.9.9")
-    ),
-    "rc-metrics": NotApplicable(
-        _NO_DUAL_CHANNEL.format(script="dashboard/show-metrics.sh")
-    ),
-    "agent-metrics": NotApplicable(
-        _NO_DUAL_CHANNEL.format(script="dashboard/agent-metrics.sh")
-    ),
+    "ship-rc": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--key", "v9.9.9")),
+    "rc-metrics": NotApplicable(_NO_DUAL_CHANNEL.format(script="dashboard/show-metrics.sh")),
+    "agent-metrics": NotApplicable(_NO_DUAL_CHANNEL.format(script="dashboard/agent-metrics.sh")),
     "cancel-rc": NotApplicable(_NO_DUAL_CHANNEL.format(script="cm/cancel-rc.sh")),
     # release-state.sh / deep-verify-status.sh route --project through
     # pp_resolve_project_name exactly like show-queues.sh / why.sh -- a
@@ -527,12 +497,16 @@ _DUAL_CHANNEL_SCENARIOS: dict[str, "DualChannelCase | NotApplicable"] = {
     "deep-verify-status": DualChannelCase(error_key="project_resolve.not_found"),
     # archive.sh hands --project to run_archive, which resolves it through
     # ops.resolve.resolve_project_name before reading or moving anything.
-    "archive": DualChannelCase(
-        error_key="project_resolve.not_found", extra_args=("--dry-run",)
-    ),
+    "archive": DualChannelCase(error_key="project_resolve.not_found", extra_args=("--dry-run",)),
     # inbox.sh resolves --project through pp_resolve_project_name before
     # the inbox module is reached.
     "inbox": DualChannelCase(error_key="project_resolve.not_found", extra_args=("list",)),
+    # install-skills.sh takes no --project; a provider outside
+    # claude|codex|all is refused dual-channel before anything is read.
+    "install-skills": DualChannelCase(
+        error_key="install_skills.unknown_provider",
+        build_args=lambda ghost, real: ["--provider", "matrix-unknown-provider", "--list"],
+    ),
 }
 
 
@@ -617,8 +591,7 @@ def test_kanban_root_missing_refusal_negative_control_without_project_name(
         assert fields is not None, f"no dual-channel fields in stderr: {result.stderr}"
         assert fields["error"] == "halt_global.kanban_root_missing"
         assert not absent_root.exists(), (
-            f"halt-global.sh must not create {absent_root} even without "
-            "PGAI_PROJECT_NAME set"
+            f"halt-global.sh must not create {absent_root} even without " "PGAI_PROJECT_NAME set"
         )
 
 
@@ -631,9 +604,7 @@ def test_kanban_root_missing_refusal_negative_control_without_project_name(
 
 def _bash_words(command: str) -> list[str]:
     """The words bash splits *command* into, one per printf line."""
-    run = subprocess.run(
-        ["bash", "-c", f"printf '%s\\n' {command}"], capture_output=True, text=True, timeout=30
-    )
+    run = subprocess.run(["bash", "-c", f"printf '%s\\n' {command}"], capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, f"command does not parse in bash: {command!r}\n{run.stderr}"
     return run.stdout.splitlines()
 
@@ -679,7 +650,7 @@ _NO_IDEMPOTENCE_DECLARED = (
     "'idempotent'; the repeat-invocation column does not apply."
 )
 
-_IDEMPOTENT_SCENARIOS: dict[str, "IdempotentCase | NotApplicable"] = {}
+_IDEMPOTENT_SCENARIOS: dict[str, IdempotentCase | NotApplicable] = {}
 
 
 def _idempotent_halt(root: pathlib.Path) -> tuple[list[str], str]:
@@ -730,10 +701,7 @@ def _idempotent_unwind_rc(root: pathlib.Path) -> tuple[list[str], str]:
     dev_tree = root / "idem-unwind-rc-dev-tree"
     dev_tree.mkdir(parents=True, exist_ok=True)
     (project_dir / "project.cfg").write_text(
-        "[project]\n"
-        "project_name = idem-unwind-rc\n"
-        f"dev_tree_path = {dev_tree}\n"
-        "workflow_type = release\n",
+        "[project]\n" "project_name = idem-unwind-rc\n" f"dev_tree_path = {dev_tree}\n" "workflow_type = release\n",
         encoding="utf-8",
     )
     # unwind-rc.sh refuses to run at all unless the project (or the whole
@@ -744,9 +712,7 @@ def _idempotent_unwind_rc(root: pathlib.Path) -> tuple[list[str], str]:
     # mismatch guard refuses (bypassable with --force, which this scenario
     # deliberately avoids to keep the repeat invocation as inert as
     # possible).
-    (project_dir / "release-state.md").write_text(
-        "# Release State\n\n## Active RC\nv9.9.9\n", encoding="utf-8"
-    )
+    (project_dir / "release-state.md").write_text("# Release State\n\n## Active RC\nv9.9.9\n", encoding="utf-8")
     return (["--project", "idem-unwind-rc", "--key", "v9.9.9", "--dry-run"], "idem-unwind-rc")
 
 
@@ -778,9 +744,7 @@ def _idempotent_set_version_ceiling(root: pathlib.Path) -> tuple[list[str], str]
 
 
 def _idempotent_switch_provider(root: pathlib.Path) -> tuple[list[str], str]:
-    (root / "kanban.cfg").write_text(
-        "[providers]\nactive = codex\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text("[providers]\nactive = codex\n", encoding="utf-8")
     return (["--provider", "claude"], "")
 
 
@@ -804,6 +768,20 @@ def _idempotent_archive(root: pathlib.Path) -> tuple[list[str], str]:
     return (["--project", "idem-archive", "--count", "1"], "idem-archive")
 
 
+def _idempotent_install_skills(root: pathlib.Path) -> tuple[list[str], str]:
+    # One skill per provider in the root's staging directory, installed into
+    # homes inside the root (never the runner's own HOME). A provider whose
+    # CLI binary is not on the runner's PATH is skipped on both runs.
+    for provider in ("claude", "codex"):
+        skill = root / "skills" / provider / "matrix-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: matrix-skill\ndescription: A fixture skill.\n---\n\n# Fixture\n", encoding="utf-8"
+        )
+    homes = root / "provider-homes"
+    return (["--claude-home", str(homes / "claude"), "--codex-home", str(homes / "codex")], "")
+
+
 _IDEMPOTENT_BUILDERS: dict[str, Callable[[pathlib.Path], tuple[list[str], str]]] = {
     "halt": _idempotent_halt,
     "unhalt": _idempotent_unhalt,
@@ -822,6 +800,7 @@ _IDEMPOTENT_BUILDERS: dict[str, Callable[[pathlib.Path], tuple[list[str], str]]]
     "add-project": _idempotent_add_project,
     "remove-project": _idempotent_remove_project,
     "archive": _idempotent_archive,
+    "install-skills": _idempotent_install_skills,
 }
 
 _RESET_VOLATILE = frozenset({"logs/reset.log"})
@@ -830,14 +809,10 @@ for _verb_name, _verb in _MANIFEST.items():
     if _verb.status != "active":
         continue
     if _verb.idempotence != "idempotent":
-        _IDEMPOTENT_SCENARIOS[_verb_name] = NotApplicable(
-            _NO_IDEMPOTENCE_DECLARED.format(value=_verb.idempotence)
-        )
+        _IDEMPOTENT_SCENARIOS[_verb_name] = NotApplicable(_NO_IDEMPOTENCE_DECLARED.format(value=_verb.idempotence))
     elif _verb_name in _IDEMPOTENT_BUILDERS:
         volatile = _RESET_VOLATILE if _verb_name == "reset" else frozenset()
-        _IDEMPOTENT_SCENARIOS[_verb_name] = IdempotentCase(
-            setup=_IDEMPOTENT_BUILDERS[_verb_name], volatile=volatile
-        )
+        _IDEMPOTENT_SCENARIOS[_verb_name] = IdempotentCase(setup=_IDEMPOTENT_BUILDERS[_verb_name], volatile=volatile)
     else:
         _IDEMPOTENT_SCENARIOS[_verb_name] = NotApplicable(
             f"manifest declares '{_verb_name}' idempotent but no repeat-"
@@ -861,18 +836,22 @@ _NO_REST_PARITY_OUT_OF_SCOPE = (
     "CLI side only."
 )
 
-_REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
+_REST_PARITY_SCENARIOS: dict[str, RestParityCase | NotApplicable] = {
     "halt": RestParityCase(method="POST", route="/operations/halt", rest_fields={}),
     "unhalt": RestParityCase(method="POST", route="/operations/unhalt", rest_fields={}),
     "halt-global": NotApplicable(_NO_REST_PARITY_OUT_OF_SCOPE.format(script="halt-global.sh")),
     "unhalt-global": NotApplicable(_NO_REST_PARITY_OUT_OF_SCOPE.format(script="unhalt-global.sh")),
     "halt-after": RestParityCase(
-        method="POST", route="/operations/halt-after",
-        extra_args=("--key", "rc"), rest_fields={"key": "rc"},
+        method="POST",
+        route="/operations/halt-after",
+        extra_args=("--key", "rc"),
+        rest_fields={"key": "rc"},
     ),
     "defer": RestParityCase(
-        method="POST", route="/operations/defer",
-        extra_args=("--until", "v9.9.9"), rest_fields={"until": "v9.9.9"},
+        method="POST",
+        route="/operations/defer",
+        extra_args=("--until", "v9.9.9"),
+        rest_fields={"until": "v9.9.9"},
     ),
     "undefer": RestParityCase(method="POST", route="/operations/undefer", rest_fields={}),
     "deep-verify": NotApplicable(
@@ -894,12 +873,13 @@ _REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
     ),
     "wake-now": NotApplicable(_NO_REST_PARITY_OUT_OF_SCOPE.format(script="wake-now.sh")),
     "show": RestParityCase(
-        method="GET", route="/show", is_query=True,
-        extra_args=("--key", "anything"), rest_fields={"key": "anything"},
+        method="GET",
+        route="/show",
+        is_query=True,
+        extra_args=("--key", "anything"),
+        rest_fields={"key": "anything"},
     ),
-    "show-queues": NotApplicable(
-        _NO_REST_PARITY_OUT_OF_SCOPE.format(script="dashboard/show-queues.sh")
-    ),
+    "show-queues": NotApplicable(_NO_REST_PARITY_OUT_OF_SCOPE.format(script="dashboard/show-queues.sh")),
     "why": NotApplicable(
         "GET /verdicts pre-validates project registration at the API "
         "layer and returns a generic 422 rather than forwarding to "
@@ -912,50 +892,64 @@ _REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
     # shared harness always sends and proceeds, so the script's own
     # release_locks.not_found refusal reaches the HTTP response.
     "release-locks": RestParityCase(
-        method="POST", route="/operations/release-locks",
+        method="POST",
+        route="/operations/release-locks",
         error_key="release_locks.not_found",
         build_cli_args=lambda ghost: ["--release", "no-such-lock-in-matrix"],
         rest_fields={"release": "no-such-lock-in-matrix"},
     ),
     "unwind-rc": RestParityCase(
-        method="POST", route="/operations/unwind-rc",
+        method="POST",
+        route="/operations/unwind-rc",
         extra_args=("--key", "v9.9.9", "--confirm"),
         # The route's confirm gate must be satisfied or the request never
         # reaches the script's own project-resolution refusal.
         rest_fields_builder=lambda ghost: {"key": "v9.9.9", "confirm": f"unwind-rc {ghost} v9.9.9"},
     ),
-    "verify-rc-state": NotApplicable(
-        _NO_REST_PARITY_OUT_OF_SCOPE.format(script="verify-rc-state.sh")
-    ),
+    "verify-rc-state": NotApplicable(_NO_REST_PARITY_OUT_OF_SCOPE.format(script="verify-rc-state.sh")),
     "reset": RestParityCase(
-        method="POST", route="/operations/reset",
-        extra_args=("--key", "anything"), rest_fields={"key": "anything"},
+        method="POST",
+        route="/operations/reset",
+        extra_args=("--key", "anything"),
+        rest_fields={"key": "anything"},
     ),
     "close": RestParityCase(
-        method="POST", route="/operations/close",
-        extra_args=("--key", "anything"), rest_fields={"key": "anything"},
+        method="POST",
+        route="/operations/close",
+        extra_args=("--key", "anything"),
+        rest_fields={"key": "anything"},
     ),
     "wontdo": RestParityCase(
-        method="POST", route="/operations/wontdo",
-        extra_args=("--key", "anything"), rest_fields={"key": "anything"},
+        method="POST",
+        route="/operations/wontdo",
+        extra_args=("--key", "anything"),
+        rest_fields={"key": "anything"},
     ),
     "delete": RestParityCase(
-        method="POST", route="/operations/delete",
-        extra_args=("--key", "anything"), rest_fields={"key": "anything"},
+        method="POST",
+        route="/operations/delete",
+        extra_args=("--key", "anything"),
+        rest_fields={"key": "anything"},
     ),
     "intake": RestParityCase(
-        method="POST", route="/operations/intake",
+        method="POST",
+        route="/operations/intake",
         rest_fields={"filename": "BUG-9999.md", "content": "fixture"},
         build_cli_args=lambda ghost: [
-            "--project", ghost, "/nonexistent/matrix-intake-source.md",
+            "--project",
+            ghost,
+            "/nonexistent/matrix-intake-source.md",
         ],
     ),
     "set-version-ceiling": RestParityCase(
-        method="POST", route="/operations/set-version-ceiling",
-        extra_args=("--minor", "5"), rest_fields={"minor": 5},
+        method="POST",
+        route="/operations/set-version-ceiling",
+        extra_args=("--minor", "5"),
+        rest_fields={"minor": 5},
     ),
     "switch-provider": RestParityCase(
-        method="POST", route="/operations/switch-provider",
+        method="POST",
+        route="/operations/switch-provider",
         rest_fields={"provider": "nobody"},
         error_key="switch_provider.unknown_provider",
         build_cli_args=lambda ghost: ["--provider", "nobody"],
@@ -964,7 +958,8 @@ _REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
     "add-project": NotApplicable(_NO_REST_PARITY_NO_KEY.format(script="add-project.sh")),
     "remove-project": NotApplicable(_NO_REST_PARITY_NO_KEY.format(script="remove-project.sh")),
     "ship-rc": RestParityCase(
-        method="POST", route="/operations/ship-rc",
+        method="POST",
+        route="/operations/ship-rc",
         extra_args=("--key", "v9.9.9"),
         rest_fields={"key": "v9.9.9"},
         rest_fields_builder=lambda ghost: {
@@ -976,12 +971,8 @@ _REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
             "confirm": f"ship-rc {ghost} v9.9.9",
         },
     ),
-    "rc-metrics": NotApplicable(
-        _NO_REST_PARITY_NO_KEY.format(script="dashboard/show-metrics.sh")
-    ),
-    "agent-metrics": NotApplicable(
-        _NO_REST_PARITY_NO_KEY.format(script="dashboard/agent-metrics.sh")
-    ),
+    "rc-metrics": NotApplicable(_NO_REST_PARITY_NO_KEY.format(script="dashboard/show-metrics.sh")),
+    "agent-metrics": NotApplicable(_NO_REST_PARITY_NO_KEY.format(script="dashboard/agent-metrics.sh")),
     "cancel-rc": NotApplicable(
         "cm/cancel-rc.sh has no CLI-reachable dual-channel refusal to "
         "compare (see the dual-channel column's own reason for this verb): "
@@ -1012,13 +1003,25 @@ _REST_PARITY_SCENARIOS: dict[str, "RestParityCase | NotApplicable"] = {
         "'why' already carries above for the identical reason."
     ),
     "archive": RestParityCase(
-        method="POST", route="/operations/archive",
-        extra_args=("--dry-run",), rest_fields={"dry_run": True},
+        method="POST",
+        route="/operations/archive",
+        extra_args=("--dry-run",),
+        rest_fields={"dry_run": True},
     ),
     "inbox": RestParityCase(
-        method="POST", route="/operations/inbox-answer",
+        method="POST",
+        route="/operations/inbox-answer",
         extra_args=("answer", "--id", "INBOX-0001", "--answer", "keep"),
         rest_fields={"id": "INBOX-0001", "answer": "keep"},
+    ),
+    "install-skills": NotApplicable(
+        "GET /skills, the twin of install-skills.sh --list --json, takes no "
+        "project or other parameter, so the CLI's argument refusals have no "
+        "HTTP counterpart, and its own refusals (a staging layout the skills "
+        "module refuses) answer 422 with top-level error/message/remedy "
+        "keys, not the shell-envelope stderr this column reads. The "
+        "read-parity ledger's install-skills case proves the two surfaces "
+        "return one object."
     ),
 }
 
@@ -1047,16 +1050,14 @@ def test_every_active_verb_has_a_dual_channel_scenario_entry(verb_name: str) -> 
 @pytest.mark.parametrize("verb_name", sorted(_ACTIVE_VERB_NAMES))
 def test_every_active_verb_has_an_idempotence_scenario_entry(verb_name: str) -> None:
     assert verb_name in _IDEMPOTENT_SCENARIOS, (
-        f"verb {verb_name!r} is declared active in the manifest but has no "
-        "entry in _IDEMPOTENT_SCENARIOS."
+        f"verb {verb_name!r} is declared active in the manifest but has no " "entry in _IDEMPOTENT_SCENARIOS."
     )
 
 
 @pytest.mark.parametrize("verb_name", sorted(_ACTIVE_VERB_NAMES))
 def test_every_active_verb_has_a_rest_parity_scenario_entry(verb_name: str) -> None:
     assert verb_name in _REST_PARITY_SCENARIOS, (
-        f"verb {verb_name!r} is declared active in the manifest but has no "
-        "entry in _REST_PARITY_SCENARIOS."
+        f"verb {verb_name!r} is declared active in the manifest but has no " "entry in _REST_PARITY_SCENARIOS."
     )
 
 
@@ -1095,9 +1096,7 @@ def test_a_bogus_manifest_entry_is_named_by_the_coverage_tests(tmp_path: pathlib
 
 
 @pytest.mark.parametrize("verb_name", sorted(_ACTIVE_VERB_NAMES))
-def test_help_exits_zero_and_lists_exactly_its_declared_flags(
-    verb_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_help_exits_zero_and_lists_exactly_its_declared_flags(verb_name: str, tmp_path: pathlib.Path) -> None:
     verb = _MANIFEST[verb_name]
     script = _verb_script(verb)
     root = tmp_path / "kanban_root"
@@ -1139,9 +1138,7 @@ def test_help_exits_zero_and_lists_exactly_its_declared_flags(
 
 
 @pytest.mark.parametrize("verb_name", sorted(_ACTIVE_VERB_NAMES))
-def test_undeclared_flag_is_refused_with_the_uniform_message(
-    verb_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_undeclared_flag_is_refused_with_the_uniform_message(verb_name: str, tmp_path: pathlib.Path) -> None:
     verb = _MANIFEST[verb_name]
     script = _verb_script(verb)
     root = tmp_path / "kanban_root"
@@ -1161,8 +1158,7 @@ def test_undeclared_flag_is_refused_with_the_uniform_message(
         # operator_args_validate_known() and its uniform message. It still
         # refuses non-zero and names the offending flag in its own words.
         assert _UNKNOWN_FLAG_PROBE in result.stderr, (
-            f"{verb_name}: hand-rolled arg parser did not name the "
-            f"unrecognised flag in stderr:\n{result.stderr}"
+            f"{verb_name}: hand-rolled arg parser did not name the " f"unrecognised flag in stderr:\n{result.stderr}"
         )
     else:
         script_basename = script.name
@@ -1217,12 +1213,10 @@ def test_declared_refusal_emits_dual_channel_fields_with_a_runnable_remedy(
         f"(error:/message:/remedy:):\n{result.stderr}"
     )
     assert scenario.error_key in fields["error"], (
-        f"{verb_name}: expected error key containing {scenario.error_key!r}, "
-        f"got {fields['error']!r}"
+        f"{verb_name}: expected error key containing {scenario.error_key!r}, " f"got {fields['error']!r}"
     )
     assert not _PLACEHOLDER_RE.search(fields["remedy"]), (
-        f"{verb_name}: remedy field carries an angle-bracket placeholder: "
-        f"{fields['remedy']!r}"
+        f"{verb_name}: remedy field carries an angle-bracket placeholder: " f"{fields['remedy']!r}"
     )
 
 
@@ -1232,9 +1226,7 @@ def test_declared_refusal_emits_dual_channel_fields_with_a_runnable_remedy(
 
 
 @pytest.mark.parametrize("verb_name", sorted(_ACTIVE_VERB_NAMES))
-def test_idempotent_verb_produces_no_second_write_on_repeat_invocation(
-    verb_name: str, tmp_path: pathlib.Path
-) -> None:
+def test_idempotent_verb_produces_no_second_write_on_repeat_invocation(verb_name: str, tmp_path: pathlib.Path) -> None:
     scenario = _IDEMPOTENT_SCENARIOS[verb_name]
     if isinstance(scenario, NotApplicable):
         assert scenario.reason, f"{verb_name}: NotApplicable reason must be non-empty"
@@ -1308,8 +1300,7 @@ def test_rest_twin_reproduces_the_cli_machine_error_key(
     )
     cli_fields = _extract_dual_channel(cli.stderr)
     assert cli_fields is not None, (
-        f"{verb_name}: CLI side of the REST-parity comparison did not "
-        f"produce dual-channel fields:\n{cli.stderr}"
+        f"{verb_name}: CLI side of the REST-parity comparison did not " f"produce dual-channel fields:\n{cli.stderr}"
     )
 
     http_root = tmp_path / "http_root"
@@ -1317,13 +1308,9 @@ def test_rest_twin_reproduces_the_cli_machine_error_key(
     _register_project(http_root, real)
 
     rest_fields = (
-        scenario.rest_fields_builder(ghost)
-        if scenario.rest_fields_builder is not None
-        else scenario.rest_fields
+        scenario.rest_fields_builder(ghost) if scenario.rest_fields_builder is not None else scenario.rest_fields
     )
-    with _make_client(
-        http_root, monkeypatch, in_process=verb.impl.startswith("module:")
-    ) as client:
+    with _make_client(http_root, monkeypatch, in_process=verb.impl.startswith("module:")) as client:
         if scenario.method == "GET":
             params = {"project": ghost, **rest_fields}
             resp = client.get(scenario.route, params=params)
@@ -1340,6 +1327,5 @@ def test_rest_twin_reproduces_the_cli_machine_error_key(
         f"CLI stderr:\n{cli.stderr}"
     )
     assert cli_fields["error"] in http_stderr, (
-        f"{verb_name}: CLI error key {cli_fields['error']!r} not found in "
-        f"REST stderr:\n{http_stderr!r}"
+        f"{verb_name}: CLI error key {cli_fields['error']!r} not found in " f"REST stderr:\n{http_stderr!r}"
     )

@@ -33,6 +33,14 @@
 # -- the container's main process -- waits instead of exiting; the
 # scheduler runs beside it through "<engine> exec".
 #
+# The run also passes --init (Docker and Podman both accept it), so the
+# engine's init is PID 1 and the entrypoint's shell runs as its child. PID 1
+# inherits every orphaned process in the container, and only a PID 1 that
+# reaps them keeps them from staying zombies for the container's lifetime;
+# with --init that holds whatever the entrypoint ends in. Under podman the
+# flag needs the engine's init binary (catatonit) on the host; a run that
+# fails for lack of it is refused like any other engine failure (exit 1).
+#
 # Container state, the scheduler's process, the heartbeat and the crontab
 # wake lines are read by pgai_agent_kanban.container.lifecycle (through
 # pp_run_ops); every engine call goes through pgai_docker
@@ -61,10 +69,10 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 _SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _SCRIPT_PATH="${_SCRIPT_DIR}/${_SCRIPT_NAME}"
 
 # shellcheck source=lib/error_contract.sh
@@ -125,6 +133,9 @@ Standard mounts and environment (lib/container_mounts.sh, the same as
 container-shell.sh):
   \$HOME and \$PGAI_AGENT_KANBAN_ROOT_PATH, bind-mounted at the same paths,
   and exported as HOME and PGAI_AGENT_KANBAN_ROOT_PATH.
+
+The detached run passes --init: the engine's init runs as PID 1 and reaps
+orphaned processes, so none stays a zombie whatever the entrypoint ends in.
 
 The engine is kanban.cfg [docker] docker_exe (docker by default, podman
 when configured). Operator-only: inside an agent wake, or without
@@ -424,7 +435,8 @@ case "${_STATE}" in
             fi
         fi
         _run_rc=0
-        pgai_docker "${ENGINE}" run -d -i -t --name "${NAME}" \
+        # --init: a reaping PID 1 (see the header).
+        pgai_docker "${ENGINE}" run -d -i -t --init --name "${NAME}" \
             "${CONTAINER_MOUNTS_ARGS[@]}" "${IMAGE}" >/dev/null 2>"${_WORK}/run.err" || _run_rc=$?
         if [[ "${_run_rc}" -ne 0 ]]; then
             _refuse_engine "running image '${IMAGE}' as container '${NAME}'" \

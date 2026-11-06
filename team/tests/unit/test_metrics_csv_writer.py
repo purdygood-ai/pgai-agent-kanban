@@ -40,7 +40,6 @@ if str(_LIB_PATH) not in sys.path:
 
 import metrics_csv_writer as mcw  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -117,11 +116,26 @@ def _minimal_rollup(
 
 
 _PRE_BLOCKED_COLUMNS = [
-    "rc", "project", "workflow_type", "opened_at", "closed_at",
-    "wall_time_minutes", "outcome", "tasks_total", "tasks_pm", "tasks_coder",
-    "tasks_writer", "tasks_tester", "tasks_cm", "input_tokens", "output_tokens",
-    "cache_read_tokens", "cache_write_tokens", "cache_hit_rate_pct",
-    "bugs_filed_during", "operator_waivers",
+    "rc",
+    "project",
+    "workflow_type",
+    "opened_at",
+    "closed_at",
+    "wall_time_minutes",
+    "outcome",
+    "tasks_total",
+    "tasks_pm",
+    "tasks_coder",
+    "tasks_writer",
+    "tasks_tester",
+    "tasks_cm",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "cache_hit_rate_pct",
+    "bugs_filed_during",
+    "operator_waivers",
 ]
 
 
@@ -490,13 +504,25 @@ def test_append_rc_row_widens_pre_existing_short_header_and_keeps_prior_rows(
     old_header = ",".join(_PRE_BLOCKED_COLUMNS)
     old_row = ",".join(
         {
-            "rc": "v0.24.6", "project": "test-project", "workflow_type": "release",
-            "opened_at": "", "closed_at": "", "wall_time_minutes": "",
-            "outcome": "SHIPPED", "tasks_total": "1", "tasks_pm": "0",
-            "tasks_coder": "1", "tasks_writer": "0", "tasks_tester": "0",
-            "tasks_cm": "0", "input_tokens": "10", "output_tokens": "5",
-            "cache_read_tokens": "0", "cache_write_tokens": "0",
-            "cache_hit_rate_pct": "0.0", "bugs_filed_during": "0",
+            "rc": "v0.24.6",
+            "project": "test-project",
+            "workflow_type": "release",
+            "opened_at": "",
+            "closed_at": "",
+            "wall_time_minutes": "",
+            "outcome": "SHIPPED",
+            "tasks_total": "1",
+            "tasks_pm": "0",
+            "tasks_coder": "1",
+            "tasks_writer": "0",
+            "tasks_tester": "0",
+            "tasks_cm": "0",
+            "input_tokens": "10",
+            "output_tokens": "5",
+            "cache_read_tokens": "0",
+            "cache_write_tokens": "0",
+            "cache_hit_rate_pct": "0.0",
+            "bugs_filed_during": "0",
             "operator_waivers": "0",
         }[col]
         for col in _PRE_BLOCKED_COLUMNS
@@ -648,9 +674,17 @@ def test_unrecognised_header_via_cli_exits_zero(tmp_path: pathlib.Path) -> None:
     rollup_path.write_text(json.dumps(_minimal_rollup(rc="v1.1.0")), encoding="utf-8")
 
     result = subprocess.run(
-        [sys.executable, str(_LIB_PATH / "metrics_csv_writer.py"),
-         "--csv-path", str(csv_path), "--rollup-json", str(rollup_path)],
-        capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            str(_LIB_PATH / "metrics_csv_writer.py"),
+            "--csv-path",
+            str(csv_path),
+            "--rollup-json",
+            str(rollup_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
         env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path), "LANG": "C.UTF-8"},
     )
 
@@ -672,9 +706,7 @@ def test_append_waiting_on_a_replaced_file_lands_in_the_new_file(tmp_path: pathl
     holder = open(csv_path, "a", encoding="utf-8")
     mcw.fcntl.flock(holder.fileno(), mcw.fcntl.LOCK_EX)
     results: list[bool] = []
-    waiter = threading.Thread(
-        target=lambda: results.append(mcw.append_rc_row(csv_path, _minimal_rollup(rc="v1.5.0")))
-    )
+    waiter = threading.Thread(target=lambda: results.append(mcw.append_rc_row(csv_path, _minimal_rollup(rc="v1.5.0"))))
     try:
         waiter.start()
         time.sleep(0.5)  # let the waiter open the old file and block on its lock

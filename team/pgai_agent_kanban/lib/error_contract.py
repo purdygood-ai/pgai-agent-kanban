@@ -101,7 +101,7 @@ import os
 import re
 import shlex
 import sys
-from typing import Optional, TextIO
+from typing import TextIO
 
 # ---------------------------------------------------------------------------
 # House-shape field labels (colon-aligned: "error:", "message:", "remedy:"
@@ -146,14 +146,10 @@ def format_error_contract(error: str, message: str, remedy: str) -> str:
         remedy:  git checkout rc/v1.2.3 && re-run the release script
     """
     _validate_fields(error=error, message=message, remedy=remedy)
-    return (
-        f"{_ERROR_LABEL}{error}\n"
-        f"{_MESSAGE_LABEL}{message}\n"
-        f"{_REMEDY_LABEL}{remedy}"
-    )
+    return f"{_ERROR_LABEL}{error}\n" f"{_MESSAGE_LABEL}{message}\n" f"{_REMEDY_LABEL}{remedy}"
 
 
-def module_file_command(module_file: "str | os.PathLike[str]", *args: str) -> str:
+def module_file_command(module_file: str | os.PathLike[str], *args: str) -> str:
     """Return a runnable ``python3 <module_file> <args...>`` command line.
 
     Every part is shell-quoted, so the line can be pasted as a remedy. The
@@ -172,8 +168,8 @@ def emit_error_contract(
     message: str,
     remedy: str,
     *,
-    file: Optional[TextIO] = None,
-    project: Optional[str] = None,
+    file: TextIO | None = None,
+    project: str | None = None,
 ) -> None:
     """Print the three-line house-shape error-contract block to *file*.
 
@@ -218,7 +214,7 @@ _ERROR_CONTRACT_BLOCK_RE = re.compile(
 )
 
 
-def parse_error_contract(text: str) -> Optional[dict]:
+def parse_error_contract(text: str) -> dict | None:
     """Return the ``{"error", "message", "remedy"}`` triple embedded in *text*.
 
     Reads the three-line house shape :func:`format_error_contract` produces
@@ -258,9 +254,7 @@ def parse_error_contract(text: str) -> Optional[dict]:
     }
 
 
-def dual_channel_from_text(
-    text: str, fallback_error_key: str, fallback_remedy: str
-) -> dict:
+def dual_channel_from_text(text: str, fallback_error_key: str, fallback_remedy: str) -> dict:
     """Return an ``{"error", "message", "remedy"}`` triple for *text*, always.
 
     The shared refusal renderer for a CLI verb and its REST twin: both hand
@@ -287,9 +281,7 @@ def dual_channel_from_text(
     return {"error": fallback_error_key, "message": text, "remedy": fallback_remedy}
 
 
-def _record_refusal_best_effort(
-    error: str, message: str, remedy: str, *, project: Optional[str]
-) -> None:
+def _record_refusal_best_effort(error: str, message: str, remedy: str, *, project: str | None) -> None:
     """Best-effort refusal-ledger recording for emit_error_contract.
 
     Resolves the caller's surface (file:function of the immediate caller of

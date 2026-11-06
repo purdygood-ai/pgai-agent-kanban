@@ -72,14 +72,18 @@ def board_root(tmp_path: pathlib.Path) -> pathlib.Path:
     project = build_synthetic_board(root, with_queues=True)
     (root / "pgai_agent_kanban").symlink_to(_PKG_DIR, target_is_directory=True)
     for number, status in ((2, "wont-do"), (3, "done"), (4, "running"), (5, "blocked")):
-        _write(project / "bugs" / f"BUG-000{number}-snap-{status}.md",
-               f"# BUG-000{number}\n\n**Severity:** high\n\n## Status\n{status}\n")
+        _write(
+            project / "bugs" / f"BUG-000{number}-snap-{status}.md",
+            f"# BUG-000{number}\n\n**Severity:** high\n\n## Status\n{status}\n",
+        )
     _write(project / "priority" / "PRIORITY-0001-snap.md", "# P\n\n## Status\nopen\n")
     for version in ("v1.0.0", "v1.2.0", "v1.3.0"):
         _write(project / "requirements" / f"{version}-snap.md", f"# {version}\n\n## Target Version\n{version}\n")
-    _write(project / "release-state.md",
-           "# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
-           "## RC Opened By Task\nsnap-fixture\n\n## Last Released\nv1.1.0\n")
+    _write(
+        project / "release-state.md",
+        "# Release State\n\n## Active RC\nv1.2.0\n\n## RC Opened At\n2026-01-01T00:00:00Z\n\n"
+        "## RC Opened By Task\nsnap-fixture\n\n## Last Released\nv1.1.0\n",
+    )
     for agent in ("pm", "writer", "tester", "cm"):
         task = f"{agent.upper()}-20260102-001-snap-task"
         _write(project / "tasks" / task / "status.md", "## State\nWORKING\n")
@@ -93,21 +97,32 @@ def _env(root: pathlib.Path, scratch: pathlib.Path, ttl: int = 60) -> dict:
         env.pop(key, None)
     env.pop("NO_COLOR", None)
     env.pop("DASHBOARD_MAX_ROWS", None)
-    env.update({
-        "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
-        "KANBAN_ROOT": str(root),
-        "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch),
-        "PGAI_DASHBOARD_SNAPSHOT_TTL_SECONDS": str(ttl),
-        "TERM": "xterm-256color",
-    })
+    env.update(
+        {
+            "PGAI_AGENT_KANBAN_ROOT_PATH": str(root),
+            "KANBAN_ROOT": str(root),
+            "PGAI_AGENT_KANBAN_TEMP_DIR": str(scratch),
+            "PGAI_DASHBOARD_SNAPSHOT_TTL_SECONDS": str(ttl),
+            "TERM": "xterm-256color",
+        }
+    )
     return env
 
 
 def _render(root: pathlib.Path, env: dict, args: list, label: str):
     return run_dashboard_script(
-        ["bash", str(root / "scripts" / "dashboard" / "column-render.sh"), *args,
-         "--label", label, "--kanban-root", str(root), "--all-projects"],
-        env=env, timeout=60,
+        [
+            "bash",
+            str(root / "scripts" / "dashboard" / "column-render.sh"),
+            *args,
+            "--label",
+            label,
+            "--kanban-root",
+            str(root),
+            "--all-projects",
+        ],
+        env=env,
+        timeout=60,
     )
 
 
@@ -141,11 +156,22 @@ def _sources(root: pathlib.Path) -> dict:
     for subcommand, column_type in board_snapshot.BOARD_COLUMNS:
         if subcommand == "input":
             dirname = {"bugs": "bugs", "priorities": "priority", "requirements": "requirements"}[column_type]
-            source = ProjectSource(PROJECT_NAME, "#378ADD", max_rows=20, input_dir=str(project / dirname),
-                                   active_rc="v1.2.0", last_released="v1.1.0")
+            source = ProjectSource(
+                PROJECT_NAME,
+                "#378ADD",
+                max_rows=20,
+                input_dir=str(project / dirname),
+                active_rc="v1.2.0",
+                last_released="v1.1.0",
+            )
         else:
-            source = ProjectSource(PROJECT_NAME, "#378ADD", max_rows=20, tasks_dir=str(project / "tasks"),
-                                   backlog_file=str(project / "tasks" / "queues" / f"{column_type}_backlog.md"))
+            source = ProjectSource(
+                PROJECT_NAME,
+                "#378ADD",
+                max_rows=20,
+                tasks_dir=str(project / "tasks"),
+                backlog_file=str(project / "tasks" / "queues" / f"{column_type}_backlog.md"),
+            )
         by_column[column_type] = [source, ProjectSource("empty-proj", "#888780")]
     return by_column
 
@@ -153,15 +179,25 @@ def _sources(root: pathlib.Path) -> dict:
 @pytest.mark.parametrize("use_color", [True, False])
 def test_every_column_from_the_snapshot_matches_its_direct_render(board_root: pathlib.Path, use_color: bool) -> None:
     sources = _sources(board_root)
-    palette = Palette(use_color, *(("\x1b[0;31m", "\x1b[0;33m", "\x1b[0;32m", "\x1b[0;37m", "\x1b[2m", "\x1b[0m")
-                                    if use_color else ("",) * 6))
+    palette = Palette(
+        use_color,
+        *(("\x1b[0;31m", "\x1b[0;33m", "\x1b[0;32m", "\x1b[0;37m", "\x1b[2m", "\x1b[0m") if use_color else ("",) * 6),
+    )
     snapshot = board_snapshot.build_snapshot(sources, use_color=use_color)
     for subcommand, column_type in board_snapshot.BOARD_COLUMNS:
         direct = render_multi_project_column(
-            sources[column_type], subcommand=subcommand, column_type=column_type, width=30, palette=palette,
+            sources[column_type],
+            subcommand=subcommand,
+            column_type=column_type,
+            width=30,
+            palette=palette,
         )
         from_snapshot = board_snapshot.render_column(
-            snapshot, subcommand=subcommand, column_type=column_type, width=30, palette=palette,
+            snapshot,
+            subcommand=subcommand,
+            column_type=column_type,
+            width=30,
+            palette=palette,
         )
         assert from_snapshot == direct, column_type
 
@@ -223,7 +259,8 @@ def _direct_outputs(board_root: pathlib.Path, tmp_path: pathlib.Path) -> dict:
 
 
 def test_all_eight_columns_gather_once_and_match_their_direct_render(
-    board_root: pathlib.Path, tmp_path: pathlib.Path,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
 ) -> None:
     scratch = tmp_path / "shared"
     env = _env(board_root, scratch)
@@ -239,7 +276,9 @@ def test_all_eight_columns_gather_once_and_match_their_direct_render(
 
 @pytest.mark.parametrize("damage", ["stale", "deleted", "corrupt"])
 def test_an_unusable_snapshot_is_rebuilt_with_unchanged_output(
-    board_root: pathlib.Path, tmp_path: pathlib.Path, damage: str,
+    board_root: pathlib.Path,
+    tmp_path: pathlib.Path,
+    damage: str,
 ) -> None:
     scratch = tmp_path / "shared"
     env = _env(board_root, scratch)

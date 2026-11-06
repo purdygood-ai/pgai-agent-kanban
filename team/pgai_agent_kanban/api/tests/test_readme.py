@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import pathlib
 import unittest.mock
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -150,22 +150,17 @@ class TestReadmeHappyPath:
 
     def test_readme_returns_200(self, readme_client: TestClient) -> None:
         """GET .../readme for a valid (project, key) pair returns HTTP 200."""
-        resp = readme_client.get(
-            f"/projects/{_PROJECT_NAME}/tasks/{_TASK_KEY}/readme"
-        )
+        resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/{_TASK_KEY}/readme")
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
 
     def test_readme_content_byte_identical(self, readme_client: TestClient) -> None:
         """AC1: stdout carries the README.md content byte-identical to the file."""
-        resp = readme_client.get(
-            f"/projects/{_PROJECT_NAME}/tasks/{_TASK_KEY}/readme"
-        )
+        resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/{_TASK_KEY}/readme")
         assert resp.status_code == 200
         body = resp.json()
         assert body["exit_code"] == 0
         assert body["stdout"] == _README_CONTENT, (
-            f"README content mismatch:\nexpected: {_README_CONTENT!r}\n"
-            f"got:      {body['stdout']!r}"
+            f"README content mismatch:\nexpected: {_README_CONTENT!r}\n" f"got:      {body['stdout']!r}"
         )
         assert body["stderr"] == ""
         assert "warnings" in body
@@ -173,9 +168,7 @@ class TestReadmeHappyPath:
     def test_readme_prefix_key_resolves(self, readme_client: TestClient) -> None:
         """AC2: a shorter prefix key (agent+date+seq) resolves the same as the full key."""
         prefix_key = "CODER-20260101-001"
-        resp = readme_client.get(
-            f"/projects/{_PROJECT_NAME}/tasks/{prefix_key}/readme"
-        )
+        resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/{prefix_key}/readme")
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["stdout"] == _README_CONTENT
@@ -209,94 +202,67 @@ class TestReadmeTraversalSecurity:
         run_mock: unittest.mock.MagicMock,
     ) -> None:
         resp = client.get(url)
-        assert 400 <= resp.status_code < 500, (
-            f"Expected a 4xx for traversal attempt; got {resp.status_code}: {resp.text}"
-        )
+        assert (
+            400 <= resp.status_code < 500
+        ), f"Expected a 4xx for traversal attempt; got {resp.status_code}: {resp.text}"
         assert not run_mock.called, (
-            f"subprocess.run must NOT be called for a traversal attempt; "
-            f"was called with: {run_mock.call_args_list}"
+            f"subprocess.run must NOT be called for a traversal attempt; " f"was called with: {run_mock.call_args_list}"
         )
 
-    def test_key_dotdot_slash_traversal_blocked_at_routing_layer(
-        self, readme_client: TestClient
-    ) -> None:
+    def test_key_dotdot_slash_traversal_blocked_at_routing_layer(self, readme_client: TestClient) -> None:
         """key=../../etc/passwd (URL-encoded slash) → 4xx; no subprocess spawned.
 
         The slash breaks Starlette's single-segment {key} match, so this
         404s at the routing layer before the handler (and its own traversal
         gate) is ever reached.
         """
-        with unittest.mock.patch(
-            "pgai_agent_kanban.api.adapter.subprocess.run"
-        ) as run_mock:
+        with unittest.mock.patch("pgai_agent_kanban.api.adapter.subprocess.run") as run_mock:
             self._assert_4xx_no_subprocess(
                 readme_client,
                 f"/projects/{_PROJECT_NAME}/tasks/..%2F..%2Fetc%2Fpasswd/readme",
                 run_mock,
             )
 
-    def test_key_bare_dotdot_blocked_by_handler_gate(
-        self, readme_client: TestClient
-    ) -> None:
+    def test_key_bare_dotdot_blocked_by_handler_gate(self, readme_client: TestClient) -> None:
         """key='..' (no slash — reaches the handler) → 422 from the traversal gate."""
-        with unittest.mock.patch(
-            "pgai_agent_kanban.api.adapter.subprocess.run"
-        ) as run_mock:
+        with unittest.mock.patch("pgai_agent_kanban.api.adapter.subprocess.run") as run_mock:
             resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/../readme")
             # A bare ".." key segment is itself special to URL path semantics
             # (it collapses at the client/normalisation layer in some HTTP
             # stacks); assert whichever 4xx results and that no subprocess ran.
-            assert 400 <= resp.status_code < 500, (
-                f"Expected a 4xx for a bare '..' key; got {resp.status_code}: {resp.text}"
-            )
+            assert (
+                400 <= resp.status_code < 500
+            ), f"Expected a 4xx for a bare '..' key; got {resp.status_code}: {resp.text}"
             assert not run_mock.called
 
-    def test_key_encoded_dotdot_no_slash_blocked_by_handler_gate(
-        self, readme_client: TestClient
-    ) -> None:
+    def test_key_encoded_dotdot_no_slash_blocked_by_handler_gate(self, readme_client: TestClient) -> None:
         """key with a literal '..' but no slash reaches the handler and is
         rejected by has_traversal with 422."""
-        with unittest.mock.patch(
-            "pgai_agent_kanban.api.adapter.subprocess.run"
-        ) as run_mock:
-            resp = readme_client.get(
-                f"/projects/{_PROJECT_NAME}/tasks/CODER-..-001/readme"
-            )
-            assert resp.status_code == 422, (
-                f"Expected 422 for a '..'-bearing key; got {resp.status_code}: {resp.text}"
-            )
+        with unittest.mock.patch("pgai_agent_kanban.api.adapter.subprocess.run") as run_mock:
+            resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/CODER-..-001/readme")
+            assert resp.status_code == 422, f"Expected 422 for a '..'-bearing key; got {resp.status_code}: {resp.text}"
             assert not run_mock.called, (
                 f"subprocess.run must NOT be called for a traversal attempt; "
                 f"was called with: {run_mock.call_args_list}"
             )
 
-    def test_project_dotdot_slash_traversal_blocked_at_routing_layer(
-        self, readme_client: TestClient
-    ) -> None:
+    def test_project_dotdot_slash_traversal_blocked_at_routing_layer(self, readme_client: TestClient) -> None:
         """project=../../etc (URL-encoded slash) → 4xx; no subprocess spawned."""
-        with unittest.mock.patch(
-            "pgai_agent_kanban.api.adapter.subprocess.run"
-        ) as run_mock:
+        with unittest.mock.patch("pgai_agent_kanban.api.adapter.subprocess.run") as run_mock:
             self._assert_4xx_no_subprocess(
                 readme_client,
                 f"/projects/..%2F..%2Fetc/tasks/{_TASK_KEY}/readme",
                 run_mock,
             )
 
-    def test_project_encoded_dotdot_no_slash_blocked_by_handler_gate(
-        self, readme_client: TestClient
-    ) -> None:
+    def test_project_encoded_dotdot_no_slash_blocked_by_handler_gate(self, readme_client: TestClient) -> None:
         """project with a literal '..' but no slash reaches the handler and is
         rejected by has_traversal with 422."""
-        with unittest.mock.patch(
-            "pgai_agent_kanban.api.adapter.subprocess.run"
-        ) as run_mock:
-            resp = readme_client.get(
-                f"/projects/my..project/tasks/{_TASK_KEY}/readme"
-            )
-            assert resp.status_code == 422, (
-                f"Expected 422 for a '..'-bearing project; got {resp.status_code}: {resp.text}"
-            )
+        with unittest.mock.patch("pgai_agent_kanban.api.adapter.subprocess.run") as run_mock:
+            resp = readme_client.get(f"/projects/my..project/tasks/{_TASK_KEY}/readme")
+            assert (
+                resp.status_code == 422
+            ), f"Expected 422 for a '..'-bearing project; got {resp.status_code}: {resp.text}"
             assert not run_mock.called
 
 
@@ -310,32 +276,20 @@ class TestReadmeNotFound:
 
     def test_unknown_task_key_returns_404(self, readme_client: TestClient) -> None:
         """AC4: a fabricated task key returns 404."""
-        resp = readme_client.get(
-            f"/projects/{_PROJECT_NAME}/tasks/CODER-99999999-999-nope/readme"
-        )
-        assert resp.status_code == 404, (
-            f"Expected 404 for unknown key; got {resp.status_code}: {resp.text}"
-        )
+        resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/CODER-99999999-999-nope/readme")
+        assert resp.status_code == 404, f"Expected 404 for unknown key; got {resp.status_code}: {resp.text}"
         body = resp.json()
         assert body["key"] == "CODER-99999999-999-nope"
 
     def test_ledger_key_returns_404(self, readme_client: TestClient) -> None:
         """AC5: a bug (ledger) key is not a task — no README resource; 404."""
-        resp = readme_client.get(
-            f"/projects/{_PROJECT_NAME}/tasks/{_BUG_KEY}/readme"
-        )
-        assert resp.status_code == 404, (
-            f"Expected 404 for ledger key; got {resp.status_code}: {resp.text}"
-        )
+        resp = readme_client.get(f"/projects/{_PROJECT_NAME}/tasks/{_BUG_KEY}/readme")
+        assert resp.status_code == 404, f"Expected 404 for ledger key; got {resp.status_code}: {resp.text}"
 
     def test_unknown_project_returns_404(self, readme_client: TestClient) -> None:
         """An unregistered project also yields no README resource — 404."""
-        resp = readme_client.get(
-            f"/projects/no-such-project/tasks/{_TASK_KEY}/readme"
-        )
-        assert resp.status_code == 404, (
-            f"Expected 404 for unknown project; got {resp.status_code}: {resp.text}"
-        )
+        resp = readme_client.get(f"/projects/no-such-project/tasks/{_TASK_KEY}/readme")
+        assert resp.status_code == 404, f"Expected 404 for unknown project; got {resp.status_code}: {resp.text}"
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +306,7 @@ class TestReadmeOpenApiSurface:
         assert resp.status_code == 200
         schema = resp.json()
         paths = schema.get("paths", {})
-        assert "/projects/{project}/tasks/{key}/readme" in paths, (
-            f"readme route missing from OpenAPI schema; paths: {sorted(paths)}"
-        )
+        assert (
+            "/projects/{project}/tasks/{key}/readme" in paths
+        ), f"readme route missing from OpenAPI schema; paths: {sorted(paths)}"
         assert "get" in paths["/projects/{project}/tasks/{key}/readme"]

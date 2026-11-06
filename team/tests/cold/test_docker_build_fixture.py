@@ -60,7 +60,6 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-import sys
 from typing import NamedTuple
 
 import pytest
@@ -83,8 +82,10 @@ _REPO_ROOT = _TEAM_DIR.parent
 # Flavor configuration
 # ---------------------------------------------------------------------------
 
+
 class _FlavorConfig(NamedTuple):
     """Build parameters for one image flavor."""
+
     name: str
     dockerfile: pathlib.Path
     build_context: pathlib.Path
@@ -121,7 +122,7 @@ def _narrate_skip(reason: str) -> None:
 
 
 @pytest.fixture(scope="module", params=_FLAVORS, ids=_FLAVOR_IDS)
-def built_image_tag(request: pytest.FixtureRequest) -> str | None:
+def built_image_tag(request: pytest.FixtureRequest, operator_container_tier: None) -> str | None:
     """
     Build docker/<flavor>/Dockerfile and return the image tag on success.
 
@@ -129,8 +130,10 @@ def built_image_tag(request: pytest.FixtureRequest) -> str | None:
     Module-scoped so each flavor's image is built once and reused by all
     tests in this module, then removed in teardown.
 
-    Skips (narrated, naming whichever of "binary absent" / "daemon
-    unreachable" is the actual cause) when Docker is not available.
+    Skips (narrated) without the operator's container-tier authorization
+    (operator_container_tier, tests/cold/conftest.py) -- checked before any
+    docker command -- and, naming whichever of "binary absent" / "daemon
+    unreachable" is the actual cause, when Docker is not available.
     """
     flavor: _FlavorConfig = request.param
 
@@ -190,10 +193,7 @@ def built_image_tag(request: pytest.FixtureRequest) -> str | None:
                 "this environment — see BUILD STDERR above for the "
                 "underlying package-resolution error"
             )
-        pytest.fail(
-            f"docker build [{flavor.name}] exited {result.returncode}; "
-            "see build output above"
-        )
+        pytest.fail(f"docker build [{flavor.name}] exited {result.returncode}; " "see build output above")
 
     print(
         f"[docker-build-fixture] [{flavor.name}] Image built successfully: {flavor.image_tag}",
@@ -234,7 +234,7 @@ def test_dockerfile_exists(flavor: _FlavorConfig) -> None:
 
 @pytest.mark.parametrize("flavor", _FLAVORS, ids=_FLAVOR_IDS)
 def test_build_without_pinned_versions_fails_naming_the_missing_arg(
-    flavor: _FlavorConfig,
+    flavor: _FlavorConfig, operator_container_tier: None
 ) -> None:
     """
     Building either flavor's Dockerfile with no --build-arg for the pinned
@@ -294,8 +294,7 @@ def test_image_builds_without_error(built_image_tag: str) -> None:
         timeout=15,
     )
     assert result.returncode == 0, (
-        f"Built image tag '{built_image_tag}' not found after build; "
-        f"inspect stderr: {result.stderr}"
+        f"Built image tag '{built_image_tag}' not found after build; " f"inspect stderr: {result.stderr}"
     )
 
 
@@ -317,30 +316,27 @@ def test_tmux_version_meets_floor_in_built_image(built_image_tag: str) -> None:
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, (
-        f"tmux -V inside built image failed (rc={result.returncode}): {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux -V inside built image failed (rc={result.returncode}): {result.stderr}"
     version_line = result.stdout.strip()
     # Expected: "tmux 3.3a" or "tmux 3.2a" — parse the version token
     parts = version_line.split()
-    assert len(parts) >= 2 and parts[0].lower() == "tmux", (
-        f"Unexpected tmux -V output: {version_line!r}"
-    )
+    assert len(parts) >= 2 and parts[0].lower() == "tmux", f"Unexpected tmux -V output: {version_line!r}"
     version_str = parts[1]
     import re
+
     match = re.match(r"(\d+)\.(\d+)", version_str)
     assert match is not None, f"Could not parse version from {version_str!r}"
     major, minor = int(match.group(1)), int(match.group(2))
-    assert (major, minor) >= (3, 1), (
-        f"tmux {version_str} inside built image is below required floor 3.1"
-    )
+    assert (major, minor) >= (3, 1), f"tmux {version_str} inside built image is below required floor 3.1"
 
 
 @pytest.mark.parametrize(
     "package, extra_docker_args, command_args",
     [
         pytest.param(
-            "ncurses (tput)", ["-e", "TERM=xterm-256color"], ["tput", "cols"],
+            "ncurses (tput)",
+            ["-e", "TERM=xterm-256color"],
+            ["tput", "cols"],
             id="tput",
         ),
         pytest.param("procps/procps-ng (watch)", [], ["watch", "--version"], id="watch"),
@@ -354,8 +350,8 @@ def test_package_available_in_built_image(
     A spot-checked package's command runs successfully inside the built image.
 
     tput is critical for the visibility-window cursor positioning loops in
-    the dashboard (create.sh pane commands use tput cup/el/ed); watch is
-    required by all dashboard pane refresh loops; git is required by the
+    the dashboard (create.sh pane commands use tput cup/el/ed); watch
+    (procps) is spot-checked as a second non-trivial package; git is required by the
     kanban chain for worktree operations and by dashboard git-status.sh /
     git-recent-tags.sh.
 
@@ -364,8 +360,7 @@ def test_package_available_in_built_image(
     The entrypoint's own contract is covered end-to-end by test_entrypoint_shipped_image.py.
     """
     result = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "", *extra_docker_args,
-         built_image_tag, *command_args],
+        ["docker", "run", "--rm", "--entrypoint", "", *extra_docker_args, built_image_tag, *command_args],
         capture_output=True,
         text=True,
         timeout=30,
@@ -388,20 +383,26 @@ def test_python3_available_in_built_image(built_image_tag: str) -> None:
     The entrypoint's own contract is covered end-to-end by test_entrypoint_shipped_image.py.
     """
     result = subprocess.run(
-        ["docker", "run", "--rm", "--entrypoint", "", built_image_tag,
-         "python3", "-c", "import sys; print(sys.version_info[:2])"],
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "",
+            built_image_tag,
+            "python3",
+            "-c",
+            "import sys; print(sys.version_info[:2])",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert result.returncode == 0, (
-        f"python3 check failed inside built image (rc={result.returncode}): "
-        f"{result.stderr.strip()}"
+        f"python3 check failed inside built image (rc={result.returncode}): " f"{result.stderr.strip()}"
     )
     output = result.stdout.strip()
     import ast
+
     version_tuple = ast.literal_eval(output)
-    assert version_tuple >= (3, 12), (
-        f"python3 inside built image reports {version_tuple}; "
-        f"expected >= (3, 12)"
-    )
+    assert version_tuple >= (3, 12), f"python3 inside built image reports {version_tuple}; " f"expected >= (3, 12)"

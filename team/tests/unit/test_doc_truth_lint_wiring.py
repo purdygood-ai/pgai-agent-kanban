@@ -49,8 +49,7 @@ def test_run_unit_tests_calls_the_doc_truth_lint_through_the_quality_wrapper() -
     team_dir = pathlib.Path(__file__).resolve().parent.parent.parent  # team/
     text = (team_dir / "scripts" / "run-unit-tests.sh").read_text(encoding="utf-8")
     assert 'gated_runner_run_quality_lint "doc_command_truth"' in text, (
-        "run-unit-tests.sh must invoke lint_doc_command_truth.py through "
-        "gated_runner_run_quality_lint."
+        "run-unit-tests.sh must invoke lint_doc_command_truth.py through " "gated_runner_run_quality_lint."
     )
     assert "lint_doc_command_truth.py" in text
 
@@ -101,8 +100,6 @@ gated_runner_write_findings_file "{findings_file}" "run-unit-tests.sh"
 
     doc_written = json.loads(findings_file.read_text(encoding="utf-8"))
     findings = [f for f in doc_written["findings"] if f.get("lint") == "doc_command_truth"]
-    assert len(findings) == 1, (
-        f"expected exactly one doc_command_truth finding, got: {doc_written['findings']}"
-    )
+    assert len(findings) == 1, f"expected exactly one doc_command_truth finding, got: {doc_written['findings']}"
     assert findings[0]["severity"] == "quality"
     assert "does_not_exist.sh" in findings[0]["detail"]

@@ -57,8 +57,7 @@ _LIB_COPIES = ("operator_verb_manifest.py", "error_contract.py")
 
 _HALT = "module:pgai_agent_kanban.ops.write.halt"
 
-APP = textwrap.dedent(
-    '''\
+APP = textwrap.dedent("""\
     from fastapi import FastAPI
 
 
@@ -70,11 +69,9 @@ APP = textwrap.dedent(
             return {}
 
         return app
-    '''
-)
+    """)
 
-READS = textwrap.dedent(
-    '''\
+READS = textwrap.dedent("""\
     from fastapi import APIRouter
 
     router = APIRouter()
@@ -93,11 +90,9 @@ READS = textwrap.dedent(
     @router.get("/projects/{project}/tasks/{key}/readme")
     def get_task_readme(project, key):
         return {}
-    {extra}'''
-)
+    {extra}""")
 
-OPERATIONS = textwrap.dedent(
-    '''\
+OPERATIONS = textwrap.dedent("""\
     from fastapi import APIRouter
 
     router = APIRouter(prefix="/operations")
@@ -111,8 +106,7 @@ OPERATIONS = textwrap.dedent(
     @router.post("/wake-now")
     def post_wake_now(body):
         return {}
-    '''
-)
+    """)
 
 PROCESS_LIST = (
     "- `GET /dashboard/{pane}` runs the pane script and waits for it.\n"
@@ -173,8 +167,21 @@ curl -sS -X POST \\
 
 def _row(name: str, method: str, route: str, impl: str) -> str:
     return "\t".join(
-        ["V", name, "active", f"scripts/{name}.sh", "project|help", "yes", "idempotent", method, route,
-         "NONE", "action", "DualChannelShellEnvelope", impl]
+        [
+            "V",
+            name,
+            "active",
+            f"scripts/{name}.sh",
+            "project|help",
+            "yes",
+            "idempotent",
+            method,
+            route,
+            "NONE",
+            "action",
+            "DualChannelShellEnvelope",
+            impl,
+        ]
     )
 
 
@@ -192,7 +199,7 @@ def _make_tree(
     extra_rows: str = "",
     generated_rows: str = "",
     extra_curl: str = "",
-    rows: "list[str] | None" = None,
+    rows: list[str] | None = None,
 ) -> Path:
     """Build a fixture repository the lint can be pointed at with --root."""
     root = tmp_path / "repo"
@@ -224,7 +231,7 @@ def _make_tree(
     return root
 
 
-def _run(root: Path, tmp_path: Path, *extra: str) -> "tuple[int, str, list[dict]]":
+def _run(root: Path, tmp_path: Path, *extra: str) -> tuple[int, str, list[dict]]:
     """Run the lint against *root*; return (exit code, stdout, findings)."""
     findings_file = tmp_path / "findings.json"
     proc = subprocess.run(
@@ -237,19 +244,17 @@ def _run(root: Path, tmp_path: Path, *extra: str) -> "tuple[int, str, list[dict]
     return proc.returncode, proc.stdout + proc.stderr, findings
 
 
-def _kinds(findings: "list[dict]") -> "list[tuple[str, str]]":
+def _kinds(findings: list[dict]) -> list[tuple[str, str]]:
     return sorted((f["kind"], f["route"]) for f in findings)
 
 
-_WIDGET_ROUTE = textwrap.dedent(
-    '''\
+_WIDGET_ROUTE = textwrap.dedent("""\
 
 
     @router.get("/projects/{project}/widgets/{widget_id}")
     def get_widget(project, widget_id):
         return {}
-    '''
-)
+    """)
 
 
 # ---------------------------------------------------------------------------

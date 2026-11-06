@@ -54,7 +54,7 @@ _DONE = "CODER-20261012-002-done"
 class Sandbox:
     """A kanban root with projects a and b, and a temp root beside it."""
 
-    def __init__(self, tmp_path: pathlib.Path, min_age: "str | None") -> None:
+    def __init__(self, tmp_path: pathlib.Path, min_age: str | None) -> None:
         self.tmp_path = tmp_path
         self.root = tmp_path / "kanban"
         self.temp = tmp_path / "tmp"
@@ -81,8 +81,11 @@ class Sandbox:
         cwd.mkdir(parents=True, exist_ok=True)
         ready = self.tmp_path / f"ready-{project}-{task}-{len(self.procs)}"
         proc = subprocess.Popen(
-            [sys.executable, "-c", _LISTENER, str(ready)], cwd=str(cwd), start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            [sys.executable, "-c", _LISTENER, str(ready)],
+            cwd=str(cwd),
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         self.procs.append(proc)
         deadline = time.monotonic() + 10
@@ -133,7 +136,7 @@ def _ended(proc: subprocess.Popen) -> bool:
 def sandbox_factory(tmp_path: pathlib.Path):
     made: list[Sandbox] = []
 
-    def make(min_age: "str | None") -> Sandbox:
+    def make(min_age: str | None) -> Sandbox:
         box = Sandbox(tmp_path, min_age)
         made.append(box)
         return box
@@ -192,7 +195,11 @@ def test_sweep_scans_for_listeners_once_for_all_projects(sandbox_factory, tmp_pa
 
     result = subprocess.run(
         ["bash", str(_SWEEP), "--only", "leaked-listeners"],
-        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=120,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
     )
 
     assert result.returncode == 0, result.stderr

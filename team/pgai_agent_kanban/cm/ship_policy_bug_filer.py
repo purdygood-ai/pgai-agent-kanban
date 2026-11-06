@@ -96,7 +96,7 @@ import pathlib
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 # Run by file path (``python3 .../ship_policy_bug_filer.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -230,8 +230,7 @@ def _input_record(
             "- team/scripts/lib/cm/release_verification_retry.sh (the step that floored the release)"
         )
         hypothesis = (
-            "Speculative -- the TESTER session ended without writing a final state, or the state was "
-            "edited by hand."
+            "Speculative -- the TESTER session ended without writing a final state, or the state was " "edited by hand."
         )
     elif kind == KIND_LOOKUP_FIELD:
         headline = (
@@ -343,7 +342,7 @@ class FilingResult:
 
     outcome: str
     bug_id: str
-    bug_path: "str | None"
+    bug_path: str | None
     key: str
 
 
@@ -356,7 +355,7 @@ def file_or_cite_input_bug(
     field: str,
     raw_value: str,
     source_path: str,
-    filed_at: "str | None" = None,
+    filed_at: str | None = None,
 ) -> FilingResult:
     """File a bug for one unreadable ship-policy input (or, for the
     release-pattern kind, for the last-three-releases-NON-FUNCTIONAL
@@ -374,13 +373,10 @@ def file_or_cite_input_bug(
     turns that into an exit 1 with the accepted set on stderr.
     """
     if kind not in _KINDS:
-        raise ValueError(
-            f"unknown ship-policy input kind {kind!r}; expected one of: "
-            + ", ".join(_KINDS)
-        )
+        raise ValueError(f"unknown ship-policy input kind {kind!r}; expected one of: " + ", ".join(_KINDS))
     os.makedirs(bugs_dir, exist_ok=True)
 
-    filed_at = filed_at or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filed_at = filed_at or datetime.now(UTC).strftime("%Y-%m-%d")
     record = _input_record(
         slug=_slug_for(kind, field),
         project=project,
@@ -395,7 +391,7 @@ def file_or_cite_input_bug(
     return FilingResult(outcome=filed.outcome, bug_id=filed.bug_id, bug_path=filed.bug_path, key=record.key)
 
 
-def main(argv: "list | None" = None) -> int:
+def main(argv: list | None = None) -> int:
     """CLI entry point -- see the module docstring's "Usage (CLI)"."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.cm.ship_policy_bug_filer",

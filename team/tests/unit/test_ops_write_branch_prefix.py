@@ -50,9 +50,7 @@ def _git(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _build_repo_with_merged_feature_branch(
-    tmp_path: pathlib.Path, rc_branch_name: str
-) -> tuple[pathlib.Path, str]:
+def _build_repo_with_merged_feature_branch(tmp_path: pathlib.Path, rc_branch_name: str) -> tuple[pathlib.Path, str]:
     """Build a repo with an RC branch and a feature branch already merged
     (via --no-ff) into it. Returns (repo_path, feature_branch_name)."""
     repo = tmp_path / "repo"
@@ -73,8 +71,15 @@ def _build_repo_with_merged_feature_branch(
 
     _git(repo, "checkout", "-q", rc_branch_name)
     _git(
-        repo, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff",
-        "-m", f"Merge {feature_branch}", feature_branch,
+        repo,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        f"Merge {feature_branch}",
+        feature_branch,
     )
     return repo, feature_branch
 
@@ -99,9 +104,7 @@ def test_warn_if_merged_fires_on_unprefixed_rc_branch(
     assert "rc/v1.0.0" in captured.err
 
 
-def test_warn_if_merged_fires_on_prefixed_rc_branch(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_warn_if_merged_fires_on_prefixed_rc_branch(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     """On a prefixed project (branch_prefix='ai_'), the RC branch
     is named 'ai_rc/vX.Y.Z' -- passing branch_prefix='ai_' makes the scan
     look for 'ai_rc/*' instead of a bare 'rc/*' that would never match, so
@@ -129,9 +132,7 @@ def test_warn_if_merged_does_not_false_positive_on_unrelated_prefix(
     assert "already merged into" not in captured.err
 
 
-def test_warn_if_merged_silent_when_not_merged(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_warn_if_merged_silent_when_not_merged(tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A feature branch that diverged from (but was never merged into) the
     RC branch produces no warning, prefixed or not."""
     repo = tmp_path / "repo"

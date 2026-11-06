@@ -633,7 +633,8 @@ wd_invoke_task() {
   # run_project_chain's per-dispatch _task_timeout_budget_seconds -- the
   # smallest of MAX_TASK_SECONDS and the remaining project and batch budgets
   # (wake_task_budget.sh), so a task never outlives the batch that dispatched
-  # it -- or MAX_TASK_SECONDS alone when no chain set one. Job control gives that subshell
+  # it -- or the configured per-task limit alone when no chain set one
+  # (wd_configured_max_task_seconds: unset reads as the registry default). Job control gives that subshell
   # -- and so the provider CLI and every tool it spawns -- its own process group
   # (PGID == the subshell's pid); an external re-exec could not carry this
   # shell's functions and dynamic scope into the child. At the deadline the
@@ -676,13 +677,14 @@ wd_invoke_task() {
   PROVIDER_AGENT_EXIT_CODE=0
   _task_killed=false
   _provider_pgid=""; _provider_deadline_epoch=""; _provider_group_sigkilled=false
-  _provider_timeout_seconds="${_task_timeout_budget_seconds:-${MAX_TASK_SECONDS:-0}}"
-  [[ "${_provider_timeout_seconds}" =~ ^[0-9]+$ ]] || _provider_timeout_seconds="${MAX_TASK_SECONDS:-0}"
+  local _max_task_cfg; _max_task_cfg="$(wd_configured_max_task_seconds)"
+  _provider_timeout_seconds="${_task_timeout_budget_seconds:-${_max_task_cfg}}"
+  [[ "${_provider_timeout_seconds}" =~ ^[0-9]+$ ]] || _provider_timeout_seconds="${_max_task_cfg}"
   if [[ "${_provider_timeout_seconds}" -gt 0 ]]; then
     local _limit="${_provider_timeout_seconds}" _grace="${KILL_GRACE_SECONDS:-30}" _timed_out=false
     local _limit_note=""
-    if [[ "${_limit}" != "${MAX_TASK_SECONDS:-0}" ]]; then
-      _limit_note="; capped from max_task_seconds=${MAX_TASK_SECONDS:-0}s by the remaining project/batch budget"
+    if [[ "${_limit}" != "${_max_task_cfg}" ]]; then
+      _limit_note="; capped from max_task_seconds=${_max_task_cfg}s by the remaining project/batch budget"
     fi
     log "task ${task_id}: per-task timeout active: ${_limit}s (kill grace: ${_grace}s; held lock mtime refreshed every ${_PGAI_LOCK_HELD_REFRESH_INTERVAL_SECONDS:-60}s${_limit_note})"
 

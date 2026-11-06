@@ -129,11 +129,13 @@ def test_candidate_resolving_to_parent_of_base_is_refused_with_nothing_deleted(t
 
     result = _run(_script_header(tmp_path, base) + _create_call("..", dev_tree), tmp_path)
 
-    assert "RC=[1]" in result.stdout, f"create must exit non-zero on a refused candidate\nstdout={result.stdout}\nstderr={result.stderr}"
+    assert (
+        "RC=[1]" in result.stdout
+    ), f"create must exit non-zero on a refused candidate\nstdout={result.stdout}\nstderr={result.stderr}"
     assert _REFUSAL_KEY in result.stderr, f"refusal must carry the house-shape error key\nstderr={result.stderr}"
-    assert f"'{base}/..'" in result.stderr and f"'{base}'" in result.stderr, (
-        f"message must name the candidate and the base\nstderr={result.stderr}"
-    )
+    assert (
+        f"'{base}/..'" in result.stderr and f"'{base}'" in result.stderr
+    ), f"message must name the candidate and the base\nstderr={result.stderr}"
     assert "remedy:  ls -ld -- " in result.stderr and "<" not in result.stderr.split("remedy:")[1].splitlines()[0]
     assert parent_sentinel.exists(), "the base's parent was recursively deleted"
     assert base.is_dir(), "the base itself was deleted"
@@ -256,7 +258,9 @@ def test_strictly_inside_predicate_accepts_only_strict_descendants_of_canonical_
     assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
     verdicts = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
     for name, (_, expected) in cases.items():
-        assert verdicts.get(name) == str(expected), f"{name}: expected exit {expected}, got {verdicts.get(name)}\nstdout={result.stdout}"
+        assert verdicts.get(name) == str(
+            expected
+        ), f"{name}: expected exit {expected}, got {verdicts.get(name)}\nstdout={result.stdout}"
 
 
 # ---------------------------------------------------------------------------
@@ -267,15 +271,18 @@ def test_strictly_inside_predicate_accepts_only_strict_descendants_of_canonical_
 def test_every_recursive_delete_in_worktree_lib_is_gated_on_the_predicate() -> None:
     lines = _WORKTREE_LIB.read_text(encoding="utf-8").splitlines()
     delete_sites = [
-        i for i, line in enumerate(lines)
-        if re.search(r"\brm\s+-rf\b", line) and not line.lstrip().startswith("#") and not line.lstrip().startswith("echo")
+        i
+        for i, line in enumerate(lines)
+        if re.search(r"\brm\s+-rf\b", line)
+        and not line.lstrip().startswith("#")
+        and not line.lstrip().startswith("echo")
     ]
     assert delete_sites, "expected at least the orphaned-residue delete site in worktree.sh"
     for i in delete_sites:
-        window = "\n".join(lines[max(0, i - 8): i + 1])
-        assert re.search(r"if\s+pgai_worktree_path_strictly_inside\s", window), (
-            f"worktree.sh:{i + 1}: rm -rf is not gated on pgai_worktree_path_strictly_inside within the preceding lines:\n{window}"
-        )
-        assert not re.search(r'==\s*"\$\{?_?\w*(root|base)\w*\}?/"\*', window), (
-            f"worktree.sh:{i + 1}: a string-prefix comparison sits beside the delete; the canonicalised predicate is the only guard"
-        )
+        window = "\n".join(lines[max(0, i - 8) : i + 1])
+        assert re.search(
+            r"if\s+pgai_worktree_path_strictly_inside\s", window
+        ), f"worktree.sh:{i + 1}: rm -rf is not gated on pgai_worktree_path_strictly_inside within the preceding lines:\n{window}"
+        assert not re.search(
+            r'==\s*"\$\{?_?\w*(root|base)\w*\}?/"\*', window
+        ), f"worktree.sh:{i + 1}: a string-prefix comparison sits beside the delete; the canonicalised predicate is the only guard"

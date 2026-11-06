@@ -86,9 +86,7 @@ def test_live_statuses_are_open_running_and_needs_operator() -> None:
 
 
 @pytest.mark.parametrize("status", _LIVE_STATUSES)
-def test_a_body_citing_a_live_bug_as_its_defect_matches_and_names_it(
-    tmp_path: pathlib.Path, status: str
-) -> None:
+def test_a_body_citing_a_live_bug_as_its_defect_matches_and_names_it(tmp_path: pathlib.Path, status: str) -> None:
     bugs = tmp_path / "bugs"
     existing = _bug(bugs, "BUG-9172-stale-lock-file.md", status)
     body = _draft_body("Same defect as BUG-9172: the lock file is left behind after a crash.")

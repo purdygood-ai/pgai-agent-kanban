@@ -26,7 +26,6 @@ from pgai_agent_kanban.lib.md_fields import (
 )
 from pgai_agent_kanban.task_status import read_section
 
-
 # --- the five writer variants -------------------------------------------------
 
 

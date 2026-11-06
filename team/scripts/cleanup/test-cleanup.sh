@@ -22,9 +22,9 @@
 set -euo pipefail
 
 # shellcheck source=../lib/header_help.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
 # shellcheck source=../lib/error_contract.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/error_contract.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/error_contract.sh"
 
 DRY_RUN=true
 for arg in "$@"; do

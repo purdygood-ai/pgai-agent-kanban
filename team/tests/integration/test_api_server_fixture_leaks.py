@@ -43,7 +43,6 @@ Test-name policy (roles/TESTER.md Anti-pattern 6):
 
 from __future__ import annotations
 
-import os
 import pathlib
 import socket
 import subprocess
@@ -53,7 +52,7 @@ import time
 
 import pytest
 
-from tests.fixtures.api_server import ServerHandle, api_server_fixture
+from tests.fixtures.api_server import api_server_fixture
 
 # ---------------------------------------------------------------------------
 # Paths used across this module
@@ -97,9 +96,9 @@ def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    assert port != _PRODUCTION_DEFAULT_PORT, (
-        f"OS assigned port {_PRODUCTION_DEFAULT_PORT} — production default; refusing."
-    )
+    assert (
+        port != _PRODUCTION_DEFAULT_PORT
+    ), f"OS assigned port {_PRODUCTION_DEFAULT_PORT} — production default; refusing."
     return port
 
 
@@ -197,9 +196,9 @@ def test_injected_exception_leaves_no_listener(tmp_path: pathlib.Path) -> None:
 
     with pytest.raises(RuntimeError, match="injected exception"):
         with api_server_fixture(tmp_path) as handle:
-            assert handle.port != _PRODUCTION_DEFAULT_PORT, (
-                f"Fixture unexpectedly bound the production default port {_PRODUCTION_DEFAULT_PORT}."
-            )
+            assert (
+                handle.port != _PRODUCTION_DEFAULT_PORT
+            ), f"Fixture unexpectedly bound the production default port {_PRODUCTION_DEFAULT_PORT}."
             recorded_port = handle.port
 
             # Confirm the server is up (port is open) before injecting the
@@ -299,9 +298,9 @@ def test_intentional_leaked_listener_detected_by_postflight_helper(
         # Wait for the subprocess to signal readiness (prints "READY:<port>").
         assert leaked_proc.stdout is not None
         ready_line = leaked_proc.stdout.readline().decode("utf-8", errors="replace").strip()
-        assert ready_line.startswith("READY:"), (
-            f"Leaked listener subprocess did not emit READY signal; got: {ready_line!r}"
-        )
+        assert ready_line.startswith(
+            "READY:"
+        ), f"Leaked listener subprocess did not emit READY signal; got: {ready_line!r}"
 
         # Confirm the listener is actually bound.
         try:
@@ -309,8 +308,7 @@ def test_intentional_leaked_listener_detected_by_postflight_helper(
                 pass
         except (ConnectionRefusedError, OSError) as exc:
             pytest.fail(
-                f"Leaked listener on port {ephemeral_port} (pid {leaked_pid}) "
-                f"is not accepting connections: {exc}"
+                f"Leaked listener on port {ephemeral_port} (pid {leaked_pid}) " f"is not accepting connections: {exc}"
             )
 
         # --- Invoke the post-flight helper directly ---
@@ -383,19 +381,15 @@ def test_presuite_snapshot_excludes_preexisting_orphan_but_flags_new_listener(
         preexisting_proc = _spawn_listening_subprocess(preexisting_cwd, "PREEXISTING")
         assert preexisting_proc.stdout is not None
         ready_line = preexisting_proc.stdout.readline().decode("utf-8", errors="replace").strip()
-        assert ready_line.startswith("PREEXISTING:"), (
-            f"Pre-existing listener subprocess did not emit readiness signal; got: {ready_line!r}"
-        )
+        assert ready_line.startswith(
+            "PREEXISTING:"
+        ), f"Pre-existing listener subprocess did not emit readiness signal; got: {ready_line!r}"
         preexisting_pid = preexisting_proc.pid
 
         # --- Step 2: take the pre-suite snapshot ---
         snapshot_result = _take_listener_snapshot(scope_dir)
-        assert snapshot_result.returncode == 0, (
-            f"pgai_listener_snapshot exited non-zero: {snapshot_result.stderr!r}"
-        )
-        snapshot_pids = {
-            line.strip() for line in snapshot_result.stdout.splitlines() if line.strip()
-        }
+        assert snapshot_result.returncode == 0, f"pgai_listener_snapshot exited non-zero: {snapshot_result.stderr!r}"
+        snapshot_pids = {line.strip() for line in snapshot_result.stdout.splitlines() if line.strip()}
         assert str(preexisting_pid) in snapshot_pids, (
             f"Pre-suite snapshot did not capture the pre-existing listener's pid "
             f"{preexisting_pid}. Snapshot stdout: {snapshot_result.stdout!r}"
@@ -405,9 +399,7 @@ def test_presuite_snapshot_excludes_preexisting_orphan_but_flags_new_listener(
         snapshot_file.write_text(snapshot_result.stdout)
 
         # --- Step 3: the pre-existing listener alone must NOT fail the gate ---
-        result_orphan_only = _run_listener_cleanliness_check_with_snapshot(
-            scope_dir, snapshot_file
-        )
+        result_orphan_only = _run_listener_cleanliness_check_with_snapshot(scope_dir, snapshot_file)
         assert result_orphan_only.returncode == 0, (
             f"pgai_listener_cleanliness_check returned non-zero (expected 0) for a "
             f"listener that predates the pre-suite snapshot (pid {preexisting_pid}). "
@@ -424,15 +416,13 @@ def test_presuite_snapshot_excludes_preexisting_orphan_but_flags_new_listener(
         run_spawned_proc = _spawn_listening_subprocess(run_spawned_cwd, "RUNSPAWNED")
         assert run_spawned_proc.stdout is not None
         ready_line = run_spawned_proc.stdout.readline().decode("utf-8", errors="replace").strip()
-        assert ready_line.startswith("RUNSPAWNED:"), (
-            f"Run-spawned listener subprocess did not emit readiness signal; got: {ready_line!r}"
-        )
+        assert ready_line.startswith(
+            "RUNSPAWNED:"
+        ), f"Run-spawned listener subprocess did not emit readiness signal; got: {ready_line!r}"
         run_spawned_pid = run_spawned_proc.pid
 
         # --- Step 5: the gate must now flag the run-spawned listener ---
-        result_with_new_listener = _run_listener_cleanliness_check_with_snapshot(
-            scope_dir, snapshot_file
-        )
+        result_with_new_listener = _run_listener_cleanliness_check_with_snapshot(scope_dir, snapshot_file)
         assert result_with_new_listener.returncode != 0, (
             f"pgai_listener_cleanliness_check returned 0 (expected non-zero) once a "
             f"listener spawned AFTER the pre-suite snapshot (pid {run_spawned_pid}) "

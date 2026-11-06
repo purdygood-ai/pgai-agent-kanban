@@ -141,11 +141,7 @@ def _write_gate_stub(path: pathlib.Path, name: str) -> None:
             f"sys.exit(1 if os.environ.get('FAIL_LINT') == {name!r} else 0)\n"
         )
     else:
-        body = (
-            "#!/usr/bin/env bash\n"
-            f"[[ \"${{FAIL_LINT:-}}\" == {name!r} ]] && exit 1\n"
-            "exit 0\n"
-        )
+        body = "#!/usr/bin/env bash\n" f'[[ "${{FAIL_LINT:-}}" == {name!r} ]] && exit 1\n' "exit 0\n"
     path.write_text(body, encoding="utf-8")
     path.chmod(0o755)
 
@@ -158,8 +154,18 @@ def _git(repo: pathlib.Path, *args: str) -> str:
         "LANG": "C.UTF-8",
     }
     result = subprocess.run(
-        ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid",
-         "-c", "commit.gpgsign=false", "-C", str(repo), *args],
+        [
+            "git",
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-C",
+            str(repo),
+            *args,
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -273,10 +279,7 @@ def _describe(result: subprocess.CompletedProcess) -> str:
 
 
 def _fallback_lines(result: subprocess.CompletedProcess) -> list[str]:
-    return [
-        ln for ln in result.stdout.splitlines()
-        if ln.startswith("[green-ledger]") and "normally" in ln
-    ]
+    return [ln for ln in result.stdout.splitlines() if ln.startswith("[green-ledger]") and "normally" in ln]
 
 
 @pytest.fixture(params=_RUNNER_NAMES)

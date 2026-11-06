@@ -294,11 +294,14 @@ def test_cm_halt_stays_while_the_rc_is_still_active(root):
     assert "waits for the operator" in outcome.reason
 
 
-@pytest.mark.parametrize("trigger, key", [
-    pytest.param("8", "cm-release.trigger-8.last-three-non-functional", id="trigger-8"),
-    pytest.param("5b", "cm-release.trigger-5b.tag-points-at-wrong-commit", id="trigger-5b"),
-    pytest.param("11", "cm-release.trigger-11.fidelity-gate-divergence", id="trigger-11"),
-])
+@pytest.mark.parametrize(
+    "trigger, key",
+    [
+        pytest.param("8", "cm-release.trigger-8.last-three-non-functional", id="trigger-8"),
+        pytest.param("5b", "cm-release.trigger-5b.tag-points-at-wrong-commit", id="trigger-5b"),
+        pytest.param("11", "cm-release.trigger-11.fidelity-gate-divergence", id="trigger-11"),
+    ],
+)
 def test_triggers_that_clear_on_nothing_are_never_cleared(root, trigger, key):
     before = _cm_halt(root, trigger, key)
     _rc_cancelled_and_rebundled(root)
@@ -479,10 +482,13 @@ def _dev_tree(root: pathlib.Path, notes: str) -> pathlib.Path:
     return repo
 
 
-@pytest.mark.parametrize("notes, cleared", [
-    pytest.param(f"# {VERSION}\n\n## Status\nPENDING-RELEASE\n\n## Notes\nx\n", True, id="status-heading"),
-    pytest.param(f"# {VERSION}\n\n## Notes\nx\n", False, id="no-status-heading"),
-])
+@pytest.mark.parametrize(
+    "notes, cleared",
+    [
+        pytest.param(f"# {VERSION}\n\n## Status\nPENDING-RELEASE\n\n## Notes\nx\n", True, id="status-heading"),
+        pytest.param(f"# {VERSION}\n\n## Notes\nx\n", False, id="no-status-heading"),
+    ],
+)
 def test_trigger_9_is_cleared_once_the_notes_recheck_green(root, notes, cleared):
     _dev_tree(root, notes)
     before = _cm_halt(root, "9", "cm-release.trigger-9.notes-missing-status-heading")
@@ -564,7 +570,9 @@ def test_cause_check_cli_reports_the_check(root):
     _rc_cancelled_and_rebundled(root)
     done = subprocess.run(
         ["python3", halt_clearing.__file__, "check", "--project-root", str(_project(root)), "--check", "rc-cancelled"],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.startswith("passed\trc-cancelled\t")

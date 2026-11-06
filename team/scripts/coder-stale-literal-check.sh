@@ -81,7 +81,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Resolve script directory and source the helper library
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
 _CSL_SELF="${SCRIPT_DIR}/coder-stale-literal-check.sh"
 

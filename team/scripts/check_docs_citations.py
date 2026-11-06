@@ -54,9 +54,23 @@ mode. Deciding that a new document should be installed is an authoring
 decision — a check that silently added the line would install documents
 nobody meant to ship.
 
+A second, separate mode, ``--team-paths``, reports every ``team/<path>``
+citation in ``docs/**/*.md`` and ``HOW_TO.md`` that names no file or
+directory in the tree (a retired script, a moved module). That mode is
+quality class (CONVERT): it lists each one with its file and line and
+always exits 0; fixing the prose is a documentation edit. A path a document
+cites deliberately as an illustration (a placeholder plugin, a file named in
+a "# BAD" example) is declared once in that document, on a line of its own:
+
+  <!-- team-paths: example team/workflows/my-new-type/ — placeholder plugin -->
+
+The declared path and anything under it are then not reported in that
+document; every other missing path still is.
+
 Exit codes
 ----------
-  0   Every reachable docs/ citation is named in the manifest.
+  0   Every reachable docs/ citation is named in the manifest (and always
+      with --team-paths).
   1   One or more reachable docs/ citations are not named in the manifest;
       see stdout for each one's citing file, line number, and the exact
       manifest line that clears it (or, for a recorded exclusion cited
@@ -71,6 +85,7 @@ Usage
   python3 team/scripts/check_docs_citations.py [--repo-root PATH]
                                                [--team-dir PATH]
                                                [--manifest PATH]
+  python3 team/scripts/check_docs_citations.py --team-paths [--repo-root PATH]
 
   --repo-root PATH   Repository root docs/ citations resolve against
                      (default: the parent of this script's team/ directory).
@@ -79,6 +94,10 @@ Usage
                      team/ relative to team/scripts/).
   --manifest PATH    The docs manifest to check citations against (default:
                      <team-dir>/config/docs-manifest.txt).
+  --team-paths       Instead, report each team/<path> citation in docs/ and
+                     HOW_TO.md that does not exist in the tree, skipping the
+                     paths a document declares with a
+                     "<!-- team-paths: example team/<path> -->" line; exits 0.
 
 Examples
 --------
@@ -87,6 +106,9 @@ Examples
 
   # Against an explicit checkout:
   python3 team/scripts/check_docs_citations.py --repo-root /path/to/repo
+
+  # team/<path> citations in the docs that name nothing in the tree:
+  python3 team/scripts/check_docs_citations.py --team-paths
 """
 
 from __future__ import annotations
@@ -107,6 +129,7 @@ if _team_str not in sys.path:
 
 from pgai_agent_kanban.lib.docs_citation_scan import (  # noqa: E402
     ClosureReport,
+    find_missing_team_paths,
     governance_seed_files,
     walk_docs_citation_closure,
 )
@@ -124,9 +147,7 @@ _DOCS_PREFIX = "docs/"
 # `docs/<name>` citation of one of those names is a finding unless <name>
 # is itself a manifest member: that is the spelling the installed-root
 # walk resolves, and on an installed root the page is not there.
-_EXCLUDED_CITATION_TARGETS_RE = re.compile(
-    r"^#\s*EXCLUDED-CITATION-TARGETS:\s*(.+)$", re.MULTILINE
-)
+_EXCLUDED_CITATION_TARGETS_RE = re.compile(r"^#\s*EXCLUDED-CITATION-TARGETS:\s*(.+)$", re.MULTILINE)
 
 
 def _load_manifest_entries(manifest_path: Path) -> set[str]:
@@ -152,17 +173,13 @@ def _load_excluded_citation_targets(manifest_path: Path) -> set[str]:
     of one of these names is not covered. Missing the line entirely is
     not an error -- an empty set, same as a manifest with no recorded
     exclusions yet."""
-    match = _EXCLUDED_CITATION_TARGETS_RE.search(
-        manifest_path.read_text(encoding="utf-8")
-    )
+    match = _EXCLUDED_CITATION_TARGETS_RE.search(manifest_path.read_text(encoding="utf-8"))
     if not match:
         return set()
     return {name.strip() for name in match.group(1).split(",") if name.strip()}
 
 
-def run_check(
-    repo_root: Path, team_dir: Path, manifest_path: Path
-) -> tuple[int, ClosureReport | None, str | None]:
+def run_check(repo_root: Path, team_dir: Path, manifest_path: Path) -> tuple[int, ClosureReport | None, str | None]:
     """Run the citation-vs-manifest closure walk.
 
     Returns (exit_code, report, setup_error). *report* is populated only
@@ -173,8 +190,7 @@ def run_check(
         return (
             2,
             None,
-            f"Docs manifest not found at {manifest_path}. This file is "
-            "required and ships with the kanban repo.",
+            f"Docs manifest not found at {manifest_path}. This file is " "required and ships with the kanban repo.",
         )
 
     manifest_entries = _load_manifest_entries(manifest_path)
@@ -282,8 +298,7 @@ def _print_report(
     print("Cause(s):", flush=True)
     for finding in report.findings:
         print(
-            f"  - {finding.source}:{finding.line} cites {finding.cited!r}, "
-            f"which {manifest_path} does not name",
+            f"  - {finding.source}:{finding.line} cites {finding.cited!r}, " f"which {manifest_path} does not name",
             flush=True,
         )
 
@@ -291,9 +306,7 @@ def _print_report(
     # A recorded exclusion is checkout-only by decision; the fix for a
     # prefixed citation of one is rewording the citation, never adding the
     # page to the delivery list.
-    excluded_rels = sorted(
-        rel for rel in cited_rels if rel.rsplit("/", 1)[-1] in excluded_citation_targets
-    )
+    excluded_rels = sorted(rel for rel in cited_rels if rel.rsplit("/", 1)[-1] in excluded_citation_targets)
     remedy_lines = sorted(cited_rels - set(excluded_rels))
     print("\nTo fix:", flush=True)
     step = 1
@@ -357,27 +370,66 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--repo-root",
         metavar="PATH",
         help=(
-            "Repository root docs/ citations resolve against (default: "
-            "the parent of this script's team/ directory)."
+            "Repository root docs/ citations resolve against (default: " "the parent of this script's team/ directory)."
         ),
     )
     parser.add_argument(
         "--team-dir",
         metavar="PATH",
-        help=(
-            "Root of the team/ directory to seed the walk from (default: "
-            "parent of this script's directory)."
-        ),
+        help=("Root of the team/ directory to seed the walk from (default: " "parent of this script's directory)."),
     )
     parser.add_argument(
         "--manifest",
         metavar="PATH",
+        help=("Docs manifest to check citations against (default: " "<team-dir>/config/docs-manifest.txt)."),
+    )
+    parser.add_argument(
+        "--team-paths",
+        action="store_true",
         help=(
-            "Docs manifest to check citations against (default: "
-            "<team-dir>/config/docs-manifest.txt)."
+            "Instead of the manifest check, report each team/<path> citation in "
+            "docs/**/*.md and HOW_TO.md that names no file or directory in the "
+            "tree, with its file and line. A path the document declares "
+            "illustrative on a '<!-- team-paths: example team/<path> -->' line "
+            "is not reported. Quality class: always exits 0."
         ),
     )
     return parser.parse_args(argv)
+
+
+def _report_team_paths(repo_root: Path) -> int:
+    """Print each team/<path> citation that names nothing in the tree; return 0."""
+    findings = find_missing_team_paths(repo_root)
+    if not findings:
+        print(
+            "check_docs_citations: team-paths: ok -- every team/<path> citation in docs/ and "
+            "HOW_TO.md names a file or directory in the tree.",
+            flush=True,
+        )
+        return 0
+    print(
+        f"check_docs_citations: team-paths: {len(findings)} team/<path> citation(s) name nothing "
+        "in the tree.\n\nCause(s):",
+        flush=True,
+    )
+    for finding in findings:
+        print(
+            f"  - {finding.source}:{finding.line} cites {finding.cited!r}, which does not exist " f"under {repo_root}",
+            flush=True,
+        )
+    print(
+        "\nTo fix:\n"
+        "  1. Correct each path to the file it now lives at, or remove the citation.\n"
+        "     A path cited on purpose as an illustration is declared once in its\n"
+        "     document instead, on a line of its own:\n"
+        "     <!-- team-paths: example team/workflows/my-new-type/ — why it is an example -->\n"
+        f"  2. Re-run: python3 {Path(__file__).resolve()} --team-paths --repo-root {repo_root}\n"
+        "\nRule: every team/<path> a document names exists in the tree.",
+        flush=True,
+    )
+    # CONVERT: a stale path in prose carries no runtime-failure risk; it is
+    # reported and the run exits 0.
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -392,9 +444,10 @@ def main(argv: list[str] | None = None) -> int:
 
     team_dir = Path(args.team_dir).resolve() if args.team_dir else _TEAM_DIR_DEFAULT
     repo_root = Path(args.repo_root).resolve() if args.repo_root else team_dir.parent
-    manifest_path = (
-        Path(args.manifest).resolve() if args.manifest else team_dir / "config" / "docs-manifest.txt"
-    )
+    manifest_path = Path(args.manifest).resolve() if args.manifest else team_dir / "config" / "docs-manifest.txt"
+
+    if args.team_paths:
+        return _report_team_paths(repo_root)
 
     if not team_dir.is_dir():
         print(
@@ -405,8 +458,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(
-        f"check_docs_citations: scanning governance files under {team_dir} "
-        f"against {manifest_path}",
+        f"check_docs_citations: scanning governance files under {team_dir} " f"against {manifest_path}",
         flush=True,
     )
 

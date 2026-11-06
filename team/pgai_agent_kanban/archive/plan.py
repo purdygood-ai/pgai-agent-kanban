@@ -96,7 +96,8 @@ import functools
 import os
 import pathlib
 import re
-from typing import Iterable, Optional, Union
+from typing import Union
+from collections.abc import Iterable
 
 from pgai_agent_kanban.archive.config import effective_archive_count
 from pgai_agent_kanban.archive.layout import (
@@ -383,7 +384,7 @@ class _TaskFacts:
     """
 
     state: str
-    release_version: Optional[str]
+    release_version: str | None
     prerequisites: tuple[str, ...]
 
 
@@ -395,7 +396,7 @@ def _list_dir(directory: pathlib.Path) -> list[str]:
         return []
 
 
-def _read_text(path: pathlib.Path) -> Optional[str]:
+def _read_text(path: pathlib.Path) -> str | None:
     """The UTF-8 text of *path*, or ``None`` when it cannot be read."""
     try:
         return path.read_text(encoding="utf-8")
@@ -471,7 +472,7 @@ def _task_candidates(layout: ProjectLayout) -> list[_Candidate]:
     return found
 
 
-def _release_version_key(release_version: Optional[str]) -> Optional[tuple[int, int, int]]:
+def _release_version_key(release_version: str | None) -> tuple[int, int, int] | None:
     """The release a ``## Release Version`` value names, parsed, or ``None``.
 
     The value is read by :func:`release_version_of` (branch prefix, bold
@@ -534,7 +535,7 @@ def _task_facts(task_dir: pathlib.Path) -> _TaskFacts:
     )
 
 
-def _read_active_rc(project_root: pathlib.Path) -> tuple[str, Optional[str]]:
+def _read_active_rc(project_root: pathlib.Path) -> tuple[str, str | None]:
     """``(active_rc, note)``: the validated ``## Active RC``, or unknown with a note.
 
     A missing release-state.md reads as ``none`` (a project that never opened
@@ -584,9 +585,7 @@ class _Context:
     task_facts: dict
 
 
-def _intake_hold(
-    candidate: _Candidate, finished: frozenset, context: _Context
-) -> Optional[tuple[str, str]]:
+def _intake_hold(candidate: _Candidate, finished: frozenset, context: _Context) -> tuple[str, str] | None:
     """The hold for an older bug or priority, or ``None`` when it may move."""
     status = _first_token(md_fields.read_field(candidate.path, "Status"))
     if not status:
@@ -599,7 +598,7 @@ def _intake_hold(
     return None
 
 
-def _requirement_hold(candidate: _Candidate, context: _Context) -> Optional[tuple[str, str]]:
+def _requirement_hold(candidate: _Candidate, context: _Context) -> tuple[str, str] | None:
     """The hold for an older requirement, or ``None`` when it may move."""
     text = _read_text(candidate.path)
     status = _first_token(md_fields.field_value(text, "Status")) if text is not None else ""
@@ -629,7 +628,7 @@ def _requirement_hold(candidate: _Candidate, context: _Context) -> Optional[tupl
     return None
 
 
-def _task_hold(candidate: _Candidate, context: _Context) -> Optional[tuple[str, str]]:
+def _task_hold(candidate: _Candidate, context: _Context) -> tuple[str, str] | None:
     """The hold for an older task, or ``None`` when it may move."""
     facts = context.task_facts[candidate.item_id]
     if not facts.state:
@@ -729,7 +728,7 @@ def _training_followers(layout: ProjectLayout, task_ids: Iterable[str], notes: l
     return logs
 
 
-def _task_in_name(name: str, by_head: dict) -> Optional[str]:
+def _task_in_name(name: str, by_head: dict) -> str | None:
     """The selected task ID *name* contains whole, or ``None``.
 
     Whole means the character after the ID does not continue a slug.
@@ -744,9 +743,9 @@ def _task_in_name(name: str, by_head: dict) -> Optional[str]:
 
 def plan(
     project: str,
-    count: Optional[int] = None,
+    count: int | None = None,
     *,
-    kanban_root: Optional[PathLike] = None,
+    kanban_root: PathLike | None = None,
 ) -> ArchivePlan:
     """Return what an archive run would move for *project*; move nothing.
 
@@ -795,12 +794,12 @@ def plan(
     context = _Context(active_rc, last_released, _open_bundle_listings(layout), live_prerequisites, task_facts)
 
     by_category = {
-        CATEGORY_BUGS: (_numbered_candidates(layout, CATEGORY_BUGS),
-                        lambda c: _intake_hold(c, _BUG_FINISHED, context)),
-        CATEGORY_PRIORITY: (_numbered_candidates(layout, CATEGORY_PRIORITY),
-                            lambda c: _intake_hold(c, _PRIORITY_FINISHED, context)),
-        CATEGORY_REQUIREMENTS: (_requirement_candidates(layout),
-                                lambda c: _requirement_hold(c, context)),
+        CATEGORY_BUGS: (_numbered_candidates(layout, CATEGORY_BUGS), lambda c: _intake_hold(c, _BUG_FINISHED, context)),
+        CATEGORY_PRIORITY: (
+            _numbered_candidates(layout, CATEGORY_PRIORITY),
+            lambda c: _intake_hold(c, _PRIORITY_FINISHED, context),
+        ),
+        CATEGORY_REQUIREMENTS: (_requirement_candidates(layout), lambda c: _requirement_hold(c, context)),
         CATEGORY_TASKS: (tasks, lambda c: _task_hold(c, context)),
     }
 

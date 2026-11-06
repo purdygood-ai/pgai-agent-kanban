@@ -37,10 +37,18 @@
 #   SIGPIPE status 141 is not an error), 2 when no path is given, and awk's
 #   own non-zero status otherwise (e.g. <script-path> cannot be read).
 #
-# Example:
-#   case "$1" in
-#     --help|-h) header_help_print "${BASH_SOURCE[0]}"; exit 0 ;;
-#   esac
+# header_help_exit_if_requested <script-path> [args...]
+#   The --help prelude every dashboard script runs before its own bootstrap:
+#   when any of [args...] is -h or --help, prints <script-path>'s header
+#   (header_help_print) and exits the calling shell 0; otherwise returns 0
+#   and changes nothing. Scanning every argument up front means help never
+#   resolves a kanban root, reads the flag as another option's value, or
+#   starts the script's own work. Returns 2 when no path is given.
+#
+# Example (the whole prelude, directly after the header and set -euo pipefail):
+#   # shellcheck source=../lib/header_help.sh
+#   source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
+#   header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 
 header_help_print() {
   local _hh_file="${1:-}"
@@ -59,4 +67,23 @@ header_help_print() {
     return 0
   fi
   return "$_hh_rc"
+}
+
+header_help_exit_if_requested() {
+  local _hh_file="${1:-}"
+  if [[ -z "$_hh_file" ]]; then
+    echo "header_help_exit_if_requested: a script path is required, e.g. header_help_exit_if_requested \"\${BASH_SOURCE[0]}\" \"\$@\"" >&2
+    return 2
+  fi
+  shift
+  local _hh_arg
+  for _hh_arg in "$@"; do
+    case "$_hh_arg" in
+      -h|--help)
+        header_help_print "$_hh_file"
+        exit 0
+        ;;
+    esac
+  done
+  return 0
 }

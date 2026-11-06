@@ -17,7 +17,6 @@ from __future__ import annotations
 import pathlib
 import re
 
-
 # Sentinels distinguishing "heading not found at all" from "heading found but
 # no qualifying value follows it before the next boundary". Neither is the
 # string "none" — that string is reserved for a legitimate field value.
@@ -65,7 +64,7 @@ def _scan_field_raw(text: str, heading: str):
     for i, line in enumerate(lines):
         if line.strip() == f"## {heading}":
             in_html_comment = False
-            for follow in lines[i + 1:]:
+            for follow in lines[i + 1 :]:
                 v = follow.strip()
                 # An HTML comment block is skipped whole, however many lines
                 # it spans; an inline "<!-- ... -->" is dropped from a value
@@ -130,4 +129,3 @@ def read_state_field(filepath: str, heading: str) -> str:
     if result is _ABSENT or result is _EMPTY:
         return "none"
     return result
-

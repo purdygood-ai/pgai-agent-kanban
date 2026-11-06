@@ -55,6 +55,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="version-sh-bash")
 
+
 # Path to the library under test, relative to the team/ directory where pytest runs.
 _LIB = "scripts/dashboard/lib/version.sh"
 
@@ -165,12 +166,9 @@ def test_get_latest_released_tag_returns_newest_tag_independent_of_branch(
         capture_output=True,
         text=True,
     )
-    assert describe_result.returncode == 0, (
-        f"Fixture setup error: git describe failed: {describe_result.stderr}"
-    )
+    assert describe_result.returncode == 0, f"Fixture setup error: git describe failed: {describe_result.stderr}"
     assert describe_result.stdout.strip() == "v0.101.2", (
-        f"Fixture must have describe returning v0.101.2 from HEAD, "
-        f"got: {describe_result.stdout.strip()!r}"
+        f"Fixture must have describe returning v0.101.2 from HEAD, " f"got: {describe_result.stdout.strip()!r}"
     )
 
     # Now verify get_latest_released_tag() returns the latest main-merged tag,
@@ -213,8 +211,7 @@ def test_get_latest_released_tag_returns_empty_for_non_git_directory(
         f"exited {result.returncode}: {result.stderr}"
     )
     assert result.stdout.strip() == "", (
-        f"get_latest_released_tag must return empty string for a non-git directory; "
-        f"got: {result.stdout.strip()!r}"
+        f"get_latest_released_tag must return empty string for a non-git directory; " f"got: {result.stdout.strip()!r}"
     )
 
 
@@ -234,8 +231,7 @@ def test_get_latest_released_tag_returns_empty_for_missing_directory(
         f"exited {result.returncode}: {result.stderr}"
     )
     assert result.stdout.strip() == "", (
-        f"get_latest_released_tag must return empty string for a missing directory; "
-        f"got: {result.stdout.strip()!r}"
+        f"get_latest_released_tag must return empty string for a missing directory; " f"got: {result.stdout.strip()!r}"
     )
 
 

@@ -50,11 +50,19 @@ _REQ_NAME = "v2.5.1-auto-feature.md"
 
 def _git(repo: pathlib.Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True,
-        env=build_scrubbed_env(home_dir=repo.parent / "githome", extra_env={
-            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
-        }),
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=build_scrubbed_env(
+            home_dir=repo.parent / "githome",
+            extra_env={
+                "GIT_AUTHOR_NAME": "t",
+                "GIT_AUTHOR_EMAIL": "t@example.com",
+                "GIT_COMMITTER_NAME": "t",
+                "GIT_COMMITTER_EMAIL": "t@example.com",
+            },
+        ),
     )
     return result.stdout.strip()
 
@@ -119,9 +127,7 @@ def _install_pm_wrapper(root: pathlib.Path, snapshot: pathlib.Path) -> None:
     scripts = root / "scripts"
     scripts.mkdir(exist_ok=True)
     wrapper = scripts / "pm-agent.sh"
-    wrapper.write_text(
-        f'#!/usr/bin/env bash\ncp "$1" "{snapshot}"\nexec "{_PM_AGENT}" "$@"\n', encoding="utf-8"
-    )
+    wrapper.write_text(f'#!/usr/bin/env bash\ncp "$1" "{snapshot}"\nexec "{_PM_AGENT}" "$@"\n', encoding="utf-8")
     wrapper.chmod(0o755)
 
 
@@ -152,8 +158,12 @@ def _run_discovery(root: pathlib.Path, tmp_path: pathlib.Path, decoy: pathlib.Pa
         'echo "DISCOVERY_STATUS=${DISCOVERY_LAST_STATUS}"\n'
     )
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, cwd=str(root),
-        env=_env(root, tmp_path, decoy), timeout=180,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+        env=_env(root, tmp_path, decoy),
+        timeout=180,
     )
 
 
@@ -185,12 +195,16 @@ def lane(two_project_root, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("target_block", [
-    "## Target Version\n\nauto\n\n",
-    "## Target Version\nnext-patch\n\n",
-    "## Target Version\n\n",
-    "",
-], ids=["auto", "next-patch", "empty", "absent"])
+@pytest.mark.parametrize(
+    "target_block",
+    [
+        "## Target Version\n\nauto\n\n",
+        "## Target Version\nnext-patch\n\n",
+        "## Target Version\n\n",
+        "",
+    ],
+    ids=["auto", "next-patch", "empty", "absent"],
+)
 def test_auto_version_is_written_before_pm_and_carried_into_the_ticket(lane, tmp_path, target_block):
     root, _repo, decoy, snapshot = lane
     req = _requirements(root, target_block)
@@ -200,9 +214,9 @@ def test_auto_version_is_written_before_pm_and_carried_into_the_ticket(lane, tmp
     assert result.returncode == 0, result.stderr
     assert "DISCOVERY_STATUS=produced_work" in result.stdout, result.stderr
     assert snapshot.is_file(), f"PM was never launched:\n{result.stderr}"
-    assert field_value(snapshot.read_text(encoding="utf-8"), "Target Version") == "v2.5.1", (
-        "the requirements file must carry the resolved version at the moment PM is launched"
-    )
+    assert (
+        field_value(snapshot.read_text(encoding="utf-8"), "Target Version") == "v2.5.1"
+    ), "the requirements file must carry the resolved version at the moment PM is launched"
     assert field_value(req.read_text(encoding="utf-8"), "Target Version") == "v2.5.1"
     tickets = _pm_tickets(root)
     assert len(tickets) == 1, tickets
@@ -215,7 +229,7 @@ def test_next_slot_is_judged_by_the_lanes_prefixed_tags(lane, tmp_path):
     _git(repo, "checkout", "-qb", "side", "main")
     _commit(repo, "side")
     _git(repo, "tag", "ai_v2.5.1")  # this lane's tag, not merged into ai_main: slot taken
-    _git(repo, "tag", "v2.5.2")     # another lane's bare tag: not this lane's slot
+    _git(repo, "tag", "v2.5.2")  # another lane's bare tag: not this lane's slot
     _git(repo, "checkout", "-q", "ai_main")
     req = _requirements(root, "## Target Version\n\nauto\n\n")
 
@@ -248,15 +262,23 @@ def test_auto_version_above_the_ceiling_is_skipped_with_the_rejection_line(lane,
 
 def _run_pm_agent(root: pathlib.Path, tmp_path: pathlib.Path, decoy: pathlib.Path, req: pathlib.Path):
     return subprocess.run(
-        [str(_PM_AGENT), str(req), "--project", _PROJECT], capture_output=True, text=True,
-        cwd=str(root), env=_env(root, tmp_path, decoy), timeout=180,
+        [str(_PM_AGENT), str(req), "--project", _PROJECT],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+        env=_env(root, tmp_path, decoy),
+        timeout=180,
     )
 
 
-@pytest.mark.parametrize("target_block", [
-    "## Target Version\n\nauto\n\n",
-    "",
-], ids=["auto", "absent"])
+@pytest.mark.parametrize(
+    "target_block",
+    [
+        "## Target Version\n\nauto\n\n",
+        "",
+    ],
+    ids=["auto", "absent"],
+)
 def test_manual_pm_agent_refuses_a_sentinel_and_queues_nothing(lane, tmp_path, target_block):
     root, _repo, decoy, _snapshot = lane
     req = _requirements(root, target_block)
@@ -264,7 +286,7 @@ def test_manual_pm_agent_refuses_a_sentinel_and_queues_nothing(lane, tmp_path, t
     result = _run_pm_agent(root, tmp_path, decoy, req)
 
     assert result.returncode != 0, result.stdout + result.stderr
-    refusal = parse_error_contract(result.stderr[result.stderr.find("error:"):])
+    refusal = parse_error_contract(result.stderr[result.stderr.find("error:") :])
     assert refusal is not None, result.stderr
     assert refusal["error"] == "pm-agent.target-version-not-explicit"
     assert "--auto --project project-a" in refusal["remedy"]

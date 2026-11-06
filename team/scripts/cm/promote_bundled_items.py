@@ -151,10 +151,10 @@ from pgai_agent_kanban.lib.bundle_items import (  # noqa: E402
 from pgai_agent_kanban.lib.terminal_states import NEEDS_OPERATOR_STATE, canonical_state  # noqa: E402
 from pgai_agent_kanban.task_status import read_section, read_state, section_regex  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Core promotion helper
 # ---------------------------------------------------------------------------
+
 
 def _status_token(text: str) -> str | None:
     """Return the first word of *text*'s ``## Status`` section.
@@ -181,7 +181,7 @@ def promote_status_running_to_done(p: pathlib.Path) -> bool:
     """
     content = p.read_text(encoding="utf-8")
     status_m = re.search(
-        r'^(##\s+Status\s*\n\s*)running(\s*)$',
+        r"^(##\s+Status\s*\n\s*)running(\s*)$",
         content,
         re.MULTILINE | re.IGNORECASE,
     )
@@ -193,11 +193,7 @@ def promote_status_running_to_done(p: pathlib.Path) -> bool:
             print(f"  skip (no ## Status field): {p.name}", flush=True)
         return False
     new_content = (
-        content[: status_m.start()]
-        + status_m.group(1)
-        + "done"
-        + status_m.group(2)
-        + content[status_m.end() :]
+        content[: status_m.start()] + status_m.group(1) + "done" + status_m.group(2) + content[status_m.end() :]
     )
     p.write_text(new_content, encoding="utf-8")
     print(f"  promoted (running -> done): {p.name}", flush=True)
@@ -230,8 +226,8 @@ def read_status_value(p: pathlib.Path) -> str | None:
 # task's README claims it (extract_claimed_item_ids_from_text()).
 # ---------------------------------------------------------------------------
 
-_ITEM_ID_PATTERN = re.compile(r'\b(BUG|PRIORITY)-(\d{4})\b', re.IGNORECASE)
-_ITEM_ID_FILENAME_PATTERN = re.compile(r'^(BUG|PRIORITY)-(\d{4})\b', re.IGNORECASE)
+_ITEM_ID_PATTERN = re.compile(r"\b(BUG|PRIORITY)-(\d{4})\b", re.IGNORECASE)
+_ITEM_ID_FILENAME_PATTERN = re.compile(r"^(BUG|PRIORITY)-(\d{4})\b", re.IGNORECASE)
 
 
 def extract_item_ids_from_text(text: str) -> set[str]:
@@ -251,7 +247,7 @@ def extract_bug_ids_from_text(text: str) -> set[str]:
 # "deferred"), or a whole path ending in one. Removed from a clause before
 # the clause is read for negative wording, so a slug never reads as a
 # statement about the item.
-_ITEM_TOKEN_PATTERN = re.compile(r'\S*\b(?:BUG|PRIORITY)-\d{4}\b\S*', re.IGNORECASE)
+_ITEM_TOKEN_PATTERN = re.compile(r"\S*\b(?:BUG|PRIORITY)-\d{4}\b\S*", re.IGNORECASE)
 
 # Wording that says a clause names an item only to put it outside the task:
 # not ticketed, out of scope, deferred, left unfixed, excluded, skipped.
@@ -281,10 +277,10 @@ _NEGATIVE_MENTION_PATTERN = re.compile(
 # whitespace, or a contrasting conjunction. A parenthetical is read as its
 # own clause, apart from the sentence around it.
 _CLAUSE_SPLIT_PATTERN = re.compile(
-    r'(?<=[.!?;])\s+|,?\s+\b(?:but|whereas|while|however|although)\b\s+',
+    r"(?<=[.!?;])\s+|,?\s+\b(?:but|whereas|while|however|although)\b\s+",
     re.IGNORECASE,
 )
-_PARENTHETICAL_PATTERN = re.compile(r'\(([^()]*)\)')
+_PARENTHETICAL_PATTERN = re.compile(r"\(([^()]*)\)")
 
 
 def _readme_clauses(text: str) -> list[str]:
@@ -408,11 +404,7 @@ def derive_shipped_bug_ids_from_tasks(tasks_dir: pathlib.Path, version: str) -> 
     """BUG-only view of derive_shipped_item_ids_from_tasks(), kept for
     promote_derived_bugs(), which cross-references BUG-*.md files in
     bugs_dir only."""
-    return {
-        item_id
-        for item_id in derive_shipped_item_ids_from_tasks(tasks_dir, version)
-        if item_id.startswith("BUG-")
-    }
+    return {item_id for item_id in derive_shipped_item_ids_from_tasks(tasks_dir, version) if item_id.startswith("BUG-")}
 
 
 def find_running_bugs_in_dir(bugs_dir: pathlib.Path) -> list[pathlib.Path]:
@@ -484,7 +476,7 @@ def promote_derived_bugs(
         # Extract the bug ID stem from the filename (e.g. "BUG-NNNN" from
         # "BUG-NNNN-example-bug.md").
         stem = bug_path.stem  # e.g. "BUG-NNNN-example-bug-slug"
-        id_m = re.match(r'^(BUG-\d{4})\b', stem, re.IGNORECASE)
+        id_m = re.match(r"^(BUG-\d{4})\b", stem, re.IGNORECASE)
         bug_id = id_m.group(1).upper() if id_m else None
 
         if bug_id and bug_id in shipped_bug_ids:
@@ -576,6 +568,7 @@ def emit_post_ship_report(
 # ---------------------------------------------------------------------------
 # High-level promotion driver (used by main and tests)
 # ---------------------------------------------------------------------------
+
 
 def promote_bundle(
     bundle_file: pathlib.Path,
@@ -708,14 +701,12 @@ def promote_bundle(
 
         if not item_paths:
             print(
-                f"  ## Bundled Items section present but contains no item paths"
-                f" in {bundle_file.name}",
+                f"  ## Bundled Items section present but contains no item paths" f" in {bundle_file.name}",
                 flush=True,
             )
         else:
             waiting = (
-                f", {len(needs_operator_items)} needs-operator (left for the operator)"
-                if needs_operator_items else ""
+                f", {len(needs_operator_items)} needs-operator (left for the operator)" if needs_operator_items else ""
             )
             print(
                 f"  Bundled items: {promoted} promoted,"
@@ -741,8 +732,7 @@ def promote_bundle(
 
     if tasks_dir is not None and bugs_dir is not None:
         print(
-            f"\n  [derivation] Running derivation path:"
-            f" tasks_dir={tasks_dir}, bugs_dir={bugs_dir}",
+            f"\n  [derivation] Running derivation path:" f" tasks_dir={tasks_dir}, bugs_dir={bugs_dir}",
             flush=True,
         )
         derive_result = promote_derived_bugs(
@@ -831,7 +821,7 @@ def find_requirement_by_version(
     # Regex for an exact full-line match (liberal whitespace on both sides,
     # letter case ignored).
     version_pattern = re.compile(
-        r'^\s*' + re.escape(target) + r'\s*$',
+        r"^\s*" + re.escape(target) + r"\s*$",
         re.MULTILINE | re.IGNORECASE,
     )
 
@@ -895,8 +885,7 @@ def promote_document_requirement(
     req_file = find_requirement_by_version(req_dir, semver)
     if req_file is None:
         print(
-            f"ERROR: no requirements file found in {req_dir} "
-            f"with ## Target Version: {display_ver}",
+            f"ERROR: no requirements file found in {req_dir} " f"with ## Target Version: {display_ver}",
             file=sys.stderr,
             flush=True,
         )
@@ -934,6 +923,7 @@ def promote_document_requirement(
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     """Run the promotion CLI for a shipped bundle, or for a document requirement.
@@ -1006,16 +996,14 @@ def main() -> int:
         bugs_dir = pathlib.Path(sys.argv[4])
         if not tasks_dir.is_dir():
             print(
-                f"  WARN: tasks_dir not found or not a directory: {tasks_dir}"
-                " — derivation path disabled.",
+                f"  WARN: tasks_dir not found or not a directory: {tasks_dir}" " — derivation path disabled.",
                 flush=True,
             )
             tasks_dir = None
             bugs_dir = None
         elif not bugs_dir.is_dir():
             print(
-                f"  WARN: bugs_dir not found or not a directory: {bugs_dir}"
-                " — derivation path disabled.",
+                f"  WARN: bugs_dir not found or not a directory: {bugs_dir}" " — derivation path disabled.",
                 flush=True,
             )
             tasks_dir = None

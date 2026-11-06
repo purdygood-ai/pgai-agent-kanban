@@ -60,7 +60,6 @@ Project validation:
 from __future__ import annotations
 
 import pathlib
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -85,14 +84,10 @@ _TAIL_MAX = 2000
 
 # The fixed agent-role set.  Validated server-side — client-supplied agent
 # values outside this set are rejected with 422.
-_VALID_AGENTS: frozenset[str] = frozenset(
-    {"pm", "po", "coder", "writer", "tester", "cm", "overwatch"}
-)
+_VALID_AGENTS: frozenset[str] = frozenset({"pm", "po", "coder", "writer", "tester", "cm", "overwatch"})
 
 # Known kinds.  Any other kind value → 404.
-_KNOWN_KINDS: frozenset[str] = frozenset(
-    {"wake", "cm", "agent", "debug", "overwatch", "api-server"}
-)
+_KNOWN_KINDS: frozenset[str] = frozenset({"wake", "cm", "agent", "debug", "overwatch", "api-server"})
 
 # The literal project sentinel for the overwatch global log.
 _GLOBAL_SENTINEL = "global"
@@ -154,7 +149,7 @@ def _tail_file(path: pathlib.Path, n: int) -> tuple[int, str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_tail(raw: Optional[str]) -> int:
+def _parse_tail(raw: str | None) -> int:
     """Parse and validate the ``tail`` query parameter.
 
     Returns the tail line count (integer in [1, 2000]).
@@ -174,25 +169,19 @@ def _parse_tail(raw: Optional[str]) -> int:
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Invalid 'tail' value: {raw!r}. "
-                "tail must be a positive integer (1–2000)."
-            ),
+            detail=(f"Invalid 'tail' value: {raw!r}. " "tail must be a positive integer (1–2000)."),
         )
 
     if n <= 0:
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Invalid 'tail' value: {n!r}. "
-                "tail must be a positive integer (greater than 0)."
-            ),
+            detail=(f"Invalid 'tail' value: {n!r}. " "tail must be a positive integer (greater than 0)."),
         )
 
     return min(n, _TAIL_MAX)
 
 
-def _validate_agent_param(agent: Optional[str]) -> str:
+def _validate_agent_param(agent: str | None) -> str:
     """Validate the ``agent`` query parameter against the fixed agent-role set.
 
     Returns the agent string (lowercased) when valid.
@@ -219,17 +208,14 @@ def _validate_agent_param(agent: Optional[str]) -> str:
     if agent_lower not in _VALID_AGENTS:
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Unknown agent: {agent!r}. "
-                f"Valid agents: {sorted(_VALID_AGENTS)!r}."
-            ),
+            detail=(f"Unknown agent: {agent!r}. " f"Valid agents: {sorted(_VALID_AGENTS)!r}."),
         )
 
     return agent_lower
 
 
 def _validate_project_param(
-    project: Optional[str],
+    project: str | None,
     registered: frozenset[str],
     allow_global: bool = False,
 ) -> str:
@@ -264,10 +250,7 @@ def _validate_project_param(
     if project not in registered:
         raise HTTPException(
             status_code=HTTP_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Unknown project: {project!r}. "
-                "The project parameter must match a registered project name."
-            ),
+            detail=(f"Unknown project: {project!r}. " "The project parameter must match a registered project name."),
         )
 
     return project
@@ -294,9 +277,7 @@ def _resolve_cm_path(kanban_root: pathlib.Path) -> pathlib.Path:
     return kanban_root / "logs" / "cron-cm.log"
 
 
-def _resolve_agent_path(
-    kanban_root: pathlib.Path, project: str, agent: str
-) -> pathlib.Path:
+def _resolve_agent_path(kanban_root: pathlib.Path, project: str, agent: str) -> pathlib.Path:
     """Resolve the per-project agent log path.
 
     Path: <kanban_root>/projects/<project>/logs/agents/<agent>.log
@@ -304,9 +285,7 @@ def _resolve_agent_path(
     return kanban_root / "projects" / project / "logs" / "agents" / f"{agent}.log"
 
 
-def _resolve_debug_path(
-    kanban_root: pathlib.Path, project: str, agent: str
-) -> pathlib.Path:
+def _resolve_debug_path(kanban_root: pathlib.Path, project: str, agent: str) -> pathlib.Path:
     """Resolve the per-project agent debug log path.
 
     Path: <kanban_root>/projects/<project>/logs/debug/<agent>.log
@@ -314,9 +293,7 @@ def _resolve_debug_path(
     return kanban_root / "projects" / project / "logs" / "debug" / f"{agent}.log"
 
 
-def _resolve_overwatch_path(
-    kanban_root: pathlib.Path, project: str
-) -> pathlib.Path:
+def _resolve_overwatch_path(kanban_root: pathlib.Path, project: str) -> pathlib.Path:
     """Resolve the overwatch sweep log path.
 
     When project == "global": <kanban_root>/logs/overwatch.log
@@ -343,16 +320,14 @@ def _resolve_api_server_path(temp_root: pathlib.Path) -> pathlib.Path:
 @router.get(
     "/logs/{kind}",
     summary="Tail a named log file",
-    response_description=(
-        "JSON envelope with exit_code, stdout (tail text), and stderr."
-    ),
+    response_description=("JSON envelope with exit_code, stdout (tail text), and stderr."),
 )
 def get_log_tail(
     kind: str,
     request: Request,
-    agent: Optional[str] = None,
-    project: Optional[str] = None,
-    tail: Optional[str] = None,
+    agent: str | None = None,
+    project: str | None = None,
+    tail: str | None = None,
     warnings: list[str] = Depends(warn_unknown_query_params),
 ) -> JSONResponse:
     """Return the tail of a named log file.

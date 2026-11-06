@@ -51,6 +51,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="cm-release-step3-state-detection")
 
+
 # ---------------------------------------------------------------------------
 # Bash snippet: Step 3 state-detection logic extracted for unit testing
 # ---------------------------------------------------------------------------
@@ -142,43 +143,34 @@ def _init_repo_pair(tmp_path: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]
     # Initial commit so the repo is non-empty (bare repos need at least one ref
     # before branch operations work reliably)
     (local / "README.md").write_text("# test repo\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(local), "config", "user.email", "test@example.com"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(local), "config", "user.name", "Test"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(local), "add", "README.md"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(local), "commit", "-m", "initial"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(local), "push", "origin", "HEAD"],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(local), "config", "user.email", "test@example.com"], check=True, capture_output=True
+    )
+    subprocess.run(["git", "-C", str(local), "config", "user.name", "Test"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "add", "README.md"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "commit", "-m", "initial"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "push", "origin", "HEAD"], check=True, capture_output=True)
 
     return local, origin
 
 
 def _create_rc_branch(local: pathlib.Path, rc_branch: str) -> None:
     """Create a local RC branch and push it to origin."""
-    subprocess.run(["git", "-C", str(local), "checkout", "-b", rc_branch],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "checkout", "-b", rc_branch], check=True, capture_output=True)
     (local / "rc-marker.txt").write_text(f"# {rc_branch}\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(local), "add", "rc-marker.txt"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(local), "commit", "-m", f"open {rc_branch}"],
-                   check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(local), "push", "origin", rc_branch],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "add", "rc-marker.txt"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "commit", "-m", f"open {rc_branch}"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "push", "origin", rc_branch], check=True, capture_output=True)
 
 
 def _delete_origin_rc(local: pathlib.Path, rc_branch: str) -> None:
     """Delete the RC branch on origin (simulates Step 13 running or premature deletion)."""
-    subprocess.run(["git", "-C", str(local), "push", "origin", "--delete", rc_branch],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "push", "origin", "--delete", rc_branch], check=True, capture_output=True)
 
 
 def _create_local_tag(local: pathlib.Path, tag: str) -> None:
     """Create a local tag on the current HEAD (simulates Step 16 tag creation)."""
-    subprocess.run(["git", "-C", str(local), "tag", tag],
-                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(local), "tag", tag], check=True, capture_output=True)
 
 
 def _run_detect(
@@ -188,9 +180,7 @@ def _run_detect(
     release_tag: str,
 ) -> str:
     """Run detect_step3_state() and return its stdout token."""
-    script = _STEP3_SNIPPET + (
-        f"detect_step3_state {local!s} {rc_branch!r} {release_tag!r}"
-    )
+    script = _STEP3_SNIPPET + (f"detect_step3_state {local!s} {rc_branch!r} {release_tag!r}")
     result = run_bash(tmp_path, script, timeout=15)
     return result.stdout.strip()
 
@@ -209,9 +199,7 @@ def test_happy_path_origin_rc_present(tmp_path: pathlib.Path) -> None:
     _create_rc_branch(local, "rc/v0.99.0")
 
     outcome = _run_detect(tmp_path, local, "rc/v0.99.0", "v0.99.0")
-    assert outcome == "origin-present", (
-        f"Expected 'origin-present' when origin RC exists; got {outcome!r}"
-    )
+    assert outcome == "origin-present", f"Expected 'origin-present' when origin RC exists; got {outcome!r}"
 
 
 def test_path_a_tag_exists_skip_repush(tmp_path: pathlib.Path) -> None:
@@ -227,9 +215,9 @@ def test_path_a_tag_exists_skip_repush(tmp_path: pathlib.Path) -> None:
     _create_local_tag(local, "v0.99.0")
 
     outcome = _run_detect(tmp_path, local, "rc/v0.99.0", "v0.99.0")
-    assert outcome == "tag-present-skip", (
-        f"Expected 'tag-present-skip' when origin RC absent and tag present; got {outcome!r}"
-    )
+    assert (
+        outcome == "tag-present-skip"
+    ), f"Expected 'tag-present-skip' when origin RC absent and tag present; got {outcome!r}"
 
 
 def test_path_b_repush_succeeds_when_origin_rc_absent_and_tag_absent(
@@ -249,8 +237,7 @@ def test_path_b_repush_succeeds_when_origin_rc_absent_and_tag_absent(
 
     outcome = _run_detect(tmp_path, local, "rc/v0.99.0", "v0.99.0")
     assert outcome == "repush-ok", (
-        f"Expected 'repush-ok' when origin RC absent, tag absent, local RC present;"
-        f" got {outcome!r}"
+        f"Expected 'repush-ok' when origin RC absent, tag absent, local RC present;" f" got {outcome!r}"
     )
 
 
@@ -269,11 +256,11 @@ def test_path_b_origin_rc_restored_after_repush(tmp_path: pathlib.Path) -> None:
     # Verify the branch is now present on origin
     result = subprocess.run(
         ["git", "-C", str(local), "ls-remote", "--heads", "origin", "rc/v0.99.0"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert result.stdout.strip() != "", (
-        "Expected rc/v0.99.0 to be restored on origin after path B re-push;"
-        " but ls-remote returned empty output."
+        "Expected rc/v0.99.0 to be restored on origin after path B re-push;" " but ls-remote returned empty output."
     )
 
 
@@ -287,6 +274,6 @@ def test_error_when_local_rc_branch_absent(tmp_path: pathlib.Path) -> None:
     # Do not create the RC branch at all
 
     outcome = _run_detect(tmp_path, local, "rc/v0.99.0", "v0.99.0")
-    assert outcome == "error-no-rc-no-tag", (
-        f"Expected 'error-no-rc-no-tag' when local RC branch is absent; got {outcome!r}"
-    )
+    assert (
+        outcome == "error-no-rc-no-tag"
+    ), f"Expected 'error-no-rc-no-tag' when local RC branch is absent; got {outcome!r}"

@@ -92,10 +92,7 @@ def _find_sys_path_dev_tree_violations() -> list[str]:
     scripts_dir = root / "team" / "scripts"
 
     if not scripts_dir.is_dir():
-        raise FileNotFoundError(
-            f"team/scripts/ not found at {scripts_dir}; "
-            "repo root resolution may be wrong."
-        )
+        raise FileNotFoundError(f"team/scripts/ not found at {scripts_dir}; " "repo root resolution may be wrong.")
 
     violations: list[str] = []
 
@@ -173,9 +170,7 @@ def test_sys_path_dev_tree_pattern_detects_synthetic_violation(
 
     # anti-pattern-allowlist: 1 (justification: test reads synthetic temp file it created, not a real scan)
     matching_lines = [
-        line
-        for line in bad_script.read_text(encoding="utf-8").splitlines()
-        if _SYS_PATH_DEV_TREE_PATTERN.search(line)
+        line for line in bad_script.read_text(encoding="utf-8").splitlines() if _SYS_PATH_DEV_TREE_PATTERN.search(line)
     ]
 
     assert len(matching_lines) >= 1, (
@@ -208,9 +203,7 @@ def test_sys_path_dev_tree_pattern_does_not_match_live_only_construction(
 
     # anti-pattern-allowlist: 1 (justification: test reads synthetic temp file it created, not a real scan)
     matching_lines = [
-        line
-        for line in good_script.read_text(encoding="utf-8").splitlines()
-        if _SYS_PATH_DEV_TREE_PATTERN.search(line)
+        line for line in good_script.read_text(encoding="utf-8").splitlines() if _SYS_PATH_DEV_TREE_PATTERN.search(line)
     ]
 
     assert not matching_lines, (
@@ -227,7 +220,7 @@ def test_sys_path_dev_tree_pattern_does_not_match_live_only_construction(
 
 def test_module_imports_from_live_root_when_dev_tree_lacks_it(
     tmp_path: pathlib.Path,
-    monkeypatch: "pytest.MonkeyPatch",  # noqa: F821
+    monkeypatch: pytest.MonkeyPatch,  # noqa: F821
 ) -> None:
     """sys.path built from kanban root only imports status_priority_cap from live root.
 
@@ -241,9 +234,7 @@ def test_module_imports_from_live_root_when_dev_tree_lacks_it(
     """
     # Build a fake dev tree that deliberately lacks the module.
     fake_dev_tree = tmp_path / "fake_dev_tree"
-    (fake_dev_tree / "team" / "pgai_agent_kanban" / "dashboard").mkdir(
-        parents=True, exist_ok=True
-    )
+    (fake_dev_tree / "team" / "pgai_agent_kanban" / "dashboard").mkdir(parents=True, exist_ok=True)
     # No status_priority_cap.py written here — the module is intentionally absent.
     (fake_dev_tree / "team" / "pgai_agent_kanban" / "__init__.py").write_text("")
     (fake_dev_tree / "team" / "pgai_agent_kanban" / "dashboard" / "__init__.py").write_text("")
@@ -280,15 +271,11 @@ def test_module_imports_from_live_root_when_dev_tree_lacks_it(
 
         # Ensure the fake dev tree's team/ is NOT on the path.
         fake_team = str(fake_dev_tree / "team")
-        assert fake_team not in sys.path, (
-            "fake dev-tree team/ must not be on sys.path in this fixture"
-        )
+        assert fake_team not in sys.path, "fake dev-tree team/ must not be on sys.path in this fixture"
 
         mod = importlib.import_module(module_name)
 
-        assert mod.__file__ is not None, (
-            "Imported module has no __file__ — cannot verify import source."
-        )
+        assert mod.__file__ is not None, "Imported module has no __file__ — cannot verify import source."
         assert mod.__file__.startswith(live_kanban_root), (
             f"Module resolved from wrong location.\n"
             f"  Expected prefix: {live_kanban_root!r}\n"
@@ -349,22 +336,26 @@ def test_missing_live_module_raises_module_not_found_error(
     try:
         # Simulate the fixed column-render.sh: single-candidate path — fake live root only.
         # The fake live root has the package skeleton but NOT the target module.
-        sys.path = [str(fake_live_root)] + [
-            p for p in original_path if p not in (str(fake_live_root),)
-        ]
+        sys.path = [str(fake_live_root)] + [p for p in original_path if p not in (str(fake_live_root),)]
 
         # Remove any already-imported pgai_agent_kanban entries that could satisfy
         # the import from the original dev path.
-        parent_keys = [k for k in sys.modules if k in (
-            "pgai_agent_kanban",
-            "pgai_agent_kanban.dashboard",
-        )]
+        parent_keys = [
+            k
+            for k in sys.modules
+            if k
+            in (
+                "pgai_agent_kanban",
+                "pgai_agent_kanban.dashboard",
+            )
+        ]
         saved_parents: dict[str, types.ModuleType] = {}
         for key in parent_keys:
             saved_parents[key] = sys.modules.pop(key)
 
         try:
             import pytest  # noqa: PLC0415
+
             with pytest.raises(
                 (ModuleNotFoundError, ImportError),
                 match=r"status_priority_cap|pgai_agent_kanban",

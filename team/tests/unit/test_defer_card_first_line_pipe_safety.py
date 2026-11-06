@@ -169,9 +169,7 @@ def test_multi_line_reads_first_line_fields_when_output_exceeds_pipe_buffer(
     however far the output runs past the pipe buffer."""
     card_output = _write_card_output(tmp_path, first_line)
     line_out = tmp_path / "multi_line.txt"
-    result = _run(
-        tmp_path, _MULTI_LINE_DRIVER, CARD_OUTPUT=str(card_output), LINE_OUT=str(line_out)
-    )
+    result = _run(tmp_path, _MULTI_LINE_DRIVER, CARD_OUTPUT=str(card_output), LINE_OUT=str(line_out))
 
     assert result.returncode == 0, (
         f"column_render_defer_multi_line exited {result.returncode} under "

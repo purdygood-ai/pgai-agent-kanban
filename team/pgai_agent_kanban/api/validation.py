@@ -236,11 +236,7 @@ def require_component(value: object, field: str) -> str:
     Raises:
         ComponentRefused: *value* is not a single plain name.
     """
-    fault = (
-        f"is not a string (got {type(value).__name__})"
-        if not isinstance(value, str)
-        else _component_fault(value)
-    )
+    fault = f"is not a string (got {type(value).__name__})" if not isinstance(value, str) else _component_fault(value)
     if fault is not None:
         # BLOCK-WORTHY (docs/blocking-site-census.md): an invariant by
         # design -- the value is about to become one path component, glob

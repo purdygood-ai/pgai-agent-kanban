@@ -173,9 +173,7 @@ def test_ship_posture_confirm_remote_example_line_shows_its_default() -> None:
 
 def test_no_line_carries_a_release_version_tag() -> None:
     offenders = [
-        f"{number}: {line}"
-        for number, line in enumerate(_template_lines(), start=1)
-        if _VERSION_TAG_RE.search(line)
+        f"{number}: {line}" for number, line in enumerate(_template_lines(), start=1) if _VERSION_TAG_RE.search(line)
     ]
     assert not offenders, "version tags describe history, not behaviour:\n" + "\n".join(offenders)
 
@@ -217,7 +215,10 @@ def test_models_header_gives_the_resolution_order_and_per_role_examples() -> Non
     text = _TEMPLATE.read_text(encoding="utf-8")
     header_start = text.index("# [models.<provider>]")
     header = text[header_start : text.index("[models.claude]", header_start)]
-    order = [header.index(marker) for marker in ("Model Override", "role's own key", "default key", "provider CLI's own default")]
+    order = [
+        header.index(marker)
+        for marker in ("Model Override", "role's own key", "default key", "provider CLI's own default")
+    ]
     assert order == sorted(order), header
     assert "All keys ship empty" not in text
     claude_comments = "\n".join(_section_lines("models.claude"))
@@ -260,6 +261,6 @@ def test_fresh_install_resolves_the_provider_default_model_for_every_role(
 
     assert result.returncode == 0, f"load_config failed on the template: {result.stderr!r}"
     for role in _ROLES:
-        assert f"{role}={_PROVIDER_DEFAULTS[provider]}" in result.stdout.splitlines(), (
-            f"{provider}: {role} did not resolve to the provider default; stdout: {result.stdout!r}"
-        )
+        assert (
+            f"{role}={_PROVIDER_DEFAULTS[provider]}" in result.stdout.splitlines()
+        ), f"{provider}: {role} did not resolve to the provider default; stdout: {result.stdout!r}"

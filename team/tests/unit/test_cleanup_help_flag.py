@@ -66,8 +66,7 @@ def test_help_flag_exits_zero_and_documents_every_flag(tmp_path: pathlib.Path) -
     )
 
     assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"expected exit 0; got {result.returncode}\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     usage = result.stdout
     for expected in ("--project", "--dry-run", "--trivial-only", "--temp-only", "--help"):
@@ -114,9 +113,7 @@ def test_short_help_flag_behaves_the_same_as_long_form(tmp_path: pathlib.Path) -
         extra_env=_sandbox_env(sandbox),
     )
 
-    assert result.returncode == 0, (
-        f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
-    )
+    assert result.returncode == 0, f"expected exit 0; got {result.returncode}\nstderr: {result.stderr!r}"
     assert "--temp-only" in result.stdout
 
 

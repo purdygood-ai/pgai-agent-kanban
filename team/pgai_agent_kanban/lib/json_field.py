@@ -37,7 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any, Optional
+from typing import Any
 
 __all__ = ["field_text"]
 
@@ -78,7 +78,7 @@ def field_text(
     return value if isinstance(value, str) else str(value)
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     parser = argparse.ArgumentParser(
         prog="python3 -m pgai_agent_kanban.lib.json_field",
@@ -92,7 +92,8 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--null", default="None", help="Text printed for a null value (default: None).")
     parser.add_argument("--json", action="store_true", help="Print the value as compact JSON.")
     parser.add_argument(
-        "--string-only", action="store_true",
+        "--string-only",
+        action="store_true",
         help="Print the value only when it is a non-blank string; otherwise print the --default text.",
     )
     args = parser.parse_args(argv)
@@ -110,7 +111,11 @@ def main(argv: Optional[list] = None) -> int:
             raise ValueError("KEY is required without --length")
         else:
             text = field_text(
-                document, args.key, default=args.default, null=args.null, as_json=args.json,
+                document,
+                args.key,
+                default=args.default,
+                null=args.null,
+                as_json=args.json,
                 string_only=args.string_only,
             )
     except (OSError, ValueError, TypeError) as exc:

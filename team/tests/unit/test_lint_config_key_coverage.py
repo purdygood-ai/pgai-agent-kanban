@@ -102,8 +102,9 @@ def _write(path: pathlib.Path, text: str) -> pathlib.Path:
     return path
 
 
-def _tree(tmp_path: pathlib.Path, *, example: str = _EXAMPLE, registry: str = _REGISTRY,
-          extra: "dict[str, str] | None" = None) -> pathlib.Path:
+def _tree(
+    tmp_path: pathlib.Path, *, example: str = _EXAMPLE, registry: str = _REGISTRY, extra: dict[str, str] | None = None
+) -> pathlib.Path:
     """Build a minimal repository tree with the three key sources."""
     root = tmp_path / "repo"
     _write(root / "kanban.cfg_example", example)
@@ -122,11 +123,14 @@ def _diagnostic(result: subprocess.CompletedProcess) -> str:
 def _run_cli(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(_LINT_SCRIPT), "--root", str(root), *args],
-        capture_output=True, text=True, timeout=120, cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(root),
     )
 
 
-def _kinds(root: pathlib.Path) -> "set[tuple[str, str, str]]":
+def _kinds(root: pathlib.Path) -> set[tuple[str, str, str]]:
     return {(f.kind, f.section, f.key) for f in lint.run(root).findings}
 
 
@@ -140,12 +144,14 @@ def test_consistent_tree_reports_zero_findings_and_exits_zero(tmp_path: pathlib.
 
 
 def test_read_key_absent_from_example_is_reported_at_its_read_site(tmp_path: pathlib.Path) -> None:
-    root = _tree(tmp_path, extra={
-        "team/scripts/extra.sh": (
-            "#!/usr/bin/env bash\n"
-            'rows="$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard rows_per_column 21)"\n'
-        ),
-    })
+    root = _tree(
+        tmp_path,
+        extra={
+            "team/scripts/extra.sh": (
+                "#!/usr/bin/env bash\n" 'rows="$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard rows_per_column 21)"\n'
+            ),
+        },
+    )
     findings_file = tmp_path / "out" / "findings.json"
     result = _run_cli(root, "--findings-file", str(findings_file))
     assert result.returncode == 0, _diagnostic(result)
@@ -219,9 +225,13 @@ def test_wrapper_key_resolves_through_literal_callers(tmp_path: pathlib.Path) ->
 def test_registry_array_is_not_evidence_for_a_wholly_variable_read(tmp_path: pathlib.Path) -> None:
     # A top-level "$key" read counts a key only when the file's code names
     # it; the registry array naming wake:max_tasks_per_wake does not.
-    registry = _REGISTRY.replace(
-        '    export MAX_TASKS_PER_WAKE="$(read_ini "$cfg" wake max_tasks_per_wake 5)"\n', "",
-    ) + 'value="$(read_ini "$cfg" wake "$key" "")"\n'
+    registry = (
+        _REGISTRY.replace(
+            '    export MAX_TASKS_PER_WAKE="$(read_ini "$cfg" wake max_tasks_per_wake 5)"\n',
+            "",
+        )
+        + 'value="$(read_ini "$cfg" wake "$key" "")"\n'
+    )
     assert ("registry_not_read", "wake", "max_tasks_per_wake") in _kinds(_tree(tmp_path, registry=registry))
     named = registry + "key=max_tasks_per_wake\n"
     assert ("registry_not_read", "wake", "max_tasks_per_wake") not in _kinds(_tree(tmp_path / "b", registry=named))
@@ -272,24 +282,21 @@ def test_python_module_reading_kanban_cfg_marks_its_keys_read(tmp_path: pathlib.
         '    parser = ini.load(kanban_root / "kanban.cfg")\n'
         '    return parser.get(_SECTION, "port")\n'
     )
-    root = _tree(tmp_path, example=example, registry=registry,
-                 extra={"team/pgai_agent_kanban/api/config.py": module})
+    root = _tree(tmp_path, example=example, registry=registry, extra={"team/pgai_agent_kanban/api/config.py": module})
     assert _kinds(root) == set()
     assert ("api", "port") in lint.run(root).kanban_read_keys
     # A kanban.cfg literal elsewhere in the module does not make an unrelated
     # parser a kanban.cfg reader: module-wide mentions do not count.
     unrelated = module.replace('ini.load(kanban_root / "kanban.cfg")', 'ini.load(kanban_root / "settings.ini")')
     unrelated += 'CFG = "kanban.cfg"\n'
-    root_b = _tree(tmp_path / "b", example=example, registry=registry,
-                   extra={"team/pgai_agent_kanban/api/config.py": unrelated})
+    root_b = _tree(
+        tmp_path / "b", example=example, registry=registry, extra={"team/pgai_agent_kanban/api/config.py": unrelated}
+    )
     assert ("example_not_read", "api", "port") in _kinds(root_b)
 
 
 def test_test_trees_are_not_scanned(tmp_path: pathlib.Path) -> None:
-    fixture = (
-        "#!/usr/bin/env bash\n"
-        'x="$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard fixture_only 1)"\n'
-    )
+    fixture = "#!/usr/bin/env bash\n" 'x="$(read_ini "$KANBAN_ROOT/kanban.cfg" dashboard fixture_only 1)"\n'
     root = _tree(tmp_path, extra={"team/tests/unit/fixture.sh": fixture})
     assert _kinds(root) == set()
 
@@ -300,14 +307,14 @@ def test_missing_example_narrates_and_exits_zero(tmp_path: pathlib.Path) -> None
     assert "no kanban.cfg_example" in result.stdout, _diagnostic(result)
 
 
-def _comment_block(lines: "list[str]", key_line: int) -> "list[str]":
+def _comment_block(lines: list[str], key_line: int) -> list[str]:
     """Comment lines documenting the key on 1-based *key_line*.
 
     Walks up from the key over blank lines and sibling key lines (a group of
     keys sharing one comment), then collects the contiguous comment run,
     stopping at the section header.
     """
-    block: "list[str]" = []
+    block: list[str] = []
     index = key_line - 2
     while index >= 0:
         text = lines[index]
@@ -339,7 +346,11 @@ def test_fresh_install_seeds_every_read_key_with_a_comment_naming_its_default(tm
     (tmp_path / "tmp").mkdir()
     result = subprocess.run(
         ["bash", str(_INSTALL_SH), "--force", "--no-system-cron", "--stamp-version", "v0.0.0-sandbox-test"],
-        capture_output=True, text=True, timeout=300, env=env, cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+        cwd=str(tmp_path),
     )
     seeded = root / "kanban.cfg"
     assert result.returncode == 0 and seeded.is_file(), _diagnostic(result)
@@ -353,7 +364,8 @@ def test_fresh_install_seeds_every_read_key_with_a_comment_naming_its_default(tm
     missing = sorted(f"[{s}] {k}" for s, k in read_keys if (s, k) not in scaffolded)
     assert not missing, f"keys read from kanban.cfg but absent from the seeded {seeded}: {missing}"
     undocumented = sorted(
-        f"[{s}] {k} (line {scaffolded[(s, k)]})" for s, k in read_keys
+        f"[{s}] {k} (line {scaffolded[(s, k)]})"
+        for s, k in read_keys
         if not any("default" in text.lower() for text in _comment_block(lines, scaffolded[(s, k)]))
     )
     assert not undocumented, f"keys whose comment block in the seeded kanban.cfg names no default: {undocumented}"
@@ -394,8 +406,13 @@ def render_project_cfg(*, name, generated_by, **_values):
 
 
 def _project_tree(
-    tmp_path: pathlib.Path, *, template: str, reader: str, max_patch_default: str = "21",
-    generator: "str | None" = None, extra: "dict[str, str] | None" = None,
+    tmp_path: pathlib.Path,
+    *,
+    template: str,
+    reader: str,
+    max_patch_default: str = "21",
+    generator: str | None = None,
+    extra: dict[str, str] | None = None,
 ) -> pathlib.Path:
     """The kanban.cfg fixture tree plus a project.cfg template, its registry and *reader*."""
     files = {
@@ -411,7 +428,7 @@ def _project_tree(
     return _tree(tmp_path, extra=files)
 
 
-def _cli_findings(root: pathlib.Path, tmp_path: pathlib.Path) -> "list[dict]":
+def _cli_findings(root: pathlib.Path, tmp_path: pathlib.Path) -> list[dict]:
     """Run the CLI with --findings-file; assert exit 0; return the findings."""
     findings_file = tmp_path / "cli-out" / "findings.json"
     result = _run_cli(root, "--findings-file", str(findings_file))
@@ -421,7 +438,7 @@ def _cli_findings(root: pathlib.Path, tmp_path: pathlib.Path) -> "list[dict]":
     return findings
 
 
-def _entries(findings: "list[dict]") -> "list[tuple[str, str]]":
+def _entries(findings: list[dict]) -> list[tuple[str, str]]:
     return [(f["kind"], f["key"]) for f in findings]
 
 
@@ -430,7 +447,9 @@ _WIDGET_TEMPLATE = "[project]\n# widget: the widget name.\n# Default: empty\nwid
 
 def test_project_key_absent_from_the_create_project_output_is_reported(tmp_path: pathlib.Path) -> None:
     root = _project_tree(
-        tmp_path, template=_WIDGET_TEMPLATE, generator=_GENERATOR,
+        tmp_path,
+        template=_WIDGET_TEMPLATE,
+        generator=_GENERATOR,
         reader='name="$(_pp_read_cfg_key "$cfg_file" project widget "")"\n',
     )
     findings = _cli_findings(root, tmp_path)
@@ -449,7 +468,9 @@ def test_project_key_absent_from_the_create_project_output_is_reported(tmp_path:
         "    return (pathlib.Path(__file__).resolve().parents[2] / 'config' / 'project.cfg_example').read_text()",
     )
     root_b = _project_tree(
-        tmp_path / "b", template=_WIDGET_TEMPLATE, generator=renders_template,
+        tmp_path / "b",
+        template=_WIDGET_TEMPLATE,
+        generator=renders_template,
         reader='name="$(_pp_read_cfg_key "$cfg_file" project widget "")"\n',
     )
     assert _cli_findings(root_b, tmp_path / "b") == []
@@ -457,7 +478,8 @@ def test_project_key_absent_from_the_create_project_output_is_reported(tmp_path:
 
 def test_project_key_absent_from_the_template_is_reported(tmp_path: pathlib.Path) -> None:
     root = _project_tree(
-        tmp_path, template="[project]\n",
+        tmp_path,
+        template="[project]\n",
         reader='name="$(_pp_read_cfg_key "$cfg_file" project widget "")"\n',
     )
     assert _entries(_cli_findings(root, tmp_path)) == [("project_cfg_read_not_scaffolded", "widget")]
@@ -482,7 +504,9 @@ def test_stated_default_disagreeing_with_the_registry_is_reported(tmp_path: path
 def test_key_with_no_stated_default_is_reported(tmp_path: pathlib.Path) -> None:
     template = "[project]\n# widget: the widget name.\nwidget =\n"
     root = _project_tree(
-        tmp_path, template=template, reader='name="$(_pp_read_cfg_key "$cfg_file" project widget "")"\n',
+        tmp_path,
+        template=template,
+        reader='name="$(_pp_read_cfg_key "$cfg_file" project widget "")"\n',
     )
     assert _entries(_cli_findings(root, tmp_path)) == [("missing_default", "widget")]
 
@@ -519,7 +543,9 @@ def test_key_read_only_into_an_export_nothing_reads_is_reported(tmp_path: pathli
     assert _entries(findings) == [("read_but_unconsumed", "widget")], findings
     assert "PP_widget" in findings[0]["summary"], findings[0]
     consumed = _project_tree(
-        tmp_path / "b", template=_WIDGET_TEMPLATE, reader=reader,
+        tmp_path / "b",
+        template=_WIDGET_TEMPLATE,
+        reader=reader,
         extra={"team/scripts/widget_user.sh": '#!/usr/bin/env bash\necho "${PP_widget}"\n'},
     )
     assert _cli_findings(consumed, tmp_path / "b") == []
@@ -536,14 +562,16 @@ def test_python_function_receiving_the_cfg_path_as_a_parameter_counts_as_a_read(
         "def read_port(cfg_path):\n"
         '    return ini.get_value(cfg_path, "api", "port")\n'
     )
-    root = _tree(tmp_path, example=_API_EXAMPLE, registry=_API_REGISTRY,
-                 extra={"team/pgai_agent_kanban/api/port.py": module})
+    root = _tree(
+        tmp_path, example=_API_EXAMPLE, registry=_API_REGISTRY, extra={"team/pgai_agent_kanban/api/port.py": module}
+    )
     result = lint.run(root)
     assert {(f.kind, f.section, f.key) for f in result.findings} == set()
     assert ("api", "port") in result.read_keys
     # Without the reader the key is reported unread, so the parameter read is what counted.
-    assert ("example_not_read", "api", "port") in _kinds(_tree(tmp_path / "b", example=_API_EXAMPLE,
-                                                              registry=_API_REGISTRY))
+    assert ("example_not_read", "api", "port") in _kinds(
+        _tree(tmp_path / "b", example=_API_EXAMPLE, registry=_API_REGISTRY)
+    )
 
 
 def test_module_naming_kanban_cfg_but_reading_project_cfg_is_not_a_kanban_cfg_read(tmp_path: pathlib.Path) -> None:
@@ -554,8 +582,9 @@ def test_module_naming_kanban_cfg_but_reading_project_cfg_is_not_a_kanban_cfg_re
         "def project_port(project_root):\n"
         '    return ini.get_value(project_root / "project.cfg", "api", "port")\n'
     )
-    root = _tree(tmp_path, example=_API_EXAMPLE, registry=_API_REGISTRY,
-                 extra={"team/pgai_agent_kanban/api/port.py": module})
+    root = _tree(
+        tmp_path, example=_API_EXAMPLE, registry=_API_REGISTRY, extra={"team/pgai_agent_kanban/api/port.py": module}
+    )
     result = lint.run(root)
     assert ("api", "port") not in result.kanban_read_keys
     assert ("api", "port") in (result.project_read_keys or set())
@@ -572,8 +601,9 @@ def test_python_tiered_reader_reads_both_files(tmp_path: pathlib.Path) -> None:
         "        if raw:\n"
         "            return raw\n"
     )
-    root = _tree(tmp_path, example=_API_EXAMPLE, registry=_API_REGISTRY,
-                 extra={"team/pgai_agent_kanban/api/port.py": module})
+    root = _tree(
+        tmp_path, example=_API_EXAMPLE, registry=_API_REGISTRY, extra={"team/pgai_agent_kanban/api/port.py": module}
+    )
     result = lint.run(root)
     assert ("api", "port") in result.kanban_read_keys
     assert ("api", "port") in (result.project_read_keys or set())
@@ -597,13 +627,18 @@ _SEC_REGISTRY = _REGISTRY.replace("paths:old_spelling\n", "paths:old_spelling se
 _SEC_TEMPLATE = "[sec]\n# A tunable. Default: 3\n# key = 3\n"
 
 
-def _sec_tree(tmp_path: pathlib.Path, *, reader: str = "", extra: "dict[str, str] | None" = None) -> pathlib.Path:
+def _sec_tree(tmp_path: pathlib.Path, *, reader: str = "", extra: dict[str, str] | None = None) -> pathlib.Path:
     """The project.cfg fixture tree with [sec] key scaffolded in both templates and registered."""
-    return _project_tree(tmp_path, template=_SEC_TEMPLATE, reader=reader, extra={
-        "kanban.cfg_example": _SEC_EXAMPLE,
-        "team/scripts/lib/config_loader.sh": _SEC_REGISTRY,
-        **(extra or {}),
-    })
+    return _project_tree(
+        tmp_path,
+        template=_SEC_TEMPLATE,
+        reader=reader,
+        extra={
+            "kanban.cfg_example": _SEC_EXAMPLE,
+            "team/scripts/lib/config_loader.sh": _SEC_REGISTRY,
+            **(extra or {}),
+        },
+    )
 
 
 def test_tiered_resolver_call_reads_both_files(tmp_path: pathlib.Path) -> None:
@@ -661,8 +696,9 @@ def test_tiered_resolver_options_keywords_and_root_only_calls(tmp_path: pathlib.
 def test_key_read_only_into_an_export_through_the_tiered_resolver_is_reported(tmp_path: pathlib.Path) -> None:
     reader = 'export SEC_KEY="$(pp_resolve_tiered_cfg_value "$root" "$proj" sec key 3)"\n'
     assert ("read_but_unconsumed", "sec", "key") in _kinds(_sec_tree(tmp_path, reader=reader))
-    consumed = _sec_tree(tmp_path / "b", reader=reader,
-                         extra={"team/scripts/sec_user.sh": '#!/usr/bin/env bash\necho "${SEC_KEY}"\n'})
+    consumed = _sec_tree(
+        tmp_path / "b", reader=reader, extra={"team/scripts/sec_user.sh": '#!/usr/bin/env bash\necho "${SEC_KEY}"\n'}
+    )
     assert _kinds(consumed) == set()
 
 
@@ -717,7 +753,8 @@ def test_python_helper_key_no_caller_resolves_is_not_a_read(tmp_path: pathlib.Pa
         '    return _tiered(root, proj, "k" + "ey")\n',
     )
     uncalled = _HELPER_READER.replace(
-        "    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}\n", "    return None\n",
+        "    return {spec.name: _tiered(root, proj, spec.cfg_key) for spec in ROWS}\n",
+        "    return None\n",
     )
     for label, module in (("comprehension", _HELPER_READER), ("computed", computed), ("uncalled", uncalled)):
         root = _sec_tree(tmp_path / label, extra={"team/pgai_agent_kanban/helper.py": module})

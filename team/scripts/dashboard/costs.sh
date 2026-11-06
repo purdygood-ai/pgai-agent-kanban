@@ -10,8 +10,9 @@
 #
 # Converts tokens to dollar costs using team/scripts/lib/token_pricing.json.
 #
-# Designed to run under `watch -t -c -n $REFRESH_INTERVAL costs.sh`
-# in a tmux Costs window created by dashboard/create.sh.
+# Run it directly for a one-shot render, or keep it refreshed under
+# `cadence-loop.sh --interval $REFRESH_INTERVAL -- costs.sh` in a pane of
+# your own. dashboard/create.sh does not launch it in any dashboard window.
 #
 # Usage:
 #   costs.sh [--kanban-root <path>] [--no-color]
@@ -30,13 +31,18 @@
 # Exits 0 always; renders friendly placeholders on missing data.
 
 set -euo pipefail
+# -h/--help prints the header comment above and exits 0 before anything
+# else runs: no kanban root is resolved and no argument is read as data.
+# shellcheck source=../lib/header_help.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/header_help.sh"
+header_help_exit_if_requested "${BASH_SOURCE[0]}" "$@"
 # shellcheck source=../lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/env_bootstrap.sh"
 
 # ---------------------------------------------------------------------------
 # Resolve script directory
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -53,12 +59,6 @@ while [[ $# -gt 0 ]]; do
     --no-color)
       NO_COLOR_ARG=true
       shift
-      ;;
-    -h|--help)
-      # shellcheck source=../lib/header_help.sh
-      source "$(dirname "${BASH_SOURCE[0]}")/../lib/header_help.sh"
-      header_help_print "${BASH_SOURCE[0]}"
-      exit 0
       ;;
     *)
       echo "ERROR: Unknown argument: $1" >&2

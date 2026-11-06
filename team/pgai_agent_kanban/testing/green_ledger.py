@@ -49,8 +49,7 @@ import json
 import os
 import pathlib
 import sys
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 # Run by file path, this module has no parent package and only its own
 # directory is on sys.path: put the package root this file sits in first,
@@ -88,9 +87,7 @@ def _parse_line(line: str) -> object:
         return None
 
 
-def reuse_verdict(
-    path: str, commit: str, suite: str, selection: str, findings_sha: str
-) -> tuple:
+def reuse_verdict(path: str, commit: str, suite: str, selection: str, findings_sha: str) -> tuple:
     """Decide whether the ledger at *path* holds a green run this run may reuse.
 
     The most recent record whose ``commit`` and ``suite`` equal *commit* and
@@ -124,13 +121,12 @@ def reuse_verdict(
             return "corrupt", f"ledger {path} line {number} is not a ledger record"
         records.append(record)
     matching = [
-        r for r in records
-        if r["commit"] == commit and r["suite"] == suite and r.get("selection", "") == selection
+        r for r in records if r["commit"] == commit and r["suite"] == suite and r.get("selection", "") == selection
     ]
     if not matching:
         return (
             "norecord",
-            f"no recorded {suite} run at commit {commit[:12]} with marker selection \"{selection}\"",
+            f'no recorded {suite} run at commit {commit[:12]} with marker selection "{selection}"',
         )
     last = matching[-1]
     recorded_exit = last["exit"]
@@ -171,10 +167,10 @@ def append_record(
     commit: str,
     suite: str,
     selection: str,
-    exit_code: "int | str",
+    exit_code: int | str,
     findings_sha: str,
     tree_clean: bool,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> str:
     """Append one run's record to the ledger at *path* and return a note.
 
@@ -197,7 +193,7 @@ def append_record(
     if os.path.exists(path) and _ledger_is_malformed(path):
         os.replace(path, path + ".malformed")
         note = f"; the malformed ledger was moved aside to {path}.malformed"
-    stamp = now if now is not None else datetime.now(timezone.utc)
+    stamp = now if now is not None else datetime.now(UTC)
     record = {
         "recorded_at": stamp.isoformat(timespec="seconds"),
         "commit": commit,
@@ -217,9 +213,7 @@ def append_record(
 
 
 def _cmd_verdict(args: argparse.Namespace) -> int:
-    verdict, detail = reuse_verdict(
-        args.ledger, args.commit, args.suite, args.selection, args.findings_sha
-    )
+    verdict, detail = reuse_verdict(args.ledger, args.commit, args.suite, args.selection, args.findings_sha)
     print(f"{verdict}\t{detail}")
     return 0
 

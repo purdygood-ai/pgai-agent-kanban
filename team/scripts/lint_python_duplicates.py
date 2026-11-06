@@ -206,9 +206,7 @@ OWNER_OF_FAMILY[STATE_FAMILY] = STATE_OWNER
 _DENY_BY_BASE: dict[str, DenyName] = {d.name.lstrip("_"): d for d in DENY_NAMES}
 
 # `re` module functions whose first argument (or pattern=) is a regex.
-_RE_FUNCS = frozenset(
-    {"compile", "search", "match", "fullmatch", "sub", "subn", "findall", "finditer", "split"}
-)
+_RE_FUNCS = frozenset({"compile", "search", "match", "fullmatch", "sub", "subn", "findall", "finditer", "split"})
 
 # A `## State` heading inside a string: `##`, then any run of literal spaces,
 # tabs, or regex whitespace tokens (\s, [ \t], quantifiers), then `State` as a
@@ -423,18 +421,14 @@ class _FileVisitor(ast.NodeVisitor):
 
     def _is_re_call(self, func: ast.expr) -> bool:
         if isinstance(func, ast.Attribute) and func.attr in _RE_FUNCS:
-            return isinstance(func.value, ast.Name) and (
-                func.value.id in self.re_aliases or func.value.id == "re"
-            )
+            return isinstance(func.value, ast.Name) and (func.value.id in self.re_aliases or func.value.id == "re")
         if isinstance(func, ast.Name):
             return func.id in self.re_func_names
         return False
 
     def visit_Call(self, node: ast.Call) -> None:
         if self._is_configparser_call(node.func) and self.rel != INI_OWNER:
-            self.raw.append(
-                RawFinding(INI_FAMILY, self.rel, self._symbol(), node.lineno, ast.unparse(node.func))
-            )
+            self.raw.append(RawFinding(INI_FAMILY, self.rel, self._symbol(), node.lineno, ast.unparse(node.func)))
         if self._is_re_call(node.func):
             pattern = node.args[0] if node.args else None
             for kw in node.keywords:
@@ -480,6 +474,7 @@ def iter_scan_files(scan_root: Path) -> list[Path]:
 
 class ScanResult(NamedTuple):
     """One scan's totals: files scanned, raw findings, duplicate groups found, and files that failed to parse."""
+
     files: int
     raw: list[RawFinding]
     dup_groups: int
@@ -627,15 +622,9 @@ def _describe(r: RawFinding) -> str:
     if r.family == DUP_FAMILY:
         return f"{r.file}:{r.line} {r.symbol} has the same normalised body as {r.detail}"
     if r.family == INI_FAMILY:
-        return (
-            f"{r.file}:{r.line} instantiates {r.detail}() in {r.symbol}; INI parsers are "
-            f"created only in {owner}"
-        )
+        return f"{r.file}:{r.line} instantiates {r.detail}() in {r.symbol}; INI parsers are " f"created only in {owner}"
     if r.family == STATE_FAMILY:
-        return (
-            f"{r.file}:{r.line} carries a '## State' regex in {r.symbol}; status.md is read "
-            f"only through {owner}"
-        )
+        return f"{r.file}:{r.line} carries a '## State' regex in {r.symbol}; status.md is read " f"only through {owner}"
     return f"{r.file}:{r.line} defines {r.symbol}; this helper may be defined only in {owner}"
 
 
@@ -664,9 +653,7 @@ def compare(
         entry = allowlist.get(key)
         if entry is None:
             for r in items:
-                findings.append(
-                    Finding("unlisted", fam, path, r.line, f"[{fam}] {_describe(r)}", _remedy(fam))
-                )
+                findings.append(Finding("unlisted", fam, path, r.line, f"[{fam}] {_describe(r)}", _remedy(fam)))
         elif n > entry[0]:
             findings.append(
                 Finding(
@@ -738,21 +725,45 @@ def _build_parser() -> argparse.ArgumentParser:
             "Exit codes:\n  0  Always (findings are narrated, never fatal).\n"
         ),
     )
-    parser.add_argument("--root", metavar="PATH", default=None,
-                        help="Repository root (default: two levels above this script's directory).")
-    parser.add_argument("--scan-root", metavar="PATH", action="append", default=None,
-                        help=("Directory to scan, relative to --root or absolute; repeatable "
-                              f"(default: {', '.join(DEFAULT_SCAN_ROOTS)})."))
-    parser.add_argument("--allowlist", metavar="PATH", default=DEFAULT_ALLOWLIST,
-                        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).")
-    parser.add_argument("--min-nodes", metavar="N", type=int, default=DEFAULT_MIN_NODES,
-                        help=f"Smallest body in AST nodes considered for duplicate-body (default: {DEFAULT_MIN_NODES}).")
-    parser.add_argument("--findings-file", metavar="PATH", default=None,
-                        help="Write ratchet findings as a JSON array to PATH (always written).")
-    parser.add_argument("--emit-allowlist", action="store_true",
-                        help="Print measured keys in allowlist format and exit 0.")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print every raw finding, allowlisted or not.")
+    parser.add_argument(
+        "--root",
+        metavar="PATH",
+        default=None,
+        help="Repository root (default: two levels above this script's directory).",
+    )
+    parser.add_argument(
+        "--scan-root",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help=(
+            "Directory to scan, relative to --root or absolute; repeatable "
+            f"(default: {', '.join(DEFAULT_SCAN_ROOTS)})."
+        ),
+    )
+    parser.add_argument(
+        "--allowlist",
+        metavar="PATH",
+        default=DEFAULT_ALLOWLIST,
+        help=f"Allowlist file, relative to --root or absolute (default: {DEFAULT_ALLOWLIST}).",
+    )
+    parser.add_argument(
+        "--min-nodes",
+        metavar="N",
+        type=int,
+        default=DEFAULT_MIN_NODES,
+        help=f"Smallest body in AST nodes considered for duplicate-body (default: {DEFAULT_MIN_NODES}).",
+    )
+    parser.add_argument(
+        "--findings-file",
+        metavar="PATH",
+        default=None,
+        help="Write ratchet findings as a JSON array to PATH (always written).",
+    )
+    parser.add_argument(
+        "--emit-allowlist", action="store_true", help="Print measured keys in allowlist format and exit 0."
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print every raw finding, allowlisted or not.")
     return parser
 
 
@@ -826,8 +837,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if findings:
         message = (
-            f"{len(findings)} duplicated-Python finding(s) against {allowlist_rel}; "
-            "see the lines printed above"
+            f"{len(findings)} duplicated-Python finding(s) against {allowlist_rel}; " "see the lines printed above"
         )
         remedy = (
             "replace each new copy with an import from its owning module, tighten any "

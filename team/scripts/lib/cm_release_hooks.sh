@@ -15,7 +15,7 @@
 # a path wins.
 #
 # Hook execution is delegated to _run_release_hook (defined in
-# lib/cm/release_finalize.sh for release.sh's callers) and to
+# lib/cm/release_hook_runner.sh for release.sh's callers) and to
 # pgai_agent_kanban/cm/ship.py's _run_hook for ship-rc.  This library does
 # NOT execute hooks itself; it resolves, prints, and enforces.
 #

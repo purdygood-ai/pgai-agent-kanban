@@ -70,14 +70,20 @@ def _run_discovery(root: pathlib.Path) -> subprocess.CompletedProcess:
         echo "DISCOVERY_STATUS=${{DISCOVERY_LAST_STATUS}}"
     """)
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=_env(root), cwd=str(root), timeout=60,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=_env(root),
+        cwd=str(root),
+        timeout=60,
     )
 
 
 def _bug(project_root: pathlib.Path, name: str, status: str = "open", symptom: str = "synthetic") -> pathlib.Path:
     path = project_root / "bugs" / name
-    path.write_text(f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\n{symptom}\n",
-                    encoding="utf-8")
+    path.write_text(
+        f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\n{symptom}\n", encoding="utf-8"
+    )
     return path
 
 
@@ -103,8 +109,13 @@ def _snapshot(path: pathlib.Path) -> dict[str, bytes]:
 
 def test_five_ordinal_slug_duplicates_collapse_to_the_lowest_numbered_bug(tmp_path) -> None:
     root, project_root = _sandbox(tmp_path)
-    names = ["BUG-9301-lock-leak.md", "BUG-9302-lock-leak-again.md", "BUG-9303-second-lock-leak.md",
-             "BUG-9304-lock-leak-3.md", "BUG-9305-lock-leak-redux.md"]
+    names = [
+        "BUG-9301-lock-leak.md",
+        "BUG-9302-lock-leak-again.md",
+        "BUG-9303-second-lock-leak.md",
+        "BUG-9304-lock-leak-3.md",
+        "BUG-9305-lock-leak-redux.md",
+    ]
     kept, *duplicates = [_bug(project_root, name) for name in names]
 
     first = _run_discovery(root)
@@ -151,8 +162,11 @@ def test_a_running_member_is_kept_and_only_non_running_members_close(tmp_path) -
 def test_distinct_bugs_mentioning_each_other_in_passing_are_left_alone(tmp_path) -> None:
     root, project_root = _sandbox(tmp_path)
     first_bug = _bug(project_root, "BUG-9321-port-clash.md")
-    second_bug = _bug(project_root, "BUG-9322-socket-timeout.md",
-                      symptom="The socket times out, as BUG-9321 did before it was diagnosed.")
+    second_bug = _bug(
+        project_root,
+        "BUG-9322-socket-timeout.md",
+        symptom="The socket times out, as BUG-9321 did before it was diagnosed.",
+    )
 
     result = _run_discovery(root)
 

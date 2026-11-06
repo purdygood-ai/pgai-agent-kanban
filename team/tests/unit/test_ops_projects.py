@@ -120,27 +120,60 @@ _SCENARIOS: dict[str, tuple[dict, str, list[str], dict]] = {
     "create-ini-dry": ({"projects.cfg": _INI_CFG}, "create-project.sh", ["--project", "alpha", "--dry-run"], {}),
     "create-colon-dry": ({"projects.cfg": _COLON_CFG}, "create-project.sh", ["--project", "alpha", "--dry-run"], {}),
     "create-colon-nomig-dry": (
-        {"projects.cfg": _COLON_CFG}, "create-project.sh", ["--project", "alpha", "--dry-run", "--no-migrate"], {},
+        {"projects.cfg": _COLON_CFG},
+        "create-project.sh",
+        ["--project", "alpha", "--dry-run", "--no-migrate"],
+        {},
     ),
     "create-ini": ({"projects.cfg": _INI_CFG}, "create-project.sh", ["--project", "alpha"], {}),
     "create-ini-nocolor": ({"projects.cfg": _INI_NOCOLOR}, "create-project.sh", ["--project", "alpha"], {}),
     "create-colon": ({"projects.cfg": _COLON_CFG}, "create-project.sh", ["--project", "alpha"], {}),
-    "create-colon-nomig": ({"projects.cfg": _COLON_CFG}, "create-project.sh", ["--project", "alpha", "--no-migrate"], {}),
+    "create-colon-nomig": (
+        {"projects.cfg": _COLON_CFG},
+        "create-project.sh",
+        ["--project", "alpha", "--no-migrate"],
+        {},
+    ),
     "create-all-flags": (
-        {"projects.cfg": _INI_CFG}, "create-project.sh",
-        ["--project", "beta", "--workflow-type", "document", "--max-patch", "3", "--max-minor", "4",
-         "--max-major", "1", "--git-remote", "up", "--priority", "7", "--color", "#123456",
-         "--dev-tree", "/nonexistent/x", "--git-repo", "git@example:x.git"],
+        {"projects.cfg": _INI_CFG},
+        "create-project.sh",
+        [
+            "--project",
+            "beta",
+            "--workflow-type",
+            "document",
+            "--max-patch",
+            "3",
+            "--max-minor",
+            "4",
+            "--max-major",
+            "1",
+            "--git-remote",
+            "up",
+            "--priority",
+            "7",
+            "--color",
+            "#123456",
+            "--dev-tree",
+            "/nonexistent/x",
+            "--git-repo",
+            "git@example:x.git",
+        ],
         {},
     ),
     "create-aliases": (
-        {}, "create-project.sh",
-        ["--project", "beta", "--dev-tree", "/a", "--dev-tree-path", "/tmp", "--git-repo-url", "u"], {},
+        {},
+        "create-project.sh",
+        ["--project", "beta", "--dev-tree", "/a", "--dev-tree-path", "/tmp", "--git-repo-url", "u"],
+        {},
     ),
     "create-gitrepo-only": ({}, "create-project.sh", ["--project", "beta", "--git-repo", "u"], {}),
     "create-testing-only": ({}, "create-project.sh", ["--project", "gamma", "--workflow-type", "testing-only"], {}),
     "create-document-dry": (
-        {}, "create-project.sh", ["--project", "gamma", "--workflow-type", "document", "--dry-run"], {},
+        {},
+        "create-project.sh",
+        ["--project", "gamma", "--workflow-type", "document", "--dry-run"],
+        {},
     ),
     "create-bad-int": ({}, "create-project.sh", ["--project", "alpha", "--max-minor", "x1"], {}),
     "create-bad-int-major": ({}, "create-project.sh", ["--project", "alpha", "--max-major", "-1"], {}),
@@ -168,81 +201,125 @@ _SCENARIOS: dict[str, tuple[dict, str, list[str], dict]] = {
     "add-new-nocfg-dry": ({"projects/zed/": _DIR}, "add-project.sh", ["--project", "zed", "--dry-run"], {}),
     "add-new-ini": ({"projects/zed/": _DIR, "projects.cfg": _INI_CFG}, "add-project.sh", ["--project", "zed"], {}),
     "add-new-ini-nocolor": (
-        {"projects/zed/": _DIR, "projects.cfg": _INI_NOCOLOR}, "add-project.sh", ["--project", "zed"], {},
+        {"projects/zed/": _DIR, "projects.cfg": _INI_NOCOLOR},
+        "add-project.sh",
+        ["--project", "zed"],
+        {},
     ),
     "add-new-ini-prio-color": (
-        {"projects/zed/": _DIR, "projects.cfg": _INI_CFG}, "add-project.sh",
-        ["--project", "zed", "--priority", "9", "--color", "#ABCDEF"], {},
+        {"projects/zed/": _DIR, "projects.cfg": _INI_CFG},
+        "add-project.sh",
+        ["--project", "zed", "--priority", "9", "--color", "#ABCDEF"],
+        {},
     ),
     "add-existing-noop": (
         {"projects/two/": _DIR, "projects/two/project.cfg": _TWO_CFG, "projects.cfg": _INI_CFG},
-        "add-project.sh", ["--project", "two"], {},
+        "add-project.sh",
+        ["--project", "two"],
+        {},
     ),
     "add-existing-same": (
         {"projects/two/": _DIR, "projects/two/project.cfg": _TWO_CFG, "projects.cfg": _INI_CFG},
-        "add-project.sh", ["--project", "two", "--priority", "4"], {},
+        "add-project.sh",
+        ["--project", "two", "--priority", "4"],
+        {},
     ),
     "add-existing-update": (
         {"projects/old/": _DIR, "projects/old/project.cfg": _OLD_CFG, "projects.cfg": _INI_CFG},
-        "add-project.sh", ["--project", "old", "--priority", "5"], {},
+        "add-project.sh",
+        ["--project", "old", "--priority", "5"],
+        {},
     ),
     "add-existing-update-color": (
         {"projects/old/": _DIR, "projects/old/project.cfg": _OLD_CFG, "projects.cfg": _INI_CFG},
         "add-project.sh",
-        ["--project", "old", "--priority", "5", "--color", "#000000"], {},
+        ["--project", "old", "--priority", "5", "--color", "#000000"],
+        {},
     ),
     "add-existing-update-spaced": (
         {"projects/two/": _DIR, "projects/two/project.cfg": _TWO_CFG, "projects.cfg": _INI_CFG},
-        "add-project.sh", ["--project", "two", "--priority", "5"], {},
+        "add-project.sh",
+        ["--project", "two", "--priority", "5"],
+        {},
     ),
     "add-existing-update-dry": (
         {"projects/old/": _DIR, "projects/old/project.cfg": _OLD_CFG, "projects.cfg": _INI_CFG},
         "add-project.sh",
-        ["--project", "old", "--priority", "5", "--dry-run"], {},
+        ["--project", "old", "--priority", "5", "--dry-run"],
+        {},
     ),
     "add-colon": ({"projects/zed/": _DIR, "projects.cfg": _COLON_CFG}, "add-project.sh", ["--project", "zed"], {}),
     "add-colon-nomig": (
-        {"projects/zed/": _DIR, "projects.cfg": _COLON_CFG}, "add-project.sh", ["--project", "zed", "--no-migrate"], {},
+        {"projects/zed/": _DIR, "projects.cfg": _COLON_CFG},
+        "add-project.sh",
+        ["--project", "zed", "--no-migrate"],
+        {},
     ),
     "add-colon-update": (
         {"projects/two/": _DIR, "projects/two/project.cfg": _TWO_CFG, "projects.cfg": _COLON_CFG},
-        "add-project.sh", ["--project", "two", "--priority", "8"], {},
+        "add-project.sh",
+        ["--project", "two", "--priority", "8"],
+        {},
     ),
     "add-colon-update-nomig": (
         {"projects/two/": _DIR, "projects/two/project.cfg": _TWO_CFG, "projects.cfg": _COLON_CFG},
         "add-project.sh",
-        ["--project", "two", "--priority", "8", "--no-migrate"], {},
+        ["--project", "two", "--priority", "8", "--no-migrate"],
+        {},
     ),
     "add-colon-dry": (
-        {"projects/zed/": _DIR, "projects.cfg": _COLON_CFG}, "add-project.sh", ["--project", "zed", "--dry-run"], {},
+        {"projects/zed/": _DIR, "projects.cfg": _COLON_CFG},
+        "add-project.sh",
+        ["--project", "zed", "--dry-run"],
+        {},
     ),
     "add-bad-color": ({"projects/zed/": _DIR}, "add-project.sh", ["--project", "zed", "--color", "#12"], {}),
     "add-no-name": ({}, "add-project.sh", [], {}),
     "add-help": ({}, "add-project.sh", ["-h"], {}),
-    "remove-plain": ({"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG}, "remove-project.sh", ["--project", "old"], {}),
+    "remove-plain": (
+        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG},
+        "remove-project.sh",
+        ["--project", "old"],
+        {},
+    ),
     "remove-last": (
         {"projects/two/x.md": "x\n", "projects.cfg": _INI_CFG + "# trailing comment\n"},
-        "remove-project.sh", ["--project", "two"], {},
+        "remove-project.sh",
+        ["--project", "two"],
+        {},
     ),
     "remove-force": (
-        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG}, "remove-project.sh", ["--project", "old", "--force"], {},
+        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG},
+        "remove-project.sh",
+        ["--project", "old", "--force"],
+        {},
     ),
     "remove-force-nodir": ({"projects.cfg": _INI_CFG}, "remove-project.sh", ["--project", "old", "--force"], {}),
     "remove-dry": (
-        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG}, "remove-project.sh", ["--project", "old", "--dry-run"], {},
+        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG},
+        "remove-project.sh",
+        ["--project", "old", "--dry-run"],
+        {},
     ),
     "remove-force-dry": (
-        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG}, "remove-project.sh",
-        ["--project", "old", "--force", "--dry-run"], {},
+        {"projects/old/x.md": "x\n", "projects.cfg": _INI_CFG},
+        "remove-project.sh",
+        ["--project", "old", "--force", "--dry-run"],
+        {},
     ),
     "remove-absent": ({"projects.cfg": _INI_CFG}, "remove-project.sh", ["--project", "nobody"], {}),
     "remove-nocfg": ({}, "remove-project.sh", ["--project", "nobody"], {}),
     "remove-colon": (
-        {"projects/two/x.md": "x\n", "projects.cfg": _COLON_CFG}, "remove-project.sh", ["--project", "two"], {},
+        {"projects/two/x.md": "x\n", "projects.cfg": _COLON_CFG},
+        "remove-project.sh",
+        ["--project", "two"],
+        {},
     ),
     "remove-rc-none": (
-        {"projects/old/release-state.md": _RS_NONE, "projects.cfg": _INI_CFG}, "remove-project.sh",
-        ["--project", "old"], {},
+        {"projects/old/release-state.md": _RS_NONE, "projects.cfg": _INI_CFG},
+        "remove-project.sh",
+        ["--project", "old"],
+        {},
     ),
     "remove-no-name": ({}, "remove-project.sh", [], {}),
     "remove-help": ({}, "remove-project.sh", ["--help"], {}),
@@ -290,14 +367,22 @@ def _env(tmp_path: pathlib.Path, root: pathlib.Path, extra: dict | None = None) 
         "PGAI_AGENT_KANBAN_TEMP_DIR": str(root / "tmp"),
     }
     env_extra.update(extra or {})
-    return build_scrubbed_env(home_dir=tmp_path / "home", extra_env=env_extra)
+    return build_scrubbed_env(
+        home_dir=tmp_path / "home",
+        extra_path_dirs=[pathlib.Path(sys.executable).parent],
+        extra_env=env_extra,
+    )
 
 
 def _run(tmp_path, root, script, args, extra=None) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", str(_SCRIPTS / script), *args],
-        capture_output=True, text=True, env=_env(tmp_path, root, extra),
-        cwd=str(root), stdin=subprocess.DEVNULL, timeout=120,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root, extra),
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        timeout=120,
     )
 
 
@@ -338,8 +423,7 @@ def _tree(root: pathlib.Path) -> dict:
 def _expected_tree(golden: dict, recorded: dict) -> dict:
     blobs = golden["blobs"]
     return {
-        path: (blobs[value[len("blob:"):]] if isinstance(value, str) else None)
-        for path, value in recorded.items()
+        path: (blobs[value[len("blob:") :]] if isinstance(value, str) else None) for path, value in recorded.items()
     }
 
 
@@ -391,7 +475,9 @@ def test_create_project_route_and_cli_reach_ops_projects_create_project(tmp_path
     assert _registry(rest_board) == _registry(cli_board)
     assert "[project:newproj]" in _registry(cli_board)
     configs = [
-        _STAMP_RE.sub("", (b / "projects" / "newproj" / "project.cfg").read_text(encoding="utf-8")).replace(str(b), "<B>")
+        _STAMP_RE.sub("", (b / "projects" / "newproj" / "project.cfg").read_text(encoding="utf-8")).replace(
+            str(b), "<B>"
+        )
         for b in (rest_board, cli_board)
     ]
     assert configs[0] == configs[1]
@@ -444,9 +530,9 @@ def test_remove_project_route_and_cli_reach_ops_projects_remove_project(tmp_path
     assert result.cli is not None and result.cli.completed.returncode == 0, result.cli.completed.stderr
     for board in (rest_board, cli_board):
         assert "[project:gone]" not in _registry(board)
-        assert (board / "projects" / "gone" / "README.md").is_file(), (
-            "without force the project directory stays in place"
-        )
+        assert (
+            board / "projects" / "gone" / "README.md"
+        ).is_file(), "without force the project directory stays in place"
     assert _registry(rest_board) == _registry(cli_board)
 
 
@@ -520,7 +606,9 @@ def test_cli_active_rc_refuses_with_and_without_force_and_changes_nothing(tmp_pa
     assert triple is not None and triple["error"] == "remove_project.active_rc", run.stderr
     assert "Active RC = v1.2.3" in triple["message"]
     assert "with or without --force" in triple["message"]
-    cancel_rc = installed_script_command(root.resolve(), "cm/cancel-rc.sh", "--project", "old", "--key", "v1.2.3", "--yes")
+    cancel_rc = installed_script_command(
+        root.resolve(), "cm/cancel-rc.sh", "--project", "old", "--key", "v1.2.3", "--yes"
+    )
     assert cancel_rc in triple["remedy"]
     assert installed_script_command(root.resolve(), "remove-project.sh", "--project", "old") in triple["remedy"]
     assert (root / "projects.cfg").read_text(encoding="utf-8") == _INI_CFG
@@ -636,9 +724,17 @@ def test_a_rewritten_projects_cfg_keeps_its_mode(tmp_path, mode, script, args, f
         (lambda ctx: ops_projects.remove_project(ctx, ""), 1),
     ],
     ids=[
-        "create-no-name", "create-negative-ceiling", "create-short-colour", "create-empty-dev-tree",
-        "create-empty-git-repo", "create-existing-dir", "create-unknown-workflow",
-        "add-no-name", "add-missing-dir", "add-bad-colour", "remove-no-name",
+        "create-no-name",
+        "create-negative-ceiling",
+        "create-short-colour",
+        "create-empty-dev-tree",
+        "create-empty-git-repo",
+        "create-existing-dir",
+        "create-unknown-workflow",
+        "add-no-name",
+        "add-missing-dir",
+        "add-bad-colour",
+        "remove-no-name",
     ],
 )
 def test_refusals_carry_the_scripts_exit_codes_and_write_nothing(tmp_path, call, exit_code):
@@ -718,8 +814,7 @@ def test_an_unknown_workflow_lists_the_ready_plugins_under_the_kanban_root(tmp_p
         ops_projects.create_project(_ctx(root), "alpha", workflow_type="nope")
 
     assert str(caught.value) == (
-        "ERROR: unknown workflow type 'nope'; discovered ready types are: "
-        "broken custom noagents nosh release"
+        "ERROR: unknown workflow type 'nope'; discovered ready types are: " "broken custom noagents nosh release"
     )
 
 
@@ -727,7 +822,11 @@ def test_seeded_overwatch_resolve_block_equals_the_bash_seeder_and_no_overwatch_
     seeders = _SCRIPTS / "lib"
     resolve = subprocess.run(
         ["bash", "-c", f'source "{seeders}/overwatch_resolve_seed.sh"; overwatch_resolve_seed_comment_block'],
-        capture_output=True, text=True, env=_env(tmp_path, tmp_path), check=True, timeout=30,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, tmp_path),
+        check=True,
+        timeout=30,
     ).stdout
 
     assert resolve == _SEED_FILE.read_text(encoding="utf-8")
@@ -753,7 +852,10 @@ def test_the_bash_resolve_seeder_names_a_missing_seed_file(tmp_path):
 
     run = subprocess.run(
         ["bash", "-c", f'source "{lib}/overwatch_resolve_seed.sh"; overwatch_resolve_seed_comment_block'],
-        capture_output=True, text=True, env=_env(tmp_path, tmp_path), timeout=30,
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, tmp_path),
+        timeout=30,
     )
 
     assert run.returncode == 1
@@ -796,7 +898,11 @@ def test_the_ops_entry_point_routes_registry_verbs_here(tmp_path, verb):
 
     run = subprocess.run(
         [sys.executable, "-m", "pgai_agent_kanban.ops", verb, f"--kanban-root={root}", "--project="],
-        capture_output=True, text=True, env=env, cwd=str(root), timeout=60,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(root),
+        timeout=60,
     )
 
     assert run.returncode == 1, run.stdout + run.stderr
@@ -846,7 +952,7 @@ def test_the_create_output_tells_the_operator_to_fill_in_the_project_readme(tmp_
     ops_projects.create_project(_ctx(root), "alpha", scripts_dir=_SCRIPTS)
 
     lines = capsys.readouterr().out.splitlines()
-    steps = lines[lines.index("Next steps:"):]
+    steps = lines[lines.index("Next steps:") :]
     assert any(line.strip().startswith("2. Fill in the project README") for line in steps), steps
     assert f"     $EDITOR {root}/projects/alpha/README.md" in steps
 
@@ -864,7 +970,7 @@ def test_the_create_output_names_the_remote_the_base_branches_go_to(tmp_path, ca
     ops_projects.create_project(_ctx(root), "alpha", scripts_dir=_SCRIPTS, **kwargs)
 
     lines = capsys.readouterr().out.splitlines()
-    steps = lines[lines.index("Next steps:"):]
+    steps = lines[lines.index("Next steps:") :]
     step3 = next(line for line in steps if line.strip().startswith("3. "))
     assert step3 == f"  3. Push the chain's base branches to {named} (run once, before first release):"
     assert steps[steps.index(step3) + 1] == "     init-project-git-repo.sh --project alpha"
@@ -1050,12 +1156,24 @@ _INJECTED_PRIORITY = "2\n[project:injected]\npriority=1"
 @pytest.mark.parametrize(
     ("script", "args", "files", "error_key"),
     [
-        ("create-project.sh", ["--project", "fresh", "--priority", _INJECTED_PRIORITY],
-         {"projects.cfg": _INI_CFG}, "create_project.priority_invalid"),
-        ("add-project.sh", ["--project", "two", "--priority", _INJECTED_PRIORITY],
-         {"projects/two/": _DIR, "projects.cfg": _INI_CFG}, "add_project.priority_invalid"),
-        ("add-project.sh", ["--project", "newone", "--priority", "high"],
-         {"projects/newone/": _DIR, "projects.cfg": _INI_CFG}, "add_project.priority_invalid"),
+        (
+            "create-project.sh",
+            ["--project", "fresh", "--priority", _INJECTED_PRIORITY],
+            {"projects.cfg": _INI_CFG},
+            "create_project.priority_invalid",
+        ),
+        (
+            "add-project.sh",
+            ["--project", "two", "--priority", _INJECTED_PRIORITY],
+            {"projects/two/": _DIR, "projects.cfg": _INI_CFG},
+            "add_project.priority_invalid",
+        ),
+        (
+            "add-project.sh",
+            ["--project", "newone", "--priority", "high"],
+            {"projects/newone/": _DIR, "projects.cfg": _INI_CFG},
+            "add_project.priority_invalid",
+        ),
     ],
     ids=["create-newline", "add-newline", "add-word"],
 )

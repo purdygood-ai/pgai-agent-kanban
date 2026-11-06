@@ -261,11 +261,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import pathlib
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 # Import the blocked-interval ledger reader from the pgai_agent_kanban
@@ -285,57 +284,41 @@ from pgai_agent_kanban.metrics.blocked_ledger import (  # noqa: E402
     blocked_minutes as read_blocked_minutes,
     ledger_path_for_project,
 )
-from pgai_agent_kanban.task_status import section_value  # noqa: E402
+from pgai_agent_kanban.env import resolve_kanban_root  # noqa: E402
 from pgai_agent_kanban.lib.atomic_write import atomic_write  # noqa: E402
-from pgai_agent_kanban.archive.lookup import task_dirs_with_archived  # noqa: E402
+from pgai_agent_kanban.metrics.task_tokens import (  # noqa: E402
+    README_MD,
+    all_days,
+    all_rc_versions,
+    load_tokens_json,
+    normalise_version,
+    read_agent,
+    read_field_from_markdown,
+    read_rc_version,
+    record_timestamp,
+    scan_tasks,
+    ts_in_day,
+)
 
 # ---------------------------------------------------------------------------
 # Canonical model ID map (shortname -> canonical)
 # Applied at read time; existing tokens.json files are NOT modified.
 # ---------------------------------------------------------------------------
 SHORTNAME_TO_CANONICAL: dict[str, str] = {
-    "opus":   "claude-opus-4-8",
+    "opus": "claude-opus-4-8",
     "sonnet": "claude-sonnet-4-6",
-    "haiku":  "claude-haiku-4-5-20251001",
+    "haiku": "claude-haiku-4-5-20251001",
 }
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-TOKENS_JSON = "artifacts/tokens.json"
-README_MD = "README.md"
-STATUS_MD = "status.md"
-
 # Track which unrecognised shortnames we've already warned about (once per run).
 _SHORTNAME_WARNED: set[str] = set()
 
 # ---------------------------------------------------------------------------
-# Helpers: kanban root resolution
+# Helpers: project directory resolution
 # ---------------------------------------------------------------------------
-
-
-def resolve_kanban_root(override: str | None = None) -> pathlib.Path:
-    """Return the kanban root directory as an absolute Path.
-
-    Priority:
-      1. override argument (from --kanban-root CLI flag)
-      2. PGAI_AGENT_KANBAN_ROOT_PATH environment variable (canonical)
-      3. ~/pgai_agent_kanban default (fresh-install path)
-
-    Exits with code 1 if the resolved path is not a directory.
-    """
-    if override:
-        p = pathlib.Path(override).expanduser().resolve()
-    else:
-        root = (
-            os.environ.get("PGAI_AGENT_KANBAN_ROOT_PATH")
-            or str(pathlib.Path.home() / "pgai_agent_kanban")
-        )
-        p = pathlib.Path(root).expanduser().resolve()
-    if not p.is_dir():
-        print(f"ERROR: kanban root not found: {p}", file=sys.stderr)
-        sys.exit(1)
-    return p
 
 
 def resolve_project_dir(kanban_root: pathlib.Path, project: str) -> pathlib.Path:
@@ -387,100 +370,8 @@ def canonicalize_model(model: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Helpers: markdown field extraction
-# ---------------------------------------------------------------------------
-
-
-def read_field_from_markdown(text: str, heading: str) -> str | None:
-    """Return the value of the '## <heading>' section, or None.
-
-    The value is read by task_status.section_value -- the first non-blank
-    line of the section, HTML comments dropped and a bold wrapper removed.
-    An empty section reads as None rather than as the next section's text.
-
-    Returns None if the heading or a value line is not found.
-    """
-    return section_value(text, heading) or None
-
-
-# ---------------------------------------------------------------------------
 # Helpers: task metadata reading
 # ---------------------------------------------------------------------------
-
-
-def load_tokens_json(task_dir: pathlib.Path) -> dict[str, Any] | None:
-    """Load artifacts/tokens.json for a task directory.
-
-    Returns the parsed dict, or None if the file is absent (silent) or
-    malformed (with a stderr warning).
-    """
-    path = task_dir / TOKENS_JSON
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("top-level value is not a JSON object")
-        return data
-    except (json.JSONDecodeError, ValueError, OSError) as exc:
-        print(
-            f"WARNING: skipping malformed tokens.json for task {task_dir.name}: {exc}",
-            file=sys.stderr,
-        )
-        return None
-
-
-def read_rc_version(task_dir: pathlib.Path) -> str | None:
-    """Read '## Release Version' from the task README.md.
-
-    Returns the raw string value (e.g. 'v0.23.22') or None if not found.
-    """
-    readme = task_dir / README_MD
-    if not readme.is_file():
-        return None
-    try:
-        text = readme.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    return read_field_from_markdown(text, "Release Version")
-
-
-def read_agent(task_dir: pathlib.Path) -> str:
-    """Read the agent type for a task.
-
-    Priority:
-      1. status.md '## Agent' field (strips model suffix, e.g. 'coder (claude-sonnet-4-6)' -> 'coder')
-      2. README.md '## Role' field (lowercased)
-      3. Task ID prefix: CLAUDE-<ROLE>-YYYYMMDD-NNN-slug -> <role> (lowercased)
-      4. Fallback: 'unknown'
-    """
-    # 1. status.md Agent field
-    status_path = task_dir / STATUS_MD
-    if status_path.is_file():
-        try:
-            text = status_path.read_text(encoding="utf-8")
-            val = read_field_from_markdown(text, "Agent")
-            if val:
-                return val.split("(")[0].strip().lower()
-        except OSError:
-            pass
-
-    # 2. README.md Role field
-    readme = task_dir / README_MD
-    if readme.is_file():
-        try:
-            text = readme.read_text(encoding="utf-8")
-            val = read_field_from_markdown(text, "Role")
-            if val:
-                return val.lower()
-        except OSError:
-            pass
-
-    # 3. Derive from task folder name
-    parts = task_dir.name.split("-")
-    if len(parts) >= 2:
-        return parts[1].lower()
-    return "unknown"
 
 
 def read_workflow_type(task_dir: pathlib.Path) -> str:
@@ -498,19 +389,6 @@ def read_workflow_type(task_dir: pathlib.Path) -> str:
         except OSError:
             pass
     return "release"
-
-
-# ---------------------------------------------------------------------------
-# Version normalisation
-# ---------------------------------------------------------------------------
-
-
-def normalise_version(version: str) -> str:
-    """Ensure the version string starts with 'v'."""
-    version = version.strip()
-    if version and not version.startswith("v"):
-        return f"v{version}"
-    return version
 
 
 # ---------------------------------------------------------------------------
@@ -613,26 +491,30 @@ def _extract_model_usage_entries(
             if not isinstance(mu, dict):
                 continue
             canonical = canonicalize_model(raw_model)
-            entries.append((
-                canonical,
-                int(mu.get("input_tokens", 0) or 0),
-                int(mu.get("output_tokens", 0) or 0),
-                int(mu.get("cache_read_input_tokens", 0) or 0),
-                int(mu.get("cache_creation_input_tokens", 0) or 0),
-                invocations,
-            ))
+            entries.append(
+                (
+                    canonical,
+                    int(mu.get("input_tokens", 0) or 0),
+                    int(mu.get("output_tokens", 0) or 0),
+                    int(mu.get("cache_read_input_tokens", 0) or 0),
+                    int(mu.get("cache_creation_input_tokens", 0) or 0),
+                    invocations,
+                )
+            )
         return entries
     else:
         raw_model = str(tok.get("model", "unknown"))
         canonical = canonicalize_model(raw_model)
-        return [(
-            canonical,
-            int(tok.get("input_tokens", 0) or 0),
-            int(tok.get("output_tokens", 0) or 0),
-            int(tok.get("cache_read_input_tokens", 0) or 0),
-            int(tok.get("cache_creation_input_tokens", 0) or 0),
-            invocations,
-        )]
+        return [
+            (
+                canonical,
+                int(tok.get("input_tokens", 0) or 0),
+                int(tok.get("output_tokens", 0) or 0),
+                int(tok.get("cache_read_input_tokens", 0) or 0),
+                int(tok.get("cache_creation_input_tokens", 0) or 0),
+                invocations,
+            )
+        ]
 
 
 def _extract_elapsed_seconds(tok: dict[str, Any]) -> float | None:
@@ -648,54 +530,6 @@ def _extract_elapsed_seconds(tok: dict[str, Any]) -> float | None:
     if isinstance(val, bool) or not isinstance(val, (int, float)):
         return None
     return val
-
-
-# ---------------------------------------------------------------------------
-# Task scanner
-# ---------------------------------------------------------------------------
-
-
-def scan_tasks(tasks_dir: pathlib.Path) -> list[dict[str, Any]]:
-    """Walk tasks_dir and collect metadata for every task that has a tokens.json.
-
-    The walk covers the project's archived task folders too
-    (archive/<project>/tasks/<ID>/, for IDs with no live folder), merged
-    with the live ones in task-ID order -- see
-    pgai_agent_kanban.archive.lookup.task_dirs_with_archived -- so a rollup
-    rebuilt after an archive run counts exactly the tasks, tokens and wall
-    time it counted before the run.
-
-    Returns a list of records:
-      {
-        "task_id":       str,
-        "task_dir":      Path,
-        "rc_version":    str | None,   -- from README.md ## Release Version
-        "agent":         str,          -- from status.md, README.md, or task ID
-        "tokens":        dict,         -- raw tokens.json data
-        "timestamp":     str | None,   -- tokens.json 'timestamp' field
-      }
-    """
-    records: list[dict[str, Any]] = []
-
-    for entry in task_dirs_with_archived(tasks_dir):
-        tokens = load_tokens_json(entry)
-        if tokens is None:
-            continue  # No tokens.json or malformed (warning already emitted)
-
-        rc_version = read_rc_version(entry)
-        agent = read_agent(entry)
-        timestamp = tokens.get("timestamp")
-
-        records.append({
-            "task_id":    entry.name,
-            "task_dir":   entry,
-            "rc_version": rc_version,
-            "agent":      agent,
-            "tokens":     tokens,
-            "timestamp":  timestamp,
-        })
-
-    return records
 
 
 # ---------------------------------------------------------------------------
@@ -804,7 +638,7 @@ def aggregate_rc(
     Returns:
       The absolute Path of the written JSON file.
     """
-    root = kanban_root or resolve_kanban_root()
+    root = kanban_root or resolve_kanban_root(home_default=True)
     project_dir = resolve_project_dir(root, project)
     tasks_dir = project_dir / "tasks"
     out_dir = project_dir / "metrics" / "rc"
@@ -814,10 +648,7 @@ def aggregate_rc(
     records = scan_tasks(tasks_dir)
 
     # Filter to tasks attributed to this RC
-    matching = [
-        r for r in records
-        if normalise_version(r.get("rc_version") or "") == rc_version
-    ]
+    matching = [r for r in records if normalise_version(r.get("rc_version") or "") == rc_version]
 
     # Counters
     tasks_total = len(matching)
@@ -879,15 +710,9 @@ def aggregate_rc(
             closed_at = state.get("closed_at") or None
             if opened_at and closed_at:
                 try:
-                    opened_dt = datetime.fromisoformat(
-                        opened_at.replace("Z", "+00:00")
-                    )
-                    closed_dt = datetime.fromisoformat(
-                        closed_at.replace("Z", "+00:00")
-                    )
-                    wall_time_minutes = round(
-                        (closed_dt - opened_dt).total_seconds() / 60.0, 2
-                    )
+                    opened_dt = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
+                    closed_dt = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
+                    wall_time_minutes = round((closed_dt - opened_dt).total_seconds() / 60.0, 2)
                 except (ValueError, OverflowError) as exc:
                     print(
                         f"WARNING: could not compute wall_time_minutes for {rc_version}: {exc}",
@@ -913,9 +738,7 @@ def aggregate_rc(
         ledger_path = ledger_path_for_project(str(root), project)
         try:
             raw_blocked = read_blocked_minutes(ledger_path, rc_version, opened_at, closed_at)
-            blocked_minutes_value = (
-                int(raw_blocked) if raw_blocked == int(raw_blocked) else round(raw_blocked, 2)
-            )
+            blocked_minutes_value = int(raw_blocked) if raw_blocked == int(raw_blocked) else round(raw_blocked, 2)
         except LedgerError as exc:
             # CENSUS CLASS: CONVERT (docs/blocking-site-census.md) -- a
             # malformed ledger degrades this one field to an absent value;
@@ -927,20 +750,20 @@ def aggregate_rc(
             blocked_minutes_value = None
 
     payload: dict[str, Any] = {
-        "rc":                rc_version,
-        "project":           project,
-        "workflow_type":     workflow_type,
-        "opened_at":         opened_at,
-        "closed_at":         closed_at,
+        "rc": rc_version,
+        "project": project,
+        "workflow_type": workflow_type,
+        "opened_at": opened_at,
+        "closed_at": closed_at,
         "wall_time_minutes": wall_time_minutes,
-        "blocked_minutes":   blocked_minutes_value,
-        "outcome":           outcome,
+        "blocked_minutes": blocked_minutes_value,
+        "outcome": outcome,
         "tasks": {
-            "total":    tasks_total,
+            "total": tasks_total,
             "by_agent": tasks_by_agent,
         },
         "tokens": {
-            "total":    total_tok,
+            "total": total_tok,
             "by_model": by_model,
             "by_agent": by_agent,
         },
@@ -948,8 +771,8 @@ def aggregate_rc(
             "by_agent": wall_by_agent,
         },
         "bugs_filed_during_verification": [],
-        "operator_interventions":         [],
-        "input_files":                    {},
+        "operator_interventions": [],
+        "input_files": {},
     }
 
     out_path = out_dir / f"{rc_version}.json"
@@ -987,7 +810,7 @@ def aggregate_day(
     Returns:
       The absolute Path of the written JSON file.
     """
-    root = kanban_root or resolve_kanban_root()
+    root = kanban_root or resolve_kanban_root(home_default=True)
     project_dir = resolve_project_dir(root, project)
     tasks_dir = project_dir / "tasks"
     out_dir = project_dir / "metrics" / "day"
@@ -998,24 +821,8 @@ def aggregate_day(
         print(f"ERROR: invalid day format '{day}' (expected YYYY-MM-DD)", file=sys.stderr)
         sys.exit(1)
 
-    def ts_in_day(ts_str: str | None) -> bool:
-        """Return True when ts_str is an ISO-8601 timestamp on day_obj (UTC)."""
-        if not ts_str:
-            return False
-        try:
-            # Handle trailing Z and +HH:MM offsets
-            clean = ts_str.strip()
-            if clean.endswith("Z"):
-                clean = clean[:-1]
-            if "+" in clean:
-                clean = clean.split("+")[0]
-            dt = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
-            return dt.date() == day_obj
-        except ValueError:
-            return False
-
     records = scan_tasks(tasks_dir)
-    matching = [r for r in records if ts_in_day(r.get("timestamp"))]
+    matching = [r for r in records if ts_in_day(record_timestamp(r), day_obj)]
 
     total_tok = _zero_token_entry()
     by_model: dict[str, dict[str, Any]] = {}
@@ -1048,11 +855,11 @@ def aggregate_day(
             _add_tokens(by_model[canonical_model], m_inp, m_out, m_cr, m_cw, m_inv)
 
     payload: dict[str, Any] = {
-        "date":          day,
-        "project":       project,
-        "rcs_included":  sorted(rcs_seen),
+        "date": day,
+        "project": project,
+        "rcs_included": sorted(rcs_seen),
         "tokens": {
-            "total":    total_tok,
+            "total": total_tok,
             "by_model": by_model,
             "by_agent": by_agent,
         },
@@ -1062,38 +869,6 @@ def aggregate_day(
     _write_rollup_json(out_path, payload)
     print(f"[metrics_aggregator] Day rollup written: {out_path}", file=sys.stderr)
     return out_path
-
-
-# ---------------------------------------------------------------------------
-# --all mode helpers
-# ---------------------------------------------------------------------------
-
-
-def all_rc_versions(records: list[dict[str, Any]]) -> list[str]:
-    """Return a sorted list of distinct RC versions seen in the records."""
-    versions: set[str] = set()
-    for r in records:
-        rv = r.get("rc_version")
-        if rv:
-            versions.add(normalise_version(rv))
-    return sorted(versions)
-
-
-def all_days(records: list[dict[str, Any]]) -> list[str]:
-    """Return a sorted list of distinct UTC days seen in the records."""
-    days: set[str] = set()
-    for r in records:
-        ts_str = r.get("timestamp")
-        if ts_str:
-            try:
-                clean = ts_str.strip().rstrip("Z")
-                if "+" in clean:
-                    clean = clean.split("+")[0]
-                dt = datetime.strptime(clean, "%Y-%m-%dT%H:%M:%S")
-                days.add(dt.strftime("%Y-%m-%d"))
-            except ValueError:
-                pass
-    return sorted(days)
 
 
 # ---------------------------------------------------------------------------
@@ -1161,7 +936,7 @@ def main() -> None:
     if not args.rc and not args.day and not args.all_rollups:
         parser.error("at least one of --rc, --day, or --all is required")
 
-    kanban_root = resolve_kanban_root(args.kanban_root)
+    kanban_root = resolve_kanban_root(args.kanban_root, home_default=True)
     project = args.project
 
     if args.all_rollups:
@@ -1175,8 +950,7 @@ def main() -> None:
         versions = all_rc_versions(records)
         days = all_days(records)
         print(
-            f"[metrics_aggregator] --all: building {len(versions)} RC rollup(s)"
-            f" and {len(days)} day rollup(s).",
+            f"[metrics_aggregator] --all: building {len(versions)} RC rollup(s)" f" and {len(days)} day rollup(s).",
             file=sys.stderr,
         )
         for ver in versions:

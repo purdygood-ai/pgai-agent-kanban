@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-from typing import Optional
 
 import pytest
 
@@ -140,14 +139,7 @@ def _build_task_folder(
     )
 
     agent_prefix = task_id.split("-")[0].lower()
-    backlog_file = (
-        kanban_root
-        / "projects"
-        / project_name
-        / "tasks"
-        / "queues"
-        / f"{agent_prefix}_backlog.md"
-    )
+    backlog_file = kanban_root / "projects" / project_name / "tasks" / "queues" / f"{agent_prefix}_backlog.md"
     if backlog_file.exists():
         existing = backlog_file.read_text(encoding="utf-8")
         backlog_file.write_text(
@@ -176,14 +168,7 @@ def _read_backlog_marker(
     Returns the marker character, or ``""`` if the line is not found.
     """
     agent_prefix = task_id.split("-")[0].lower()
-    backlog_file = (
-        kanban_root
-        / "projects"
-        / project_name
-        / "tasks"
-        / "queues"
-        / f"{agent_prefix}_backlog.md"
-    )
+    backlog_file = kanban_root / "projects" / project_name / "tasks" / "queues" / f"{agent_prefix}_backlog.md"
     if not backlog_file.exists():
         return ""
     text = backlog_file.read_text(encoding="utf-8")
@@ -244,7 +229,7 @@ def _assert_task_no_longer_in_initial_state(
 #   - delete: DONE → (directory gone), marker must be [x].
 # ---------------------------------------------------------------------------
 
-_TERMINAL_STATE_CASES: list[tuple[str, str, Optional[str], str, bool]] = [
+_TERMINAL_STATE_CASES: list[tuple[str, str, str | None, str, bool]] = [
     # (operation, initial_state, expected_terminal_state_or_None, expected_marker,
     #  task_dir_survives)
     #
@@ -262,10 +247,10 @@ _TERMINAL_STATE_CASES: list[tuple[str, str, Optional[str], str, bool]] = [
     #     True  → artifacts/ and logs/ subdirectories must still exist after the
     #             operation (the task folder is not removed; state-only mutation).
     #     False → the task directory itself is gone (delete); no subdirs to check.
-    ("reset",  "DONE",   "BACKLOG", "open",    True),
-    ("close",  "BACKLOG", "DONE",   "x",       True),
-    ("wontdo", "BACKLOG", "WONT-DO","x",       True),
-    ("delete", "DONE",    None,     "removed", False),
+    ("reset", "DONE", "BACKLOG", "open", True),
+    ("close", "BACKLOG", "DONE", "x", True),
+    ("wontdo", "BACKLOG", "WONT-DO", "x", True),
+    ("delete", "DONE", None, "removed", False),
 ]
 
 _TERMINAL_STATE_IDS = [op for op, *_ in _TERMINAL_STATE_CASES]
@@ -302,7 +287,7 @@ class TestTerminalStateOperationContracts:
         cli_invoker: CliAdapter,
         operation: str,
         initial_state: str,
-        expected_state: Optional[str],
+        expected_state: str | None,
         expected_marker: str,
         task_dir_survives: bool,
     ) -> None:
@@ -334,14 +319,7 @@ class TestTerminalStateOperationContracts:
         # close) so the marker-flip-to-open can be verified.
         if operation == "reset":
             agent_prefix = task_id.split("-")[0].lower()
-            backlog_file = (
-                root
-                / "projects"
-                / "project-a"
-                / "tasks"
-                / "queues"
-                / f"{agent_prefix}_backlog.md"
-            )
+            backlog_file = root / "projects" / "project-a" / "tasks" / "queues" / f"{agent_prefix}_backlog.md"
             if backlog_file.exists():
                 text = backlog_file.read_text(encoding="utf-8")
                 text = text.replace(f"- [ ] {task_id}", f"- [x] {task_id}")
@@ -389,9 +367,7 @@ class TestTerminalStateOperationContracts:
         marker = _read_backlog_marker(root, "project-a", task_id)
         if expected_marker == "x":
             assert marker == "x", (
-                f"'{operation}' must flip the backlog marker to [x]; "
-                f"got {marker!r}.\n"
-                f"stdout: {result.stdout}"
+                f"'{operation}' must flip the backlog marker to [x]; " f"got {marker!r}.\n" f"stdout: {result.stdout}"
             )
         elif expected_marker == "open":
             assert marker in ("", " "), (
@@ -420,8 +396,7 @@ class TestTerminalStateOperationContracts:
                 f"task_dir={task_dir}.\nstdout: {result.stdout}"
             )
             assert (task_dir / "logs").exists(), (
-                f"'{operation}' must not remove the logs/ directory; "
-                f"task_dir={task_dir}.\nstdout: {result.stdout}"
+                f"'{operation}' must not remove the logs/ directory; " f"task_dir={task_dir}.\nstdout: {result.stdout}"
             )
 
     def test_terminal_state_operations_refuse_ambiguous_key_safely(
@@ -516,13 +491,10 @@ class TestReadOperationContracts:
             f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "BACKLOG" in result.stdout, (
-            "show must emit the task's current state in its output; "
-            f"'BACKLOG' not found.\nstdout: {result.stdout}"
+            "show must emit the task's current state in its output; " f"'BACKLOG' not found.\nstdout: {result.stdout}"
         )
         status_after = (task_dir / "status.md").read_bytes()
-        assert status_after == status_before, (
-            "show must not modify status.md (read-only contract violated)."
-        )
+        assert status_after == status_before, "show must not modify status.md (read-only contract violated)."
 
     def test_show_returns_not_found_exit_code_for_missing_key(
         self,
@@ -832,9 +804,9 @@ class TestReadOperationContracts:
 
 _HALT_FAMILY_CASES: list[tuple[str, bool, bool]] = [
     # (operation, flag_present_after, project_scoped)
-    ("halt",          True,  True),
-    ("unhalt",        False, True),
-    ("halt-global",   True,  False),
+    ("halt", True, True),
+    ("unhalt", False, True),
+    ("halt-global", True, False),
     ("unhalt-global", False, False),
 ]
 
@@ -922,8 +894,7 @@ class TestHaltFamilyContracts:
 
         # Contract part 1: the operation exits 0.
         assert result.returncode == 0, (
-            f"'{operation}' must exit 0; "
-            f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            f"'{operation}' must exit 0; " f"rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         # Contract part 2: the flag is in the correct state at the target path.
@@ -951,9 +922,9 @@ class TestHaltFamilyContracts:
     @pytest.mark.parametrize(
         "operation,project_scoped",
         [
-            ("halt",          True),
-            ("unhalt",        True),
-            ("halt-global",   False),
+            ("halt", True),
+            ("unhalt", True),
+            ("halt-global", False),
             ("unhalt-global", False),
         ],
         ids=["halt", "unhalt", "halt-global", "unhalt-global"],
@@ -1013,28 +984,21 @@ class TestHaltFamilyContracts:
 
         # Set up: halt project-a.
         cli_invoker.invoke("halt", ["--project", "project-a"], kanban_root=root)
-        assert (root / "projects" / "project-a" / "HALT").exists(), (
-            "Pre-condition: HALT must exist after halt invocation."
-        )
+        assert (
+            root / "projects" / "project-a" / "HALT"
+        ).exists(), "Pre-condition: HALT must exist after halt invocation."
 
         # Act: unhalt project-a.
-        result = cli_invoker.invoke(
-            "unhalt", ["--project", "project-a"], kanban_root=root
-        )
+        result = cli_invoker.invoke("unhalt", ["--project", "project-a"], kanban_root=root)
 
         assert result.returncode == 0, (
-            f"unhalt must exit 0; rc={result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"unhalt must exit 0; rc={result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert not (root / "projects" / "project-a" / "HALT").exists(), (
-            "unhalt must remove the per-project HALT flag for the targeted project."
-        )
-        assert not (root / "projects" / "project-b" / "HALT").exists(), (
-            "unhalt must not touch project-b's HALT flag."
-        )
-        assert not (root / "HALT").exists(), (
-            "unhalt must not create or remove the global HALT at the kanban root."
-        )
+        assert not (
+            root / "projects" / "project-a" / "HALT"
+        ).exists(), "unhalt must remove the per-project HALT flag for the targeted project."
+        assert not (root / "projects" / "project-b" / "HALT").exists(), "unhalt must not touch project-b's HALT flag."
+        assert not (root / "HALT").exists(), "unhalt must not create or remove the global HALT at the kanban root."
 
     def test_unhalt_global_removes_root_flag_without_touching_per_project_flags(
         self,
@@ -1059,20 +1023,15 @@ class TestHaltFamilyContracts:
 
         # Set up: halt-global.
         cli_invoker.invoke("halt-global", [], kanban_root=root)
-        assert (root / "HALT").exists(), (
-            "Pre-condition: global HALT must exist after halt-global invocation."
-        )
+        assert (root / "HALT").exists(), "Pre-condition: global HALT must exist after halt-global invocation."
 
         # Act: unhalt-global.
         result = cli_invoker.invoke("unhalt-global", [], kanban_root=root)
 
         assert result.returncode == 0, (
-            f"unhalt-global must exit 0; rc={result.returncode}.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"unhalt-global must exit 0; rc={result.returncode}.\n" f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert not (root / "HALT").exists(), (
-            "unhalt-global must remove the kanban root HALT flag."
-        )
+        assert not (root / "HALT").exists(), "unhalt-global must remove the kanban root HALT flag."
         # Per-project flag must survive — it was not created by halt-global
         # and must not be removed by unhalt-global.
         assert (root / "projects" / "project-a" / "HALT").exists(), (
@@ -1103,9 +1062,7 @@ class TestIntakeContracts:
             pytest.param(
                 "BUG-prefixed",
                 "BUG-9001-contract-routing-test.md",
-                "# BUG-9001: contract-routing-test\n\n"
-                "## Status\nopen\n\n"
-                "## Summary\nContract test bug file.\n",
+                "# BUG-9001: contract-routing-test\n\n" "## Status\nopen\n\n" "## Summary\nContract test bug file.\n",
                 "bugs",
                 id="bug_prefixed_file_deposits_to_bugs_directory",
             ),
@@ -1188,9 +1145,7 @@ class TestIntakeContracts:
         filename = "PRIORITY-9002-no-clobber-contract-test.md"
         # Pre-create the destination file to simulate a file already deposited.
         original_content = (
-            b"# PRIORITY-9002: original content\n\n"
-            b"## Status\nopen\n\n"
-            b"## Summary\nOriginal intake file.\n"
+            b"# PRIORITY-9002: original content\n\n" b"## Status\nopen\n\n" b"## Summary\nOriginal intake file.\n"
         )
         (priority_dir / filename).write_bytes(original_content)
 
@@ -1237,17 +1192,13 @@ class TestIntakeContracts:
 
         filename = "BUG-9004-renumber-contract-test.md"
         original_content = (
-            b"# BUG-9004: original content\n\n"
-            b"## Status\nopen\n\n"
-            b"## Summary\nOriginal intake file.\n"
+            b"# BUG-9004: original content\n\n" b"## Status\nopen\n\n" b"## Summary\nOriginal intake file.\n"
         )
         (bugs_dir / filename).write_bytes(original_content)
 
         staged = tmp_path / filename
         staged.write_text(
-            "# BUG-9004: second draft\n\n"
-            "## Status\nopen\n\n"
-            "## Summary\nThis draft takes the next free number.\n",
+            "# BUG-9004: second draft\n\n" "## Status\nopen\n\n" "## Summary\nThis draft takes the next free number.\n",
             encoding="utf-8",
         )
 
@@ -1261,22 +1212,22 @@ class TestIntakeContracts:
             "intake must deposit a BUG-* draft whose number is taken under the next free number; "
             f"got rc={result.returncode}.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        assert (bugs_dir / filename).read_bytes() == original_content, (
+        assert (
+            bugs_dir / filename
+        ).read_bytes() == original_content, (
             "intake must leave the existing bug file byte-for-byte unchanged when it renumbers a draft."
         )
-        renumbered = sorted(
-            p for p in bugs_dir.glob("BUG-*-renumber-contract-test.md") if p.name != filename
-        )
+        renumbered = sorted(p for p in bugs_dir.glob("BUG-*-renumber-contract-test.md") if p.name != filename)
         assert len(renumbered) == 1, (
             f"expected exactly one renumbered deposit beside {filename}; found {renumbered}.\n"
             f"stdout: {result.stdout}"
         )
-        assert renumbered[0].name in result.stdout, (
-            f"intake's stdout must name the renumbered deposit {renumbered[0].name}; got: {result.stdout}"
-        )
-        assert "This draft takes the next free number." in renumbered[0].read_text(encoding="utf-8"), (
-            "the renumbered deposit must carry the staged draft's body."
-        )
+        assert (
+            renumbered[0].name in result.stdout
+        ), f"intake's stdout must name the renumbered deposit {renumbered[0].name}; got: {result.stdout}"
+        assert "This draft takes the next free number." in renumbered[0].read_text(
+            encoding="utf-8"
+        ), "the renumbered deposit must carry the staged draft's body."
 
     def test_unrecognized_prefix_is_rejected_without_deposit(
         self,

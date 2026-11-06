@@ -29,9 +29,8 @@ Design notes:
 
 from __future__ import annotations
 
-import os
 import pathlib
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,9 +69,7 @@ def _materialise_registry_sandbox(root: pathlib.Path) -> None:
     # The pre-registered project is used by add-project (already-registered path)
     # and by remove-project tests.
     (root / "projects.cfg").write_text(
-        f"[project:{_SANDBOX_PROJECT}]\n"
-        "priority = 1\n"
-        "color = #aabbcc\n",
+        f"[project:{_SANDBOX_PROJECT}]\n" "priority = 1\n" "color = #aabbcc\n",
         encoding="utf-8",
     )
 
@@ -80,10 +77,7 @@ def _materialise_registry_sandbox(root: pathlib.Path) -> None:
     project_dir = root / "projects" / _SANDBOX_PROJECT
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "project.cfg").write_text(
-        "[project]\n"
-        f"project_name = {_SANDBOX_PROJECT}\n"
-        "dev_tree_path =\n"
-        "git_repo_url =\n",
+        "[project]\n" f"project_name = {_SANDBOX_PROJECT}\n" "dev_tree_path =\n" "git_repo_url =\n",
         encoding="utf-8",
     )
     (project_dir / "release-state.md").write_text(
@@ -227,10 +221,7 @@ class TestRegistryVerbEndpoints:
                 },
             )
 
-        assert resp.status_code == 200, (
-            f"Expected HTTP 200 on success; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected HTTP 200 on success; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0, (
             "create-project.sh must exit 0 in dry-run mode; "
@@ -259,10 +250,7 @@ class TestRegistryVerbEndpoints:
                 },
             )
 
-        assert resp.status_code == 200, (
-            f"Expected HTTP 200 on success; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected HTTP 200 on success; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0, (
             "add-project.sh must exit 0 in dry-run mode; "
@@ -294,10 +282,7 @@ class TestRegistryVerbEndpoints:
                 },
             )
 
-        assert resp.status_code == 200, (
-            f"Expected HTTP 200 on success; got {resp.status_code}.\n"
-            f"body: {resp.text}"
-        )
+        assert resp.status_code == 200, f"Expected HTTP 200 on success; got {resp.status_code}.\n" f"body: {resp.text}"
         body = resp.json()
         assert body["exit_code"] == 0, (
             "remove-project.sh must exit 0 in dry-run mode; "
@@ -307,7 +292,7 @@ class TestRegistryVerbEndpoints:
 
     def test_remove_project_force_without_confirm_returns_422_naming_confirm_no_subprocess(
         self,
-        api_client: "TestClient",
+        api_client: TestClient,
     ) -> None:
         """POST /operations/remove-project with force and no confirm returns 422.
 
@@ -326,15 +311,12 @@ class TestRegistryVerbEndpoints:
             mock_run.assert_not_called()
 
         assert resp.status_code == 422, (
-            f"Expected HTTP 422 (confirm gate); got {resp.status_code}.\n"
-            f"body: {resp.text}"
+            f"Expected HTTP 422 (confirm gate); got {resp.status_code}.\n" f"body: {resp.text}"
         )
         body = resp.json()
         assert "detail" not in body, f"framework validation list leaked into the refusal: {body}"
         assert body["error"] == "remove_project.confirm_required", body
-        assert "confirm" in body["message"], (
-            f"422 message must name 'confirm'; got: {body['message']!r}"
-        )
+        assert "confirm" in body["message"], f"422 message must name 'confirm'; got: {body['message']!r}"
         assert body["remedy"].startswith("curl "), body["remedy"]
 
     def test_remove_project_force_with_active_rc_returns_exit_code_2_and_changes_nothing(
@@ -370,8 +352,7 @@ class TestRegistryVerbEndpoints:
             )
 
         assert resp.status_code == 409, (
-            f"Expected HTTP 409 for the active-RC refusal; got {resp.status_code}.\n"
-            f"body: {resp.text}"
+            f"Expected HTTP 409 for the active-RC refusal; got {resp.status_code}.\n" f"body: {resp.text}"
         )
         body = resp.json()
         assert body["exit_code"] == 2, body

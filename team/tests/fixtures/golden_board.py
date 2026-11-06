@@ -248,8 +248,7 @@ def _write_state_bugs(project_dir: pathlib.Path) -> None:
     newest = (bugs_dir / f"{_BUG_ID}.md").stat().st_mtime
     for offset, (bug_id, status) in enumerate(_STATE_BUGS.values(), start=1):
         close_note = (
-            f"\n## Close Note\nduplicate of BUG-0001 ({_BUG_ID}): fixture pointer\n"
-            if status == "duplicate" else ""
+            f"\n## Close Note\nduplicate of BUG-0001 ({_BUG_ID}): fixture pointer\n" if status == "duplicate" else ""
         )
         path = bugs_dir / f"{bug_id}.md"
         path.write_text(

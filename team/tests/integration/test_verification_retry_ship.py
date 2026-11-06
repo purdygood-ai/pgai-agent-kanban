@@ -26,6 +26,11 @@ Coverage:
     and the TESTER task byte-identical; run inside its CM wake, the release
     task is set to WAITING again. Once that task is BLOCKED or WONT-DO, the
     next run ships NON-FUNCTIONAL as unverified.
+  - The after-ship step on its own (cm_verification_retry_after_ship): when
+    the unverified ship's inbox entry cannot be written, exactly one bug is
+    filed through intake naming the inbox file and the by-hand command, a
+    re-run files no second one, and the step still returns success; when
+    the entry is written, no bug is filed.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ import pathlib
 import pytest
 
 from tests.integration.test_cm_release_synthetic import _git_tag_exists, _run_cm_script
+from tests.unit.shell_harness import run_bash
 from tests.integration.test_ship_policy_acceptance import (
     _RELEASE_SCRIPT,
     _add_tester_task,
@@ -93,7 +99,12 @@ def _inbox_open_entries(kanban_root: pathlib.Path, project: str) -> list:
 
 def _release(kanban_root, project, repo_path, *args, extra_env=None):
     return _run_cm_script(
-        _RELEASE_SCRIPT, list(args), kanban_root, project, repo_root=repo_path, extra_env=extra_env,
+        _RELEASE_SCRIPT,
+        list(args),
+        kanban_root,
+        project,
+        repo_root=repo_path,
+        extra_env=extra_env,
     )
 
 
@@ -109,9 +120,7 @@ def _assert_requeued(result, kanban_root, project, version, task_dir, cause_frag
     assert cause_fragment in _section(status, "Summary"), status
     note = _section((task_dir / "README.md").read_text(encoding="utf-8"), "Triage Note")
     assert cause_fragment in note and version in note, note
-    queue = (kanban_root / "projects" / project / "tasks" / "queues" / "tester_backlog.md").read_text(
-        encoding="utf-8"
-    )
+    queue = (kanban_root / "projects" / project / "tasks" / "queues" / "tester_backlog.md").read_text(encoding="utf-8")
     assert f"- [ ] {_TESTER_ID}" in queue, queue
     record = kanban_root / "projects" / project / "release-state" / f"verification-retry-{version}"
     assert record.is_file(), "the RC's one requeue is recorded"
@@ -246,17 +255,15 @@ def test_a_rerun_while_the_requeued_task_is_pending_exits_4_and_writes_nothing(
     assert "VERIFICATION-PENDING" in rerun.stdout, out
     assert "verification is still pending" in rerun.stdout, out
     assert "cm-release.verification-pending" in rerun.stderr, out
-    assert _watched_bytes(kanban_root, project, version, task_dir) == before, (
-        f"release-state.md, HALT, inbox, retry record and TESTER task are untouched\n{out}"
-    )
+    assert (
+        _watched_bytes(kanban_root, project, version, task_dir) == before
+    ), f"release-state.md, HALT, inbox, retry record and TESTER task are untouched\n{out}"
     assert not _git_tag_exists(repo_path, version), "nothing ships while verification is pending"
     assert "## State\nWAITING" in (cm_dir / "status.md").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("final_state", ["BLOCKED", "WONT-DO"])
-def test_a_pending_verification_that_fails_again_ships_non_functional(
-    tmp_path: pathlib.Path, final_state: str
-) -> None:
+def test_a_pending_verification_that_fails_again_ships_non_functional(tmp_path: pathlib.Path, final_state: str) -> None:
     version, project = "v0.3.4", "verify-pending-then-fails-project"
     kanban_root, repo_path, task_dir, _cm_dir = _requeue_then_pend(tmp_path, project, version, "WORKING")
     pending = _release(kanban_root, project, repo_path)
@@ -265,3 +272,73 @@ def test_a_pending_verification_that_fails_again_ships_non_functional(
     _status(task_dir / "status.md", final_state, "The suite runner still could not start: disk full.")
     shipped = _release(kanban_root, project, repo_path)
     _assert_shipped_unverified(shipped, kanban_root, project, version, repo_path, task_dir, "disk full")
+
+
+_AFTER_SHIP_SOURCES = " && ".join(
+    f"source {lib}"
+    for lib in (
+        "scripts/lib/project_paths.sh",
+        "scripts/lib/pp_run_ops.sh",
+        "scripts/lib/error_contract.sh",
+        "scripts/lib/cm/release_known_issue.sh",
+        "scripts/lib/cm/release_ship_policy.sh",
+    )
+)
+
+
+def _after_ship(tmp_path: pathlib.Path, kanban_root: pathlib.Path, project: str, calls: int):
+    """Run cm_verification_retry_after_ship *calls* times for an unverified ship."""
+    step = " && ".join(["cm_verification_retry_after_ship"] * calls)
+    script = (
+        f"{_AFTER_SHIP_SOURCES} && set -euo pipefail && PROJECT_NAME={project} ACTIVE_RC=v1.4.0 "
+        f"_CM_PROJECT_ROOT='{kanban_root / 'projects' / project}' _VERIFICATION_UNVERIFIED=yes "
+        f"_TESTER_TASK_ID={_TESTER_ID} _VERIFICATION_CASE=tester-blocked _VERIFICATION_CAUSE=no-runner && "
+        f"{step} && echo continued"
+    )
+    env = {
+        "KANBAN_ROOT": str(kanban_root),
+        "PGAI_AGENT_KANBAN_ROOT_PATH": str(kanban_root),
+        "PGAI_AGENT_KANBAN_TEMP_DIR": str(tmp_path / "tmp"),
+    }
+    return run_bash(tmp_path, script, extra_env=env, timeout=120)
+
+
+@pytest.mark.parametrize("calls", [1, 2])
+def test_an_unwritable_inbox_files_one_bug_naming_the_inbox_and_the_by_hand_command(
+    tmp_path: pathlib.Path, calls: int
+) -> None:
+    project = "after-ship-proj"
+    kanban_root = tmp_path / "kanban"
+    project_root = kanban_root / "projects" / project
+    (project_root / "bugs").mkdir(parents=True)
+    project_root.chmod(0o555)  # the inbox file cannot be created; bugs/ stays writable
+    try:
+        result = _after_ship(tmp_path, kanban_root, project, calls)
+    finally:
+        project_root.chmod(0o755)
+
+    out = f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.returncode == 0, out
+    assert result.stdout.strip().endswith("continued"), out
+    assert not (project_root / "operator-inbox.md").exists(), out
+    filed = sorted((project_root / "bugs").glob("BUG-*.md"))
+    assert len(filed) == 1, f"exactly one bug for the missing inbox entry\n{out}"
+    text = filed[0].read_text(encoding="utf-8")
+    assert str(project_root / "operator-inbox.md") in text, text
+    assert "pgai_agent_kanban.cm.verification_retry inbox" in text, text
+    assert _TESTER_ID in text and "no-runner" in text, text
+    assert "\tintake" in (project_root / "bugs" / ".bug-claims.log").read_text(encoding="utf-8")
+
+
+def test_a_written_inbox_entry_files_no_bug(tmp_path: pathlib.Path) -> None:
+    project = "after-ship-proj"
+    kanban_root = tmp_path / "kanban"
+    project_root = kanban_root / "projects" / project
+    (project_root / "bugs").mkdir(parents=True)
+
+    result = _after_ship(tmp_path, kanban_root, project, 1)
+
+    out = f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    assert result.returncode == 0, out
+    assert len(_inbox_open_entries(kanban_root, project)) == 1, out
+    assert not list((project_root / "bugs").glob("BUG-*.md")), out

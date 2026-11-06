@@ -66,7 +66,6 @@ from pgai_agent_kanban.ops.errors import (
 )
 from pgai_agent_kanban.overwatch.halt_provenance import installed_script_command
 
-
 # ---------------------------------------------------------------------------
 # list_projects
 # ---------------------------------------------------------------------------
@@ -93,9 +92,7 @@ def list_projects(ctx: OpsContext) -> list[str]:
     try:
         return [entry.name for entry in ini.projects_registry(ctx.kanban_root)]
     except ini.IniError as exc:
-        raise IoError(
-            f"Cannot read the project registry {ctx.kanban_root / 'projects.cfg'}: {exc}"
-        ) from exc
+        raise IoError(f"Cannot read the project registry {ctx.kanban_root / 'projects.cfg'}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +102,8 @@ def list_projects(ctx: OpsContext) -> list[str]:
 
 def get_halt_state(
     ctx: OpsContext,
-    project: "str | None" = None,
-) -> "tuple[str, str | None]":
+    project: str | None = None,
+) -> tuple[str, str | None]:
     """Return the current halt state for the kanban or a named project.
 
     Delegates to ``dashboard.halt_state.compute_halt_state``.  The halt state
@@ -264,12 +261,14 @@ def get_queues(ctx: OpsContext, project: str) -> dict[str, Any]:
         # genuinely idle project, being rendered for a name nothing
         # registered.
         # CENSUS-ANCHOR: ops-read-queues-project-missing-01
-        raise NotFound(format_error_contract(
-            "show_queues.project_directory_missing",
-            f"show-queues.sh: project directory not found: {project_root}.",
-            "Check the project name against projects.cfg, or create it first with "
-            f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', project)}.",
-        ))
+        raise NotFound(
+            format_error_contract(
+                "show_queues.project_directory_missing",
+                f"show-queues.sh: project directory not found: {project_root}.",
+                "Check the project name against projects.cfg, or create it first with "
+                f"{installed_script_command(ctx.kanban_root, 'create-project.sh', '--project', project)}.",
+            )
+        )
 
     tasks_dir = ctx.tasks_dir(project)
     counts = scan_task_counts(tasks_dir)
@@ -277,18 +276,14 @@ def get_queues(ctx: OpsContext, project: str) -> dict[str, Any]:
     try:
         entries = scan_queue_files(tasks_dir)
     except OSError as exc:
-        raise IoError(
-            f"Cannot read queue files for project {project!r}: {exc}"
-        ) from exc
+        raise IoError(f"Cannot read queue files for project {project!r}: {exc}") from exc
 
     working = counts.working
     return {
         "project": project,
         "counts": counts.queues,
         "working": (
-            {"task_id": working.task_id, "mtime": working.mtime, "role": working.role}
-            if working is not None
-            else None
+            {"task_id": working.task_id, "mtime": working.mtime, "role": working.role} if working is not None else None
         ),
         "halt": {"flag": flag, "text": text},
         "details": resolve_queue_details(tasks_dir, tasks_dir / "queues"),
@@ -383,8 +378,9 @@ class TaskDocument(NamedTuple):
         return f"archived: {self.key} is not in the live project; read from the archive: {item}\n"
 
 
-def _ambiguity_notice(message: str, candidates: "tuple[pathlib.Path, ...] | list[pathlib.Path]",
-                      first_match: pathlib.Path) -> str:
+def _ambiguity_notice(
+    message: str, candidates: tuple[pathlib.Path, ...] | list[pathlib.Path], first_match: pathlib.Path
+) -> str:
     """The resolver's ambiguous-key notice, as the resolve CLI prints it to stderr.
 
     The resolver's message, one ``resolve_item:   <path>`` line per
@@ -443,9 +439,7 @@ def get_task_status(
     from pgai_agent_kanban.ops.resolve import require_task_document_inside, resolve_item
 
     if file not in TASK_DOCUMENT_FILES:
-        raise OpsError(
-            f"get_task_status: file must be one of {', '.join(TASK_DOCUMENT_FILES)}; got: {file!r}"
-        )
+        raise OpsError(f"get_task_status: file must be one of {', '.join(TASK_DOCUMENT_FILES)}; got: {file!r}")
 
     candidates: tuple[pathlib.Path, ...] = ()
     ambiguity = ""
@@ -498,9 +492,7 @@ def get_task_status(
 # printed is the validator's; these two exist so that even the fallback path
 # is a single string shared by the two surfaces rather than one per renderer.
 RELEASE_STATE_REFUSAL_ERROR_KEY = "release-state.invalid-field"
-RELEASE_STATE_REFUSAL_FALLBACK_REMEDY = (
-    "Fix the invalid field(s) in release-state.md, then retry."
-)
+RELEASE_STATE_REFUSAL_FALLBACK_REMEDY = "Fix the invalid field(s) in release-state.md, then retry."
 
 
 def get_release_state(ctx: OpsContext, project: str) -> dict[str, str]:
@@ -572,9 +564,7 @@ def get_release_state(ctx: OpsContext, project: str) -> dict[str, str]:
 _DEEP_VERIFY_MODE_ALIASES = {"true": "weekly", "false": "off"}
 
 
-def _read_deep_verify_mode_raw(
-    kanban_root: "pathlib.Path", project_root: "pathlib.Path"
-) -> "tuple[str, str]":
+def _read_deep_verify_mode_raw(kanban_root: pathlib.Path, project_root: pathlib.Path) -> tuple[str, str]:
     """Return ``(raw, source)`` for the project's ``[release] deep_verify``.
 
     Reads the chain ``team/scripts/lib/project_paths.sh``'s
@@ -663,8 +653,7 @@ def get_deep_verify_status(ctx: OpsContext, project: str) -> dict[str, Any]:
         mode = resolve_mode(aliased_mode)
     except InvalidDeepVerifyMode as exc:
         raise Refused(
-            f"{exc}; read from {mode_source} [release] deep_verify "
-            "(aliases 'true'/'false' are also accepted)"
+            f"{exc}; read from {mode_source} [release] deep_verify " "(aliases 'true'/'false' are also accepted)"
         ) from exc
 
     ledger_path = ledger_path_for_project(str(ctx.kanban_root), project)
@@ -685,7 +674,7 @@ def get_deep_verify_status(ctx: OpsContext, project: str) -> dict[str, Any]:
 
 def get_attention(
     ctx: OpsContext,
-    project: "str | None" = None,
+    project: str | None = None,
 ) -> str:
     """Return a formatted attention report for the kanban or a named project.
 
@@ -718,9 +707,7 @@ def get_attention(
     if project is not None:
         project_root = ctx.project_root(project)
         if not project_root.exists():
-            raise NotFound(
-                f"Project not found: {project!r} (expected at {project_root})"
-            )
+            raise NotFound(f"Project not found: {project!r} (expected at {project_root})")
         tasks_root = str(ctx.tasks_dir(project))
         kanban_root = str(ctx.kanban_root)
     else:
@@ -809,11 +796,7 @@ def get_metrics(
         project_entries = project_entries[-last_n:]
 
     buckets = aggregate(project_entries)
-    window_label = (
-        f"project={project}, last {last_n} entries"
-        if last_n > 0
-        else f"project={project}, all entries"
-    )
+    window_label = f"project={project}, last {last_n} entries" if last_n > 0 else f"project={project}, all entries"
     return render_table(buckets, window_label)
 
 
@@ -906,9 +889,7 @@ def _read_text(path: pathlib.Path) -> str:
     return path.read_bytes().decode("utf-8", errors="replace")
 
 
-def _resolve_for_script(
-    ctx: OpsContext, project: str, key: str, script: str
-) -> "tuple[Any, str, int]":
+def _resolve_for_script(ctx: OpsContext, project: str, key: str, script: str) -> tuple[Any, str, int]:
     """Resolve *key* the way the resolve CLI the read scripts called reports it.
 
     Returns ``(result, notice, code)``: the resolved item, the ambiguity
@@ -934,14 +915,12 @@ def _resolve_for_script(
     except Ambiguous as exc:
         return exc.result, _ambiguity_notice(str(exc), exc.candidates, exc.result.path), 2
     except NotFound as exc:
-        raise CliRefusal(
-            "resolve_item.not_found", f"{exc}\n{script}: key not found: {key}\n", exit_code=3
-        ) from exc
+        raise CliRefusal("resolve_item.not_found", f"{exc}\n{script}: key not found: {key}\n", exit_code=3) from exc
     except OpsError as exc:
         raise CliRefusal("resolve_item.failed", f"{exc}\n") from exc
 
 
-def _script_output(render: "Any") -> ReadOutput:
+def _script_output(render: Any) -> ReadOutput:
     """Run *render* (returning ``(stdout, stderr, exit_code)``); a CliRefusal becomes its ReadOutput."""
     try:
         stdout, stderr, exit_code = render()
@@ -971,9 +950,7 @@ def _blocked_task_ids(tasks_dir: pathlib.Path) -> tuple[str, ...]:
     try:
         with os.scandir(tasks_dir) as entries:
             candidates += [
-                pathlib.Path(entry.path) / "status.md"
-                for entry in entries
-                if entry.is_dir(follow_symlinks=False)
+                pathlib.Path(entry.path) / "status.md" for entry in entries if entry.is_dir(follow_symlinks=False)
             ]
     except OSError:
         return ()
@@ -1084,8 +1061,8 @@ def read_status(
     project: str,
     *,
     no_color: bool = False,
-    environ: "Any" = None,
-    now: "int | None" = None,
+    environ: Any = None,
+    now: int | None = None,
 ) -> StatusRead:
     """Read *project*'s status once and render it, keeping the snapshot.
 
@@ -1113,7 +1090,7 @@ def read_status(
     env = os.environ if environ is None else environ
     read: list[Any] = []
 
-    def _render() -> "tuple[str, str, int]":
+    def _render() -> tuple[str, str, int]:
         snapshot = get_status(ctx, project)
         read.append(snapshot)
         text = render_status_summary(
@@ -1133,8 +1110,8 @@ def render_status(
     project: str,
     *,
     no_color: bool = False,
-    environ: "Any" = None,
-    now: "int | None" = None,
+    environ: Any = None,
+    now: int | None = None,
 ) -> ReadOutput:
     """Return what ``kanban-status.sh`` prints for *project*, over :func:`get_status`.
 
@@ -1192,13 +1169,11 @@ def render_release_state(ctx: OpsContext, project: str) -> ReadOutput:
     """
     from pgai_agent_kanban.lib.error_contract import dual_channel_from_text
 
-    def _render() -> "tuple[str, str, int]":
+    def _render() -> tuple[str, str, int]:
         try:
             fields = get_release_state(ctx, project)
         except NotFound as exc:
-            raise CliRefusal(
-                "release_state.project_not_found", f"release-state.sh: {exc}\n", exit_code=2
-            ) from exc
+            raise CliRefusal("release_state.project_not_found", f"release-state.sh: {exc}\n", exit_code=2) from exc
         except Refused as exc:
             body = dual_channel_from_text(
                 str(exc),
@@ -1249,7 +1224,7 @@ def render_deep_verify_status(ctx: OpsContext, project: str) -> ReadOutput:
     """
     from pgai_agent_kanban.deep_verify.ledger import DeepVerifyRecord, format_record
 
-    def _render() -> "tuple[str, str, int]":
+    def _render() -> tuple[str, str, int]:
         try:
             status = get_deep_verify_status(ctx, project)
         except NotFound as exc:
@@ -1265,8 +1240,7 @@ def render_deep_verify_status(ctx: OpsContext, project: str) -> ReadOutput:
             lines.append("latest: never-run\n")
         else:
             lines.append(
-                f"latest: {latest['verdict']} "
-                f"({latest['timestamp']}, {latest['version']}, {latest['commit']})\n"
+                f"latest: {latest['verdict']} " f"({latest['timestamp']}, {latest['version']}, {latest['commit']})\n"
             )
         entries = status["entries"]
         lines.append(f"\nLedger ({len(entries)} entries):\n")
@@ -1365,9 +1339,7 @@ def get_test_report(ctx: OpsContext, project: str, key: str) -> VerificationRepo
             matching = [
                 entry.name
                 for entry in entries
-                if entry.is_dir(follow_symlinks=False)
-                and entry.name.startswith("TESTER-")
-                and verify in entry.name
+                if entry.is_dir(follow_symlinks=False) and entry.name.startswith("TESTER-") and verify in entry.name
             ]
         if not matching:
             raise CliRefusal(
@@ -1400,7 +1372,7 @@ def get_test_report(ctx: OpsContext, project: str, key: str) -> VerificationRepo
 def render_test_report(ctx: OpsContext, project: str, key: str) -> ReadOutput:
     """Return what ``show-test-report.sh --project P --key K`` prints, over :func:`get_test_report`."""
 
-    def _render() -> "tuple[str, str, int]":
+    def _render() -> tuple[str, str, int]:
         report = get_test_report(ctx, project, key)
         return report.text, report.notice, report.exit_code
 
@@ -1467,7 +1439,7 @@ def get_task_readme(ctx: OpsContext, project: str, key: str) -> TaskReadme:
 def render_task_readme(ctx: OpsContext, project: str, key: str) -> ReadOutput:
     """Return what ``show-readme.sh --project P --key K`` prints, over :func:`get_task_readme`."""
 
-    def _render() -> "tuple[str, str, int]":
+    def _render() -> tuple[str, str, int]:
         readme = get_task_readme(ctx, project, key)
         return readme.text, readme.notice, 0
 
@@ -1488,7 +1460,7 @@ def _quarantine_timestamp(path: pathlib.Path) -> str:
     return datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%dT%H:%M")
 
 
-def list_rejected(ctx: OpsContext, project: "str | None" = None) -> list[Any]:
+def list_rejected(ctx: OpsContext, project: str | None = None) -> list[Any]:
     """Return the intake files discovery quarantined, per project and directory.
 
     The one read behind ``list-rejected.sh`` and ``GET /rejected``. For each
@@ -1549,18 +1521,20 @@ def list_rejected(ctx: OpsContext, project: "str | None" = None) -> list[Any]:
         for directory in (*INTAKE_DIRS, UNKNOWN_ORIGIN):
             paths = sorted(by_origin.get(directory, ()), key=lambda path: path.name)
             if paths:
-                sections.append(RejectedSection(
-                    project=name,
-                    directory=directory,
-                    files=tuple(
-                        RejectedFile(path.name, _quarantine_timestamp(path), rejection_reason(path.name))
-                        for path in paths
-                    ),
-                ))
+                sections.append(
+                    RejectedSection(
+                        project=name,
+                        directory=directory,
+                        files=tuple(
+                            RejectedFile(path.name, _quarantine_timestamp(path), rejection_reason(path.name))
+                            for path in paths
+                        ),
+                    )
+                )
     return sections
 
 
-def render_rejected(ctx: OpsContext, project: "str | None" = None, *, environ: "Any" = None) -> ReadOutput:
+def render_rejected(ctx: OpsContext, project: str | None = None, *, environ: Any = None) -> ReadOutput:
     """Return what ``list-rejected.sh [--project P]`` prints, over :func:`list_rejected`.
 
     Colour follows ``dashboard.rejected_listing.listing_color_enabled`` on
@@ -1570,7 +1544,7 @@ def render_rejected(ctx: OpsContext, project: "str | None" = None, *, environ: "
 
     env = os.environ if environ is None else environ
 
-    def _render() -> "tuple[str, str, int]":
+    def _render() -> tuple[str, str, int]:
         sections = list_rejected(ctx, project)
         return render_rejected_listing(sections, use_color=listing_color_enabled(env)), "", 0
 
@@ -1605,7 +1579,7 @@ _CLI_USAGE = (
 )
 
 #: Script-shaped verbs: name -> (accepted argument counts, ReadOutput producer).
-_SCRIPT_VERBS: "dict[str, tuple[tuple[int, ...], Any]]" = {
+_SCRIPT_VERBS: dict[str, tuple[tuple[int, ...], Any]] = {
     "get_status": ((3,), lambda ctx, a: render_status(ctx, a[1], no_color=a[2] == "1")),
     "get_release_state": ((2,), lambda ctx, a: render_release_state(ctx, a[1])),
     "get_deep_verify_status": ((2,), lambda ctx, a: render_deep_verify_status(ctx, a[1])),
@@ -1622,7 +1596,7 @@ def _write_stdout(text: str) -> None:
     sys.stdout.buffer.flush()
 
 
-def _cli_main(argv: "list[str] | None" = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """CLI for the read verbs bash wrappers reach through ``pp_run_ops``.
 
     Invoked as ``python3 -m pgai_agent_kanban.ops <verb> [args...]``
@@ -1688,8 +1662,10 @@ def _cli_main(argv: "list[str] | None" = None) -> int:
     try:
         if verb == "get_task_status":
             if len(rest) not in (3, 4):
-                print(f"read get_task_status: KANBAN_ROOT, PROJECT and KEY arguments are required\n{_CLI_USAGE}",
-                      file=sys.stderr)
+                print(
+                    f"read get_task_status: KANBAN_ROOT, PROJECT and KEY arguments are required\n{_CLI_USAGE}",
+                    file=sys.stderr,
+                )
                 return 1
             ctx = OpsContext(kanban_root=pathlib.Path(rest[0]))
             document = get_task_status(ctx, rest[1], rest[2], rest[3] if len(rest) == 4 else "status")
@@ -1699,8 +1675,11 @@ def _cli_main(argv: "list[str] | None" = None) -> int:
 
         elif verb == "get_queues":
             if len(rest) != 4:
-                print(f"read get_queues: KANBAN_ROOT, PROJECT, DATA_PROJECT and DETAILS arguments are required\n"
-                      f"{_CLI_USAGE}", file=sys.stderr)
+                print(
+                    f"read get_queues: KANBAN_ROOT, PROJECT, DATA_PROJECT and DETAILS arguments are required\n"
+                    f"{_CLI_USAGE}",
+                    file=sys.stderr,
+                )
                 return 1
             ctx = OpsContext(kanban_root=pathlib.Path(rest[0]))
             pane = render_queues(ctx, rest[1], rest[2], rest[3] == "1")

@@ -37,7 +37,7 @@ import pathlib
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pytest
 
@@ -86,7 +86,12 @@ def _require_git() -> None:
 
 def _git(*args: str, env: dict) -> str:
     return subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True, stdin=subprocess.DEVNULL, env=env,
+        ["git", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        env=env,
     ).stdout.strip()
 
 
@@ -109,15 +114,17 @@ class _Lane:
         for name in _AMBIENT_NAMES:
             env.pop(name, None)
         env.update(_GIT_IDENTITY)
-        env.update({
-            "HOME": str(self.home),
-            "KANBAN_ROOT": str(self.root),
-            "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
-            "TEAM_ROOT": str(self.root),
-            "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
-            "PGAI_PROJECT_NAME": _PROJECT,
-            "PYTHONPATH": str(_TEAM_DIR),
-        })
+        env.update(
+            {
+                "HOME": str(self.home),
+                "KANBAN_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
+                "TEAM_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
+                "PGAI_PROJECT_NAME": _PROJECT,
+                "PYTHONPATH": str(_TEAM_DIR),
+            }
+        )
         return env
 
     def _build_root(self) -> None:
@@ -158,15 +165,20 @@ class _Lane:
     def git(self, *args: str) -> str:
         return _git("-C", str(self.dev), *args, env=self.env)
 
-    def run(self, script: pathlib.Path, *args: str, extra_env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    def run(self, script: pathlib.Path, *args: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
         env = dict(self.env)
         env.update(extra_env or {})
         return subprocess.run(
-            ["bash", str(script), *args], capture_output=True, text=True, env=env,
-            cwd=str(self.root), timeout=240, stdin=subprocess.DEVNULL,
+            ["bash", str(script), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(self.root),
+            timeout=240,
+            stdin=subprocess.DEVNULL,
         )
 
-    def open_rc_with_work(self, extra_files: Optional[dict] = None) -> None:
+    def open_rc_with_work(self, extra_files: dict | None = None) -> None:
         """Open the RC and land one feature-branch merge on it."""
         opened = self.run(_OPEN_RC, _VERSION)
         assert opened.returncode == 0, _out(opened)
@@ -193,7 +205,7 @@ class _Lane:
         """Force every inbox write to fail: the inbox path is a directory."""
         (self.proj / "operator-inbox.md").mkdir()
 
-    def halt_body(self) -> Optional[str]:
+    def halt_body(self) -> str | None:
         halt = self.proj / "HALT"
         return halt.read_text(encoding="utf-8") if halt.exists() else None
 
@@ -226,7 +238,9 @@ def _without_timestamp(halt_body: str) -> str:
 def _contract(output: str, key: str) -> tuple:
     """The (message, remedy) the stop emitted for *key* on stderr."""
     match = re.search(
-        rf"^error:   {re.escape(key)}\nmessage: (.*)\nremedy:  (.*)$", output, re.MULTILINE,
+        rf"^error:   {re.escape(key)}\nmessage: (.*)\nremedy:  (.*)$",
+        output,
+        re.MULTILINE,
     )
     assert match, f"no dual-channel block for {key} in:\n{output}"
     return match.group(1), match.group(2)
@@ -325,8 +339,9 @@ def test_integrity_stop_writes_one_inbox_entry_with_its_key_reason_and_remedy(tm
     assert stop.key in entry and message in entry and f"Remedy: {remedy}" in entry, entry
     resume = "scripts/unhalt.sh --project" if stop.halts else "scripts/cm/release.sh --project"
     assert f"{lane.root}/{resume} {_PROJECT}" in entry, entry
-    assert re.search(rf"Operator inbox: INBOX-0001 records this stop \({re.escape(stop.key)}\)", result.stderr), \
-        _out(result)
+    assert re.search(rf"Operator inbox: INBOX-0001 records this stop \({re.escape(stop.key)}\)", result.stderr), _out(
+        result
+    )
 
 
 @pytest.mark.parametrize("stop", _STOPS, ids=[s.name for s in _STOPS])
@@ -345,15 +360,21 @@ def test_integrity_stop_keeps_its_exit_and_halt_when_the_inbox_write_fails(tmp_p
     assert lane.git("tag", "--list") == ""
     assert lane.git("rev-parse", _MAIN) == main_before
     assert (lane.proj / "operator-inbox.md").is_dir(), "the failed write left the inbox path as it was"
-    assert f"WARNING: the operator inbox entry for this stop ({stop.key}) could not be written" in result.stderr, \
-        _out(result)
+    assert f"WARNING: the operator inbox entry for this stop ({stop.key}) could not be written" in result.stderr, _out(
+        result
+    )
     assert "/scripts/lib/pp_run_ops.sh pgai_agent_kanban.overwatch.inbox write_entry" in result.stderr, _out(result)
     # The narrated by-hand command runs as printed once the inbox is fixed.
     by_hand = re.search(r"Write it by hand: (.*)$", result.stderr, re.MULTILINE).group(1)
     (lane.proj / "operator-inbox.md").rmdir()
     written = subprocess.run(
-        ["bash", "-c", by_hand], capture_output=True, text=True, env=lane.env, cwd=str(lane.root),
-        timeout=60, stdin=subprocess.DEVNULL,
+        ["bash", "-c", by_hand],
+        capture_output=True,
+        text=True,
+        env=lane.env,
+        cwd=str(lane.root),
+        timeout=60,
+        stdin=subprocess.DEVNULL,
     )
     assert written.returncode == 0, f"{written.stdout}\n{written.stderr}"
     entries = _inbox_entries(lane.inbox())

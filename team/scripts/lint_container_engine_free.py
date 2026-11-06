@@ -140,8 +140,7 @@ def find_sweep_files(sweep_dir: Path) -> list[Path]:
     return sorted(
         p
         for p in sweep_dir.rglob("*.py")
-        if p.is_file()
-        and not (_SKIPPED_PATH_SEGMENTS & set(p.relative_to(sweep_dir).parts[:-1]))
+        if p.is_file() and not (_SKIPPED_PATH_SEGMENTS & set(p.relative_to(sweep_dir).parts[:-1]))
     )
 
 
@@ -158,13 +157,9 @@ def _build_parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
     return parents
 
 
-def _enclosing_function(
-    node: ast.AST, parents: dict[ast.AST, ast.AST]
-) -> ast.AST | None:
+def _enclosing_function(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
     cur = parents.get(node)
-    while cur is not None and not isinstance(
-        cur, (ast.FunctionDef, ast.AsyncFunctionDef)
-    ):
+    while cur is not None and not isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
         cur = parents.get(cur)
     return cur
 
@@ -223,16 +218,10 @@ def _function_scrubs_path_before(func_node: ast.AST, line_no: int) -> bool:
                 if not isinstance(target, ast.Subscript):
                     continue
                 val = target.value
-                is_os_environ = (
-                    isinstance(val, ast.Attribute) and val.attr == "environ"
-                )
+                is_os_environ = isinstance(val, ast.Attribute) and val.attr == "environ"
                 key = target.slice
                 # Python >= 3.9: target.slice is the key expression directly.
-                if (
-                    is_os_environ
-                    and isinstance(key, ast.Constant)
-                    and key.value == "PATH"
-                ):
+                if is_os_environ and isinstance(key, ast.Constant) and key.value == "PATH":
                     return True
     return False
 
@@ -288,9 +277,7 @@ def scan_file(path: Path) -> list[_Finding]:
             continue
 
         func_node = _enclosing_function(node, parents)
-        if func_node is not None and _function_scrubs_path_before(
-            func_node, line_no
-        ):
+        if func_node is not None and _function_scrubs_path_before(func_node, line_no):
             # PATH is redirected to a test-owned location earlier in the
             # same function -- this call structurally cannot reach the
             # real system binary (see module docstring).
@@ -313,7 +300,7 @@ def scan_file(path: Path) -> list[_Finding]:
                     "team/tests/cold/ for the existing relocated modules -- "
                     "or, if this call is a deliberate absent-binary test, "
                     "redirect PATH to a directory this test controls (e.g. "
-                    "monkeypatch.setenv(\"PATH\", ...)) before the call so it "
+                    'monkeypatch.setenv("PATH", ...)) before the call so it '
                     "cannot reach a real engine"
                 ),
             )
@@ -342,8 +329,7 @@ def _print_findings(findings: list[_Finding], lint_script: Path) -> None:
     for i, finding in enumerate(findings, start=1):
         print(f"  {i}. {finding.remedy}", flush=True)
     print(
-        f"  {len(findings) + 1}. python3 \"{lint_script}\"   # re-run this "
-        "lint to confirm",
+        f'  {len(findings) + 1}. python3 "{lint_script}"   # re-run this ' "lint to confirm",
         flush=True,
     )
     print("", flush=True)
@@ -417,8 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     for sweep_dir in sweep_dirs:
         if not sweep_dir.is_dir():
             print(
-                f"ERROR: sweep directory not found: {sweep_dir}\n"
-                "Use --sweep-dir to specify an alternative path.",
+                f"ERROR: sweep directory not found: {sweep_dir}\n" "Use --sweep-dir to specify an alternative path.",
                 file=sys.stderr,
             )
             return 2
@@ -426,15 +411,10 @@ def main(argv: list[str] | None = None) -> int:
     files: list[Path] = []
     for sweep_dir in sweep_dirs:
         files.extend(find_sweep_files(sweep_dir))
-    files = sorted(
-        f
-        for f in set(files)
-        if not f.as_posix().endswith(_DEFAULT_IGNORED_SUFFIXES)
-    )
+    files = sorted(f for f in set(files) if not f.as_posix().endswith(_DEFAULT_IGNORED_SUFFIXES))
 
     print(
-        f"lint_container_engine_free: scanning {len(files)} file(s) under "
-        f"{', '.join(str(d) for d in sweep_dirs)}",
+        f"lint_container_engine_free: scanning {len(files)} file(s) under " f"{', '.join(str(d) for d in sweep_dirs)}",
         flush=True,
     )
 
@@ -451,8 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(
-        f"lint_container_engine_free: OK -- {len(files)} file(s) checked, "
-        "0 violations.",
+        f"lint_container_engine_free: OK -- {len(files)} file(s) checked, " "0 violations.",
         flush=True,
     )
     return 0

@@ -72,7 +72,7 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from tests.fixtures.golden_board import PROJECT_NAME, task_ids_by_state
 
@@ -143,6 +143,10 @@ CliExpectationsFn = Callable[[dict], tuple[str, ...]]
 """(resolved) -> substrings the CLI's stdout must carry, each built from
 the resolver's result in the CLI's own rendering."""
 
+EnvFn = Callable[[pathlib.Path], dict[str, str | None]]
+"""(board_root) -> environment overrides the CLI run, the REST server and the
+in-process resolver all see; a ``None`` value unsets the name."""
+
 
 @dataclasses.dataclass(frozen=True)
 class StdoutReadCase:
@@ -170,7 +174,7 @@ class StdoutReadCase:
     rest_route: str
     rest_query: dict
     expect_stdout_contains: tuple[str, ...]
-    seed: Optional[SeedFn] = None
+    seed: SeedFn | None = None
     note: str = ""
 
     @property
@@ -200,6 +204,11 @@ class ResolvedReadCase:
                      the seed reached the board both surfaces read, so a
                      comparison over an unseeded, all-``none`` board cannot
                      pass by accident.
+        env:         Optional environment overrides, built from the board,
+                     that the runner applies before seeding: the CLI run,
+                     the REST server and the resolver all read them (a verb
+                     that resolves paths from HOME points them inside the
+                     board this way).
     """
 
     verb: str
@@ -211,8 +220,9 @@ class ResolvedReadCase:
     rest_view: RestViewFn
     cli_expectations: CliExpectationsFn
     expect_stdout_contains: tuple[str, ...]
-    seed: Optional[SeedFn] = None
+    seed: SeedFn | None = None
     note: str = ""
+    env: EnvFn | None = None
 
     @property
     def kind(self) -> str:
@@ -240,7 +250,7 @@ class RefusalReadCase:
     error_key: str
     cli_exit_code: int
     rest_status: int
-    seed: Optional[SeedFn] = None
+    seed: SeedFn | None = None
     note: str = ""
 
     @property
@@ -270,7 +280,7 @@ class DelegatedReadCase:
         return "delegated"
 
 
-ReadParityCase = Union[StdoutReadCase, ResolvedReadCase, RefusalReadCase, DelegatedReadCase]
+ReadParityCase = StdoutReadCase | ResolvedReadCase | RefusalReadCase | DelegatedReadCase
 
 
 # ---------------------------------------------------------------------------
@@ -292,16 +302,12 @@ def _release_state_text(active_rc: str) -> str:
 
 def seed_release_state(root: pathlib.Path, project_dir: pathlib.Path) -> None:
     """A valid release-state.md with an RC in flight."""
-    (project_dir / "release-state.md").write_text(
-        _release_state_text(SEEDED_ACTIVE_RC), encoding="utf-8"
-    )
+    (project_dir / "release-state.md").write_text(_release_state_text(SEEDED_ACTIVE_RC), encoding="utf-8")
 
 
 def seed_malformed_release_state(root: pathlib.Path, project_dir: pathlib.Path) -> None:
     """A release-state.md whose ``## Active RC`` the schema refuses."""
-    (project_dir / "release-state.md").write_text(
-        _release_state_text(MALFORMED_ACTIVE_RC), encoding="utf-8"
-    )
+    (project_dir / "release-state.md").write_text(_release_state_text(MALFORMED_ACTIVE_RC), encoding="utf-8")
 
 
 def seed_project_cfg_with_dev_tree(root: pathlib.Path, project_dir: pathlib.Path) -> None:
@@ -345,6 +351,58 @@ def seed_deep_verify_ledger(root: pathlib.Path, project_dir: pathlib.Path) -> No
     ledger_path = ledger_path_for_project(str(root), PROJECT_NAME)
     for entry in SEEDED_LEDGER_ENTRIES:
         append_record(ledger_path, DeepVerifyRecord(**entry))
+
+
+# The skill a seeded staging directory carries beside the shipped ones,
+# absent from the shipped-skills record, so it lists as operator-added.
+SEEDED_OPERATOR_SKILL = "my-skill"
+
+
+def skills_provider_env(root: pathlib.Path) -> dict[str, str | None]:
+    """Provider skill homes inside the board: claude under
+    ``<board>/claude-config`` (CLAUDE_CONFIG_DIR), codex under
+    ``<board>/user-home`` (HOME), so no surface reads a real home."""
+    return {"HOME": str(root / "user-home"), "CLAUDE_CONFIG_DIR": str(root / "claude-config")}
+
+
+def skills_provider_env_without_claude_config_dir(root: pathlib.Path) -> dict[str, str | None]:
+    """Provider skill homes inside the board with CLAUDE_CONFIG_DIR unset:
+    claude under ``<board>/user-home/.claude``, codex under
+    ``<board>/user-home/.codex`` (HOME)."""
+    return {"HOME": str(root / "user-home"), "CLAUDE_CONFIG_DIR": None}
+
+
+def seed_skills_staging(root: pathlib.Path, project_dir: pathlib.Path) -> None:
+    """A staging directory at ``<board>/skills`` holding the repository's
+    shipped skills and one operator-added claude skill, the shipped-skills
+    record naming the shipped ones, and provider homes where the shipped
+    claude skill is installed (``same``) and the codex copy is edited
+    (``changed``); the operator skill stays ``new``. The homes are written
+    through the skills module's own installer, resolved from the process
+    environment the case's ``env`` has already set."""
+    import shutil
+
+    from pgai_agent_kanban.lib import skills_install
+
+    staging = root / skills_install.STAGING_DIR
+    shutil.copytree(_REPO_ROOT / "skills", staging)
+    shipped = sorted(p.relative_to(root).as_posix() for p in staging.glob("*/*/SKILL.md"))
+    (root / skills_install.SHIPPED_MANIFEST).write_text("".join(f"{line}\n" for line in shipped), encoding="utf-8")
+
+    homes = {
+        "claude": skills_install.provider_skills_home("claude"),
+        "codex": skills_install.provider_skills_home("codex"),
+    }
+    skills_install.install_skills(skills_install.list_skills(staging, homes=homes))
+    codex_copy = homes["codex"] / "pgai-agent-kanban" / "SKILL.md"
+    codex_copy.write_text(codex_copy.read_text(encoding="utf-8") + "\nAn operator edit.\n", encoding="utf-8")
+
+    operator_skill = staging / "claude" / SEEDED_OPERATOR_SKILL
+    operator_skill.mkdir(parents=True)
+    (operator_skill / "SKILL.md").write_text(
+        f"---\nname: {SEEDED_OPERATOR_SKILL}\ndescription: An operator's own skill.\n---\n\n# Mine\n",
+        encoding="utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -410,10 +468,7 @@ def deep_verify_status_cli_expectations(resolved: dict) -> tuple[str, ...]:
     latest_line = (
         "latest: never-run"
         if latest is None
-        else (
-            f"latest: {latest['verdict']} "
-            f"({latest['timestamp']}, {latest['version']}, {latest['commit']})"
-        )
+        else (f"latest: {latest['verdict']} " f"({latest['timestamp']}, {latest['version']}, {latest['commit']})")
     )
     return (
         f"mode: {resolved['mode']}",
@@ -421,6 +476,32 @@ def deep_verify_status_cli_expectations(resolved: dict) -> tuple[str, ...]:
         f"Ledger ({len(resolved['entries'])} entries):",
         *(format_record(DeepVerifyRecord.from_dict(entry)) for entry in resolved["entries"]),
     )
+
+
+def resolve_install_skills(root: pathlib.Path) -> dict:
+    """``pgai_agent_kanban.lib.skills_install.list_skills`` over the board's
+    staging directory, with the shipped set from its record -- the one
+    function install-skills.sh --list and GET /skills both call. Homes
+    resolve from the process environment, which the case's ``env`` set."""
+    from pgai_agent_kanban.lib import skills_install
+
+    shipped = skills_install.read_shipped_manifest(root / skills_install.SHIPPED_MANIFEST, missing_ok=True)
+    return skills_install.list_skills(root / skills_install.STAGING_DIR, shipped=shipped, missing_ok=True).to_dict()
+
+
+def install_skills_rest_view(resolved: dict) -> dict:
+    """GET /skills' documented success body is the module's list object
+    itself (``source`` and ``providers``), plus ``warnings``."""
+    return resolved
+
+
+def install_skills_cli_expectations(resolved: dict) -> tuple[str, ...]:
+    """install-skills.sh --list --json prints the list object as
+    ``render_list_json`` renders it: keys sorted, two-space indent, one
+    trailing newline -- the whole document is the one expected block."""
+    import json
+
+    return (json.dumps(resolved, indent=2, sort_keys=True) + "\n",)
 
 
 # ---------------------------------------------------------------------------
@@ -444,16 +525,20 @@ _P = PROJECT_NAME
 READ_PARITY_CASES: tuple = (
     # --- Envelope reads: stdout byte-for-byte -------------------------------
     StdoutReadCase(
-        verb="show", script="show.sh",
+        verb="show",
+        script="show.sh",
         cli_args=_args("--project", _P, "--key", _TASKS["WORKING"]),
-        rest_route="/show", rest_query={"project": _P, "key": _TASKS["WORKING"]},
+        rest_route="/show",
+        rest_query={"project": _P, "key": _TASKS["WORKING"]},
         expect_stdout_contains=("## State\nWORKING",),
         note="show.sh and the route both call ops.read.get_task_status with the same project/key; stdout is the task's status.md",
     ),
     StdoutReadCase(
-        verb="verify-rc-state", script="verify-rc-state.sh",
+        verb="verify-rc-state",
+        script="verify-rc-state.sh",
         cli_args=_args(_P),
-        rest_route="/verify-rc-state", rest_query={"project": _P},
+        rest_route="/verify-rc-state",
+        rest_query={"project": _P},
         expect_stdout_contains=(
             "--- Check a: release-state.md consistency ---",
             "--- Check f: Bundle invariants ---",
@@ -468,9 +553,11 @@ READ_PARITY_CASES: tuple = (
     ),
     # --- One resolver, two renderers ---------------------------------------
     ResolvedReadCase(
-        verb="release-state", script="release-state.sh",
+        verb="release-state",
+        script="release-state.sh",
         cli_args=_args("--project", _P),
-        rest_route="/release-state", rest_query={"project": _P},
+        rest_route="/release-state",
+        rest_query={"project": _P},
         resolve=resolve_release_state,
         rest_view=release_state_rest_view,
         cli_expectations=release_state_cli_expectations,
@@ -479,9 +566,11 @@ READ_PARITY_CASES: tuple = (
         note="both surfaces call ops.read.get_release_state; the CLI prints key=value, the route JSON with none -> null",
     ),
     RefusalReadCase(
-        verb="release-state", script="release-state.sh",
+        verb="release-state",
+        script="release-state.sh",
         cli_args=_args("--project", _P),
-        rest_route="/release-state", rest_query={"project": _P},
+        rest_route="/release-state",
+        rest_query={"project": _P},
         error_key="release-state.invalid-field",
         cli_exit_code=3,
         rest_status=422,
@@ -492,9 +581,11 @@ READ_PARITY_CASES: tuple = (
         ),
     ),
     ResolvedReadCase(
-        verb="deep-verify-status", script="deep-verify-status.sh",
+        verb="deep-verify-status",
+        script="deep-verify-status.sh",
         cli_args=_args("--project", _P),
-        rest_route="/deep-verify-status", rest_query={"project": _P},
+        rest_route="/deep-verify-status",
+        rest_query={"project": _P},
         resolve=resolve_deep_verify_status,
         rest_view=deep_verify_status_rest_view,
         cli_expectations=deep_verify_status_cli_expectations,
@@ -504,6 +595,36 @@ READ_PARITY_CASES: tuple = (
         ),
         seed=seed_deep_verify_ledger,
         note="both surfaces call ops.read.get_deep_verify_status; the CLI renders records through the ledger's format_record",
+    ),
+    # Once with CLAUDE_CONFIG_DIR set and once unset: the claude home both
+    # surfaces report follows the one provider-home rule either way.
+    *(
+        ResolvedReadCase(
+            verb="install-skills",
+            script="install-skills.sh",
+            cli_args=_args("--list", "--json"),
+            rest_route="/skills",
+            rest_query={},
+            resolve=resolve_install_skills,
+            rest_view=install_skills_rest_view,
+            cli_expectations=install_skills_cli_expectations,
+            expect_stdout_contains=(
+                f'"name": "{SEEDED_OPERATOR_SKILL}",\n          "origin": "operator-added"',
+                '"origin": "shipped",\n          "state": "same"',
+                '"origin": "shipped",\n          "state": "changed"',
+            ),
+            seed=seed_skills_staging,
+            env=env,
+            note=(
+                "both surfaces call skills_install.list_skills over <board>/skills with the shipped set "
+                "from <board>/.installed-skills; the CLI's --list --json is the route's body minus "
+                f"warnings ({homes})"
+            ),
+        )
+        for env, homes in (
+            (skills_provider_env, "CLAUDE_CONFIG_DIR set"),
+            (skills_provider_env_without_claude_config_dir, "CLAUDE_CONFIG_DIR unset"),
+        )
     ),
     # --- Pairs that parse bespoke CLI text, shipped in their own module ----
     DelegatedReadCase(

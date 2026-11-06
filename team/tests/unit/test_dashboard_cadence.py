@@ -49,6 +49,13 @@ on the `sleep` test double's virtual clock, so each is charged for the
 same number of ticks whatever the host load (see that constant's own
 comment for the measurement method and the recorded baseline).
 
+Group 5 -- Reaping under a non-reaping PID 1 (unshare-gated): a cadence
+pane (rendering `true`, and a --stream pane) runs detached in a user+PID
+namespace whose PID 1 is `sleep`, which never reaps. After two hidden
+visibility re-checks and again after the pane is killed, no zombie is left
+under PID 1. Skips, naming the reason, where unshare cannot create the
+namespace.
+
 Docker is not used anywhere in this module -- tmux-dependent tests run on
 a private socket per team/tests/unit/test_dashboard_pane_signal_traps.py's
 established convention. Tmux-dependent groups narrate a skip (never a
@@ -70,15 +77,18 @@ import shlex
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
-from typing import Callable, Iterator, NamedTuple
+from typing import NamedTuple
+from collections.abc import Callable, Iterator
 
 import pytest
 
 from tests.fixtures.binary_guard import (
     narrate_binary_skip,
+    require_binary,
     teardown_private_tmux,
     try_resolve_binary,
 )
@@ -156,15 +166,10 @@ def test_create_sh_contains_no_flat_watch_pane_commands() -> None:
     visibility-blind cadence that cadence-loop.sh replaces.
     """
     text = _CREATE_SH.read_text()
-    offending = [
-        line
-        for line in text.splitlines()
-        if re.search(r"_CMD=.*\bwatch\s+-", line)
-    ]
+    offending = [line for line in text.splitlines() if re.search(r"_CMD=.*\bwatch\s+-", line)]
     assert not offending, (
         "found a pane command still invoking `watch` directly -- every pane "
-        "must route through cadence-loop.sh for visibility-aware cadence:\n"
-        + "\n".join(offending)
+        "must route through cadence-loop.sh for visibility-aware cadence:\n" + "\n".join(offending)
     )
 
 
@@ -172,14 +177,51 @@ def test_create_sh_contains_no_hand_rolled_sleep_refresh_loops() -> None:
     """Complementary to the above: no pane command still contains the
     pre-ticket hand-rolled 'sleep $REFRESH_INTERVAL' polling pattern."""
     text = _CREATE_SH.read_text()
-    offending = [
-        line
-        for line in text.splitlines()
-        if re.search(r"_CMD=.*sleep \$\{?REFRESH_INTERVAL\}?", line)
-    ]
-    assert not offending, (
-        "found a pane command with a hand-rolled flat-interval sleep loop:\n"
-        + "\n".join(offending)
+    offending = [line for line in text.splitlines() if re.search(r"_CMD=.*sleep \$\{?REFRESH_INTERVAL\}?", line)]
+    assert not offending, "found a pane command with a hand-rolled flat-interval sleep loop:\n" + "\n".join(offending)
+
+
+# The number of pane-command dispatches through cadence-loop.sh that
+# create.sh holds: one per interval-based pane command it builds. A pane
+# that loses its dispatch drops the count below this floor; a pane added
+# under cadence-loop.sh raises the count and still passes. Removing a pane
+# on purpose lowers this number in the same change.
+_CADENCE_LOOP_PANE_DISPATCHES = 40
+
+# A dispatch is cadence-loop.sh invoked with an interval: the loop running
+# a renderer, as opposed to a bare mention of the script's name.
+_CADENCE_LOOP_DISPATCH_RE = re.compile(r"cadence-loop\.sh\b.*?\s--interval\s")
+
+# The `${SCRIPT_DIR}/cadence-loop.sh [--stream] --interval N -- ` prefix
+# that wraps a renderer in a pane command.
+_CADENCE_LOOP_PREFIX_RE = re.compile(r"\$\{SCRIPT_DIR\}/cadence-loop\.sh\s+(?:--stream\s+)?--interval\s+\S+\s+--\s+")
+
+
+def _is_comment_line(line: str) -> bool:
+    """True for a bash line whose first non-blank character is `#`."""
+    return line.lstrip().startswith("#")
+
+
+def _count_cadence_loop_dispatches(script_text: str) -> int:
+    """Count the cadence-loop.sh dispatches on executable lines of a bash
+    script. Mentions on `#` comment lines never count, whatever they say:
+    comments describe the cadence model, they do not run a pane."""
+    return sum(
+        len(_CADENCE_LOOP_DISPATCH_RE.findall(line))
+        for line in script_text.splitlines()
+        if not _is_comment_line(line)
+    )
+
+
+def _assert_panes_dispatch_through_cadence_loop(create_sh: pathlib.Path) -> None:
+    """Assert that create.sh still dispatches every interval-based pane
+    command through cadence-loop.sh."""
+    dispatches = _count_cadence_loop_dispatches(create_sh.read_text())
+    assert dispatches >= _CADENCE_LOOP_PANE_DISPATCHES, (
+        f"expected at least {_CADENCE_LOOP_PANE_DISPATCHES} pane commands dispatched through "
+        f"cadence-loop.sh on executable lines of {create_sh}, found {dispatches} -- a pane may have "
+        f"reverted to a one-shot or visibility-blind render; if a pane was removed on purpose, "
+        f"lower _CADENCE_LOOP_PANE_DISPATCHES in {_THIS_FILE.name}"
     )
 
 
@@ -188,19 +230,45 @@ def test_create_sh_dispatches_every_watch_replaced_pane_through_cadence_loop() -
     interval-based pane (main/operator/visibility/git/metadata/
     rc-metrics/agent-metrics/training-logs/human-review/drill-N -- the
     tail/cron-tail/interactive-shell panes are excluded, they were
-    never interval-based). A future pane added back on a bare `watch`
-    would not increment this count and the drift test above would catch
-    the literal `watch` reappearing; this test catches a pane silently
-    losing its cadence-loop.sh dispatch entirely (e.g. reverted to a
-    one-shot render with no loop at all)."""
-    text = _CREATE_SH.read_text()
-    call_count = text.count("cadence-loop.sh")
-    assert call_count >= 20, (
-        f"expected at least 20 cadence-loop.sh references in create.sh "
-        f"(one per watch-replaced or hand-rolled-loop pane command), found "
-        f"{call_count} -- a pane may have reverted to a flat, "
-        f"visibility-blind refresh"
+    never interval-based). Only dispatches on executable lines count;
+    mentions on comment lines do not. A future pane added back on a bare
+    `watch` would not increment this count and the drift test above would
+    catch the literal `watch` reappearing; this test catches a pane
+    silently losing its cadence-loop.sh dispatch entirely (e.g. reverted
+    to a one-shot render with no loop at all)."""
+    # Static guard: every interval-based pane command in create.sh runs under
+    # cadence-loop.sh; the loop's behavior is covered by Groups 2-5 below.
+    _assert_panes_dispatch_through_cadence_loop(_CREATE_SH)
+
+
+def test_cadence_loop_dispatch_count_fails_when_only_comments_mention_the_loop(tmp_path: pathlib.Path) -> None:
+    """The dispatch count above can fail: on a copy of create.sh whose
+    executable lines no longer run cadence-loop.sh but whose comment lines
+    are unchanged, the count is zero and the assertion fails, however many
+    comments still name the loop."""
+    original = _CREATE_SH.read_text()
+    stripped_lines = [
+        line
+        if _is_comment_line(line)
+        else _CADENCE_LOOP_PREFIX_RE.sub("", line).replace("cadence-loop.sh", "one-shot-render")
+        for line in original.splitlines()
+    ]
+    stripped = tmp_path / "create.sh"
+    stripped.write_text("\n".join(stripped_lines) + "\n")
+
+    executable_mentions = [line for line in stripped_lines if not _is_comment_line(line) and "cadence-loop.sh" in line]
+    assert not executable_mentions, "the stripped copy must leave no executable line naming cadence-loop.sh"
+    assert [line for line in stripped_lines if _is_comment_line(line)] == [
+        line for line in original.splitlines() if _is_comment_line(line)
+    ], "the stripped copy must keep every comment line of create.sh unchanged"
+    assert any(_is_comment_line(line) and "cadence-loop.sh" in line for line in stripped_lines), (
+        "create.sh no longer mentions cadence-loop.sh in any comment, so this copy does not "
+        "exercise comment mentions being ignored"
     )
+
+    assert _count_cadence_loop_dispatches(stripped.read_text()) == 0
+    with pytest.raises(AssertionError, match="pane commands dispatched through cadence-loop.sh"):
+        _assert_panes_dispatch_through_cadence_loop(stripped)
 
 
 def test_agent_metrics_window_runs_live_and_full_history_panes_under_cadence_loop() -> None:
@@ -210,14 +278,8 @@ def test_agent_metrics_window_runs_live_and_full_history_panes_under_cadence_loo
     Neither introduces its own refresh mechanism."""
     text = _CREATE_SH.read_text()
     loop = "${SCRIPT_DIR}/cadence-loop.sh --interval ${REFRESH_INTERVAL} -- "
-    live = (
-        'AGENT_METRICS_CMD="' + loop
-        + '${SCRIPT_DIR}/agent-metrics.sh --kanban-root ${KANBAN_ROOT}"'
-    )
-    full = (
-        'AGENT_METRICS_ALL_CMD="' + loop
-        + '${SCRIPT_DIR}/agent-metrics.sh --all --kanban-root ${KANBAN_ROOT}"'
-    )
+    live = 'AGENT_METRICS_CMD="' + loop + '${SCRIPT_DIR}/agent-metrics.sh --kanban-root ${KANBAN_ROOT}"'
+    full = 'AGENT_METRICS_ALL_CMD="' + loop + '${SCRIPT_DIR}/agent-metrics.sh --all --kanban-root ${KANBAN_ROOT}"'
     assert live in text, "agent-metrics live-table pane command changed or lost its cadence-loop.sh wrap"
     assert full in text, "agent-metrics full-history pane is missing or not under cadence-loop.sh"
     assert 'dashboard_send_armed_keys "agent-metrics.0" "${AGENT_METRICS_CMD}"' in text
@@ -231,9 +293,15 @@ def test_jitter_seconds_is_deterministic_across_repeated_calls() -> None:
 
     def jitter(label: str, bound: int = 3) -> str:
         result = subprocess.run(
-            ["bash", "-c", f"source {shlex.quote(str(_CADENCE_LIB_SH))}; "
-             f"dashboard_cadence_jitter_seconds {shlex.quote(label)} {bound}"],
-            capture_output=True, text=True, timeout=10,
+            [
+                "bash",
+                "-c",
+                f"source {shlex.quote(str(_CADENCE_LIB_SH))}; "
+                f"dashboard_cadence_jitter_seconds {shlex.quote(label)} {bound}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
@@ -249,9 +317,15 @@ def test_jitter_seconds_is_bounded() -> None:
 
     def jitter(label: str, bound: int) -> int:
         result = subprocess.run(
-            ["bash", "-c", f"source {shlex.quote(str(_CADENCE_LIB_SH))}; "
-             f"dashboard_cadence_jitter_seconds {shlex.quote(label)} {bound}"],
-            capture_output=True, text=True, timeout=10,
+            [
+                "bash",
+                "-c",
+                f"source {shlex.quote(str(_CADENCE_LIB_SH))}; "
+                f"dashboard_cadence_jitter_seconds {shlex.quote(label)} {bound}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0, result.stderr
         return int(result.stdout.strip())
@@ -276,9 +350,15 @@ def test_two_panes_launched_together_do_not_share_a_jitter_offset() -> None:
 
     def jitter(label: str) -> int:
         result = subprocess.run(
-            ["bash", "-c", f"source {shlex.quote(str(_CADENCE_LIB_SH))}; "
-             f"dashboard_cadence_jitter_seconds {shlex.quote(label)} {bound}"],
-            capture_output=True, text=True, timeout=10,
+            [
+                "bash",
+                "-c",
+                f"source {shlex.quote(str(_CADENCE_LIB_SH))}; "
+                f"dashboard_cadence_jitter_seconds {shlex.quote(label)} {bound}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0, result.stderr
         return int(result.stdout.strip())
@@ -323,7 +403,7 @@ _HANG_GUARD_SECONDS = 60.0
 # The cadence loop's only `sleep` call is its interval wait (the jitter
 # sleep is disabled with --jitter-bound 0 throughout), so each call this
 # double sees is exactly one interval request.
-_SLEEP_SHIM = r'''#!/usr/bin/env bash
+_SLEEP_SHIM = r"""#!/usr/bin/env bash
 # Test double for `sleep`, placed first on PATH for a cadence-loop.sh under
 # test.
 #   CADENCE_TEST_EVENT_LOG       when set, appends "sleep <args>" per call.
@@ -353,7 +433,7 @@ if [[ -n "${CADENCE_TEST_VIRTUAL_WINDOW_MS:-}" ]]; then
     exit 0
 fi
 exec __REAL_SLEEP__ "$@"
-'''
+"""
 
 # A renderer that records each render in the event log before painting a
 # timestamp, so the log reads as the loop's own render/sleep sequence.
@@ -396,7 +476,7 @@ def _events_between_renders(events: list[str], renders: int) -> list[list[str]]:
     recorded between each consecutive pair (renders - 1 lists)."""
     positions = [i for i, event in enumerate(events) if event == "render"][:renders]
     assert len(positions) == renders, f"expected {renders} renders in the event log, found: {events}"
-    return [events[a + 1:b] for a, b in zip(positions, positions[1:])]
+    return [events[a + 1 : b] for a, b in zip(positions, positions[1:])]
 
 
 def _requested_seconds(event: str) -> float:
@@ -463,10 +543,13 @@ def _running_cadence_loop(
 ) -> Iterator[LoopDisplay]:
     """Run cadence-loop.sh in its own process group for the duration of
     the block; the whole group is killed and reaped on exit."""
-    args = ["bash", str(_CADENCE_LOOP_SH), "--interval", str(interval), "--jitter-bound", "0",
-            "--", *renderer]
+    args = ["bash", str(_CADENCE_LOOP_SH), "--interval", str(interval), "--jitter-bound", "0", "--", *renderer]
     proc = subprocess.Popen(
-        args, env=env, cwd=str(_REPO_ROOT), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        args,
+        env=env,
+        cwd=str(_REPO_ROOT),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT if merge_stderr else subprocess.DEVNULL,
         start_new_session=True,
     )
@@ -535,7 +618,8 @@ def test_pane_renders_at_the_configured_interval_while_active(tmp_path: pathlib.
         _wait_for(
             lambda: len(display.timestamps()) >= renders,
             f"{renders} renders at a {interval}s active interval",
-            [display], lambda: _diagnostics(display, harness.event_log),
+            [display],
+            lambda: _diagnostics(display, harness.event_log),
         )
 
     events = _read_events(harness.event_log)
@@ -548,9 +632,9 @@ def test_pane_renders_at_the_configured_interval_while_active(tmp_path: pathlib.
     timestamps = display.timestamps()[:renders]
     gaps = [b - a for a, b in zip(timestamps, timestamps[1:])]
     for gap in gaps:
-        assert gap >= interval - 0.05, (
-            f"render gap {gap:.3f}s is shorter than the configured {interval}s interval: {gaps}"
-        )
+        assert (
+            gap >= interval - 0.05
+        ), f"render gap {gap:.3f}s is shorter than the configured {interval}s interval: {gaps}"
 
 
 def test_hidden_pane_renders_on_arrival_then_only_rechecks_visibility(tmp_path: pathlib.Path) -> None:
@@ -574,19 +658,19 @@ def test_hidden_pane_renders_on_arrival_then_only_rechecks_visibility(tmp_path: 
     env["CADENCE_TEST_WINDOW_DONE"] = str(done)
     with _running_cadence_loop(env, interval, ["bash", "-c", _LOGGING_RENDERER]) as display:
         _wait_for(
-            done.exists, "fifteen hidden re-checks on the virtual clock",
-            [display], lambda: _diagnostics(display, harness.event_log),
+            done.exists,
+            "fifteen hidden re-checks on the virtual clock",
+            [display],
+            lambda: _diagnostics(display, harness.event_log),
         )
 
     events = _read_events(harness.event_log)
-    assert events.count("render") == 1, (
-        f"a hidden pane must render only its arrival render; events: {events}"
-    )
+    assert events.count("render") == 1, f"a hidden pane must render only its arrival render; events: {events}"
     requests = [_requested_seconds(e) for e in events if e.startswith("sleep ")]
     assert len(requests) >= 15, events
-    assert all(r == pytest.approx(hidden_interval) for r in requests), (
-        f"every hidden wait must be the {hidden_interval:.1f}s re-check interval; events: {events}"
-    )
+    assert all(
+        r == pytest.approx(hidden_interval) for r in requests
+    ), f"every hidden wait must be the {hidden_interval:.1f}s re-check interval; events: {events}"
 
 
 def test_activation_signal_while_still_hidden_does_not_render(tmp_path: pathlib.Path) -> None:
@@ -603,19 +687,22 @@ def test_activation_signal_while_still_hidden_does_not_render(tmp_path: pathlib.
         _wait_for(
             lambda: [e for e in _read_events(harness.event_log) if e.startswith("sleep ")],
             "the arrival render and the first hidden wait",
-            [display], diag,
+            [display],
+            diag,
         )
         os.kill(display.proc.pid, signal.SIGUSR1)
         _wait_for(
             lambda: len([e for e in _read_events(harness.event_log) if e.startswith("sleep ")]) >= 2,
             "a second hidden wait after the activation signal",
-            [display], diag,
+            [display],
+            diag,
         )
 
     events = _read_events(harness.event_log)
     assert events.count("render") == 1, events
     assert [_requested_seconds(e) for e in events if e.startswith("sleep ")][:2] == [
-        pytest.approx(hidden_interval), pytest.approx(hidden_interval)
+        pytest.approx(hidden_interval),
+        pytest.approx(hidden_interval),
     ], events
 
 
@@ -641,7 +728,8 @@ def test_pane_becoming_visible_renders_immediately_on_the_activation_signal(tmp_
             lambda: len(display.timestamps()) >= 1
             and any(e.startswith("sleep ") for e in _read_events(harness.event_log)),
             "the first render and the hidden-interval request after it",
-            [display], diag,
+            [display],
+            diag,
         )
         state.write_text("active\n", encoding="utf-8")
         signal_sent_at = time.monotonic()
@@ -649,15 +737,15 @@ def test_pane_becoming_visible_renders_immediately_on_the_activation_signal(tmp_
         _wait_for(
             lambda: len(display.timestamps()) >= 2,
             "a render after the activation signal",
-            [display], diag,
+            [display],
+            diag,
         )
         latency = time.monotonic() - signal_sent_at
 
     events = _read_events(harness.event_log)
     requests = [_requested_seconds(e) for e in events if e.startswith("sleep ")]
     assert requests and requests[0] == pytest.approx(hidden_interval), (
-        f"expected the loop's first request to be the {hidden_interval}s hidden "
-        f"interval; events: {events}"
+        f"expected the loop's first request to be the {hidden_interval}s hidden " f"interval; events: {events}"
     )
     assert latency < hidden_interval / 2, (
         f"second render took {latency:.2f}s after the activation signal -- "
@@ -710,7 +798,8 @@ def test_activation_signal_arriving_mid_render_still_cuts_the_hidden_wait_short(
         _wait_for(
             lambda: _read_events(harness.event_log).count("render") >= 2 and display.timestamps(),
             "a render after an activation signal that arrived mid-render",
-            [display], diag,
+            [display],
+            diag,
         )
 
     events = _read_events(harness.event_log)
@@ -779,8 +868,7 @@ def test_cadence_loop_keeps_snapshot_miss_narration_off_the_display_and_in_the_d
     with _running_cadence_loop(env, 0.3, ["bash", "-c", driver], merge_stderr=True) as display:
         _wait_for(
             lambda: "RENDERED-COLUMN-CONTENT" in display.text
-            and ("[dashboard-snapshot]" in display.text
-                 or _MISS_NARRATION in _debug_log_text(debug_log_dir)),
+            and ("[dashboard-snapshot]" in display.text or _MISS_NARRATION in _debug_log_text(debug_log_dir)),
             "a rendered miss and its narration",
             [display],
             lambda: f"{_diagnostics(display)}\n--- debug log ---\n{_debug_log_text(debug_log_dir)}",
@@ -788,8 +876,7 @@ def test_cadence_loop_keeps_snapshot_miss_narration_off_the_display_and_in_the_d
     display_stream = display.text
 
     assert "RENDERED-COLUMN-CONTENT" in display_stream, (
-        f"expected the renderer's own content to reach the display stream; "
-        f"display_stream={display_stream!r}"
+        f"expected the renderer's own content to reach the display stream; " f"display_stream={display_stream!r}"
     )
     assert "[dashboard-snapshot]" not in display_stream, (
         f"snapshot cache-miss narration must never reach the pane's display "
@@ -800,8 +887,7 @@ def test_cadence_loop_keeps_snapshot_miss_narration_off_the_display_and_in_the_d
     assert log_files, f"expected a pane-scoped debug log to exist under {debug_log_dir}"
     combined_log = _debug_log_text(debug_log_dir)
     assert "[dashboard-snapshot]" in combined_log and _MISS_NARRATION in combined_log, (
-        f"expected the cache-miss narration to be recoverable from the pane "
-        f"debug log; got: {combined_log!r}"
+        f"expected the cache-miss narration to be recoverable from the pane " f"debug log; got: {combined_log!r}"
     )
 
 
@@ -859,8 +945,10 @@ def test_cadence_loop_panes_keep_rendering_cleanly_after_the_snapshot_cache_dire
         panes = [pane_a, pane_b]
 
         def diag() -> str:
-            return (f"--- pane A ---\n{pane_a.text!r}\n--- pane B ---\n{pane_b.text!r}\n"
-                    f"--- debug log ---\n{_debug_log_text(debug_log_dir)}")
+            return (
+                f"--- pane A ---\n{pane_a.text!r}\n--- pane B ---\n{pane_b.text!r}\n"
+                f"--- debug log ---\n{_debug_log_text(debug_log_dir)}"
+            )
 
         def narration_on_a_display() -> bool:
             return any("[dashboard-snapshot]" in pane.text for pane in panes)
@@ -869,11 +957,10 @@ def test_cadence_loop_panes_keep_rendering_cleanly_after_the_snapshot_cache_dire
             lambda: narration_on_a_display()
             or (all(len(pane.timestamps()) >= 2 for pane in panes) and snapshot_dir.exists()),
             "two renders from each pane with the snapshot cache in place",
-            panes, diag,
+            panes,
+            diag,
         )
-        assert snapshot_dir.exists(), (
-            f"expected a snapshot cache directory at {snapshot_dir} before removal\n{diag()}"
-        )
+        assert snapshot_dir.exists(), f"expected a snapshot cache directory at {snapshot_dir} before removal\n{diag()}"
         misses_before = _debug_log_text(debug_log_dir).count(_MISS_NARRATION)
 
         removed = temp_root / "dashboard" / "snapshots.removed"
@@ -883,10 +970,13 @@ def test_cadence_loop_panes_keep_rendering_cleanly_after_the_snapshot_cache_dire
 
         _wait_for(
             lambda: narration_on_a_display()
-            or (all(pane.timestamps() and pane.timestamps()[-1] > deletion_time for pane in panes)
-                and _debug_log_text(debug_log_dir).count(_MISS_NARRATION) > misses_before),
+            or (
+                all(pane.timestamps() and pane.timestamps()[-1] > deletion_time for pane in panes)
+                and _debug_log_text(debug_log_dir).count(_MISS_NARRATION) > misses_before
+            ),
             "a fresh render from each pane, and a logged miss, after the cache removal",
-            panes, diag,
+            panes,
+            diag,
         )
 
     for label, pane in (("pane A", pane_a), ("pane B", pane_b)):
@@ -913,8 +1003,7 @@ def test_cadence_loop_panes_keep_rendering_cleanly_after_the_snapshot_cache_dire
         f"narration appended to the pane debug log; got: {log_after!r}"
     )
     assert "[dashboard-snapshot]" in log_after, (
-        f"expected the re-triggered miss to be recoverable from the pane "
-        f"debug log; got: {log_after!r}"
+        f"expected the re-triggered miss to be recoverable from the pane " f"debug log; got: {log_after!r}"
     )
 
 
@@ -933,7 +1022,9 @@ class PrivateTmux(NamedTuple):
     def run(self, *args: str, timeout: float = 15) -> subprocess.CompletedProcess:
         return subprocess.run(
             [self.real_tmux, "-L", self.socket_name, *args],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
 
 
@@ -962,8 +1053,10 @@ def _attached_client(private_tmux: PrivateTmux, session: str) -> Iterator[None]:
     pid, fd = pty.fork()
     if pid == 0:  # pragma: no cover - child process
         os.environ["TERM"] = "xterm-256color"
-        os.execv(private_tmux.real_tmux, [private_tmux.real_tmux, "-L", private_tmux.socket_name,
-                                          "attach-session", "-t", session])
+        os.execv(
+            private_tmux.real_tmux,
+            [private_tmux.real_tmux, "-L", private_tmux.socket_name, "attach-session", "-t", session],
+        )
     stop = threading.Event()
 
     def _drain() -> None:
@@ -981,8 +1074,10 @@ def _attached_client(private_tmux: PrivateTmux, session: str) -> Iterator[None]:
     drainer.start()
     try:
         deadline = time.monotonic() + _HANG_GUARD_SECONDS
-        while private_tmux.run("display-message", "-p", "-t", session,
-                               "#{session_attached}").stdout.strip() in ("", "0"):
+        while private_tmux.run("display-message", "-p", "-t", session, "#{session_attached}").stdout.strip() in (
+            "",
+            "0",
+        ):
             if time.monotonic() > deadline:
                 pytest.fail(f"a client never attached to {session}")
             time.sleep(0.05)
@@ -1004,15 +1099,16 @@ def _pane_ids(private_tmux: PrivateTmux, target: str) -> list[str]:
 def _visible(env: dict[str, str], pane_id: str) -> str:
     result = subprocess.run(
         ["bash", "-c", f"source {shlex.quote(str(_CADENCE_LIB_SH))}; dashboard_pane_visible {shlex.quote(pane_id)}"],
-        capture_output=True, text=True, timeout=10, env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()
 
 
-def test_pane_visibility_reads_a_real_tmux_session(
-    private_tmux: PrivateTmux, tmp_path: pathlib.Path
-) -> None:
+def test_pane_visibility_reads_a_real_tmux_session(private_tmux: PrivateTmux, tmp_path: pathlib.Path) -> None:
     """
     dashboard_pane_visible, against a REAL private-socket tmux session with
     two windows: with no client attached, NO pane is visible -- not even
@@ -1030,7 +1126,9 @@ def test_pane_visibility_reads_a_real_tmux_session(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     wrapper = bin_dir / "tmux"
-    wrapper.write_text(f"#!/usr/bin/env bash\nexec {shlex.quote(private_tmux.real_tmux)} -L {shlex.quote(private_tmux.socket_name)} \"$@\"\n")
+    wrapper.write_text(
+        f'#!/usr/bin/env bash\nexec {shlex.quote(private_tmux.real_tmux)} -L {shlex.quote(private_tmux.socket_name)} "$@"\n'
+    )
     wrapper.chmod(0o755)
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
@@ -1122,10 +1220,23 @@ def _measure_cpu_over_virtual_window(
     env["CADENCE_TEST_WINDOW_DONE"] = str(done)
     renderer = str(_TEAM_DIR / "scripts" / "dashboard" / "legend-render.sh")
     proc = subprocess.Popen(
-        ["bash", str(_CADENCE_LOOP_SH), "--interval", str(interval), "--jitter-bound", "0",
-         "--", renderer, "--kanban-root", str(_REPO_ROOT)],
-        env=env, cwd=str(_REPO_ROOT), stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            "bash",
+            str(_CADENCE_LOOP_SH),
+            "--interval",
+            str(interval),
+            "--jitter-bound",
+            "0",
+            "--",
+            renderer,
+            "--kanban-root",
+            str(_REPO_ROOT),
+        ],
+        env=env,
+        cwd=str(_REPO_ROOT),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
     try:
@@ -1208,3 +1319,211 @@ def test_hidden_window_cpu_cost_stays_under_the_recorded_budget_ratio(tmp_path: 
         f"over a {sampling_window}s sampling window -- the hidden-window "
         f"slowdown may have regressed"
     )
+
+
+# ---------------------------------------------------------------------------
+# Group 5 -- Reaping under a non-reaping PID 1 (unshare-gated, private tmux)
+#
+# A cadence loop must reap every process it starts. On a host whose PID 1
+# reaps orphans, a child the loop abandons vanishes and nothing shows; under
+# a PID 1 that never reaps -- a container started with `sleep infinity` --
+# it stays a zombie forever. These cases build exactly that: a user+PID
+# namespace whose PID 1 is `sleep`, a private tmux server inside it, and a
+# detached (so hidden) cadence pane. A zombie is counted when its parent is
+# PID 1: nothing will ever reap it. (A zombie whose parent still runs is
+# reaped by that parent a moment later, and is not a leak.)
+# ---------------------------------------------------------------------------
+
+_UNSHARE_SKIP_LABEL = "dashboard-cadence-reaping"
+
+# The namespace's PID 1 outlives the driver; the test ends the whole
+# namespace by killing unshare (--kill-child takes PID 1, and with it every
+# process in the namespace, down too).
+_NAMESPACE_INIT = 'bash "$1" & exec sleep 600'
+
+# Runs inside the namespace as PID 1's child. Reports, one line each:
+#   CHECKS <n>          visibility queries the pane had made at the first sample
+#   BEFORE <zombies>    orphaned zombies while the pane runs
+#   AFTER <zombies>     orphaned zombies once the pane is killed and its loop gone
+#   LEFT <processes>    processes other than this driver and the tmux server
+#                       still running under PID 1 then (a loop child that
+#                       outlived its loop, to become a zombie later)
+#   END
+# Each list is "pid:comm" words, empty when there are none.
+_REAPING_DRIVER = r"""
+set -u
+tmux() { "$REAPING_REAL_TMUX" -L "$REAPING_SOCKET" -f /dev/null "$@"; }
+_under_init() {  # <want-zombies 1|0>: "pid:comm" of each matching child of PID 1
+    local f line rest state ppid pid comm out=""
+    for f in /proc/[0-9]*/stat; do
+        { read -r line < "$f"; } 2>/dev/null || continue
+        rest="${line##*) }"
+        read -r state ppid _ <<<"$rest"
+        [[ "$ppid" == 1 ]] || continue
+        pid="${f#/proc/}"; pid="${pid%/stat}"
+        comm="${line#*(}"; comm="${comm%)*}"
+        if [[ "$1" == 1 ]]; then
+            [[ "$state" == Z ]] || continue
+        else
+            [[ "$state" != Z && "$pid" != "$$" && "$pid" != "$server" ]] || continue
+        fi
+        out+="${pid}:${comm} "
+    done
+    printf '%s' "$out"
+}
+_checks() { [[ -f "$REAPING_QUERY_LOG" ]] && wc -l < "$REAPING_QUERY_LOG" || echo 0; }
+
+# Window 0 keeps the session (and so the server) alive once the cadence
+# pane is killed; the cadence pane is window 1. Nobody attaches: hidden.
+tmux new-session -d -s reap -x 80 -y 24 "exec sleep 600" || { echo "FAIL new-session"; exit 1; }
+server="$(tmux display-message -p -t reap '#{pid}')"
+pane="$(tmux new-window -d -P -F '#{pane_id}' -t reap: "$REAPING_PANE_CMD")" || { echo "FAIL new-window"; exit 1; }
+loop_pid="$(tmux display-message -p -t "$pane" '#{pane_pid}')"
+
+# The arrival check plus two hidden re-checks.
+until (( $(_checks) >= 3 )); do
+    kill -0 "$loop_pid" 2>/dev/null || { echo "FAIL loop exited before its re-checks"; exit 1; }
+    "$REAPING_REAL_SLEEP" 0.1
+done
+echo "CHECKS $(_checks)"
+echo "BEFORE $(_under_init 1)"
+
+tmux kill-pane -t "$pane"
+while [[ -e "/proc/$loop_pid" ]]; do "$REAPING_REAL_SLEEP" 0.1; done
+echo "AFTER $(_under_init 1)"
+echo "LEFT $(_under_init 0)"
+echo "END"
+"""
+
+# Logs every visibility query (the tmux call that reads the session's
+# attached-client count) before handing the call to the real tmux.
+_TMUX_QUERY_LOGGER = r"""#!/usr/bin/env bash
+[[ "$*" == *session_attached* ]] && printf 'query\n' >> "$REAPING_QUERY_LOG"
+exec "$REAPING_REAL_TMUX" "$@"
+"""
+
+
+def _require_unshare_pid_namespace(unshare: str) -> None:
+    """Skip, naming the reason, unless unshare can create a user+PID
+    namespace with its own /proc here."""
+    probe = subprocess.run(
+        [unshare, "-Urpf", "--mount-proc", "true"], capture_output=True, text=True, timeout=30
+    )
+    if probe.returncode != 0:
+        reason = (
+            "unshare cannot create a user+PID namespace on this host "
+            f"(unshare -Urpf --mount-proc exited {probe.returncode}: {probe.stderr.strip()})"
+        )
+        print(f"\n[{_UNSHARE_SKIP_LABEL}] SKIP — {reason}", flush=True)
+        pytest.skip(reason)
+
+
+@pytest.mark.parametrize(
+    "pane_args",
+    [
+        pytest.param(["--", "true"], id="rendering-true"),
+        pytest.param(["--stream", "--", "bash", "-c", "tail -f /dev/null | cat"], id="stream-pipeline"),
+    ],
+)
+def test_pane_loop_leaves_no_zombie_under_a_non_reaping_pid_1(
+    tmp_path: pathlib.Path, pgai_tests_temp_dir: pathlib.Path, pane_args: list[str]
+) -> None:
+    """
+    Under a PID 1 that never reaps (`sleep`, in a user+PID namespace), a
+    detached cadence pane leaves no orphaned zombie after two hidden
+    re-checks of its visibility, and none once the pane is killed: the
+    visibility query is waited for by the loop, and the loop's teardown
+    reaps its pending sleep and, for a --stream pane, the renderer's whole
+    process group before it exits. No child of the loop is left running
+    under PID 1 either.
+    """
+    unshare = require_binary("unshare", _UNSHARE_SKIP_LABEL).path
+    real_tmux = require_binary("tmux", _UNSHARE_SKIP_LABEL).path
+    real_sleep = require_binary("sleep", _UNSHARE_SKIP_LABEL).path
+    _require_unshare_pid_namespace(unshare)
+
+    # A throwaway kanban root: all five live-install names set or cleared.
+    sandbox = tmp_path / "kanban-root"
+    (sandbox / "tmp").mkdir(parents=True)
+    # Short on purpose: a long TMUX_TMPDIR can push the socket path past the
+    # kernel's unix-socket length limit.
+    tmux_dir = pathlib.Path(tempfile.mkdtemp(prefix="tmx", dir=str(pgai_tests_temp_dir)))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    logger = bin_dir / "tmux"
+    logger.write_text(_TMUX_QUERY_LOGGER, encoding="utf-8")
+    logger.chmod(0o755)
+    driver = tmp_path / "driver.sh"
+    driver.write_text(_REAPING_DRIVER, encoding="utf-8")
+
+    pane_cmd = shlex.join(
+        [
+            str(_CADENCE_LOOP_SH),
+            "--interval",
+            "1",
+            "--hidden-multiplier",
+            "1",
+            "--jitter-bound",
+            "0",
+            *pane_args,
+        ]
+    )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PGAI_TASKS_DIR", "PGAI_PROJECT_ROOT", "TMUX", "TMUX_PANE", "PGAI_DASHBOARD_CADENCE_FORCE_STATE")
+    }
+    env.update(
+        KANBAN_ROOT=str(sandbox),
+        PGAI_AGENT_KANBAN_ROOT_PATH=str(sandbox),
+        PGAI_AGENT_KANBAN_TEMP_DIR=str(sandbox / "tmp"),
+        TMUX_TMPDIR=str(tmux_dir),
+        TERM="xterm-256color",
+        PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        REAPING_REAL_TMUX=real_tmux,
+        REAPING_REAL_SLEEP=real_sleep,
+        REAPING_SOCKET=f"reap-{uuid.uuid4().hex[:8]}",
+        REAPING_QUERY_LOG=str(tmp_path / "queries.log"),
+        REAPING_PANE_CMD=pane_cmd,
+    )
+
+    proc = subprocess.Popen(
+        [unshare, "-Urpf", "--kill-child", "--mount-proc", "bash", "-c", _NAMESPACE_INIT, "init", str(driver)],
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    report: dict[str, str] = {}
+    output = b""
+    try:
+        deadline = time.monotonic() + _HANG_GUARD_SECONDS
+        while "END" not in report:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                pytest.fail(f"the namespace driver did not finish within {_HANG_GUARD_SECONDS:.0f}s:\n{output!r}")
+            ready, _, _ = select.select([proc.stdout], [], [], min(remaining, 1.0))
+            if not ready:
+                continue
+            chunk = os.read(proc.stdout.fileno(), 65536)
+            if not chunk:
+                pytest.fail(f"the namespace exited before its driver finished:\n{output!r}")
+            output += chunk
+            for line in output.decode(errors="replace").splitlines():
+                key, _, value = line.partition(" ")
+                if key == "FAIL":
+                    pytest.fail(f"the namespace driver failed: {line}\n{output!r}")
+                report[key] = value.strip()
+    finally:
+        # Killing unshare takes the namespace's PID 1 (--kill-child), and so
+        # every process inside it, down -- whatever the outcome above.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=30)
+        proc.stdout.close()
+
+    assert int(report["CHECKS"]) >= 3, report
+    assert report["BEFORE"] == "", f"orphaned zombies while the pane ran hidden: {report['BEFORE']}\n{report}"
+    assert report["AFTER"] == "", f"orphaned zombies after the pane was killed: {report['AFTER']}\n{report}"
+    assert report["LEFT"] == "", f"processes left running under PID 1 after the pane was killed: {report['LEFT']}"

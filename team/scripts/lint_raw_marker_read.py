@@ -91,6 +91,17 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+# The pgai_agent_kanban package sits beside scripts/ in the same tree
+# (team/ in the dev tree, the kanban root when installed); each tree finds
+# its own copy.
+_PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
+from pgai_agent_kanban.lint.source_text import (  # noqa: E402
+    mask_comment_lines as _mask_comment_lines,
+    violation_causes as _build_causes,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -134,22 +145,6 @@ class Violation(NamedTuple):
 # Comment masking (same technique as lint_dashboard_network_git_gate.py:
 # exclude documentation prose from the scan while preserving line numbers)
 # ---------------------------------------------------------------------------
-
-
-def _mask_comment_lines(text: str) -> str:
-    """Return *text* with every comment-only line blanked out (same length).
-
-    A line is a "comment line" when its first non-whitespace character is
-    ``#``. Blanking (rather than deleting) preserves line numbers for
-    subsequent regex matches and their derived line-number reporting.
-    """
-    masked_lines = []
-    for line in text.splitlines(keepends=False):
-        if line.lstrip().startswith("#"):
-            masked_lines.append("")
-        else:
-            masked_lines.append(line)
-    return "\n".join(masked_lines)
 
 
 def _line_number_for_offset(text: str, offset: int) -> int:
@@ -205,13 +200,6 @@ def scan_paths(paths: list[Path], *, verbose: bool = False) -> list[Violation]:
 # ---------------------------------------------------------------------------
 
 
-def _build_causes(violations: list[Violation]) -> list[str]:
-    return [
-        f"{v.path}:{v.line}: {v.kind} — {v.snippet!r}"
-        for v in violations
-    ]
-
-
 def _format_remedy_block(violations: list[Violation], *, lint_script: Path) -> str:
     causes = _build_causes(violations)
     lines = [
@@ -228,7 +216,7 @@ def _format_remedy_block(violations: list[Violation], *, lint_script: Path) -> s
         "read for the task the backlog line names (see _disc_task_terminal in "
         "team/scripts/lib/discovery_guards.sh for the established pattern)."
     )
-    lines.append(f"  2. python3 \"{lint_script}\"")
+    lines.append(f'  2. python3 "{lint_script}"')
     lines.append("")
     lines.append(
         "Rule: the discovery pipeline's idle/RC-in-flight decisions read a "

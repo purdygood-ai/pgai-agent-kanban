@@ -88,8 +88,13 @@ def _env(tmp_path: pathlib.Path, root: pathlib.Path) -> dict:
 
 def _run_cli(tmp_path: pathlib.Path, root: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(_SCRIPT), *args], capture_output=True, text=True,
-        env=_env(tmp_path, root), cwd=str(root), stdin=subprocess.DEVNULL, timeout=120,
+        ["bash", str(_SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        env=_env(tmp_path, root),
+        cwd=str(root),
+        stdin=subprocess.DEVNULL,
+        timeout=120,
     )
 
 

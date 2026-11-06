@@ -76,14 +76,20 @@ def _run_discovery(root: pathlib.Path) -> subprocess.CompletedProcess:
         echo "DISCOVERY_STATUS=${{DISCOVERY_LAST_STATUS}}"
     """)
     return subprocess.run(
-        ["bash", "-c", script], capture_output=True, text=True, env=_env(root), cwd=str(root), timeout=60,
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env=_env(root),
+        cwd=str(root),
+        timeout=60,
     )
 
 
 def _bug(project_root: pathlib.Path, name: str, status: str) -> pathlib.Path:
     path = project_root / "bugs" / name
-    path.write_text(f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n",
-                    encoding="utf-8")
+    path.write_text(
+        f"# {name[:-3]}\n\n**Severity:** medium\n\n## Status\n{status}\n\n## Symptom\nsynthetic\n", encoding="utf-8"
+    )
     return path
 
 
@@ -105,7 +111,7 @@ def _bundles(project_root: pathlib.Path) -> list[pathlib.Path]:
 def _status(path: pathlib.Path) -> str:
     lines = path.read_text(encoding="utf-8").splitlines()
     index = next(i for i, line in enumerate(lines) if line.strip().lower() == "## status")
-    return next(line.strip() for line in lines[index + 1:] if line.strip())
+    return next(line.strip() for line in lines[index + 1 :] if line.strip())
 
 
 def _open_entries(root: pathlib.Path) -> tuple:
@@ -180,9 +186,24 @@ def test_an_answered_carried_bug_is_bundled_by_the_next_pass(tmp_path) -> None:
     [entry] = _open_entries(root)
 
     answered = subprocess.run(
-        [sys.executable, "-m", "pgai_agent_kanban.overwatch.inbox", "answer", "--project", _PROJECT,
-         "--kanban-root", str(root), "--id", entry.entry_id, "--answer", "Use the primary mirror."],
-        capture_output=True, text=True, env={**_env(root), "PYTHONPATH": str(_TEAM_DIR)}, timeout=60,
+        [
+            sys.executable,
+            "-m",
+            "pgai_agent_kanban.overwatch.inbox",
+            "answer",
+            "--project",
+            _PROJECT,
+            "--kanban-root",
+            str(root),
+            "--id",
+            entry.entry_id,
+            "--answer",
+            "Use the primary mirror.",
+        ],
+        capture_output=True,
+        text=True,
+        env={**_env(root), "PYTHONPATH": str(_TEAM_DIR)},
+        timeout=60,
     )
     assert answered.returncode == 0, answered.stderr
     assert _status(carried) == "open"

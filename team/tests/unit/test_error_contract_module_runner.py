@@ -70,9 +70,7 @@ def test_sourcing_error_contract_defines_a_working_module_runner(tmp_path: pathl
 def test_a_caller_defined_runner_is_kept(tmp_path: pathlib.Path) -> None:
     result = _run(
         tmp_path,
-        "pp_run_ops() { echo caller-runner; }\n"
-        f'source "{_ERROR_CONTRACT}"\n'
-        "pp_run_ops anything\n",
+        "pp_run_ops() { echo caller-runner; }\n" f'source "{_ERROR_CONTRACT}"\n' "pp_run_ops anything\n",
     )
     assert (result.returncode, result.stdout) == (0, "caller-runner\n"), result.stderr
 

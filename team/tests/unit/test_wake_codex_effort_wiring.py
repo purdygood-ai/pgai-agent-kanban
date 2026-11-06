@@ -45,7 +45,6 @@ import pathlib
 import stat
 import subprocess
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Paths (relative to this file: team/tests/unit/ -> team/ -> repo root)
@@ -252,15 +251,14 @@ def test_effort_override_appended_when_resolved(tmp_path: pathlib.Path) -> None:
     )
 
     assert result.returncode == 0, (
-        f"provider_dispatch harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"provider_dispatch harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     argv = _read_argv(argv_capture_file)
     assert "-c" in argv, f"Expected '-c' in assembled argv: {argv}"
     idx = argv.index("-c")
-    assert argv[idx + 1] == "model_reasoning_effort=high", (
-        f"Expected 'model_reasoning_effort=high' immediately after '-c'; got argv: {argv}"
-    )
+    assert (
+        argv[idx + 1] == "model_reasoning_effort=high"
+    ), f"Expected 'model_reasoning_effort=high' immediately after '-c'; got argv: {argv}"
 
 
 # ---------------------------------------------------------------------------
@@ -278,13 +276,10 @@ def test_no_effort_override_when_absent(tmp_path: pathlib.Path) -> None:
     )
 
     assert result.returncode == 0, (
-        f"provider_dispatch harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"provider_dispatch harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     argv = _read_argv(argv_capture_file)
-    assert "-c" not in argv, (
-        f"Unexpected '-c' in assembled argv when no effort is resolved: {argv}"
-    )
+    assert "-c" not in argv, f"Unexpected '-c' in assembled argv when no effort is resolved: {argv}"
     # The assembled command otherwise matches today's known shape exactly
     # (no -m since selected_model is empty in this fixture).
     assert argv == [
@@ -314,8 +309,7 @@ def test_effort_override_positioned_before_json_flag_like_model_flag(
     )
 
     assert result.returncode == 0, (
-        f"provider_dispatch harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"provider_dispatch harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     argv = _read_argv(argv_capture_file)
     assert argv == [
@@ -344,13 +338,12 @@ def test_wake_log_narrates_effort_value_and_source(tmp_path: pathlib.Path) -> No
     )
 
     assert result.returncode == 0, (
-        f"provider_dispatch harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"provider_dispatch harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     log_text = log_file.read_text(encoding="utf-8")
-    assert "effort: low (from [providers] llm_effort cfg)" in log_text, (
-        f"Expected effort narration line naming value and source in log; got:\n{log_text}"
-    )
+    assert (
+        "effort: low (from [providers] llm_effort cfg)" in log_text
+    ), f"Expected effort narration line naming value and source in log; got:\n{log_text}"
 
 
 def test_wake_log_has_no_effort_narration_when_absent(tmp_path: pathlib.Path) -> None:
@@ -362,13 +355,10 @@ def test_wake_log_has_no_effort_narration_when_absent(tmp_path: pathlib.Path) ->
     )
 
     assert result.returncode == 0, (
-        f"provider_dispatch harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"provider_dispatch harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     log_text = log_file.read_text(encoding="utf-8")
-    assert "effort:" not in log_text, (
-        f"Unexpected effort narration line when no effort is resolved; got:\n{log_text}"
-    )
+    assert "effort:" not in log_text, f"Unexpected effort narration line when no effort is resolved; got:\n{log_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -385,15 +375,12 @@ def test_tokens_json_records_effort_when_resolved(tmp_path: pathlib.Path) -> Non
     )
 
     assert result.returncode == 0, (
-        f"_wd_run_provider_and_capture_tokens harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"_wd_run_provider_and_capture_tokens harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     tokens_json = artifact_dir / "tokens.json"
     assert tokens_json.exists(), f"Expected tokens.json at {tokens_json}"
     data = json.loads(tokens_json.read_text(encoding="utf-8"))
-    assert data.get("effort") == "high", (
-        f"Expected tokens.json 'effort' field to be 'high'; got: {data}"
-    )
+    assert data.get("effort") == "high", f"Expected tokens.json 'effort' field to be 'high'; got: {data}"
 
 
 def test_tokens_json_omits_effort_when_absent(tmp_path: pathlib.Path) -> None:
@@ -405,15 +392,12 @@ def test_tokens_json_omits_effort_when_absent(tmp_path: pathlib.Path) -> None:
     )
 
     assert result.returncode == 0, (
-        f"_wd_run_provider_and_capture_tokens harness failed:\n"
-        f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
+        f"_wd_run_provider_and_capture_tokens harness failed:\n" f"stdout: {result.stdout!r}\nstderr: {result.stderr!r}"
     )
     tokens_json = artifact_dir / "tokens.json"
     assert tokens_json.exists(), f"Expected tokens.json at {tokens_json}"
     data = json.loads(tokens_json.read_text(encoding="utf-8"))
-    assert "effort" not in data, (
-        f"Unexpected 'effort' key in tokens.json when no effort was resolved: {data}"
-    )
+    assert "effort" not in data, f"Unexpected 'effort' key in tokens.json when no effort was resolved: {data}"
 
 
 # ---------------------------------------------------------------------------
@@ -430,8 +414,7 @@ def test_codex_sh_resolves_effort_via_resolve_role_effort() -> None:
     narration source, mirroring the model resolution block."""
     content = _DRIVER_PREP.read_text(encoding="utf-8")
     assert "resolve_role_effort" in content, (
-        f"{_DRIVER_PREP} does not call resolve_role_effort(). "
-        "The effort-resolution wiring may be missing."
+        f"{_DRIVER_PREP} does not call resolve_role_effort(). " "The effort-resolution wiring may be missing."
     )
 
 
@@ -447,8 +430,7 @@ def test_codex_sh_passes_effort_to_provider_invoke_agent() -> None:
         f"wake_driver_invoke.sh; found {call_count} occurrence(s)."
     )
     assert content.count('"${effort_source:-}" \\') == 2, (
-        "Expected both provider_dispatch call sites in wake_driver_invoke.sh "
-        "to pass effort_source."
+        "Expected both provider_dispatch call sites in wake_driver_invoke.sh " "to pass effort_source."
     )
 
 
@@ -457,9 +439,6 @@ def test_wake_codex_provider_contains_effort_wiring() -> None:
     effort assembly and narration."""
     content = _PROVIDER.read_text(encoding="utf-8")
     assert "model_reasoning_effort" in content, (
-        f"{_PROVIDER} does not contain 'model_reasoning_effort'. "
-        "The effort override wiring may be missing."
+        f"{_PROVIDER} does not contain 'model_reasoning_effort'. " "The effort override wiring may be missing."
     )
-    assert "selected_effort" in content, (
-        f"{_PROVIDER} does not reference 'selected_effort'."
-    )
+    assert "selected_effort" in content, f"{_PROVIDER} does not reference 'selected_effort'."

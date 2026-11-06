@@ -190,8 +190,7 @@ def evaluate(
             return _evaluate_unlatched(project_root, release_state_root, event)
         if rc_is_open(release_state_root):
             logger.info(
-                "rc_gate.evaluate: drain already latched for event=%r; "
-                "RC still open — promotion stays deferred",
+                "rc_gate.evaluate: drain already latched for event=%r; " "RC still open — promotion stays deferred",
                 latched_event,
             )
             return RcGateResult(RcGateOutcome.DEFERRED, latched_event)

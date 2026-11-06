@@ -53,6 +53,9 @@ _LIB_DIR = _TEAM_DIR / "scripts" / "lib"
 _DRIVER_INVOKE = _LIB_DIR / "wake_driver_invoke.sh"
 _ERROR_CONTRACT = _LIB_DIR / "error_contract.sh"
 _WAKE_COMMON = _LIB_DIR / "wake_common.sh"
+# The watchdog block reads its clock and the configured per-task limit from
+# the budget stage the driver sources ahead of it.
+_TASK_BUDGET = _LIB_DIR / "wake_task_budget.sh"
 
 _FORBIDDEN_WORDS = ("trace", "introspection", "confidence calibration")
 _BLOCK_BEGIN = "## Documentation Feedback (documentation-feedback mode)"
@@ -104,8 +107,7 @@ def test_prompt_block_excludes_forbidden_vocabulary() -> None:
     lowered = block.lower()
     for word in _FORBIDDEN_WORDS:
         assert not re.search(r"\b" + re.escape(word) + r"\b", lowered), (
-            f"Forbidden word {word!r} found in the documentation-feedback "
-            f"prompt block:\n{block}"
+            f"Forbidden word {word!r} found in the documentation-feedback " f"prompt block:\n{block}"
         )
 
 
@@ -117,9 +119,9 @@ def test_wake_common_has_no_prompt_injection_vocabulary() -> None:
     wake_driver_invoke.sh today."""
     content = _WAKE_COMMON.read_text(encoding="utf-8").lower()
     for word in _FORBIDDEN_WORDS:
-        assert not re.search(r"\b" + re.escape(word) + r"\b", content), (
-            f"Forbidden word {word!r} found in {_WAKE_COMMON}."
-        )
+        assert not re.search(
+            r"\b" + re.escape(word) + r"\b", content
+        ), f"Forbidden word {word!r} found in {_WAKE_COMMON}."
 
 
 def test_skip_narration_phrase_is_present_and_literal() -> None:
@@ -257,25 +259,22 @@ def test_safeguard_refusal_then_success_retries_once_without_block(
     )
     result = _run(harness)
 
-    assert result.returncode == 0, (
-        f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert "FINAL_EXIT=0" in result.stdout, result.stdout
     assert "FINAL_PROMPT=prompt without the documentation-feedback block" in result.stdout, (
-        "Expected the retry to swap in the pre-injection prompt.\n"
-        f"stdout: {result.stdout}"
+        "Expected the retry to swap in the pre-injection prompt.\n" f"stdout: {result.stdout}"
     )
-    assert call_count_file.read_text(encoding="utf-8").strip() == "2", (
-        "Expected exactly one retry (two total invocation attempts)."
-    )
+    assert (
+        call_count_file.read_text(encoding="utf-8").strip() == "2"
+    ), "Expected exactly one retry (two total invocation attempts)."
 
     log_text = log_file.read_text(encoding="utf-8")
-    assert "Error: request blocked by safety system." in log_text, (
-        f"Expected the verbatim provider error in the log; got:\n{log_text}"
-    )
-    assert "skipping trace injection: provider safeguard" in log_text, (
-        f"Expected the exact skip narration phrase in the log; got:\n{log_text}"
-    )
+    assert (
+        "Error: request blocked by safety system." in log_text
+    ), f"Expected the verbatim provider error in the log; got:\n{log_text}"
+    assert (
+        "skipping trace injection: provider safeguard" in log_text
+    ), f"Expected the exact skip narration phrase in the log; got:\n{log_text}"
 
 
 def test_second_safeguard_refusal_is_not_retried_again(tmp_path: pathlib.Path) -> None:
@@ -291,20 +290,17 @@ def test_second_safeguard_refusal_is_not_retried_again(tmp_path: pathlib.Path) -
     )
     result = _run(harness)
 
-    assert result.returncode == 0, (
-        f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert "FINAL_EXIT=1" in result.stdout, (
         "Expected the second refusal's exit code (1) to be returned "
         f"unchanged (no third attempt).\nstdout: {result.stdout}"
     )
-    assert call_count_file.read_text(encoding="utf-8").strip() == "2", (
-        "Expected exactly two invocation attempts total -- never a third."
-    )
+    assert (
+        call_count_file.read_text(encoding="utf-8").strip() == "2"
+    ), "Expected exactly two invocation attempts total -- never a third."
     log_text = log_file.read_text(encoding="utf-8")
     assert log_text.count("skipping trace injection: provider safeguard") == 1, (
-        "Expected the skip narration exactly once (only the first refusal "
-        f"triggers a retry); got:\n{log_text}"
+        "Expected the skip narration exactly once (only the first refusal " f"triggers a retry); got:\n{log_text}"
     )
 
 
@@ -316,9 +312,7 @@ def test_second_safeguard_refusal_is_not_retried_again(tmp_path: pathlib.Path) -
         "HTTP 429 Too Many Requests -- rate limit exceeded, retry later",
     ],
 )
-def test_non_safeguard_failure_is_never_retried(
-    tmp_path: pathlib.Path, failure_text: str
-) -> None:
+def test_non_safeguard_failure_is_never_retried(tmp_path: pathlib.Path, failure_text: str) -> None:
     """A timeout, auth failure, or rate-limit error on the first attempt
     must NOT trigger the retry -- it is returned unchanged, and no skip
     narration is emitted."""
@@ -329,18 +323,16 @@ def test_non_safeguard_failure_is_never_retried(
     )
     result = _run(harness)
 
-    assert result.returncode == 0, (
-        f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert "FINAL_EXIT=1" in result.stdout, result.stdout
     assert call_count_file.read_text(encoding="utf-8").strip() == "1", (
         f"Expected no retry for a non-safeguard failure ({failure_text!r}); "
         f"got call count {call_count_file.read_text(encoding='utf-8').strip()!r}."
     )
     log_text = log_file.read_text(encoding="utf-8")
-    assert "skipping trace injection: provider safeguard" not in log_text, (
-        f"Non-safeguard failure must never emit the skip narration; got:\n{log_text}"
-    )
+    assert (
+        "skipping trace injection: provider safeguard" not in log_text
+    ), f"Non-safeguard failure must never emit the skip narration; got:\n{log_text}"
 
 
 def test_default_path_is_untouched_when_telemetry_gate_inactive(
@@ -358,17 +350,15 @@ def test_default_path_is_untouched_when_telemetry_gate_inactive(
     )
     result = _run(harness)
 
-    assert result.returncode == 0, (
-        f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert "FINAL_EXIT=1" in result.stdout, result.stdout
-    assert call_count_file.read_text(encoding="utf-8").strip() == "1", (
-        "Expected exactly one invocation on the default (gate-inactive) path."
-    )
+    assert (
+        call_count_file.read_text(encoding="utf-8").strip() == "1"
+    ), "Expected exactly one invocation on the default (gate-inactive) path."
     log_text = log_file.read_text(encoding="utf-8")
-    assert "skipping trace injection: provider safeguard" not in log_text, (
-        f"Default path must never emit the skip narration; got:\n{log_text}"
-    )
+    assert (
+        "skipping trace injection: provider safeguard" not in log_text
+    ), f"Default path must never emit the skip narration; got:\n{log_text}"
 
 
 def test_successful_first_attempt_never_triggers_retry_logic(
@@ -427,6 +417,7 @@ def test_watchdog_bounds_total_time_including_an_internal_retry(
 set -uo pipefail
 export PGAI_AGENT_KANBAN_TEMP_DIR={str(temp_root)!r}
 source {str(_TEAM_DIR / "scripts" / "lib" / "temp.sh")!r}
+source {str(_TASK_BUDGET)!r}
 log() {{ echo "[$(date -Iseconds)] wake(${{AGENT}}): $*" | tee -a "$LOG_FILE"; }}
 
 LOG_FILE={str(log_file)!r}
@@ -476,12 +467,8 @@ echo "TASK_KILLED=${{_task_killed}}"
 """
     result = _run(harness, timeout=25)
 
-    assert result.returncode == 0, (
-        f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-    assert "FINAL_EXIT=124" in result.stdout, (
-        f"Expected the watchdog's timeout exit code (124); got:\n{result.stdout}"
-    )
+    assert result.returncode == 0, f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    assert "FINAL_EXIT=124" in result.stdout, f"Expected the watchdog's timeout exit code (124); got:\n{result.stdout}"
     assert "TASK_KILLED=true" in result.stdout, result.stdout
     # Behavioral proof of "no second budget": the main poll loop can run at
     # most MAX_TASK_SECONDS(2) iterations and the grace loop at most
@@ -521,6 +508,7 @@ def test_watchdog_passes_through_fast_completion_unbounded_by_budget(
 set -uo pipefail
 export PGAI_AGENT_KANBAN_TEMP_DIR={str(temp_root)!r}
 source {str(_TEAM_DIR / "scripts" / "lib" / "temp.sh")!r}
+source {str(_TASK_BUDGET)!r}
 log() {{ echo "[$(date -Iseconds)] wake(${{AGENT}}): $*" | tee -a "$LOG_FILE"; }}
 
 LOG_FILE={str(log_file)!r}
@@ -559,9 +547,7 @@ echo "TASK_KILLED=${{_task_killed}}"
 """
     result = _run(harness, timeout=25)
 
-    assert result.returncode == 0, (
-        f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Harness failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
     assert "FINAL_EXIT=0" in result.stdout, result.stdout
     assert "TASK_KILLED=false" in result.stdout, result.stdout
     # Behavioral proof of "did not wait out the full budget": a job that

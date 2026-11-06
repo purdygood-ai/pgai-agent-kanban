@@ -69,8 +69,7 @@ _PROJECT_PATHS = _LIB_DIR / "project_paths.sh"
 # The exact condition pp_last_released_version guards its fetch with, and
 # the flag-only shape an installed copy that predates the role check carries.
 _ROLE_AWARE_CONDITION = (
-    'if [[ -z "${PGAI_GIT_LOCAL_ONLY:-}" && '
-    '( -z "$_plrv_role_lc" || "$_plrv_role_lc" == "cm" ) ]]; then'
+    'if [[ -z "${PGAI_GIT_LOCAL_ONLY:-}" && ' '( -z "$_plrv_role_lc" || "$_plrv_role_lc" == "cm" ) ]]; then'
 )
 _FLAG_ONLY_CONDITION = 'if [[ -z "${PGAI_GIT_LOCAL_ONLY:-}" ]]; then'
 
@@ -101,7 +100,9 @@ def _require_git() -> None:
 def _git(real_git: str, repo: pathlib.Path, *args: str) -> None:
     subprocess.run(
         [real_git, "-C", str(repo), *args],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
 
 
@@ -114,16 +115,26 @@ def _build_board(tmp_path: pathlib.Path, real_git: str) -> pathlib.Path:
     (root / "projects" / _PROJECT).mkdir(parents=True)
     repo = root / "repo"
     repo.mkdir()
-    subprocess.run([real_git, "init", "-q", "--initial-branch=main", str(repo)],
-                   capture_output=True, text=True, check=True)
-    _git(real_git, repo, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
-         "commit", "-q", "--allow-empty", "-m", "init")
+    subprocess.run(
+        [real_git, "init", "-q", "--initial-branch=main", str(repo)], capture_output=True, text=True, check=True
+    )
+    _git(
+        real_git,
+        repo,
+        "-c",
+        "user.email=t@example.invalid",
+        "-c",
+        "user.name=t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "init",
+    )
     _git(real_git, repo, "tag", _TAG)
     _git(real_git, repo, "remote", "add", "origin", "git@example.invalid:org/repo.git")
 
-    (root / "kanban.cfg").write_text(
-        f"[paths]\ntmp_root = {root}\ntmp_subdir = tmp\n", encoding="utf-8"
-    )
+    (root / "kanban.cfg").write_text(f"[paths]\ntmp_root = {root}\ntmp_subdir = tmp\n", encoding="utf-8")
     (root / "projects.cfg").write_text(
         f"[project:{_PROJECT}]\npriority=1\ndescription=probe\nenabled=true\n",
         encoding="utf-8",
@@ -214,7 +225,11 @@ def _run_lookup(
         echo "version=[$(pp_last_released_version {_PROJECT})]"
     """)
     result = subprocess.run(
-        ["bash", "-c", harness], capture_output=True, text=True, timeout=60, env=env,
+        ["bash", "-c", harness],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
     )
     return result, evidence, net_log
 
@@ -240,13 +255,11 @@ def test_non_cm_dispatch_resolves_version_without_records_or_network(
     tmp_path: pathlib.Path, subagent: str, shape: str
 ) -> None:
     project_paths = _PROJECT_PATHS if shape == "role-aware" else _flag_only_project_paths(tmp_path)
-    result, evidence, net_log = _run_lookup(
-        tmp_path, subagent=subagent, project_paths=project_paths
-    )
+    result, evidence, net_log = _run_lookup(tmp_path, subagent=subagent, project_paths=project_paths)
     assert result.returncode == 0, result.stderr
-    assert "PGAI_GIT_LOCAL_ONLY=[1]" in result.stdout, (
-        f"the wiring must export PGAI_GIT_LOCAL_ONLY=1 for role '{subagent}'.\n{result.stdout}"
-    )
+    assert (
+        "PGAI_GIT_LOCAL_ONLY=[1]" in result.stdout
+    ), f"the wiring must export PGAI_GIT_LOCAL_ONLY=1 for role '{subagent}'.\n{result.stdout}"
     assert f"version=[{_TAG}]" in result.stdout, (
         f"a non-CM lookup must still resolve the tagged version {_TAG} from "
         f"local refs ({shape} project_paths.sh).\nstdout: {result.stdout}\nstderr: {result.stderr}"
@@ -255,9 +268,9 @@ def test_non_cm_dispatch_resolves_version_without_records_or_network(
         f"a non-CM version lookup must add ZERO evidence records ({shape} "
         f"project_paths.sh, role '{subagent}'); got:\n{evidence.read_text(encoding='utf-8')}"
     )
-    assert "fetch" not in _network_calls(net_log), (
-        f"a non-CM version lookup must never reach for origin; the stub logged:\n{_network_calls(net_log)}"
-    )
+    assert "fetch" not in _network_calls(
+        net_log
+    ), f"a non-CM version lookup must never reach for origin; the stub logged:\n{_network_calls(net_log)}"
 
 
 # ---------------------------------------------------------------------------
@@ -266,25 +279,20 @@ def test_non_cm_dispatch_resolves_version_without_records_or_network(
 
 
 @pytest.mark.parametrize("shape", ["role-aware", "flag-only"])
-def test_cm_dispatch_has_no_flag_and_reaches_the_fetch(
-    tmp_path: pathlib.Path, shape: str
-) -> None:
+def test_cm_dispatch_has_no_flag_and_reaches_the_fetch(tmp_path: pathlib.Path, shape: str) -> None:
     project_paths = _PROJECT_PATHS if shape == "role-aware" else _flag_only_project_paths(tmp_path)
-    result, evidence, net_log = _run_lookup(
-        tmp_path, subagent="cm", project_paths=project_paths
-    )
+    result, evidence, net_log = _run_lookup(tmp_path, subagent="cm", project_paths=project_paths)
     assert result.returncode == 0, result.stderr
-    assert "PGAI_GIT_LOCAL_ONLY=[]" in result.stdout, (
-        f"PGAI_GIT_LOCAL_ONLY must be absent from a CM dispatch's environment.\n{result.stdout}"
-    )
+    assert (
+        "PGAI_GIT_LOCAL_ONLY=[]" in result.stdout
+    ), f"PGAI_GIT_LOCAL_ONLY must be absent from a CM dispatch's environment.\n{result.stdout}"
     calls = _network_calls(net_log)
     assert "fetch origin --tags --quiet" in calls, (
-        f"a CM lookup must reach its best-effort fetch ({shape} project_paths.sh); "
-        f"the stub logged:\n{calls!r}"
+        f"a CM lookup must reach its best-effort fetch ({shape} project_paths.sh); " f"the stub logged:\n{calls!r}"
     )
-    assert f"version=[{_TAG}]" in result.stdout, (
-        f"a CM lookup must resolve the same version a non-CM one does.\n{result.stdout}"
-    )
+    assert (
+        f"version=[{_TAG}]" in result.stdout
+    ), f"a CM lookup must resolve the same version a non-CM one does.\n{result.stdout}"
     assert _records(evidence) == [], (
         "a CM dispatch is never guarded, so nothing may be recorded; got:\n"
         f"{evidence.read_text(encoding='utf-8') if evidence.exists() else ''}"
@@ -305,15 +313,12 @@ def test_genuine_non_cm_fetch_is_still_refused_with_exactly_one_record(
         tmp_path,
         subagent="coder",
         project_paths=_PROJECT_PATHS,
-        extra_shell=(
-            f'git -C "{repo}" fetch origin >/dev/null 2>&1; '
-            'echo "genuine-fetch-rc=[$?]"'
-        ),
+        extra_shell=(f'git -C "{repo}" fetch origin >/dev/null 2>&1; ' 'echo "genuine-fetch-rc=[$?]"'),
     )
     assert result.returncode == 0, result.stderr
-    assert "genuine-fetch-rc=[0]" not in result.stdout, (
-        f"a genuine non-CM fetch must be refused (non-zero exit).\n{result.stdout}"
-    )
+    assert (
+        "genuine-fetch-rc=[0]" not in result.stdout
+    ), f"a genuine non-CM fetch must be refused (non-zero exit).\n{result.stdout}"
     records = _records(evidence)
     assert len(records) == 1, (
         "a genuine non-CM fetch must append exactly one evidence record even "

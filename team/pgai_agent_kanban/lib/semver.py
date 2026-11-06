@@ -44,10 +44,9 @@ version_sort_key(value) -> tuple[int, int, int]
 from __future__ import annotations
 
 import re
-from typing import Optional, Union
 
 # Type alias: callers may pass either a raw string or a pre-parsed tuple.
-_VersionLike = Union[str, tuple[int, int, int]]
+_VersionLike = str | tuple[int, int, int]
 
 # Pattern used by from_filename and parse.
 _VERSION_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
@@ -80,9 +79,7 @@ def parse(version_str: str) -> tuple[int, int, int]:
         s = s[1:]
     m = _PLAIN_RE.match(s)
     if not m:
-        raise ValueError(
-            f"Cannot parse version {version_str!r}: expected X.Y.Z (with optional v prefix)"
-        )
+        raise ValueError(f"Cannot parse version {version_str!r}: expected X.Y.Z (with optional v prefix)")
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
@@ -153,6 +150,7 @@ def from_filename(filename: str) -> str:
         empty string if no match is found.
     """
     import os
+
     base = os.path.basename(filename)
     m = _VERSION_RE.search(base)
     if not m:
@@ -162,7 +160,7 @@ def from_filename(filename: str) -> str:
     return f"v{m.group(1)}.{m.group(2)}.{m.group(3)}"
 
 
-def parse_version(value: str) -> Optional[tuple[int, int, int]]:
+def parse_version(value: str) -> tuple[int, int, int] | None:
     """Parse *value* leniently into ``(major, minor, patch)``, or ``None``.
 
     Leading ``v``/``V`` characters are stripped. The remainder must have at

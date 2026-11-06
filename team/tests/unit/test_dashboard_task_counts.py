@@ -28,8 +28,9 @@ from pgai_agent_kanban.dashboard import task_counts
 from pgai_agent_kanban.dashboard.task_counts import QUEUE_ROLES, format_task_counts, scan_task_counts
 
 
-def _task(tasks: pathlib.Path, task_id: str, status: str | None, readme: str | None = None,
-          mtime: int | None = None) -> None:
+def _task(
+    tasks: pathlib.Path, task_id: str, status: str | None, readme: str | None = None, mtime: int | None = None
+) -> None:
     task_dir = tasks / task_id
     task_dir.mkdir(parents=True)
     if status is not None:
@@ -126,16 +127,23 @@ def test_format_prints_data_sh_lines_in_order(tmp_path: pathlib.Path) -> None:
     lines = format_task_counts(scan_task_counts(tasks)).splitlines()
 
     assert lines[:6] == [
-        "TOTAL_TICKETS=2", "DONE_COUNT=1", "WORKING_COUNT=1",
-        "BLOCKED_COUNT=0", "WAITING_COUNT=0", "BACKLOG_COUNT=0",
+        "TOTAL_TICKETS=2",
+        "DONE_COUNT=1",
+        "WORKING_COUNT=1",
+        "BLOCKED_COUNT=0",
+        "WAITING_COUNT=0",
+        "BACKLOG_COUNT=0",
     ]
     assert lines[6:11] == [
-        "QUEUE_PM_TOTAL=1", "QUEUE_PM_DONE=1", "QUEUE_PM_WORKING=0",
-        "QUEUE_PM_BLOCKED=0", "QUEUE_PM_WAITING=0",
+        "QUEUE_PM_TOTAL=1",
+        "QUEUE_PM_DONE=1",
+        "QUEUE_PM_WORKING=0",
+        "QUEUE_PM_BLOCKED=0",
+        "QUEUE_PM_WAITING=0",
     ]
-    queue_lines = lines[6:6 + 5 * len(QUEUE_ROLES)]
+    queue_lines = lines[6 : 6 + 5 * len(QUEUE_ROLES)]
     assert [line.split("_")[1] for line in queue_lines[::5]] == list(QUEUE_ROLES)
-    rest = lines[6 + 5 * len(QUEUE_ROLES):]
+    rest = lines[6 + 5 * len(QUEUE_ROLES) :]
     assert rest[:3] == ["WORKING_TASK_ID=CODER-20260101-001-w", "WORKING_TASK_MTIME=1234", "WORKING_TASK_ROLE=CODER"]
     assert rest[3:5] == ["LAST_DONE_1=PM-20260101-001-d", "LAST_DONE_ROLE_1=PM"]
     assert rest[5:] == [line for index in range(2, 6) for line in (f"LAST_DONE_{index}=", f"LAST_DONE_ROLE_{index}=")]

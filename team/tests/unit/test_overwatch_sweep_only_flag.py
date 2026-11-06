@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import textwrap
 import time
@@ -105,7 +106,7 @@ def test_unknown_only_slug_is_refused_and_names_the_available_slugs(sandbox, tmp
     message = re.search(r"^message: (.+)$", result.stderr, flags=re.M).group(1)
     assert "nosuchcheck" in message
     available = sorted(
-        p.name[len("check-"):-len(".sh")]
+        p.name[len("check-") : -len(".sh")]
         for p in (_TEAM_DIR / "scripts" / "lib" / "overwatch-checks").glob("check-*.sh")
     )
     for slug in available:
@@ -146,6 +147,13 @@ def test_help_documents_only_and_lock_wait(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# How far short of a configured lock wait the outer stopwatch may read
+# before the sweep counts as having given up early. The sweep's own pauses
+# add up to the whole wait; the slack covers only the two clocks starting
+# at different instants.
+_STOPWATCH_SKEW_TOLERANCE_SECONDS = 0.25
+
+
 def _base_env() -> dict:
     """PATH and HOME for a Popen-launched sweep (run_bash supplies its own)."""
     return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.environ.get("HOME", "/")}
@@ -153,7 +161,12 @@ def _base_env() -> dict:
 
 class _LockHolder:
     """A separate process holding the project's repo lock as a wake chain
-    would, until release() is called."""
+    would, until release() is called.
+
+    It runs in a process group of its own; kill() stops the group, and the
+    lock_holder fixture calls it in teardown, so a holder never outlives a
+    test that fails before release() -- or one that never became ready.
+    """
 
     def __init__(self, sb: Sandbox) -> None:
         lock_file = sb.root / "locks" / f"repo-wake-{_PROJECT}.lock"
@@ -167,48 +180,86 @@ class _LockHolder:
             while [[ ! -f "{self.done}" ]]; do sleep 0.05; done
             pgai_lock_release "{lock_file}" "$fd"
         """)
-        self.proc = subprocess.Popen(["bash", "-c", script], cwd=str(_TEAM_DIR))
+        self.proc = subprocess.Popen(["bash", "-c", script], cwd=str(_TEAM_DIR), start_new_session=True)
         deadline = time.time() + 10
-        while not self.ready.exists() and time.time() < deadline:
+        while not self.ready.exists() and time.time() < deadline and self.proc.poll() is None:
             time.sleep(0.05)
-        assert self.ready.exists(), "the lock holder did not start"
+        if not self.ready.exists():
+            self.kill()
+            raise AssertionError("the lock holder did not start")
 
     def release(self) -> None:
         self.done.touch()
         self.proc.wait(timeout=10)
 
+    def kill(self) -> None:
+        """Stop the holder's whole process group if it is still running."""
+        if self.proc.poll() is None:
+            try:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # exited between the poll and the kill
+            self.proc.wait(timeout=10)
 
-def test_lock_released_during_the_wait_is_taken(sandbox, tmp_path):
+
+@pytest.fixture
+def lock_holder():
+    """Start _LockHolder processes; every one is killed in teardown, pass or fail."""
+    started: list[_LockHolder] = []
+
+    def start(sb: Sandbox) -> _LockHolder:
+        holder = _LockHolder(sb)
+        started.append(holder)
+        return holder
+
+    yield start
+    for holder in started:
+        holder.kill()
+
+
+def test_lock_released_during_the_wait_is_taken(sandbox, tmp_path, lock_holder):
     sandbox.seed(_status(_record("plugin_load_failed")))
-    holder = _LockHolder(sandbox)
+    holder = lock_holder(sandbox)
+    sweep = subprocess.Popen(
+        ["bash", _SWEEP, "--only", "block-triage", "--lock-wait", "30"],
+        cwd=str(_TEAM_DIR),
+        env={**_base_env(), **sandbox.env()},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
     try:
-        sweep = subprocess.Popen(
-            ["bash", _SWEEP, "--only", "block-triage", "--lock-wait", "30"],
-            cwd=str(_TEAM_DIR), env={**_base_env(), **sandbox.env()},
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        )
         time.sleep(3)
-    finally:
         holder.release()
-    out, _ = sweep.communicate(timeout=300)
+        out, _ = sweep.communicate(timeout=300)
+    finally:
+        if sweep.poll() is None:
+            os.killpg(sweep.pid, signal.SIGKILL)
+            sweep.wait(timeout=10)
     assert sweep.returncode == 0, out
     assert "block-triage:plugin_load_failed:escalate" in sandbox.actions, out
     assert "block-triage-refused" not in sandbox.actions, out
     assert "still contended" not in out, out
 
 
-def test_lock_held_for_the_whole_wait_is_given_up_naming_the_holder(sandbox, tmp_path):
+def test_lock_held_for_the_whole_wait_is_given_up_naming_the_holder(sandbox, tmp_path, lock_holder):
     sandbox.seed(_status(_record("plugin_load_failed")))
     before = sandbox.snapshot()
-    holder = _LockHolder(sandbox)
+    holder = lock_holder(sandbox)
     try:
-        started = time.time()
+        started = time.monotonic()
         result = _sweep(sandbox, tmp_path, "--only block-triage --lock-wait 3")
-        elapsed = time.time() - started
+        elapsed = time.monotonic() - started
     finally:
         holder.release()
     assert result.returncode == 0, result.stderr
-    assert elapsed >= 3, f"the sweep gave up after {elapsed:.1f}s, before its 3s wait"
+    # The sweep paces its retries on its own clock, which starts at a
+    # different instant from this stopwatch; a reading a few milliseconds
+    # short of the wait is that skew, not a sweep that gave up early.
+    assert (
+        elapsed >= 3 - _STOPWATCH_SKEW_TOLERANCE_SECONDS
+    ), f"the sweep gave up after {elapsed:.3f}s, before its 3s wait"
     assert "still contended after retrying for up to 3s" in result.stderr, result.stderr
     assert sandbox.snapshot() == before
     refusals = [line for line in sandbox.actions.splitlines() if "block-triage-refused" in line]

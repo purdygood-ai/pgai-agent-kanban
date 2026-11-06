@@ -89,7 +89,7 @@ print(json.dumps({
 """
 
 
-def _diagnostic(result: "BashResult | subprocess.CompletedProcess") -> str:
+def _diagnostic(result: BashResult | subprocess.CompletedProcess) -> str:
     return f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
 
 
@@ -123,8 +123,13 @@ def _case_env(setup: CaseSetup, sandbox: pathlib.Path, *, kanban_root_as_root_pa
 def _python_answers(case: TempRootCase, setup: CaseSetup, sandbox: pathlib.Path) -> dict:
     result = subprocess.run(
         [
-            sys.executable, "-I", "-c", _PY_DRIVER,
-            str(setup.install), json.dumps(setup.kanban_root), str(setup.board),
+            sys.executable,
+            "-I",
+            "-c",
+            _PY_DRIVER,
+            str(setup.install),
+            json.dumps(setup.kanban_root),
+            str(setup.board),
         ],
         env=_case_env(setup, sandbox, kanban_root_as_root_path=False),
         cwd=sandbox,
@@ -132,26 +137,33 @@ def _python_answers(case: TempRootCase, setup: CaseSetup, sandbox: pathlib.Path)
         text=True,
         check=False,
     )
-    assert result.returncode == 0, f"Python resolver for case {case.id!r} exited {result.returncode}\n{_diagnostic(result)}"
+    assert (
+        result.returncode == 0
+    ), f"Python resolver for case {case.id!r} exited {result.returncode}\n{_diagnostic(result)}"
     answer = json.loads(result.stdout)
-    assert pathlib.Path(answer["module"]).is_relative_to(setup.install), (
-        f"case {case.id!r} must run the resolver copied into {setup.install}, not {answer['module']}"
-    )
+    assert pathlib.Path(answer["module"]).is_relative_to(
+        setup.install
+    ), f"case {case.id!r} must run the resolver copied into {setup.install}, not {answer['module']}"
     return answer
 
 
 def _bash_answers(case: TempRootCase, setup: CaseSetup, temp_sh: pathlib.Path, sandbox: pathlib.Path) -> dict:
     """Source the copied temp.sh and print each answer as one 'name=value' line."""
     board_cfg = setup.board / "kanban.cfg"
-    script = "\n".join([
-        f"source '{temp_sh}'",
-        "printf 'honoured=%s\\n' \"$(pgai_temp_dir)\"",
-        "printf 'ignored=%s\\n' \"$(pgai_configured_temp_root)\"",
-        f"printf 'board_honoured=%s\\n' \"$(pgai_temp_dir '{board_cfg}')\"",
-        f"printf 'board_ignored=%s\\n' \"$(pgai_configured_temp_root '{board_cfg}')\"",
-    ])
+    script = "\n".join(
+        [
+            f"source '{temp_sh}'",
+            "printf 'honoured=%s\\n' \"$(pgai_temp_dir)\"",
+            "printf 'ignored=%s\\n' \"$(pgai_configured_temp_root)\"",
+            f"printf 'board_honoured=%s\\n' \"$(pgai_temp_dir '{board_cfg}')\"",
+            f"printf 'board_ignored=%s\\n' \"$(pgai_configured_temp_root '{board_cfg}')\"",
+        ]
+    )
     result = run_bash(
-        sandbox, script, base_env=_case_env(setup, sandbox, kanban_root_as_root_path=True), cwd=sandbox,
+        sandbox,
+        script,
+        base_env=_case_env(setup, sandbox, kanban_root_as_root_path=True),
+        cwd=sandbox,
     )
     assert result.returncode == 0, f"temp.sh for case {case.id!r} exited {result.returncode}\n{_diagnostic(result)}"
     assert result.stderr == "", f"temp.sh must be silent on stderr for case {case.id!r}\n{_diagnostic(result)}"
@@ -160,7 +172,7 @@ def _bash_answers(case: TempRootCase, setup: CaseSetup, temp_sh: pathlib.Path, s
     return answers
 
 
-def _run_both(case: TempRootCase, sandbox: pathlib.Path) -> "tuple[CaseSetup, dict, dict]":
+def _run_both(case: TempRootCase, sandbox: pathlib.Path) -> tuple[CaseSetup, dict, dict]:
     setup = set_up_case(case, sandbox)
     temp_sh = _install(setup.install)
     python = _python_answers(case, setup, sandbox)
@@ -182,16 +194,16 @@ def test_pgai_temp_dir_gives_the_python_resolver_root_for_every_case(
     case: TempRootCase, tmp_path: pathlib.Path
 ) -> None:
     setup, python, bash = _run_both(case, tmp_path)
-    assert python["honoured"] == setup.expected, (
-        f"{_detail(case)}\nthe Python resolver returned {python['honoured']!r}, the table expects {setup.expected!r}"
-    )
+    assert (
+        python["honoured"] == setup.expected
+    ), f"{_detail(case)}\nthe Python resolver returned {python['honoured']!r}, the table expects {setup.expected!r}"
     assert bash["honoured"] == python["honoured"], (
         f"{_detail(case)}\npgai_temp_dir returned {bash['honoured']!r}; "
         f"resolve_temp_root() returned {python['honoured']!r} for the same row"
     )
-    assert pathlib.Path(bash["honoured"]).is_dir(), (
-        f"{_detail(case)}\npgai_temp_dir must create the root it returns ({bash['honoured']!r})"
-    )
+    assert pathlib.Path(
+        bash["honoured"]
+    ).is_dir(), f"{_detail(case)}\npgai_temp_dir must create the root it returns ({bash['honoured']!r})"
 
 
 @pytest.mark.parametrize("case", TEMP_ROOT_CASES, ids=lambda case: case.id)
@@ -232,9 +244,7 @@ def test_explicit_config_form_gives_the_python_resolver_root_for_that_kanban_roo
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "case", [c for c in TEMP_ROOT_CASES if c.board_cfg is not None], ids=lambda case: case.id
-)
+@pytest.mark.parametrize("case", [c for c in TEMP_ROOT_CASES if c.board_cfg is not None], ids=lambda case: case.id)
 def test_load_config_exports_the_resolver_root_for_the_cfg_it_was_given(
     case: TempRootCase, tmp_path: pathlib.Path
 ) -> None:
@@ -242,14 +252,19 @@ def test_load_config_exports_the_resolver_root_for_the_cfg_it_was_given(
     _install(setup.install)
     python = _python_answers(case, setup, tmp_path)
     board_cfg = setup.board / "kanban.cfg"
-    script = "\n".join([
-        f"source '{_CONFIG_LOADER}'",
-        f"load_config '{board_cfg}' || exit 7",
-        "printf 'temp_dir=%s\\n' \"$PGAI_AGENT_KANBAN_TEMP_DIR\"",
-        "printf 'tmpdir=%s\\n' \"$TMPDIR\"",
-    ])
+    script = "\n".join(
+        [
+            f"source '{_CONFIG_LOADER}'",
+            f"load_config '{board_cfg}' || exit 7",
+            "printf 'temp_dir=%s\\n' \"$PGAI_AGENT_KANBAN_TEMP_DIR\"",
+            "printf 'tmpdir=%s\\n' \"$TMPDIR\"",
+        ]
+    )
     result = run_bash(
-        tmp_path, script, base_env=_case_env(setup, tmp_path, kanban_root_as_root_path=False), cwd=tmp_path,
+        tmp_path,
+        script,
+        base_env=_case_env(setup, tmp_path, kanban_root_as_root_path=False),
+        cwd=tmp_path,
     )
     assert result.returncode == 0, f"load_config for case {case.id!r} exited {result.returncode}\n{_diagnostic(result)}"
     exported = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
@@ -257,9 +272,9 @@ def test_load_config_exports_the_resolver_root_for_the_cfg_it_was_given(
         f"{_detail(case)}\nload_config exported PGAI_AGENT_KANBAN_TEMP_DIR={exported.get('temp_dir')!r}; "
         f"resolve_temp_root(<board>) returned {python['board_honoured']!r}\n{_diagnostic(result)}"
     )
-    assert exported.get("tmpdir") == exported.get("temp_dir"), (
-        f"{_detail(case)}\nTMPDIR must be exported from the resolved temp root\n{_diagnostic(result)}"
-    )
-    assert pathlib.Path(exported["temp_dir"]).is_dir(), (
-        f"{_detail(case)}\nload_config must leave {exported['temp_dir']!r} created"
-    )
+    assert exported.get("tmpdir") == exported.get(
+        "temp_dir"
+    ), f"{_detail(case)}\nTMPDIR must be exported from the resolved temp root\n{_diagnostic(result)}"
+    assert pathlib.Path(
+        exported["temp_dir"]
+    ).is_dir(), f"{_detail(case)}\nload_config must leave {exported['temp_dir']!r} created"

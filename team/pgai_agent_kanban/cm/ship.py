@@ -79,7 +79,11 @@ also uses; it prints the one resolution line per phase and enforces
 ``cm_release_<phase>_hook_required``. A resolved hook runs in the repository
 with ``PGAI_TARGET_VERSION``, ``PGAI_PROJECT_NAME``, ``PGAI_PROJECT_ROOT``,
 ``PGAI_DEV_TREE_PATH``, ``PGAI_RC_BRANCH`` and ``PGAI_KANBAN_ROOT`` set, its
-stdout and stderr merged and each line prefixed ``[hook <name>]``. A HALT
+stdout and stderr merged and each line prefixed ``[hook <name>]``. The
+resolver and the hook each run in their own process group under kanban.cfg
+``[release] hook_timeout_seconds`` (default 900); a hook past the limit has
+its group stopped and fails with rc=124, taking its phase's failed-hook path
+below. A HALT
 (a required hook that is absent, a pre-squash or pre-tag hook that is not
 executable, a failing pre-squash hook) prints the dual-channel block between
 ``[ship-rc] HALT`` and ``HALT: ship-rc.sh stopped.`` and records it in the
@@ -139,7 +143,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from pgai_agent_kanban.cm import cancel as _cancel
 from pgai_agent_kanban.cm import unwind as _unwind
@@ -147,10 +151,14 @@ from pgai_agent_kanban.cm import write_rc_state
 from pgai_agent_kanban.halt_after import parse_token as _parse_halt_after_token
 from pgai_agent_kanban.halt_after import rc_gate as _halt_after_gate
 from pgai_agent_kanban.halt_after.token import describe_token as _describe_halt_after_token
+from pgai_agent_kanban.lib import ini
+from pgai_agent_kanban.lib.dev_tree import resolve_dev_tree
 from pgai_agent_kanban.lib import push_decision as _push_decision
 from pgai_agent_kanban.lib import refusal_ledger
 from pgai_agent_kanban.lib import semver as _semver
+from pgai_agent_kanban.lib.bounded_run import parse_timeout_seconds, run_in_process_group
 from pgai_agent_kanban.lib.branch_prefix import release_tag_name
+from pgai_agent_kanban.lib.hook_timeout import hook_timeout_default_seconds
 from pgai_agent_kanban.lib.error_contract import format_error_contract
 from pgai_agent_kanban.lib.stdio import write_stderr as _write_stderr
 from pgai_agent_kanban.lib.stdio import write_stdout as _write_stdout
@@ -192,7 +200,7 @@ _HOOK_RESOLVER = (
     'lib_dir="$1"; result_fd="$2"; shift 2\n'
     'source "$lib_dir/project_paths.sh" || exit 70\n'
     'source "$lib_dir/cm_release_hooks.sh" || exit 70\n'
-    'set -uo pipefail\n'
+    "set -uo pipefail\n"
     'cm_halt() { printf "halt\\0%s\\0%s\\0%s\\0" "$1" "$2" "$3" >&"$result_fd"; exit 71; }\n'
     'CM_RESOLVED_HOOK_PATH=""\n'
     'cm_resolve_and_enforce_hook "$@" || exit 72\n'
@@ -201,6 +209,15 @@ _HOOK_RESOLVER = (
 _HOOK_LIB_UNAVAILABLE = 70
 _HOOK_LIB_HALTED = 71
 _HOOK_NOT_EXECUTABLE = 72
+
+# kanban.cfg [release] hook_timeout_seconds bounds both hook-path children:
+# the resolver above and the hook itself. Its default is defined once, in
+# pgai_agent_kanban.lib.hook_timeout.
+HOOK_TIMEOUT_KEY = "hook_timeout_seconds"
+DEFAULT_HOOK_TIMEOUT_SECONDS = hook_timeout_default_seconds()
+# The exit code a hook stopped at its limit is reported with (coreutils
+# timeout's), so the phase takes the path any failing hook takes.
+HOOK_TIMEOUT_EXIT = 124
 
 Writer = Callable[[str], None]
 
@@ -280,12 +297,7 @@ def _repo_root(ctx: OpsContext, project: str) -> str:
     can serve a push: a project whose config names no ``dev_tree_path`` is
     ``unresolved`` to the push decision and contacts no remote.
     """
-    cfg_file = _cancel._project_cfg_file(ctx.project_root(project))
-    if cfg_file is not None:
-        value = _cancel._read_cfg_key(cfg_file, "project", "dev_tree_path")
-        if value:
-            return value
-    return _unwind._dev_tree_fallback(ctx) or str(_TREE_ROOT.parent)
+    return resolve_dev_tree(ctx.kanban_root, ctx.project_root(project)) or str(_TREE_ROOT.parent)
 
 
 def _branch_prefix(ctx: OpsContext, project: str) -> str:
@@ -417,14 +429,17 @@ def _resolve_modify_delete_conflicts(git: _Git, say: Callable[..., None], squash
             say(f"cm-release: auto-resolved modify/delete: {path} (took main's version)")
 
     remaining = [
-        line for line in _cancel._run_git(git.repo, ["status", "--porcelain"]).stdout.splitlines()
+        line
+        for line in _cancel._run_git(git.repo, ["status", "--porcelain"]).stdout.splitlines()
         if _UNMERGED_RE.match(line)
     ]
     if remaining:
         git.err("[ship-rc] ERROR: U entries remain after auto-resolve attempt:\n")
         git.err("\n".join(remaining) + "\n")
         return 2
-    say(f"[ship-rc] Auto-resolve complete: {len(resolutions)} modify/delete path(s) resolved for squash: {squash_label}")
+    say(
+        f"[ship-rc] Auto-resolve complete: {len(resolutions)} modify/delete path(s) resolved for squash: {squash_label}"
+    )
     return 0
 
 
@@ -443,13 +458,43 @@ class _Release:
     repo: str
     rc_branch: str
     project_root: pathlib.Path
+    # None: read kanban.cfg [release] hook_timeout_seconds at each hook call.
+    hook_timeout_seconds: int | None = None
+
+
+def resolve_hook_timeout_seconds(kanban_root: str | os.PathLike[str], warn_raw: Writer) -> int:
+    """kanban.cfg ``[release] hook_timeout_seconds``: the limit on each hook-path child.
+
+    Fleet-wide only (a project.cfg value is not read). Absent or blank
+    resolves to DEFAULT_HOOK_TIMEOUT_SECONDS; a value that is not a positive
+    whole number resolves to the default with one warning to *warn_raw*.
+    """
+    kanban_cfg = os.path.join(str(kanban_root), "kanban.cfg")
+    raw = ini.read_line_value(kanban_cfg, "release", HOOK_TIMEOUT_KEY)
+    seconds, warning = parse_timeout_seconds(
+        raw, DEFAULT_HOOK_TIMEOUT_SECONDS, setting=f"[release] {HOOK_TIMEOUT_KEY}", source=kanban_cfg
+    )
+    if warning:
+        warn_raw(f"[ship-rc] {warning}\n")
+    return seconds
+
+
+def _hook_timeout(release: _Release, warn_raw: Writer) -> int:
+    """The release's hook limit, read from kanban.cfg when the release does not carry one."""
+    if release.hook_timeout_seconds is not None:
+        return release.hook_timeout_seconds
+    return resolve_hook_timeout_seconds(release.ctx.kanban_root, warn_raw)
 
 
 def _halt(release: _Release, error: str, message: str, remedy: str) -> ShipRcError:
     """The HALT stop: the dual-channel block between the HALT banners, recorded in the ledger."""
     refusal_ledger.record_refusal(
-        error, message, remedy,
-        project=release.project, kanban_root=str(release.ctx.kanban_root), surface="ship.py:ship_rc",
+        error,
+        message,
+        remedy,
+        project=release.project,
+        kanban_root=str(release.ctx.kanban_root),
+        surface="ship.py:ship_rc",
     )
     # BLOCK-WORTHY (docs/blocking-site-census.md): the one HALT stop every
     # named ship-rc halt routes through (a required hook absent, a hook that
@@ -464,7 +509,7 @@ def _halt(release: _Release, error: str, message: str, remedy: str) -> ShipRcErr
     )
 
 
-def _resolve_hook(release: _Release, phase: str, say_raw: Writer, warn_raw: Writer) -> tuple[Optional[str], bool]:
+def _resolve_hook(release: _Release, phase: str, say_raw: Writer, warn_raw: Writer) -> tuple[str | None, bool]:
     """Resolve *phase*'s hook through the shared release-hook library.
 
     The library's resolution line goes to *say_raw* and any remedy block to
@@ -482,17 +527,30 @@ def _resolve_hook(release: _Release, phase: str, say_raw: Writer, warn_raw: Writ
     env = dict(os.environ)
     env["KANBAN_ROOT"] = str(release.ctx.kanban_root)
     env["PGAI_AGENT_KANBAN_ROOT_PATH"] = str(release.ctx.kanban_root)
+    seconds = _hook_timeout(release, warn_raw)
     read_fd, write_fd = os.pipe()
     try:
         try:
-            done = subprocess.run(
+            done = run_in_process_group(
                 [
-                    "bash", "-c", _HOOK_RESOLVER, "cm-release-hook-resolver",
-                    str(_HOOK_LIB_DIR), str(write_fd),
-                    release.project, phase, str(release.project_root / "hooks"), release.repo,
+                    "bash",
+                    "-c",
+                    _HOOK_RESOLVER,
+                    "cm-release-hook-resolver",
+                    str(_HOOK_LIB_DIR),
+                    str(write_fd),
+                    release.project,
+                    phase,
+                    str(release.project_root / "hooks"),
+                    release.repo,
                 ],
-                capture_output=True, text=True, errors="replace", check=False,
-                stdin=subprocess.DEVNULL, env=env, pass_fds=(write_fd,),
+                timeout_seconds=seconds,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                env=env,
+                pass_fds=(write_fd,),
             )
         finally:
             os.close(write_fd)
@@ -515,6 +573,11 @@ def _resolve_hook(release: _Release, phase: str, say_raw: Writer, warn_raw: Writ
     if done.returncode == _HOOK_NOT_EXECUTABLE:
         return None, False
     if done.returncode != 0 or fields[0] != "path":
+        how = (
+            f"within {seconds}s (kanban.cfg [release] {HOOK_TIMEOUT_KEY}; its process group was stopped)"
+            if done.timed_out
+            else f"(exit {done.returncode})"
+        )
         # BLOCK-WORTHY (docs/blocking-site-census.md): without the shared
         # release-hook library no phase's hook can be resolved or its
         # required flag enforced, so the release cannot proceed safely.
@@ -524,9 +587,10 @@ def _resolve_hook(release: _Release, phase: str, say_raw: Writer, warn_raw: Writ
             format_error_contract(
                 "ship_rc.hook_library_unavailable",
                 f"The release-hook library under {_HOOK_LIB_DIR} could not resolve the {phase} hook "
-                f"(exit {done.returncode}), so the release cannot run or enforce its hooks.",
+                f"{how}, so the release cannot run or enforce its hooks.",
                 f"ls -l {_HOOK_LIB_DIR}/cm_release_hooks.sh {_HOOK_LIB_DIR}/project_paths.sh",
-            ) + "\n",
+            )
+            + "\n",
         )
     return (fields[1] or None), True
 
@@ -537,6 +601,11 @@ def _run_hook(release: _Release, name: str, path: str, say_raw: Writer, warn_raw
     A path that is not a file is skipped with a note; one that is not
     executable is skipped with a warning. The hook's stdout and stderr are
     merged and each line prefixed ``[hook <name>] ``.
+
+    The hook runs in its own process group under kanban.cfg ``[release]
+    hook_timeout_seconds``. Past the limit the whole group -- a daemon the
+    hook forked included -- is stopped, a warning names the limit, and the
+    hook reports HOOK_TIMEOUT_EXIT, so the phase takes its failed-hook path.
     """
     say = lambda line: say_raw(line + "\n")  # noqa: E731 -- local one-liner
     if not os.path.isfile(path):
@@ -547,37 +616,57 @@ def _run_hook(release: _Release, name: str, path: str, say_raw: Writer, warn_raw
         return 0
     say(f"[ship-rc] running hook {name}...")
     env = dict(os.environ)
-    env.update({
-        "PGAI_TARGET_VERSION": release.version,
-        "PGAI_PROJECT_NAME": release.project,
-        "PGAI_PROJECT_ROOT": str(release.project_root),
-        "PGAI_DEV_TREE_PATH": release.repo,
-        "PGAI_RC_BRANCH": release.rc_branch,
-        "PGAI_KANBAN_ROOT": str(release.ctx.kanban_root),
-    })
-    output, code = "", 0
+    env.update(
+        {
+            "PGAI_TARGET_VERSION": release.version,
+            "PGAI_PROJECT_NAME": release.project,
+            "PGAI_PROJECT_ROOT": str(release.project_root),
+            "PGAI_DEV_TREE_PATH": release.repo,
+            "PGAI_RC_BRANCH": release.rc_branch,
+            "PGAI_KANBAN_ROOT": str(release.ctx.kanban_root),
+        }
+    )
+    seconds = _hook_timeout(release, warn_raw)
+    output, code, timed_out = "", 0, False
     # A hook with no interpreter line runs as a bash script, as bash itself
     # runs an executable it cannot exec.
     for argv in ([path], ["bash", path]):
         try:
-            done = subprocess.run(
-                argv, cwd=release.repo, env=env, stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+            done = run_in_process_group(
+                argv,
+                timeout_seconds=seconds,
+                cwd=release.repo,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
             )
         except OSError as exc:
             output, code = f"{path}: {exc.strerror}\n", 126
             if exc.errno == errno.ENOEXEC:
                 continue
             break
-        output, code = done.stdout.decode("utf-8", errors="replace"), done.returncode
+        output = (done.stdout or b"").decode("utf-8", errors="replace")
+        timed_out = done.timed_out
+        code = HOOK_TIMEOUT_EXIT if timed_out else done.returncode
         break
     if output:
         say_raw("".join(f"[hook {name}] {line}" for line in output.splitlines(keepends=True)))
+    if timed_out:
+        if output and not output.endswith("\n"):
+            say_raw("\n")
+        warn_raw(
+            f"[ship-rc] WARNING: ship_rc.hook_timeout: hook {name} did not finish within {seconds}s "
+            f"(kanban.cfg [release] {HOOK_TIMEOUT_KEY}); its process group was stopped\n"
+        )
     return code
 
 
 def _hook_phase(
-    release: _Release, phase: str, say_raw: Writer, warn_raw: Writer,
+    release: _Release,
+    phase: str,
+    say_raw: Writer,
+    warn_raw: Writer,
 ) -> None:
     """Resolve and run *phase*'s hook with the stop rules of that phase.
 
@@ -643,9 +732,9 @@ def ship_rc(
     version: str,
     *,
     dry_run: bool = False,
-    repo_root: Optional[str] = None,
-    out: Optional[Writer] = None,
-    err: Optional[Writer] = None,
+    repo_root: str | None = None,
+    out: Writer | None = None,
+    err: Writer | None = None,
 ) -> ShipOutcome:
     """Ship *project*'s RC *version* (see the module docstring).
 
@@ -704,7 +793,15 @@ def ship_rc(
     remote = _git_remote_name(ctx, name)
     decision = _cancel.push_decision(ctx, name)
     push = decision.may_push
-    release = _Release(ctx, name, version, repo, rc_branch, ctx.project_root(name))
+    release = _Release(
+        ctx,
+        name,
+        version,
+        repo,
+        rc_branch,
+        ctx.project_root(name),
+        hook_timeout_seconds=resolve_hook_timeout_seconds(ctx.kanban_root, warn_raw),
+    )
     git = _Git(repo, say_raw, warn_raw)
 
     def skip_remote(kind: str, command: str) -> None:
@@ -882,9 +979,7 @@ def _last_released_after_ship(current: str, version: str) -> str:
     return version
 
 
-def _reset_release_state(
-    release_state: pathlib.Path, version: str, say: Callable[..., None], warn_raw: Writer
-) -> None:
+def _reset_release_state(release_state: pathlib.Path, version: str, say: Callable[..., None], warn_raw: Writer) -> None:
     """Close the RC in release-state.md: RC fields to none, Last Released raised to *version*.
 
     Only the RC headings the file carries are reset; Last Released is set
@@ -1013,7 +1108,7 @@ def _cli_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _cli_main(argv: Optional[list[str]] = None) -> int:
+def _cli_main(argv: list[str] | None = None) -> int:
     """Run ``ship_rc`` from the command line (see the module docstring).
 
     Prints the narration to stdout; a refusal's remaining text goes to

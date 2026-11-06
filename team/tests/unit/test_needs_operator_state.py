@@ -12,9 +12,10 @@ priority item into and out of it:
     error/message/remedy triple and a non-zero exit, and both the item file
     and ``operator-inbox.md`` stay byte-identical.
   - Answering that entry -- through ``inbox.answer_entry`` or the inbox
-    module's own command line -- returns the item to ``open``; answering an
-    entry whose Source is not an intake item (an RC) leaves every intake
-    file byte-identical.
+    module's own command line -- returns the item to ``open``; an item no
+    longer waiting keeps its status (the answer is still recorded on it);
+    answering an entry whose Source is not an intake item (an RC) leaves
+    every intake file byte-identical.
   - Closing a needs-operator item closes its open inbox entry.
 
 Every test builds its own throwaway kanban root under pytest's ``tmp_path``;
@@ -43,7 +44,7 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent  # team/tests/
 _PROJECT = "demo-proj"
 _BUG = "BUG-9101-widget-port"
 _QUESTION = "Which port should the widget service listen on?"
-_T0 = datetime.datetime(2026, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
+_T0 = datetime.datetime(2026, 1, 1, 10, 0, 0, tzinfo=datetime.UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -59,13 +60,9 @@ def root(tmp_path: pathlib.Path) -> pathlib.Path:
     (project_root / "bugs").mkdir(parents=True)
     (project_root / "priority").mkdir()
     (project_root / "tasks" / "queues").mkdir(parents=True)
-    (sandbox / "projects.cfg").write_text(
-        f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8"
-    )
+    (sandbox / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority = 1\nenabled = true\n", encoding="utf-8")
     _intake(sandbox, "bugs", _BUG, "open")
-    (project_root / "tasks" / "queues" / "bug_backlog.md").write_text(
-        f"- [x] {_BUG} — widget port\n", encoding="utf-8"
-    )
+    (project_root / "tasks" / "queues" / "bug_backlog.md").write_text(f"- [x] {_BUG} — widget port\n", encoding="utf-8")
     return sandbox
 
 
@@ -107,11 +104,7 @@ def _snapshot(*paths: pathlib.Path) -> tuple:
 def _intake_snapshot(root: pathlib.Path) -> dict:
     """Every file under bugs/ and priority/, by path, with its bytes."""
     project_root = _project_root(root)
-    return {
-        p: p.read_bytes()
-        for sub in ("bugs", "priority")
-        for p in sorted((project_root / sub).glob("*.md"))
-    }
+    return {p: p.read_bytes() for sub in ("bugs", "priority") for p in sorted((project_root / sub).glob("*.md"))}
 
 
 def _run_module(root: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
@@ -142,8 +135,13 @@ def _run_module(root: pathlib.Path, tmp_path: pathlib.Path, *args: str) -> subpr
 
 def _set_via_cli(root, tmp_path, key: str = _BUG, question: str = _QUESTION):
     return _run_module(
-        root, tmp_path, "pgai_agent_kanban.ops", "set_needs_operator",
-        str(_project_root(root)), key, question,
+        root,
+        tmp_path,
+        "pgai_agent_kanban.ops",
+        "set_needs_operator",
+        str(_project_root(root)),
+        key,
+        question,
     )
 
 
@@ -264,8 +262,18 @@ def test_answering_through_the_inbox_cli_returns_the_bug_to_open(root, tmp_path)
     entry = ops_write.set_needs_operator(_ctx(root), _PROJECT, _BUG, _QUESTION, now=_T0)
 
     result = _run_module(
-        root, tmp_path, "pgai_agent_kanban.overwatch.inbox", "answer",
-        "--project", _PROJECT, "--kanban-root", str(root), "--id", entry.entry_id, "--answer", "8080",
+        root,
+        tmp_path,
+        "pgai_agent_kanban.overwatch.inbox",
+        "answer",
+        "--project",
+        _PROJECT,
+        "--kanban-root",
+        str(root),
+        "--id",
+        entry.entry_id,
+        "--answer",
+        "8080",
     )
 
     assert result.returncode == 0, _diagnostic(result)
@@ -276,8 +284,13 @@ def test_answering_an_rc_entry_leaves_every_intake_file_byte_identical(root):
     _intake(root, "bugs", "BUG-9103-other", "needs-operator")
     _intake(root, "priority", "PRIORITY-9104-other", "needs-operator")
     entry = inbox.write_entry(
-        _ctx(root), _PROJECT, source="rc:v1.2.3", question="Cancel the RC?",
-        meanwhile="Kept it open.", how_to_answer="cancel or keep", now=_T0,
+        _ctx(root),
+        _PROJECT,
+        source="rc:v1.2.3",
+        question="Cancel the RC?",
+        meanwhile="Kept it open.",
+        how_to_answer="cancel or keep",
+        now=_T0,
     )
     before = _intake_snapshot(root)
 
@@ -286,14 +299,21 @@ def test_answering_an_rc_entry_leaves_every_intake_file_byte_identical(root):
     assert _intake_snapshot(root) == before
 
 
-def test_answering_an_entry_for_an_item_no_longer_waiting_changes_nothing(root):
+def test_answering_an_entry_for_an_item_no_longer_waiting_keeps_its_status(root):
     entry = ops_write.set_needs_operator(_ctx(root), _PROJECT, _BUG, _QUESTION, now=_T0)
     _intake(root, "bugs", _BUG, "running")
     before = _intake_snapshot(root)
 
     inbox.answer_entry(_ctx(root), _PROJECT, entry.entry_id, "8080", now=_T0)
 
-    assert _intake_snapshot(root) == before
+    after = _intake_snapshot(root)
+    assert _status(_bug_file(root)) == "running"
+    assert ops_write.recorded_operator_answers(_bug_file(root)) == [
+        f"- 2026-01-01T10:00:00+00:00 {entry.entry_id}: 8080"
+    ]
+    assert {p: b for p, b in after.items() if p != _bug_file(root)} == {
+        p: b for p, b in before.items() if p != _bug_file(root)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +324,13 @@ def test_answering_an_entry_for_an_item_no_longer_waiting_changes_nothing(root):
 def test_closing_a_needs_operator_bug_closes_its_open_inbox_entry(root):
     entry = ops_write.set_needs_operator(_ctx(root), _PROJECT, _BUG, _QUESTION, now=_T0)
     other = inbox.write_entry(
-        _ctx(root), _PROJECT, source="rc:v1.2.3", question="Cancel the RC?",
-        meanwhile="Kept it open.", how_to_answer="cancel or keep", now=_T0,
+        _ctx(root),
+        _PROJECT,
+        source="rc:v1.2.3",
+        question="Cancel the RC?",
+        meanwhile="Kept it open.",
+        how_to_answer="cancel or keep",
+        now=_T0,
     )
 
     ops_write.close_item(_ctx(root), _PROJECT, _BUG, state="wont-do", note="not worth it")

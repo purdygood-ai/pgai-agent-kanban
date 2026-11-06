@@ -402,9 +402,9 @@ def test_rest_reconcile_dry_run_matches_the_cli_and_apply_moves_the_lines(board,
         applied = client.post("/operations/archive", json={"project": box.project, "reconcile_queues": True})
 
     assert cli.returncode == 0, _diagnostic(cli)
-    assert dry.json()["stdout"] == cli.stdout, (
-        f"REST dry run differs from the CLI\n--- REST ---\n{dry.json()['stdout']}\n--- CLI ---\n{cli.stdout}"
-    )
+    assert (
+        dry.json()["stdout"] == cli.stdout
+    ), f"REST dry run differs from the CLI\n--- REST ---\n{dry.json()['stdout']}\n--- CLI ---\n{cli.stdout}"
     assert applied.status_code == 200, applied.text
     assert applied.json()["exit_code"] == 0, applied.json()
     for line, file_name in board.moving.items():

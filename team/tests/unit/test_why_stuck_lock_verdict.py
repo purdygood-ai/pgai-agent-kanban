@@ -195,9 +195,9 @@ def test_queued_work_with_lock_past_stale_threshold_yields_stuck_lock_with_relea
 
     result = _run(["--project", "demo"], tmp_path, now_epoch=now)
 
-    assert result.returncode == _STUCK_LOCK_EXIT_CODE, (
-        f"expected the STUCK-LOCK exit code, got {result.returncode}: {result.stdout!r}"
-    )
+    assert (
+        result.returncode == _STUCK_LOCK_EXIT_CODE
+    ), f"expected the STUCK-LOCK exit code, got {result.returncode}: {result.stdout!r}"
     line = result.stdout.strip()
     assert line.startswith("demo: STUCK-LOCK")
     assert "remedy:" in line
@@ -452,9 +452,7 @@ def test_details_exit_code_matches_plain_verdict_for_stuck_lock_project(tmp_path
 def test_aged_out_cause_names_refresh_age_and_held_time_separately(tmp_path: pathlib.Path) -> None:
     now = 2_000_000_000
     stale_age = _STALE_LOCK_THRESHOLD_SECONDS + 60  # 7m 0s since last refresh
-    acquired_at = datetime.datetime.fromtimestamp(
-        now - 3 * 3600, tz=datetime.timezone.utc
-    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    acquired_at = datetime.datetime.fromtimestamp(now - 3 * 3600, tz=datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for label, recorded, held_phrase in (
         ("recorded", acquired_at, "(held 3h 0m)"),
         ("legacy", "", "(acquired_at not recorded (pre-upgrade lock))"),

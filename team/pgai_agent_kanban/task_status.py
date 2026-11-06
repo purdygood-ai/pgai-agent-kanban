@@ -182,6 +182,7 @@ rather than carrying their own ``## Section`` regex:
     record_field(text, heading, field, default) one ``key: value`` record value
     set_section(path, heading, body)            one section, atomic write
     set_sections(path, {heading: body})         several sections, one write
+    rewrite_status_file(path, transform)        transform(old text), one write
     write_task_status(path, state=..., ...)     validated State/Needs Human/
                                                 Summary/Blockers write, with the
                                                 ## Block Record kept in step
@@ -209,7 +210,8 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping, NoReturn, Optional, Sequence
+from typing import TYPE_CHECKING, NoReturn
+from collections.abc import Callable, Mapping, Sequence
 
 # Run by file path (``python3 .../task_status.py``) or loaded from a file
 # outside its package, this module has no parent package and the interpreter
@@ -282,7 +284,7 @@ class TaskStatusError(Exception):
 def resolve_status_file(
     project: str,
     key: str,
-    ctx: Optional[OpsContext] = None,
+    ctx: OpsContext | None = None,
 ) -> Path:
     """Return the status.md path for the named task.
 
@@ -312,7 +314,7 @@ def resolve_status_file(
 # ---------------------------------------------------------------------------
 
 
-def validate_required_text(value: Optional[str], *, flag: str, error_key: str) -> str:
+def validate_required_text(value: str | None, *, flag: str, error_key: str) -> str:
     """Return *value* stripped, or raise TaskStatusError when blank/None.
 
     CLI-level presence check for a flag the CLI cannot proceed without but
@@ -379,14 +381,8 @@ def validate_state(state: str) -> str:
         # CENSUS-ANCHOR: task-status-invalid-state-01
         raise TaskStatusError(
             error_key="task-status.invalid-state",
-            message=(
-                f"'{state}' is not one of the six canonical task states "
-                f"({', '.join(CANONICAL_STATES)})"
-            ),
-            remedy=(
-                "re-run with --state set to one of: "
-                + "|".join(CANONICAL_STATES)
-            ),
+            message=(f"'{state}' is not one of the six canonical task states " f"({', '.join(CANONICAL_STATES)})"),
+            remedy=("re-run with --state set to one of: " + "|".join(CANONICAL_STATES)),
         )
     return candidate
 
@@ -408,10 +404,7 @@ def validate_needs_human(value: str) -> str:
     if candidate not in CANONICAL_NEEDS_HUMAN:
         raise TaskStatusError(
             error_key="task-status.invalid-needs-human",
-            message=(
-                f"'{value}' is not a valid --needs-human value "
-                f"(expected 'yes' or 'no')"
-            ),
+            message=(f"'{value}' is not a valid --needs-human value " f"(expected 'yes' or 'no')"),
             remedy="re-run with --needs-human yes or --needs-human no",
         )
     return candidate
@@ -469,9 +462,7 @@ def _section_pattern(
       ``State`` and no inline value is read.  Combine with ``re.M | re.I``.
     """
     if sum((exact_heading, free_spacing, heading_prefix)) > 1:
-        raise ValueError(
-            "exact_heading, free_spacing and heading_prefix are different heading readings; pass one"
-        )
+        raise ValueError("exact_heading, free_spacing and heading_prefix are different heading readings; pass one")
     if exact_heading:
         head = rf"(^[^\S\n]*## {re.escape(heading)}[^\S\n]*)"
         ends = r"[^\S\n]*##"
@@ -516,7 +507,7 @@ def _mask_inert_lines(text: str, *, fences: bool, comments: bool) -> str:
         from pgai_agent_kanban.lib.markdown_fence import is_fence_closer, match_fence_opener
 
     lines = text.split("\n")
-    fence_token: Optional[str] = None
+    fence_token: str | None = None
     in_comment = False
     for idx, line in enumerate(lines):
         stripped = line.strip()
@@ -553,7 +544,7 @@ def _split_heading_line(heading_line: str, heading: str) -> tuple[str, str]:
     name = re.match(r"##[ \t]+" + re.escape(heading), heading_line, re.I)
     if name is None:  # unreachable for a line _section_pattern matched
         return heading_line, ""
-    rest = heading_line[name.end():]
+    rest = heading_line[name.end() :]
     inline = re.match(r"[ \t]*:(.*)$", rest, re.S)
     if inline is None:
         return heading_line, ""
@@ -577,7 +568,7 @@ def replace_section(
     heading: str,
     body: str,
     *,
-    insert_after: Optional[str] = None,
+    insert_after: str | None = None,
 ) -> str:
     """Return *text* with the body of ``## <heading>`` replaced by *body*.
 
@@ -613,29 +604,27 @@ def replace_section(
     """
     new_body = body.strip()
 
-    def _replace(m: "re.Match[str]") -> str:
+    def _replace(m: re.Match[str]) -> str:
         heading_line, _inline = _split_heading_line(m.group(1), heading)
         # The separator already begins with every newline between the old
         # body and the next heading (or the file's trailing newlines) — reuse
         # it verbatim; at an end of file with no newline, supply one.
         return heading_line + "\n" + new_body + (m.group(3) or "\n")
 
-    new_text, n = re.subn(
-        _section_pattern(heading), _replace, text, count=1, flags=_SECTION_FLAGS
-    )
+    new_text, n = re.subn(_section_pattern(heading), _replace, text, count=1, flags=_SECTION_FLAGS)
     if n:
         return new_text
 
     if insert_after is not None:
-        def _insert(m: "re.Match[str]") -> str:
-            return (
-                m.group(1) + m.group(2)
-                + f"\n\n## {heading}\n" + new_body
-                + (m.group(3) or "\n")
-            )
+
+        def _insert(m: re.Match[str]) -> str:
+            return m.group(1) + m.group(2) + f"\n\n## {heading}\n" + new_body + (m.group(3) or "\n")
 
         new_text, n = re.subn(
-            _section_pattern(insert_after), _insert, text, count=1,
+            _section_pattern(insert_after),
+            _insert,
+            text,
+            count=1,
             flags=_SECTION_FLAGS,
         )
         if n:
@@ -669,10 +658,10 @@ class SectionSpan:
 
     start: int
     body_end: int
-    next_heading: Optional[int]
+    next_heading: int | None
 
 
-def section_span(text: str, heading: str) -> Optional[SectionSpan]:
+def section_span(text: str, heading: str) -> SectionSpan | None:
     """Return where the ``## <heading>`` section sits in *text*, or ``None``.
 
     The heading and the end of the section are found exactly as
@@ -697,7 +686,7 @@ def section_regex(
     free_spacing: bool = False,
     end_at_rule: bool = False,
     heading_prefix: bool = False,
-) -> "re.Pattern[str]":
+) -> re.Pattern[str]:
     """Return the compiled pattern :func:`read_section` matches a section with.
 
     For a caller that needs the section boundary itself -- to compare it
@@ -742,7 +731,7 @@ def read_section(
     comments: bool = False,
     last: bool = False,
     heading_prefix: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """Return the body of the ``## <heading>`` section in *text*, or ``None``.
 
     The one Python reader of a ``## Heading`` section, for status.md,
@@ -846,10 +835,10 @@ def read_section(
             m = later
             later = pattern.search(searched, m.end(2))
     # Masking keeps offsets, so the spans index the unmasked text.
-    body = normalised[m.start(2):m.end(2)].strip()
+    body = normalised[m.start(2) : m.end(2)].strip()
     if exact_heading or free_spacing or heading_prefix:
         return body
-    _heading_line, inline = _split_heading_line(normalised[m.start(1):m.end(1)], heading)
+    _heading_line, inline = _split_heading_line(normalised[m.start(1) : m.end(1)], heading)
     if inline:
         return f"{inline}\n{body}".strip()
     return body
@@ -889,7 +878,7 @@ def section_value(text: str, heading: str, *, fences: bool = False) -> str:
     return ""
 
 
-def section_lines(text: str, heading: str, max_lines: Optional[int] = None) -> list[str]:
+def section_lines(text: str, heading: str, max_lines: int | None = None) -> list[str]:
     """Return the non-blank lines of the ``## <heading>`` section in *text*.
 
     Each line is stripped of surrounding whitespace; blank lines are
@@ -963,7 +952,7 @@ def first_value_line(body: str) -> str:
     return ""
 
 
-def read_state(status_file: "Path | str", *, upper: bool = True) -> str:
+def read_state(status_file: Path | str, *, upper: bool = True) -> str:
     """Return a task's ``## State`` value, uppercased, or ``""``.
 
     The canonical State reader: :func:`section_value` over the same section
@@ -1012,7 +1001,7 @@ read_task_state = read_state
 
 def replace_sections(
     text: str,
-    updates: "Mapping[str, str]",
+    updates: Mapping[str, str],
     *,
     skip_missing: bool = False,
 ) -> str:
@@ -1108,7 +1097,7 @@ def upsert_section(
     heading: str,
     body: str,
     *,
-    after: "tuple[str, ...] | list[str]" = (),
+    after: tuple[str, ...] | list[str] = (),
 ) -> str:
     """Replace ``## <heading>``'s body, or add the section when it is absent.
 
@@ -1169,13 +1158,11 @@ def set_or_append_section(text: str, heading: str, body: str) -> str:
         The rewritten text.
     """
 
-    def _replace(m: "re.Match[str]") -> str:
+    def _replace(m: re.Match[str]) -> str:
         heading_line, _inline = _split_heading_line(m.group(1), heading)
         return heading_line + "\n" + body + (m.group(3) or "\n")
 
-    new_text, n = re.subn(
-        _section_pattern(heading), _replace, text, count=1, flags=_SECTION_FLAGS
-    )
+    new_text, n = re.subn(_section_pattern(heading), _replace, text, count=1, flags=_SECTION_FLAGS)
     if n:
         return new_text
     if not text.endswith("\n"):
@@ -1207,7 +1194,7 @@ def remove_section(text: str, heading: str) -> str:
     separator = m.group(3) or ""
     if separator.endswith("##"):
         # A later section follows: it moves up into the removed one's place.
-        return text[: m.start()] + "##" + text[m.end():]
+        return text[: m.start()] + "##" + text[m.end() :]
     head = text[: m.start()].rstrip("\n")
     return head + "\n" if head else ""
 
@@ -1252,7 +1239,7 @@ def _undecodable_status_error(status_file: Path, exc: UnicodeDecodeError) -> Tas
     offset of the first undecodable byte; the remedy is a command that
     rewrites the file with the undecodable bytes dropped.
     """
-    bad = exc.object[exc.start:exc.start + 1] if isinstance(exc.object, bytes) else b""
+    bad = exc.object[exc.start : exc.start + 1] if isinstance(exc.object, bytes) else b""
     byte_label = f"byte 0x{bad[0]:02x}" if bad else "a byte"
     quoted = shlex.quote(str(status_file))
     # AGENT-RESOLVABLE: the bytes are already on disk and nothing is
@@ -1276,10 +1263,10 @@ def _undecodable_status_error(status_file: Path, exc: UnicodeDecodeError) -> Tas
 
 def _rewrite_sections(
     status_file: Path,
-    updates: "Mapping[str, str]",
+    updates: Mapping[str, str],
     *,
-    insert_after: Optional[str] = None,
-    transform: "Optional[Callable[[str, str], str]]" = None,
+    insert_after: str | None = None,
+    transform: Callable[[str, str], str] | None = None,
 ) -> str:
     """Apply *updates* to *status_file* in one atomic write; return the old text.
 
@@ -1347,10 +1334,10 @@ def _rewrite_sections(
 
 
 def set_sections(
-    status_file: "Path | str",
-    updates: "Mapping[str, str]",
+    status_file: Path | str,
+    updates: Mapping[str, str],
     *,
-    insert_after: Optional[str] = None,
+    insert_after: str | None = None,
 ) -> None:
     """Replace several section bodies of *status_file* in one atomic write.
 
@@ -1376,11 +1363,11 @@ def set_sections(
 
 
 def set_section(
-    status_file: "Path | str",
+    status_file: Path | str,
     heading: str,
     body: str,
     *,
-    insert_after: Optional[str] = None,
+    insert_after: str | None = None,
 ) -> None:
     """Replace the body of one ``## <heading>`` section in one atomic write.
 
@@ -1398,6 +1385,34 @@ def set_section(
         TaskStatusError: as :func:`set_sections`.
     """
     set_sections(status_file, {heading: body}, insert_after=insert_after)
+
+
+def rewrite_status_file(
+    status_file: Path | str,
+    transform: Callable[[str], str],
+) -> None:
+    """Rewrite *status_file* as ``transform(old_text)`` in one atomic write.
+
+    For a writer whose change is more than a set of section-body
+    replacements -- one that adds a section after another, rewrites every
+    copy of a repeated heading, or collapses blank lines -- and builds the
+    new text itself from this module's section helpers. The file is read
+    and written as :func:`set_sections` reads and writes it: it must exist
+    and be valid UTF-8, the text written ends with a newline and is valid
+    UTF-8, and the write is atomic (a concurrent reader sees the old or the
+    new file, never a partial one).
+
+    Args:
+        status_file: Path to the file.  Must already exist.
+        transform:   Called once with the file's current text; returns the
+                     text to write.
+
+    Raises:
+        TaskStatusError: ``task-status.missing-status-file``,
+            ``task-status.read-failed`` or ``task-status.write-failed``, or
+            one *transform* raises.  Nothing is written on any of them.
+    """
+    _rewrite_sections(Path(status_file), {}, transform=lambda old, _new: transform(old))
 
 
 # ---------------------------------------------------------------------------
@@ -1421,7 +1436,7 @@ def task_ledger_source(key: str) -> str:
     return f"task:{key}"
 
 
-def ledger_context_for_status_file(status_file: "Path | str") -> "Optional[tuple[Path, str, str]]":
+def ledger_context_for_status_file(status_file: Path | str) -> tuple[Path, str, str] | None:
     """``(kanban_root, project, key)`` read from a status.md path, or None.
 
     Pure path arithmetic over the multi-project layout
@@ -1441,7 +1456,7 @@ def ledger_context_for_status_file(status_file: "Path | str") -> "Optional[tuple
 
 
 def _ledger_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
 def _warn_ledger_stamp(kind: str, project: str, source: str, exc: BaseException) -> None:
@@ -1467,14 +1482,14 @@ def _open_ledger_blocks(ledger_path: str, source: str) -> list[dict]:
 
 
 def stamp_ledger_block_start(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     source: str,
     *,
-    reason_code: Optional[str] = None,
+    reason_code: str | None = None,
     cause: str = "chain",
     block_class: str = "any",
-    timestamp: Optional[str] = None,
+    timestamp: str | None = None,
 ) -> bool:
     """Open a block for *source* on *project*'s blocked ledger, best-effort.
 
@@ -1531,14 +1546,14 @@ def stamp_ledger_block_start(
 
 
 def stamp_ledger_block_end(
-    kanban_root: "Path | str",
+    kanban_root: Path | str,
     project: str,
     source: str,
     *,
     block_class: str = "any",
-    cause: Optional[str] = None,
-    reason_code: Optional[str] = None,
-    timestamp: Optional[str] = None,
+    cause: str | None = None,
+    reason_code: str | None = None,
+    timestamp: str | None = None,
 ) -> int:
     """Close every open block of *source* on *project*'s ledger, best-effort.
 
@@ -1586,12 +1601,12 @@ def stamp_ledger_block_end(
 
 def _stamp_blocked_ledger_boundary(
     *,
-    project: Optional[str],
-    key: Optional[str],
-    old_state: Optional[str],
+    project: str | None,
+    key: str | None,
+    old_state: str | None,
     new_state: str,
-    needs_human_requested: Optional[str],
-    reason_code: Optional[str] = None,
+    needs_human_requested: str | None,
+    reason_code: str | None = None,
 ) -> None:
     """Best-effort blocked-ledger stamp for one status write of task *key*.
 
@@ -1627,9 +1642,7 @@ def _stamp_blocked_ledger_boundary(
         return
 
     prior = (old_state or "").strip().upper()
-    opening = new_state == "BLOCKED" or (
-        needs_human_requested == "yes" and new_state not in TERMINAL_STATES
-    )
+    opening = new_state == "BLOCKED" or (needs_human_requested == "yes" and new_state not in TERMINAL_STATES)
     closing = not opening and (new_state in TERMINAL_STATES or prior == "BLOCKED")
     if not opening and not closing:
         return
@@ -1749,12 +1762,12 @@ def _refuse_block_input(error_key: str, message: str, remedy: str) -> NoReturn:
 
 def validate_block_inputs(
     state: str,
-    reason_code: Optional[str],
-    action_args: "Optional[Sequence[str]]",
+    reason_code: str | None,
+    action_args: Sequence[str] | None,
     *,
-    project: Optional[str] = None,
-    key: Optional[str] = None,
-) -> tuple[Optional[str], list[str]]:
+    project: str | None = None,
+    key: str | None = None,
+) -> tuple[str | None, list[str]]:
     """Validate ``--reason-code`` / ``--action-args`` for a write to *state*.
 
     Args:
@@ -1791,8 +1804,12 @@ def validate_block_inputs(
     if reason_code is None and not raw_args:
         return None, []
     base = _task_status_command(
-        "--project", (project or _EXAMPLE_PROJECT).strip(), "--key", (key or _EXAMPLE_KEY).strip(),
-        "--state", "BLOCKED",
+        "--project",
+        (project or _EXAMPLE_PROJECT).strip(),
+        "--key",
+        (key or _EXAMPLE_KEY).strip(),
+        "--state",
+        "BLOCKED",
     )
     example_args = example_action_args()
     if state != "BLOCKED":
@@ -1845,9 +1862,7 @@ def _task_owner_role(status_file: Path, text: str) -> str:
     """
     from pgai_agent_kanban.overwatch.block_evidence import resolve_owner_role
 
-    return resolve_owner_role(status_file) or resolve_owner_role(
-        status_file, [section_value(text, "Role")]
-    )
+    return resolve_owner_role(status_file) or resolve_owner_role(status_file, [section_value(text, "Role")])
 
 
 class _BlockRecordStep:
@@ -1858,7 +1873,7 @@ class _BlockRecordStep:
     :class:`StatusWriteResult`.
     """
 
-    def __init__(self, status_file: Path, state: str, code: Optional[str], evidence: list[str]) -> None:
+    def __init__(self, status_file: Path, state: str, code: str | None, evidence: list[str]) -> None:
         self.status_file = status_file
         self.state = state
         self.code = code
@@ -1919,13 +1934,13 @@ def write_task_status(
     status_file: Path,
     *,
     state: str,
-    needs_human: Optional[str] = None,
-    summary: Optional[str] = None,
-    blockers: Optional[str] = None,
-    project: Optional[str] = None,
-    key: Optional[str] = None,
-    reason_code: Optional[str] = None,
-    action_args: "Optional[Sequence[str]]" = None,
+    needs_human: str | None = None,
+    summary: str | None = None,
+    blockers: str | None = None,
+    project: str | None = None,
+    key: str | None = None,
+    reason_code: str | None = None,
+    action_args: Sequence[str] | None = None,
 ) -> StatusWriteResult:
     """Validate inputs and atomically write the requested fields to status_file.
 
@@ -1987,12 +2002,8 @@ def write_task_status(
     """
     # Validate everything first — no writes happen until every field checks out.
     canonical_state = validate_state(state)
-    canonical_needs_human = (
-        validate_needs_human(needs_human) if needs_human is not None else None
-    )
-    code, evidence = validate_block_inputs(
-        canonical_state, reason_code, action_args, project=project, key=key
-    )
+    canonical_needs_human = validate_needs_human(needs_human) if needs_human is not None else None
+    code, evidence = validate_block_inputs(canonical_state, reason_code, action_args, project=project, key=key)
 
     updates: dict[str, str] = {"State": canonical_state}
     if canonical_needs_human is not None:
@@ -2024,7 +2035,7 @@ def write_task_status(
     return block_step.result
 
 
-def _ledger_reason_code(result: StatusWriteResult, old_text: str, code: Optional[str]) -> str:
+def _ledger_reason_code(result: StatusWriteResult, old_text: str, code: str | None) -> str:
     """The reason_code a BLOCKED write's ledger block-start carries: the
     ## Block Record's own (the one written, or the one kept), else the
     code this call named, else ``agent_unclassified``."""
@@ -2044,7 +2055,7 @@ def _ledger_reason_code(result: StatusWriteResult, old_text: str, code: Optional
 # ---------------------------------------------------------------------------
 
 
-def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="task_status",
         description=(
@@ -2056,7 +2067,8 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         epilog=(
             "Block Record: --state BLOCKED also writes the task's ## Block "
             "Record (reason_code from --reason-code, else "
-            + DEFAULT_AGENT_REASON_CODE + "); --state DONE or WONT-DO removes "
+            + DEFAULT_AGENT_REASON_CODE
+            + "); --state DONE or WONT-DO removes "
             "it. List the codes and verbs with: python3 -m "
             "pgai_agent_kanban.overwatch.block_record codes --agent (or "
             "--action-verbs). "
@@ -2088,10 +2100,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--state",
         default=None,
         help=(
-            "New ## State value. Required unless --read-state is given. "
-            "One of: "
-            + "|".join(CANONICAL_STATES)
-            + "."
+            "New ## State value. Required unless --read-state is given. " "One of: " + "|".join(CANONICAL_STATES) + "."
         ),
     )
     mode.add_argument(
@@ -2134,7 +2143,8 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "With --state BLOCKED only: why the task blocked, from the closed "
             "agent list (" + ", ".join(AGENT_REASON_CODES) + "). Recorded in "
             "the ## Block Record with owner_role taken from the task's ## Role. "
-            "A BLOCKED write without it records " + DEFAULT_AGENT_REASON_CODE
+            "A BLOCKED write without it records "
+            + DEFAULT_AGENT_REASON_CODE
             + " (a task already BLOCKED keeps its existing record). An unknown "
             "code is refused and nothing is written. DONE or WONT-DO removes "
             "the ## Block Record."
@@ -2209,7 +2219,10 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         # refuses through _refuse's dual-channel contract, not argparse's
         # bare usage error.
         p.add_argument(
-            "status_file", nargs="?", default=None, metavar="STATUS_FILE",
+            "status_file",
+            nargs="?",
+            default=None,
+            metavar="STATUS_FILE",
             help="Path to the status.md. Omit when --project/--key are given.",
         )
         p.add_argument("--project", default=None, help="Project name as registered in projects.cfg.")
@@ -2227,13 +2240,19 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     _target_args(read_p)
-    read_p.add_argument("--section", action="append", default=None, metavar="HEADING",
-                        help=(
-                            "Heading name without '## ' (default: State). Repeat it "
-                            "with --value to read several headings in one call."
-                        ))
     read_p.add_argument(
-        "--raw", action="store_true",
+        "--section",
+        action="append",
+        default=None,
+        metavar="HEADING",
+        help=(
+            "Heading name without '## ' (default: State). Repeat it "
+            "with --value to read several headings in one call."
+        ),
+    )
+    read_p.add_argument(
+        "--raw",
+        action="store_true",
         help=(
             "Print the section body exactly as written, for ## State too (no "
             "first-line, bold or case handling), and exit 3 printing nothing "
@@ -2243,7 +2262,9 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     read_p.add_argument(
-        "--field", default=None, metavar="NAME",
+        "--field",
+        default=None,
+        metavar="NAME",
         help=(
             "Treat --section as a 'key: value' record and print the value of "
             "NAME (the durable ## Transient Retry / ## Zero Progress records). "
@@ -2252,10 +2273,12 @@ def _subcommand_parser() -> argparse.ArgumentParser:
             "file prints one plain line to stderr and exits 1."
         ),
     )
-    read_p.add_argument("--default", default="", metavar="TEXT",
-                        help="Value --field prints when it finds none (default: empty).")
     read_p.add_argument(
-        "--value", action="store_true",
+        "--default", default="", metavar="TEXT", help="Value --field prints when it finds none (default: empty)."
+    )
+    read_p.add_argument(
+        "--value",
+        action="store_true",
         help=(
             "Print the first value line of each --section, one line per "
             "heading in the order named: blank, '#' comment and HTML comment "
@@ -2270,23 +2293,34 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         "section readings",
         "How --raw and --value find a section; each defaults to the status.md reading.",
     )
-    reading.add_argument("--exact-heading", action="store_true",
-                         help=(
-                             "The heading line must read exactly '## HEADING' once stripped "
-                             "(letter case counts, no inline value); any line starting '##' "
-                             "after its indentation ends the section."
-                         ))
-    reading.add_argument("--free-spacing", action="store_true",
-                         help=(
-                             "'##' and each word of HEADING may be separated by any run of "
-                             "blanks, none included; letter case is ignored; no inline value."
-                         ))
-    reading.add_argument("--comments", action="store_true",
-                         help="A '##' line inside an HTML comment block neither starts nor ends a section.")
-    reading.add_argument("--end-at-subheading", action="store_true",
-                         help="A '###' (or deeper) heading ends the section too.")
-    reading.add_argument("--end-at-rule", action="store_true",
-                         help="A '---' horizontal rule starting a line ends the section too.")
+    reading.add_argument(
+        "--exact-heading",
+        action="store_true",
+        help=(
+            "The heading line must read exactly '## HEADING' once stripped "
+            "(letter case counts, no inline value); any line starting '##' "
+            "after its indentation ends the section."
+        ),
+    )
+    reading.add_argument(
+        "--free-spacing",
+        action="store_true",
+        help=(
+            "'##' and each word of HEADING may be separated by any run of "
+            "blanks, none included; letter case is ignored; no inline value."
+        ),
+    )
+    reading.add_argument(
+        "--comments",
+        action="store_true",
+        help="A '##' line inside an HTML comment block neither starts nor ends a section.",
+    )
+    reading.add_argument(
+        "--end-at-subheading", action="store_true", help="A '###' (or deeper) heading ends the section too."
+    )
+    reading.add_argument(
+        "--end-at-rule", action="store_true", help="A '---' horizontal rule starting a line ends the section too."
+    )
 
     set_p = sub.add_parser(
         "set-section",
@@ -2299,10 +2333,8 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     _target_args(set_p)
-    set_p.add_argument("--section", default=None, metavar="HEADING",
-                       help="Heading name without '## '. Required.")
-    set_p.add_argument("--body", default=None, metavar="TEXT",
-                       help="New section body (may be empty). Required.")
+    set_p.add_argument("--section", default=None, metavar="HEADING", help="Heading name without '## '. Required.")
+    set_p.add_argument("--body", default=None, metavar="TEXT", help="New section body (may be empty). Required.")
 
     render_p = sub.add_parser(
         "render",
@@ -2319,14 +2351,28 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     render_p.add_argument("status_file", metavar="STATUS_FILE", help="Path to the status.md to read.")
-    render_p.add_argument("--section", action="append", default=[], metavar="HEADING",
-                          help="Heading to rewrite, without '## '. Repeatable.")
-    render_p.add_argument("--body", action="append", default=[], metavar="TEXT",
-                          help="New body for the --section at the same position. Repeatable.")
-    render_p.add_argument("--skip-missing", action="store_true",
-                          help="Leave a section the file lacks alone instead of failing.")
     render_p.add_argument(
-        "--insert-after", action="append", default=[], metavar="HEADING",
+        "--section",
+        action="append",
+        default=[],
+        metavar="HEADING",
+        help="Heading to rewrite, without '## '. Repeatable.",
+    )
+    render_p.add_argument(
+        "--body",
+        action="append",
+        default=[],
+        metavar="TEXT",
+        help="New body for the --section at the same position. Repeatable.",
+    )
+    render_p.add_argument(
+        "--skip-missing", action="store_true", help="Leave a section the file lacks alone instead of failing."
+    )
+    render_p.add_argument(
+        "--insert-after",
+        action="append",
+        default=[],
+        metavar="HEADING",
         help=(
             "With exactly one --section: when that section is absent, insert "
             "it after the first of these headings present (blank-line runs "
@@ -2335,7 +2381,8 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     render_p.add_argument(
-        "--append", action="store_true",
+        "--append",
+        action="store_true",
         help=(
             "Append each --body to its section's existing body, after one "
             "blank line, instead of replacing it (an empty body becomes the "
@@ -2343,7 +2390,10 @@ def _subcommand_parser() -> argparse.ArgumentParser:
         ),
     )
     render_p.add_argument(
-        "--append-missing", action="append", default=[], metavar="HEADING",
+        "--append-missing",
+        action="append",
+        default=[],
+        metavar="HEADING",
         help=(
             "Write the --section named HEADING with its --body exactly as "
             "given (not stripped), appending '## HEADING' and the body at the "
@@ -2352,8 +2402,9 @@ def _subcommand_parser() -> argparse.ArgumentParser:
             "with --append or --insert-after."
         ),
     )
-    render_p.add_argument("--collapse-blank-lines", action="store_true",
-                          help="Finally, cut every run of two or more blank lines to one.")
+    render_p.add_argument(
+        "--collapse-blank-lines", action="store_true", help="Finally, cut every run of two or more blank lines to one."
+    )
 
     clip_p = sub.add_parser(
         "clip",
@@ -2367,10 +2418,12 @@ def _subcommand_parser() -> argparse.ArgumentParser:
             "and exits 1."
         ),
     )
-    clip_p.add_argument("text", nargs="?", default=None, metavar="TEXT",
-                        help="Text to clip. Read from stdin when omitted.")
-    clip_p.add_argument("--chars", default=None, metavar="N",
-                        help="Most characters kept per line (a whole number). Required.")
+    clip_p.add_argument(
+        "text", nargs="?", default=None, metavar="TEXT", help="Text to clip. Read from stdin when omitted."
+    )
+    clip_p.add_argument(
+        "--chars", default=None, metavar="N", help="Most characters kept per line (a whole number). Required."
+    )
     return parser
 
 
@@ -2407,7 +2460,7 @@ def _resolve_subcommand_target(args: argparse.Namespace, *, require_file: bool =
     return status_file
 
 
-def _read_text_plain(path: Path, errors: str = "strict") -> Optional[str]:
+def _read_text_plain(path: Path, errors: str = "strict") -> str | None:
     """Return *path*'s text, or print one plain stderr line and return None.
 
     The wake-facing primitives (``read --raw``, ``render``) report an
@@ -2430,7 +2483,11 @@ def _read_text_plain(path: Path, errors: str = "strict") -> Optional[str]:
 
 
 _READING_FLAGS: tuple[str, ...] = (
-    "exact_heading", "free_spacing", "comments", "end_at_subheading", "end_at_rule",
+    "exact_heading",
+    "free_spacing",
+    "comments",
+    "end_at_subheading",
+    "end_at_rule",
 )
 
 
@@ -2439,12 +2496,12 @@ def _reading(args: argparse.Namespace) -> dict[str, bool]:
     return {name: True for name in _READING_FLAGS if getattr(args, name)}
 
 
-def _one_section(args: argparse.Namespace) -> Optional[str]:
+def _one_section(args: argparse.Namespace) -> str | None:
     """The single --section a mode reads, stripped, or None when not given."""
     return args.section[0].strip() if args.section else None
 
 
-def _read_mode_conflict(args: argparse.Namespace) -> Optional[str]:
+def _read_mode_conflict(args: argparse.Namespace) -> str | None:
     """Return a one-line usage error for a flag combination ``read`` refuses."""
     if args.value and (args.raw or args.field is not None):
         return "read: --value cannot be combined with --raw or --field"
@@ -2488,8 +2545,7 @@ def _run_render(args: argparse.Namespace) -> int:
     """Print STATUS_FILE with the requested rewrites applied; write nothing."""
     if len(args.section) != len(args.body):
         print(
-            f"render: {len(args.section)} --section but {len(args.body)} --body; "
-            "give one --body per --section",
+            f"render: {len(args.section)} --section but {len(args.body)} --body; " "give one --body per --section",
             file=sys.stderr,
         )
         return 1
@@ -2500,8 +2556,7 @@ def _run_render(args: argparse.Namespace) -> int:
         print("render: --append and --insert-after cannot be combined", file=sys.stderr)
         return 1
     if args.append_missing and (args.append or args.insert_after):
-        print("render: --append-missing cannot be combined with --append or --insert-after",
-              file=sys.stderr)
+        print("render: --append-missing cannot be combined with --append or --insert-after", file=sys.stderr)
         return 1
     unpaired = [h for h in args.append_missing if h not in args.section]
     if unpaired:
@@ -2626,9 +2681,7 @@ def _run_set_section(args: argparse.Namespace) -> int:
         _refuse(
             "task-status.missing-section-arg",
             "'set-section' needs --section naming the heading to write",
-            _task_status_command(
-                "set-section", *_EXAMPLE_TARGET.split(), "--section", "Artifacts", "--body", "none"
-            ),
+            _task_status_command("set-section", *_EXAMPLE_TARGET.split(), "--section", "Artifacts", "--body", "none"),
         )
     if args.body is None:
         _refuse(
@@ -2673,7 +2726,7 @@ def _subcommand_main(argv: list[str]) -> int:
         return 1
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Entry point for CLI invocation.
 
     Args:
@@ -2694,15 +2747,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     try:
-        project = validate_required_text(
-            args.project, flag="project", error_key="task-status.missing-project"
-        )
-        key = validate_required_text(
-            args.key, flag="key", error_key="task-status.missing-key"
-        )
-        state = validate_required_text(
-            args.state, flag="state", error_key="task-status.missing-state"
-        )
+        project = validate_required_text(args.project, flag="project", error_key="task-status.missing-project")
+        key = validate_required_text(args.key, flag="key", error_key="task-status.missing-key")
+        state = validate_required_text(args.state, flag="state", error_key="task-status.missing-state")
     except TaskStatusError as exc:
         emit_error_contract(exc.error_key, exc.message, exc.remedy, project=args.project)
         return 1

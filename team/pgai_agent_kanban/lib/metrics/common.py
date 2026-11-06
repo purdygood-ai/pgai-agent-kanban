@@ -16,7 +16,8 @@ import dataclasses
 import json
 import os
 import pathlib
-from typing import Any, Mapping, Optional
+from typing import Any
+from collections.abc import Mapping
 
 from .. import ini
 from ..palette import ansi_code
@@ -69,7 +70,7 @@ class Colors:
     yellow: str = ""
 
 
-def color_enabled(no_color_flag: bool, environ: Optional[Mapping[str, str]] = None) -> bool:
+def color_enabled(no_color_flag: bool, environ: Mapping[str, str] | None = None) -> bool:
     """Decide colour the way the dashboard scripts do.
 
     Colour is off when ``--no-color`` was given, when ``NO_COLOR`` is set
@@ -96,7 +97,7 @@ def colors_for(use_color: bool) -> Colors:
     )
 
 
-def load_json_object(path: pathlib.Path) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+def load_json_object(path: pathlib.Path) -> tuple[dict[str, Any] | None, str | None]:
     """Read *path* as a JSON object.
 
     Returns ``(data, None)`` on success and ``(None, reason)`` when the

@@ -48,8 +48,7 @@ fixes a real Dockerfile defect.
 # Exit 1: every image-build test passed (debian and rocky9, docker and
 # podman) and one non-build cold test failed.
 NON_BUILD_TEST_FAILURE_OUTPUT = (
-    _SESSION_HEADER
-    + "tests/cold/test_container_shell_launcher.py ........                    [  7%]\n"
+    _SESSION_HEADER + "tests/cold/test_container_shell_launcher.py ........                    [  7%]\n"
     "tests/cold/test_dashboard_operator_window.py ........                   [ 15%]\n"
     "tests/cold/test_dashboard_smoke_container.py ....                       [ 19%]\n"
     "tests/cold/test_docker_build_fixture.py ..                              [ 21%]\n"
@@ -67,15 +66,13 @@ NON_BUILD_TEST_FAILURE_OUTPUT = (
     f"{NON_BUILD_TEST_FILE}:132: AssertionError\n"
     "=========================== short test summary info ============================\n"
     f"FAILED {NON_BUILD_TEST_NODEID} - AssertionError: expected exit 1 with a brok...\n"
-    "======================== 1 failed, 103 passed in 812.34s =======================\n"
-    + _LANE_FAILED_TRAILER
+    "======================== 1 failed, 103 passed in 812.34s =======================\n" + _LANE_FAILED_TRAILER
 )
 
 # Exit 1: a real Dockerfile failure (structured engine/flavor/step line in
 # the build test's failure) alongside the same non-build test failure.
 DOCKERFILE_FAILURE_WITH_NON_BUILD_FAILURE_OUTPUT = (
-    _SESSION_HEADER
-    + "tests/cold/test_docker_cold_build.py ....F............................ [ 53%]\n"
+    _SESSION_HEADER + "tests/cold/test_docker_cold_build.py ....F............................ [ 53%]\n"
     f"{NON_BUILD_TEST_FILE} F.                      [100%]\n"
     "\n"
     "=================================== FAILURES ===================================\n"
@@ -88,20 +85,17 @@ DOCKERFILE_FAILURE_WITH_NON_BUILD_FAILURE_OUTPUT = (
     "FAILED tests/cold/test_docker_cold_build.py::test_image_builds_without_error[docker-debian]"
     " - Failed: docker build of docker/debian/Dockerfile failed (exit 1) at step: RUN...\n"
     f"FAILED {NON_BUILD_TEST_NODEID} - AssertionError: expected exit 1 with a brok...\n"
-    "======================== 2 failed, 102 passed in 790.02s =======================\n"
-    + _LANE_FAILED_TRAILER
+    "======================== 2 failed, 102 passed in 790.02s =======================\n" + _LANE_FAILED_TRAILER
 )
 
 # Exit 1: an image-build test failed without the structured step line.
 BUILD_TEST_FAILURE_WITHOUT_STEP_OUTPUT = (
-    _SESSION_HEADER
-    + "tests/cold/test_docker_cold_build.py ......F.......................... [ 53%]\n"
+    _SESSION_HEADER + "tests/cold/test_docker_cold_build.py ......F.......................... [ 53%]\n"
     "\n"
     "=========================== short test summary info ============================\n"
     "FAILED tests/cold/test_docker_cold_build.py::test_tmux_version_meets_floor_in_built_image[podman-rocky9]"
     " - AssertionError: tmux 3.1 is below the floor 3.2\n"
-    "======================== 1 failed, 103 passed in 801.10s =======================\n"
-    + _LANE_FAILED_TRAILER
+    "======================== 1 failed, 103 passed in 801.10s =======================\n" + _LANE_FAILED_TRAILER
 )
 
 # Exit 0: no engine on the host, so no (engine, flavor) pair was collected,
@@ -125,9 +119,7 @@ ENGINE_UNAVAILABLE_ALL_SKIPPED_OUTPUT = (
 # among the progress characters, as pytest prints it with capture off.
 ENGINE_UNAVAILABLE_FAILING_TEST_FILE = "tests/cold/test_dashboard_operator_window.py"
 ENGINE_UNAVAILABLE_FAILING_TEST_ID = "test_create_sh_exists"
-ENGINE_UNAVAILABLE_FAILING_TEST_NODEID = (
-    f"{ENGINE_UNAVAILABLE_FAILING_TEST_FILE}::{ENGINE_UNAVAILABLE_FAILING_TEST_ID}"
-)
+ENGINE_UNAVAILABLE_FAILING_TEST_NODEID = f"{ENGINE_UNAVAILABLE_FAILING_TEST_FILE}::{ENGINE_UNAVAILABLE_FAILING_TEST_ID}"
 ENGINE_UNAVAILABLE_SKIP_REASON = (
     "docker binary not found or docker unreachable; cold-build lane requires "
     "a working docker installation to exercise the debian flavor under docker"
@@ -150,8 +142,7 @@ def _engine_unavailable_progress(operator_window_progress: str) -> str:
         for flavor in ("debian", "rocky9")
     )
     smoke_narration = (
-        "\n[dashboard-smoke-fixture] SKIP — docker binary not found on PATH; "
-        "this test requires docker\ns"
+        "\n[dashboard-smoke-fixture] SKIP — docker binary not found on PATH; " "this test requires docker\ns"
     )
     return (
         _SESSION_HEADER.replace("collected 104 items", "collected 40 items")

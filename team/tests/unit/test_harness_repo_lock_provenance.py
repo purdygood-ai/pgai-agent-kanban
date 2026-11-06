@@ -52,18 +52,14 @@ def _acquisition_snippet() -> str:
     """
     lines = _HARNESS_SH.read_text(encoding="utf-8").splitlines()
     start_idx = next(i for i, line in enumerate(lines) if "local _lock_file" in line)
-    skip_idx = next(
-        i for i in range(start_idx, len(lines)) if "-- skipping\"" in lines[i]
-    )
+    skip_idx = next(i for i in range(start_idx, len(lines)) if '-- skipping"' in lines[i])
     # skip_idx+1 is "return 0", skip_idx+2 is the closing "fi".
     return "\n".join(lines[start_idx : skip_idx + 3])
 
 
 def _release_snippet() -> str:
     lines = _HARNESS_SH.read_text(encoding="utf-8").splitlines()
-    release_line = next(
-        line for line in lines if 'pgai_lock_release "$_lock_file" "$_lock_fd"' in line
-    )
+    release_line = next(line for line in lines if 'pgai_lock_release "$_lock_file" "$_lock_fd"' in line)
     return release_line.strip()
 
 
@@ -79,9 +75,9 @@ def test_harness_calls_shared_lock_helpers() -> None:
     text = _HARNESS_SH.read_text(encoding="utf-8")
     assert "pgai_lock_acquire " in text
     assert "pgai_lock_release " in text
-    assert re.search(r'source ".*lock_provenance\.sh"', text), (
-        "harness.sh must source lock_provenance.sh to reach pgai_lock_acquire/release"
-    )
+    assert re.search(
+        r'source ".*lock_provenance\.sh"', text
+    ), "harness.sh must source lock_provenance.sh to reach pgai_lock_acquire/release"
 
 
 def test_contended_second_acquisition_preserves_first_holders_provenance(
@@ -160,9 +156,9 @@ def test_contended_second_acquisition_preserves_first_holders_provenance(
             "a contended acquisition must return before reaching the task "
             f"loop\nstdout={contender.stdout}\nstderr={contender.stderr}"
         )
-        assert "repo lock held by" in contender.stderr, (
-            f"contended run must narrate who holds the lock\nstderr={contender.stderr}"
-        )
+        assert (
+            "repo lock held by" in contender.stderr
+        ), f"contended run must narrate who holds the lock\nstderr={contender.stderr}"
 
         provenance_after = lock_file.read_text(encoding="utf-8")
         assert provenance_after == provenance_before, (

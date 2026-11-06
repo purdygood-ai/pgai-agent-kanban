@@ -94,8 +94,15 @@ class _Sandbox:
             assert "PGAI_AGENT_WAKE_ACTIVE" not in env
         return env
 
-    def run(self, args: list[str], *, wake: bool = True, cwd: pathlib.Path | None = None,
-            script: pathlib.Path = _BUILD_SH, **extra: str) -> subprocess.CompletedProcess:
+    def run(
+        self,
+        args: list[str],
+        *,
+        wake: bool = True,
+        cwd: pathlib.Path | None = None,
+        script: pathlib.Path = _BUILD_SH,
+        **extra: str,
+    ) -> subprocess.CompletedProcess:
         return subprocess.run(
             ["bash", str(script), *args],
             capture_output=True,
@@ -157,9 +164,9 @@ def test_dry_run_prints_the_same_command_from_any_working_directory(sandbox: _Sa
     from_repo = sandbox.run(["rocky9", "--dry-run"], cwd=_REPO_ROOT)
     from_docker_dir = sandbox.run(["--dry-run", "rocky9"], cwd=_REPO_ROOT / "docker")
 
-    assert _one_command(from_elsewhere) == _one_command(from_repo) == _one_command(from_docker_dir), (
-        f"{_diagnostic(from_elsewhere)}\n{_diagnostic(from_repo)}\n{_diagnostic(from_docker_dir)}"
-    )
+    assert (
+        _one_command(from_elsewhere) == _one_command(from_repo) == _one_command(from_docker_dir)
+    ), f"{_diagnostic(from_elsewhere)}\n{_diagnostic(from_repo)}\n{_diagnostic(from_docker_dir)}"
     assert sandbox.engine_calls() == []
 
 
@@ -386,7 +393,8 @@ def test_installed_package_copy_prints_the_build_argv_without_the_test_tree(tmp_
     named by --repo-root and prints the full build argv."""
     installed = tmp_path / "installed"
     shutil.copytree(
-        _TEAM_DIR / "pgai_agent_kanban", installed / "pgai_agent_kanban",
+        _TEAM_DIR / "pgai_agent_kanban",
+        installed / "pgai_agent_kanban",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     assert not (installed / "tests").exists()
@@ -396,7 +404,11 @@ def test_installed_package_copy_prints_the_build_argv_without_the_test_tree(tmp_
     def module(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, "-m", "pgai_agent_kanban.container.image_build", *args],
-            capture_output=True, text=True, env=env, cwd=str(installed), timeout=60,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(installed),
+            timeout=60,
         )
 
     result = module("build-args", "debian", "--repo-root", str(_REPO_ROOT))

@@ -64,10 +64,19 @@ _EXIT_TIMEOUT = 4 * _KILL_GRACE_SECONDS + 30
 
 
 def _bootstrap_trap_lines() -> str:
-    """The exit-trap installation lines exactly as wake_bootstrap.sh writes them."""
-    lines = re.findall(r"^trap cleanup_on_exit .*$", _BOOTSTRAP.read_text(encoding="utf-8"), re.M)
-    assert lines, f"no 'trap cleanup_on_exit' line found in {_BOOTSTRAP}"
-    return "\n".join(lines)
+    """The exit-trap installation lines exactly as wake_bootstrap.sh writes them.
+
+    The EXIT registration goes through lib/exit_trap.sh (``exit_trap_add
+    cleanup_on_exit``) and the signal traps are plain ``trap cleanup_on_exit``
+    lines; both are taken, with the helper they need sourced first.
+    """
+    text = _BOOTSTRAP.read_text(encoding="utf-8")
+    lines = re.findall(r"^(?:trap cleanup_on_exit .*|exit_trap_add cleanup_on_exit)$", text, re.M)
+    assert any(
+        line.startswith("exit_trap_add") for line in lines
+    ), f"no 'exit_trap_add cleanup_on_exit' line found in {_BOOTSTRAP}"
+    assert any(line.startswith("trap ") for line in lines), f"no 'trap cleanup_on_exit' line found in {_BOOTSTRAP}"
+    return "\n".join([f"source {str(_LIB_DIR / 'exit_trap.sh')!r}", *lines])
 
 
 def _watchdog_block() -> str:
@@ -79,7 +88,9 @@ def _watchdog_block() -> str:
 
 def _stub_provider(marker: str, *, ignore_sigterm: bool) -> str:
     """A provider stand-in that only sleeps; never a real provider call."""
-    trap_line = "trap '' TERM   # an ignored disposition survives exec: both sleepers ignore it" if ignore_sigterm else ""
+    trap_line = (
+        "trap '' TERM   # an ignored disposition survives exec: both sleepers ignore it" if ignore_sigterm else ""
+    )
     return f"""#!/usr/bin/env bash
 {trap_line}
 ( ( exec -a {marker}-grandchild sleep 600 ) & )
@@ -190,9 +201,9 @@ def test_exit_signal_stops_the_provider_group_before_the_lock_is_released(
             if wake.poll() is not None:
                 break
             time.sleep(0.2)
-        assert provider_pgid and len(_marker_processes(marker)) >= 2, (
-            f"the stub provider never came up; wake rc={wake.poll()}\n{wake.stderr.read() if wake.poll() is not None else ''}"
-        )
+        assert (
+            provider_pgid and len(_marker_processes(marker)) >= 2
+        ), f"the stub provider never came up; wake rc={wake.poll()}\n{wake.stderr.read() if wake.poll() is not None else ''}"
         assert (tmp_path / "repo.lock").is_file(), "fixture precondition: the stub wake holds its lock"
 
         os.kill(wake.pid, sig)

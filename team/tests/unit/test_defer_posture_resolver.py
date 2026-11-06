@@ -238,8 +238,7 @@ def test_malformed_until_value_refuses_loud_without_falling_through(tmp_path: pa
     assert "2.14" in result.stderr
     assert "vX.Y.Z" in result.stderr
     assert "deferred_bugs=" not in result.stdout, (
-        "resolver must not print any resolution — partial or fallback — "
-        "when the campaign file fails to parse"
+        "resolver must not print any resolution — partial or fallback — " "when the campaign file fails to parse"
     )
 
 
@@ -263,17 +262,20 @@ def test_campaign_file_with_no_until_line_refuses_loud(tmp_path: pathlib.Path) -
     "key, bad_value, expected_substrings",
     [
         pytest.param(
-            "deferred_bugs", "maybe",
+            "deferred_bugs",
+            "maybe",
             ["deferred_bugs", "true|false", "on"],
             id="invalid_deferred_bugs_names_true_false",
         ),
         pytest.param(
-            "deferred_bug_level", "extreme",
+            "deferred_bug_level",
+            "extreme",
             ["deferred_bug_level", "low|medium|high"],
             id="invalid_deferred_bug_level_names_enum",
         ),
         pytest.param(
-            "defer_piggyback", "on",
+            "defer_piggyback",
+            "on",
             ["defer_piggyback", "true|false"],
             id="invalid_defer_piggyback_names_true_false",
         ),
@@ -288,9 +290,7 @@ def test_out_of_range_value_refuses_naming_accepted_set(
 
     assert result.returncode != 0, f"expected {key}={bad_value!r} to refuse loud"
     for substring in expected_substrings:
-        assert substring in result.stderr, (
-            f"expected {substring!r} named in the refusal; stderr: {result.stderr!r}"
-        )
+        assert substring in result.stderr, f"expected {substring!r} named in the refusal; stderr: {result.stderr!r}"
 
 
 def test_invalid_value_at_an_unconsulted_tier_does_not_refuse(tmp_path: pathlib.Path) -> None:

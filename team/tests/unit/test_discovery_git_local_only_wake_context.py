@@ -71,7 +71,6 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
-from typing import Optional
 
 import pytest
 
@@ -91,6 +90,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="discovery-git-local-only-wake-context")
 
+
 _LIB = "scripts/lib/discovery.sh"
 # discovery.sh is sourced after project_paths.sh, as every production caller
 # does: the ls-remote fallthrough names its remote through pp_git_remote_name.
@@ -104,8 +104,8 @@ _FLAG_UNSET_MARKER = "<unset>"
 def _explicit_env(
     tmp_path: pathlib.Path,
     *,
-    stub_bin: Optional[pathlib.Path] = None,
-    local_only_flag: Optional[str] = None,
+    stub_bin: pathlib.Path | None = None,
+    local_only_flag: str | None = None,
 ) -> dict[str, str]:
     """Build the complete environment for one of this module's subprocesses.
 
@@ -153,7 +153,7 @@ def _probe_tag_exists(
     repo: pathlib.Path,
     *,
     stub_bin: pathlib.Path,
-    local_only_flag: Optional[str],
+    local_only_flag: str | None,
 ) -> tuple[str, BashResult]:
     """Call ``_disc_git_tag_exists <tag> <repo>`` in a fresh bash process.
 
@@ -167,17 +167,13 @@ def _probe_tag_exists(
     result = run_bash(
         tmp_path,
         script,
-        base_env=_explicit_env(
-            tmp_path, stub_bin=stub_bin, local_only_flag=local_only_flag
-        ),
+        base_env=_explicit_env(tmp_path, stub_bin=stub_bin, local_only_flag=local_only_flag),
     )
     observed_flag = result.stdout.splitlines()[0] if result.stdout else ""
     return observed_flag, result
 
 
-def _assert_child_saw_flag(
-    observed: str, expected: Optional[str], result: BashResult
-) -> None:
+def _assert_child_saw_flag(observed: str, expected: str | None, result: BashResult) -> None:
     """Fail on the precondition, not the behavior, if the flag state leaked."""
     want = _FLAG_UNSET_MARKER if expected is None else expected
     assert observed == want, (
@@ -232,9 +228,7 @@ def test_flag_unset_still_falls_through_to_ls_remote(
     log_file = tmp_path / "network-calls.log"
     install_git_network_stub(stub_bin, log_file)
 
-    observed_flag, result = _probe_tag_exists(
-        tmp_path, "v9.9.9", repo, stub_bin=stub_bin, local_only_flag=None
-    )
+    observed_flag, result = _probe_tag_exists(tmp_path, "v9.9.9", repo, stub_bin=stub_bin, local_only_flag=None)
     _assert_child_saw_flag(observed_flag, None, result)
 
     # The stub returns a non-zero ls-remote result (simulating "not found on
@@ -254,9 +248,7 @@ def test_flag_unset_still_falls_through_to_ls_remote(
         "origin fallthrough must still occur."
     )
     logged = log_file.read_text(encoding="utf-8")
-    assert "ls-remote" in logged, (
-        f"Expected an 'ls-remote' invocation in the network-call log; got: {logged!r}"
-    )
+    assert "ls-remote" in logged, f"Expected an 'ls-remote' invocation in the network-call log; got: {logged!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -281,9 +273,7 @@ def test_flag_set_makes_zero_network_calls(tmp_path: pathlib.Path) -> None:
     log_file = tmp_path / "network-calls.log"
     install_git_network_stub(stub_bin, log_file)
 
-    observed_flag, result = _probe_tag_exists(
-        tmp_path, "v9.9.9", repo, stub_bin=stub_bin, local_only_flag="1"
-    )
+    observed_flag, result = _probe_tag_exists(tmp_path, "v9.9.9", repo, stub_bin=stub_bin, local_only_flag="1")
     _assert_child_saw_flag(observed_flag, "1", result)
 
     assert result.returncode == 1, (
@@ -310,7 +300,7 @@ def test_flag_set_makes_zero_network_calls(tmp_path: pathlib.Path) -> None:
 )
 def test_locally_present_tag_never_reaches_network(
     tmp_path: pathlib.Path,
-    local_only_flag: Optional[str],
+    local_only_flag: str | None,
 ) -> None:
     """A tag that already exists locally short-circuits before any network
     check — true both with and without PGAI_GIT_LOCAL_ONLY. Sanity check
@@ -334,10 +324,6 @@ def test_locally_present_tag_never_reaches_network(
     _assert_child_saw_flag(observed_flag, local_only_flag, result)
 
     assert result.returncode == 0, (
-        f"Expected _disc_git_tag_exists to report 'found locally' (rc=0); "
-        f"got rc={result.returncode}"
+        f"Expected _disc_git_tag_exists to report 'found locally' (rc=0); " f"got rc={result.returncode}"
     )
-    assert not log_file.exists(), (
-        "A locally-present tag must short-circuit before any network check "
-        "is attempted."
-    )
+    assert not log_file.exists(), "A locally-present tag must short-circuit before any network check " "is attempted."

@@ -2,15 +2,16 @@
 # team/scripts/lib/provider_codex.sh
 # Codex implementation of the five-function wake provider interface.
 #
-# Source this file in wake/codex.sh (after the active-provider fast-exit
-# check, before sourcing wake_common.sh / wake_driver.sh). It defines the
-# provider identity constants and exactly the five interface functions
-# below — no pipeline logic. The shared pipeline lives in
-# lib/wake_driver.sh and its sibling stage files (wake_driver_prep.sh,
-# wake_driver_worktree.sh, wake_driver_invoke.sh, wake_driver_finalize.sh);
-# those files call the five functions below and hold no Codex-specific code
-# themselves. See lib/provider_claude.sh's header for the full interface
-# contract this file implements the Codex side of.
+# Sourced by lib/wake_entry.sh, which wake/codex.sh names it to (after the
+# active-provider fast-exit check, before sourcing wake_common.sh /
+# wake_driver.sh). It defines the provider identity constants and exactly
+# the five interface functions below — no pipeline logic. The shared
+# pipeline lives in lib/wake_driver.sh and its sibling stage files
+# (wake_driver_prep.sh, wake_driver_worktree.sh, wake_driver_invoke.sh,
+# wake_driver_finalize.sh); those files call the five functions below and
+# hold no Codex-specific code themselves. See lib/provider_claude.sh's
+# header for the full interface contract this file implements the Codex
+# side of.
 #
 # Folded out of the former wake_codex_provider.sh's single
 # provider_invoke_agent function, which combined CLI invocation with the
@@ -91,7 +92,7 @@ fi
 # ---------------------------------------------------------------------------
 # provider_env_preflight
 # Check that the provider CLI is available in PATH.
-# Called by wake/codex.sh before wake_common.sh / wake_driver.sh are sourced.
+# Called by lib/wake_entry.sh before wake_common.sh / wake_driver.sh are sourced.
 # ---------------------------------------------------------------------------
 provider_env_preflight() {
     command -v "$PROVIDER_CLI" >/dev/null 2>&1 || {

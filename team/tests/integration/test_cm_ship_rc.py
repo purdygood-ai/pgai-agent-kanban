@@ -56,7 +56,6 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -117,11 +116,11 @@ _RELEASE_STATE = (
 # without a newline.
 _HOOK = (
     "#!/usr/bin/env bash\n"
-    "echo \"phase={phase} version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME\"\n"
-    "echo \"project_root=$PGAI_PROJECT_ROOT\"\n"
-    "echo \"dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT\"\n"
-    "echo \"cwd=$(pwd)\"\n"
-    "echo \"a line on stderr\" >&2\n"
+    'echo "phase={phase} version=$PGAI_TARGET_VERSION project=$PGAI_PROJECT_NAME"\n'
+    'echo "project_root=$PGAI_PROJECT_ROOT"\n'
+    'echo "dev_tree=$PGAI_DEV_TREE_PATH rc=$PGAI_RC_BRANCH kanban=$PGAI_KANBAN_ROOT"\n'
+    'echo "cwd=$(pwd)"\n'
+    'echo "a line on stderr" >&2\n'
     "printf 'last line without a newline'\n"
     "exit {code}\n"
 )
@@ -244,7 +243,10 @@ def _fixture_env() -> dict:
 def _git(repo: pathlib.Path, *args: str) -> str:
     done = subprocess.run(
         ["git", "-C", str(repo), *args],
-        capture_output=True, text=True, check=True, env=_fixture_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_fixture_env(),
     )
     return done.stdout
 
@@ -302,12 +304,18 @@ def _build_repo(base: pathlib.Path, spec: dict) -> pathlib.Path:
     origin = base / "origin.git"
     subprocess.run(
         ["git", "clone", "-q", "--bare", str(seed), str(origin)],
-        capture_output=True, text=True, check=True, env=_fixture_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_fixture_env(),
     )
     repo = base / "dev_repo"
     subprocess.run(
         ["git", "clone", "-q", "--branch", main, str(origin), str(repo)],
-        capture_output=True, text=True, check=True, env=_fixture_env(),
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_fixture_env(),
     )
     if spec.get("rc_local", True):
         _git(repo, "branch", "-q", "--no-track", rc, f"origin/{rc}")
@@ -433,16 +441,17 @@ def _files_under(top: pathlib.Path, base: pathlib.Path) -> dict:
 
 
 def _refs(repo: pathlib.Path) -> list[str]:
-    return _git(
-        repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/tags"
-    ).splitlines()
+    return _git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/tags").splitlines()
 
 
 def snapshot(base: pathlib.Path, root: pathlib.Path, repo: pathlib.Path) -> dict:
     """Every file ship-rc may touch, the branches and tags here and on origin, and HEAD."""
     head = subprocess.run(
         ["git", "-C", str(repo), "symbolic-ref", "--short", "HEAD"],
-        capture_output=True, text=True, check=False, env=_fixture_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_fixture_env(),
     ).stdout.strip()
     return {
         "files": _files_under(root / "projects" / _PROJECT, base),
@@ -490,8 +499,11 @@ def _run_cli(script: pathlib.Path, base, root, repo, spec) -> subprocess.Complet
     return subprocess.run(
         ["bash", str(script), *spec.get("args", _default_args())],
         stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, env=_cli_env(base, root, repo, spec),
-        cwd=str(cwd), timeout=_TIMEOUT_SECONDS,
+        capture_output=True,
+        text=True,
+        env=_cli_env(base, root, repo, spec),
+        cwd=str(cwd),
+        timeout=_TIMEOUT_SECONDS,
     )
 
 
@@ -728,8 +740,12 @@ class _ShipGateCase:
         cwd.mkdir(exist_ok=True)
         return subprocess.run(
             ["bash", str(_SCRIPT), *_default_args()],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env,
-            cwd=str(cwd), timeout=_TIMEOUT_SECONDS,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(cwd),
+            timeout=_TIMEOUT_SECONDS,
         )
 
     def network_calls(self) -> list[str]:
@@ -763,9 +779,9 @@ class TestShipPushGate:
         assert run.returncode == 0, f"{shape}: ship-rc failed\n{_ship_out(run)}"
         assert case.network_calls() == [], f"{shape}: ship-rc made a git network call\n{_ship_out(run)}"
         skips = _gate_skip_lines(_ship_out(run))
-        assert len(skips) == 1 and token in skips[0], (
-            f"{shape}: expected one {_PUSH_GATE_SKIP} line naming {token!r}\n{_ship_out(run)}"
-        )
+        assert (
+            len(skips) == 1 and token in skips[0]
+        ), f"{shape}: expected one {_PUSH_GATE_SKIP} line naming {token!r}\n{_ship_out(run)}"
         assert skips[0].startswith("[ship-rc] "), skips[0]
         assert f"refs/tags/{_VERSION}" in " ".join(_refs(case.repo)), _ship_out(run)
         assert _refs(case.base / "origin.git") == case.origin_before
@@ -801,7 +817,7 @@ class TestShipPushGate:
         assert f"refs/tags/{_VERSION}" in " ".join(_refs(case.repo))
 
 
-def record_golden(work_dir: pathlib.Path, out_file: Optional[pathlib.Path] = None) -> dict:
+def record_golden(work_dir: pathlib.Path, out_file: pathlib.Path | None = None) -> dict:
     """Run every scenario against the script on disk and return (or write) the record.
 
     Used to capture the golden file; not a test.

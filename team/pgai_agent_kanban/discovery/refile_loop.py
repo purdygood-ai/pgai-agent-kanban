@@ -48,7 +48,7 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 import sys
-from typing import Optional, TextIO
+from typing import TextIO
 
 # Run by file path (``python3 .../refile_loop.py``) or loaded from a file
 # outside its package, this module has no parent package and the
@@ -139,7 +139,7 @@ def _why(bug: LiveBug, kept: LiveBug, matches: list) -> str:
     return f"{citing.bug_id}'s body cites it as the defect it reports, and {citing.bug_id} is the same defect as {kept.bug_id}"
 
 
-def _components(bugs: list, matches: "list[tuple[LiveBug, SameDefect]]") -> list:
+def _components(bugs: list, matches: list[tuple[LiveBug, SameDefect]]) -> list:
     """The connected groups of *bugs* under *matches*, each of two or more."""
     parent = {bug.path: bug.path for bug in bugs}
 
@@ -159,7 +159,7 @@ def _components(bugs: list, matches: "list[tuple[LiveBug, SameDefect]]") -> list
     return [members for members in groups.values() if len(members) > 1]
 
 
-def refile_groups(bugs_dir: "pathlib.Path | str") -> list:
+def refile_groups(bugs_dir: pathlib.Path | str) -> list:
     """The same-defect groups among the live bugs in *bugs_dir*. Reads only.
 
     Returns a RefileGroup for each group of two or more live bugs (status
@@ -184,7 +184,7 @@ def refile_groups(bugs_dir: "pathlib.Path | str") -> list:
     return sorted(groups, key=lambda group: _number(group.kept))
 
 
-def close_refile_duplicates(bugs_dir: "pathlib.Path | str", *, err: TextIO = sys.stderr) -> list:
+def close_refile_duplicates(bugs_dir: pathlib.Path | str, *, err: TextIO = sys.stderr) -> list:
     """Close every bug :func:`refile_groups` names as ``duplicate``.
 
     Each closure is ``ops.write.close_item(ctx, project, <stem>,
@@ -237,7 +237,7 @@ def close_refile_duplicates(bugs_dir: "pathlib.Path | str", *, err: TextIO = sys
 _USAGE = {"list": "list DIR", "close": "close DIR"}
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Command-line entry point; see the module docstring."""
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
@@ -245,8 +245,11 @@ def main(argv: Optional[list] = None) -> int:
         return 0
     command, rest = args[0], args[1:]
     if command not in _USAGE or len(rest) != 1:
-        print("usage: python3 -m pgai_agent_kanban.discovery.refile_loop "
-              + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} DIR"), file=sys.stderr)
+        print(
+            "usage: python3 -m pgai_agent_kanban.discovery.refile_loop "
+            + (_USAGE.get(command) or "{" + ",".join(_USAGE) + "} DIR"),
+            file=sys.stderr,
+        )
         return 2
     bugs_dir = pathlib.Path(rest[0])
     if command == "list":

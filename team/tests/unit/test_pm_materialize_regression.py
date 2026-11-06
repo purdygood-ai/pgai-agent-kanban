@@ -41,7 +41,6 @@ import json
 import pathlib
 import sys
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Import with installed-package / direct-checkout fallback
@@ -50,19 +49,14 @@ import pytest
 try:
     import pm_agent.pm_materialize as pm  # installed via pm_agent package
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     import pm_materialize as pm  # type: ignore[no-redef]
 
 try:
     from pm_agent.lib import workflow_loader
     from pm_agent.lib.workflow_loader import load_workflow
 except ImportError:
-    sys.path.insert(
-        0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent")
-    )
-    from lib import workflow_loader  # type: ignore[no-redef]
+    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent / "pm-agent"))
     from lib.workflow_loader import load_workflow  # type: ignore[no-redef]
 
 
@@ -125,8 +119,7 @@ def test_release_decomposition_matches_golden() -> None:
     before regenerating the golden.
     """
     assert _RELEASE_GOLDEN.exists(), (
-        f"Release golden fixture not found: {_RELEASE_GOLDEN}. "
-        "Run the golden-generation step to create it."
+        f"Release golden fixture not found: {_RELEASE_GOLDEN}. " "Run the golden-generation step to create it."
     )
     expected = json.loads(_RELEASE_GOLDEN.read_text(encoding="utf-8"))
 
@@ -174,21 +167,28 @@ def test_release_decomposition_task_count_matches_golden() -> None:
     expected = json.loads(_RELEASE_GOLDEN.read_text(encoding="utf-8"))
     tasks = [
         {
-            "sequence": 1, "slug": "implement", "title": "Implement",
-            "role": "CODER", "assigned_agent": "coder",
-            "working_directory": "none", "git_repo": "none",
-            "source_branch": "main", "goal": "Do the work.",
-            "inputs": ["requirements.md"], "context_paths": [],
-            "required_output": "Done.", "constraints": [],
-            "acceptance_criteria": ["It works."], "depends_on": [],
-            "prerequisite_ids": [], "notes": "none",
+            "sequence": 1,
+            "slug": "implement",
+            "title": "Implement",
+            "role": "CODER",
+            "assigned_agent": "coder",
+            "working_directory": "none",
+            "git_repo": "none",
+            "source_branch": "main",
+            "goal": "Do the work.",
+            "inputs": ["requirements.md"],
+            "context_paths": [],
+            "required_output": "Done.",
+            "constraints": [],
+            "acceptance_criteria": ["It works."],
+            "depends_on": [],
+            "prerequisite_ids": [],
+            "notes": "none",
             "task_id": "CODER-20260101-001-implement",
         },
     ]
     pm.inject_cm_bookends(tasks, "v1.3.0", "20260101", 100, "CLAUDE")
-    assert len(tasks) == len(expected), (
-        f"Task count changed: got {len(tasks)}, expected {len(expected)}"
-    )
+    assert len(tasks) == len(expected), f"Task count changed: got {len(tasks)}, expected {len(expected)}"
 
 
 def test_release_decomposition_role_sequence_matches_golden() -> None:
@@ -198,22 +198,29 @@ def test_release_decomposition_role_sequence_matches_golden() -> None:
 
     tasks = [
         {
-            "sequence": 1, "slug": "implement", "title": "Implement",
-            "role": "CODER", "assigned_agent": "coder",
-            "working_directory": "none", "git_repo": "none",
-            "source_branch": "main", "goal": "Do the work.",
-            "inputs": ["requirements.md"], "context_paths": [],
-            "required_output": "Done.", "constraints": [],
-            "acceptance_criteria": ["It works."], "depends_on": [],
-            "prerequisite_ids": [], "notes": "none",
+            "sequence": 1,
+            "slug": "implement",
+            "title": "Implement",
+            "role": "CODER",
+            "assigned_agent": "coder",
+            "working_directory": "none",
+            "git_repo": "none",
+            "source_branch": "main",
+            "goal": "Do the work.",
+            "inputs": ["requirements.md"],
+            "context_paths": [],
+            "required_output": "Done.",
+            "constraints": [],
+            "acceptance_criteria": ["It works."],
+            "depends_on": [],
+            "prerequisite_ids": [],
+            "notes": "none",
             "task_id": "CODER-20260101-001-implement",
         },
     ]
     pm.inject_cm_bookends(tasks, "v1.3.0", "20260101", 100, "CLAUDE")
     actual_roles = [t["role"] for t in tasks]
-    assert actual_roles == expected_roles, (
-        f"Role sequence changed: got {actual_roles}, expected {expected_roles}"
-    )
+    assert actual_roles == expected_roles, f"Role sequence changed: got {actual_roles}, expected {expected_roles}"
 
 
 # ---------------------------------------------------------------------------
@@ -236,8 +243,7 @@ def test_document_decomposition_matches_golden() -> None:
     team/workflows/document/pipeline.yaml resolution path as production.
     """
     assert _DOCUMENT_GOLDEN.exists(), (
-        f"Document golden fixture not found: {_DOCUMENT_GOLDEN}. "
-        "Run the golden-generation step to create it."
+        f"Document golden fixture not found: {_DOCUMENT_GOLDEN}. " "Run the golden-generation step to create it."
     )
     expected = json.loads(_DOCUMENT_GOLDEN.read_text(encoding="utf-8"))
 
@@ -247,13 +253,13 @@ def test_document_decomposition_matches_golden() -> None:
     pm.inject_document_workflow_tasks(
         tasks,
         workflow_def=wf_def,
-        sections=[],          # short-form: no sections
+        sections=[],  # short-form: no sections
         date_str="20260101",
         base_seq=100,
         owner="CLAUDE",
         git_repo="none",
         target_version="v1.3.0",
-        project_cfg_path=None,   # no review_agent → review step skipped
+        project_cfg_path=None,  # no review_agent → review step skipped
         artifact_name="",
         resolved_source_paths=None,
     )
@@ -284,9 +290,7 @@ def test_document_decomposition_task_count_matches_golden() -> None:
         artifact_name="",
         resolved_source_paths=None,
     )
-    assert len(tasks) == len(expected), (
-        f"Task count changed: got {len(tasks)}, expected {len(expected)}"
-    )
+    assert len(tasks) == len(expected), f"Task count changed: got {len(tasks)}, expected {len(expected)}"
 
 
 def test_document_decomposition_role_sequence_matches_golden() -> None:
@@ -310,9 +314,7 @@ def test_document_decomposition_role_sequence_matches_golden() -> None:
         resolved_source_paths=None,
     )
     actual_roles = [t["role"] for t in tasks]
-    assert actual_roles == expected_roles, (
-        f"Role sequence changed: got {actual_roles}, expected {expected_roles}"
-    )
+    assert actual_roles == expected_roles, f"Role sequence changed: got {actual_roles}, expected {expected_roles}"
 
 
 def test_document_decomposition_starts_with_cm_open_doc() -> None:
@@ -334,12 +336,10 @@ def test_document_decomposition_starts_with_cm_open_doc() -> None:
     )
     assert tasks, "Document decomposition must produce at least one task"
     first = tasks[0]
-    assert first["role"] == "CM", (
-        f"First task must be CM (open-doc); got role={first['role']!r}"
-    )
-    assert "open-doc" in first.get("slug", ""), (
-        f"First task must be the open-doc CM task; got slug={first.get('slug')!r}"
-    )
+    assert first["role"] == "CM", f"First task must be CM (open-doc); got role={first['role']!r}"
+    assert "open-doc" in first.get(
+        "slug", ""
+    ), f"First task must be the open-doc CM task; got slug={first.get('slug')!r}"
 
 
 def test_document_decomposition_ends_with_cm_finalize() -> None:
@@ -361,9 +361,5 @@ def test_document_decomposition_ends_with_cm_finalize() -> None:
     )
     assert tasks, "Document decomposition must produce at least one task"
     last = tasks[-1]
-    assert last["role"] == "CM", (
-        f"Last task must be CM (finalize); got role={last['role']!r}"
-    )
-    assert "finalize" in last.get("slug", ""), (
-        f"Last task must be the finalize CM task; got slug={last.get('slug')!r}"
-    )
+    assert last["role"] == "CM", f"Last task must be CM (finalize); got role={last['role']!r}"
+    assert "finalize" in last.get("slug", ""), f"Last task must be the finalize CM task; got slug={last.get('slug')!r}"

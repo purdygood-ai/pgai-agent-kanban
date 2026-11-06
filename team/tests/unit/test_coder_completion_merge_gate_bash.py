@@ -90,6 +90,7 @@ def _require_git() -> None:
     """
     require_binary("git", label="coder-completion-merge-gate-bash")
 
+
 # ---------------------------------------------------------------------------
 # Paths (relative to team/, which is the CWD when run via run-unit-tests.sh)
 # ---------------------------------------------------------------------------
@@ -456,9 +457,9 @@ def test_unmerged_feature_branch_refuses_done_claim(tmp_path: pathlib.Path) -> N
 
     result = _run(script)
     assert result.returncode == 0, f"gate call should not error\nstderr={result.stderr}"
-    assert "RESULT=[BLOCKED]" in result.stdout, (
-        f"unmerged feature branch must refuse the DONE-claim\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "RESULT=[BLOCKED]" in result.stdout
+    ), f"unmerged feature branch must refuse the DONE-claim\nstdout={result.stdout}\nstderr={result.stderr}"
 
     status_text = _read(status_file)
     assert _field(status_text, "State") == "BLOCKED", f"State must be BLOCKED\n{status_text}"
@@ -470,12 +471,12 @@ def test_unmerged_feature_branch_refuses_done_claim(tmp_path: pathlib.Path) -> N
     # Dual-channel error contract: a forced gate refusal must emit
     # error/message/remedy in the house shape, with a stable, greppable
     # machine key.
-    assert "error:   wake.completion-gate.merge-not-found" in blockers, (
-        f"Blockers must carry the house-shape error key\n{blockers}"
-    )
-    assert "message: " in blockers and "remedy:  " in blockers, (
-        f"Blockers must carry the house-shape message/remedy fields\n{blockers}"
-    )
+    assert (
+        "error:   wake.completion-gate.merge-not-found" in blockers
+    ), f"Blockers must carry the house-shape error key\n{blockers}"
+    assert (
+        "message: " in blockers and "remedy:  " in blockers
+    ), f"Blockers must carry the house-shape message/remedy fields\n{blockers}"
 
 
 # ---------------------------------------------------------------------------
@@ -519,9 +520,9 @@ def test_merge_performed_then_recompletion_is_accepted(tmp_path: pathlib.Path) -
     """)
     second = _run(second_script)
     assert second.returncode == 0, f"gate call should not error\nstderr={second.stderr}"
-    assert "RESULT=[DONE]" in second.stdout, (
-        f"a real merge must be accepted on re-completion\nstdout={second.stdout}\nstderr={second.stderr}"
-    )
+    assert (
+        "RESULT=[DONE]" in second.stdout
+    ), f"a real merge must be accepted on re-completion\nstdout={second.stdout}\nstderr={second.stderr}"
     assert _field(_read(status_file), "State") == "DONE"
 
 
@@ -549,9 +550,9 @@ def test_dirty_worktree_refuses_done_claim(tmp_path: pathlib.Path) -> None:
     """)
     result = _run(script)
     assert result.returncode == 0, f"gate call should not error\nstderr={result.stderr}"
-    assert "RESULT=[BLOCKED]" in result.stdout, (
-        f"a dirty worktree at done-claim must refuse\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "RESULT=[BLOCKED]" in result.stdout
+    ), f"a dirty worktree at done-claim must refuse\nstdout={result.stdout}\nstderr={result.stderr}"
 
     status_text = _read(status_file)
     assert _field(status_text, "State") == "BLOCKED"
@@ -599,24 +600,21 @@ def test_golden_path_merged_and_branch_deleted_is_accepted(tmp_path: pathlib.Pat
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
     result_line = [ln for ln in result.stdout.splitlines() if ln.startswith("RESULT=")]
-    assert result_line == ["RESULT=[DONE]"], (
-        f"the gate's return value must be exactly DONE, not multi-line contaminated\n{result_line}"
-    )
+    assert result_line == [
+        "RESULT=[DONE]"
+    ], f"the gate's return value must be exactly DONE, not multi-line contaminated\n{result_line}"
 
     # status.md is untouched on the golden path (State remains whatever the
     # caller already had — this function does not rewrite a passing task).
     assert _field(_read(status_file), "State") == "DONE"
 
     # Narration: exactly one PASS line for this task in the wake log.
-    log_lines = [
-        ln for ln in log_file.read_text(encoding="utf-8").splitlines()
-        if task_id in ln
-    ]
+    log_lines = [ln for ln in log_file.read_text(encoding="utf-8").splitlines() if task_id in ln]
     assert len(log_lines) == 1, f"expected exactly one narration line\nlog:\n{log_lines}"
     assert "PASS" in log_lines[0], f"narration must report PASS\n{log_lines[0]}"
-    assert feature_branch in log_lines[0] and source_branch in log_lines[0], (
-        f"narration must name both branches\n{log_lines[0]}"
-    )
+    assert (
+        feature_branch in log_lines[0] and source_branch in log_lines[0]
+    ), f"narration must name both branches\n{log_lines[0]}"
 
 
 # ---------------------------------------------------------------------------
@@ -637,9 +635,9 @@ def test_no_worktree_task_shape_passes_trivially(tmp_path: pathlib.Path) -> None
     """)
     result = _run(script)
     assert result.returncode == 0, f"gate call should not error\nstderr={result.stderr}"
-    assert "RESULT=[DONE]" in result.stdout, (
-        f"a no-worktree task shape must pass trivially\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "RESULT=[DONE]" in result.stdout
+    ), f"a no-worktree task shape must pass trivially\nstdout={result.stdout}\nstderr={result.stderr}"
     assert _field(_read(status_file), "State") == "DONE"
 
 
@@ -664,9 +662,9 @@ def test_non_coder_writer_subagent_is_unaffected(tmp_path: pathlib.Path) -> None
     """)
     result = _run(script)
     assert result.returncode == 0, f"gate call should not error\nstderr={result.stderr}"
-    assert "RESULT=[DONE]" in result.stdout, (
-        f"CM completion semantics must be untouched by this gate\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "RESULT=[DONE]" in result.stdout
+    ), f"CM completion semantics must be untouched by this gate\nstdout={result.stdout}\nstderr={result.stderr}"
     assert _field(_read(status_file), "State") == "DONE"
 
 
@@ -719,16 +717,16 @@ def test_real_wake_path_routes_unmerged_claim_to_blocked_marker(tmp_path: pathli
     """)
     result = _run(script)
     assert result.returncode == 0, f"extracted call-site block should not error\nstderr={result.stderr}"
-    assert "FINAL_STATE=[BLOCKED]" in result.stdout, (
-        f"an unmerged DONE-claim must be downgraded to BLOCKED\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "FINAL_STATE=[BLOCKED]" in result.stdout
+    ), f"an unmerged DONE-claim must be downgraded to BLOCKED\nstdout={result.stdout}\nstderr={result.stderr}"
     assert "GATE_REFUSED=[true]" in result.stdout
 
     assert mark_backlog_calls.exists(), "mark_backlog must have been invoked"
     calls = mark_backlog_calls.read_text(encoding="utf-8").strip().splitlines()
-    assert calls == [f"{task_id}\tB"], (
-        f"the queue must be marked BLOCKED ('B'), never advanced to done ('x')\ncalls={calls}"
-    )
+    assert calls == [
+        f"{task_id}\tB"
+    ], f"the queue must be marked BLOCKED ('B'), never advanced to done ('x')\ncalls={calls}"
 
     status_text = _read(status_file)
     assert _field(status_text, "State") == "BLOCKED"
@@ -775,14 +773,12 @@ def test_real_wake_path_accepts_golden_path_claim(tmp_path: pathlib.Path) -> Non
     """)
     result = _run(script)
     assert result.returncode == 0, f"extracted call-site block should not error\nstderr={result.stderr}"
-    assert "FINAL_STATE=[DONE]" in result.stdout, (
-        f"a merged, clean completion must stay DONE\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert (
+        "FINAL_STATE=[DONE]" in result.stdout
+    ), f"a merged, clean completion must stay DONE\nstdout={result.stdout}\nstderr={result.stderr}"
 
     calls = mark_backlog_calls.read_text(encoding="utf-8").strip().splitlines()
-    assert calls == [f"{task_id}\tx"], (
-        f"a golden-path completion must advance the queue to done ('x')\ncalls={calls}"
-    )
+    assert calls == [f"{task_id}\tx"], f"a golden-path completion must advance the queue to done ('x')\ncalls={calls}"
 
 
 # ---------------------------------------------------------------------------
@@ -875,9 +871,9 @@ def test_planted_ledger_id_comment_no_longer_refuses_done_claim(tmp_path: pathli
 
     status_text = _read(status_file)
     assert _field(status_text, "State") == "DONE", f"State must stay DONE (no refusal)\n{status_text}"
-    assert _field(status_text, "Needs Human").lower() == "no", (
-        f"Needs Human must not be escalated for retired-check litter\n{status_text}"
-    )
+    assert (
+        _field(status_text, "Needs Human").lower() == "no"
+    ), f"Needs Human must not be escalated for retired-check litter\n{status_text}"
 
     log_lines = [ln for ln in log_file.read_text(encoding="utf-8").splitlines() if task_id in ln]
     assert len(log_lines) == 1, f"expected exactly one narration line\nlog:\n{log_lines}"
@@ -933,9 +929,9 @@ def test_real_wake_path_accepts_planted_ledger_id_comment_claim(tmp_path: pathli
     )
 
     calls = mark_backlog_calls.read_text(encoding="utf-8").strip().splitlines()
-    assert calls == [f"{task_id}\tx"], (
-        f"the queue must advance to done ('x'); the retired check must not hold it back\ncalls={calls}"
-    )
+    assert calls == [
+        f"{task_id}\tx"
+    ], f"the queue must advance to done ('x'); the retired check must not hold it back\ncalls={calls}"
     status_text = _read(status_file)
     assert _field(status_text, "State") == "DONE"
     assert _field(status_text, "Needs Human").lower() == "no"
@@ -952,9 +948,7 @@ def test_real_wake_path_accepts_planted_ledger_id_comment_claim(tmp_path: pathli
 def test_sibling_worktree_merge_is_accepted_via_merge_evidence(tmp_path: pathlib.Path) -> None:
     task_id = "CODER-20260101-115-fixture-i"
     source_branch = "ai_rc/v9.9.9"
-    _dev_tree, feature_branch, worktree_task = _build_repo_with_sibling_worktree_merge(
-        tmp_path, task_id, source_branch
-    )
+    _dev_tree, feature_branch, worktree_task = _build_repo_with_sibling_worktree_merge(tmp_path, task_id, source_branch)
     status_file = _build_status_file(tmp_path, task_id)
     log_file = tmp_path / "wake.log"
 
@@ -984,12 +978,10 @@ def test_sibling_worktree_merge_is_accepted_via_merge_evidence(tmp_path: pathlib
     log_lines = [ln for ln in log_file.read_text(encoding="utf-8").splitlines() if task_id in ln]
     assert len(log_lines) == 1, f"expected exactly one narration line\nlog:\n{log_lines}"
     assert "PASS" in log_lines[0], f"narration must report PASS\n{log_lines[0]}"
-    assert "merge-evidence" in log_lines[0], (
-        f"narration must name the merge-evidence acceptance path\n{log_lines[0]}"
-    )
-    assert feature_branch in log_lines[0] and source_branch in log_lines[0], (
-        f"narration must name both branches\n{log_lines[0]}"
-    )
+    assert "merge-evidence" in log_lines[0], f"narration must name the merge-evidence acceptance path\n{log_lines[0]}"
+    assert (
+        feature_branch in log_lines[0] and source_branch in log_lines[0]
+    ), f"narration must name both branches\n{log_lines[0]}"
 
 
 # ---------------------------------------------------------------------------
@@ -1033,8 +1025,8 @@ def test_force_deleted_unmerged_branch_still_refuses_done_claim(tmp_path: pathli
     blockers = _field(status_text, "Blockers")
     assert feature_branch in blockers, f"remedy must name the feature branch\n{blockers}"
     assert "no longer exists" in blockers, f"remedy must state the ref is gone\n{blockers}"
-    assert "the merge cannot be confirmed" in blockers, (
-        f"remedy must use the existing reflog-inspection wording (unchanged)\n{blockers}"
-    )
+    assert (
+        "the merge cannot be confirmed" in blockers
+    ), f"remedy must use the existing reflog-inspection wording (unchanged)\n{blockers}"
     assert "git reflog" in blockers, f"remedy must retain the reflog-inspection instruction\n{blockers}"
     assert _field(status_text, "Needs Human").lower() == "yes"

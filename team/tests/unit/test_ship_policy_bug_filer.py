@@ -91,11 +91,15 @@ def test_unparseable_report_value_files_one_bug_quoting_raw_text_and_report_path
     assert any(f"**Severity:** {sev}" in content for sev in ("critical", "high", "medium", "low"))
     assert "SHIP-WITH-CONCERNS" in content
     assert "v1.2.3" in content
-    assert "## Ship-Policy Input\n" + input_key(
-        KIND_REPORT_VALUE,
-        "Recommendation",
-        "/kanban/projects/demo/tasks/TESTER-20260601-001-verify/artifacts/report.md",
-    ) in content
+    assert (
+        "## Ship-Policy Input\n"
+        + input_key(
+            KIND_REPORT_VALUE,
+            "Recommendation",
+            "/kanban/projects/demo/tasks/TESTER-20260601-001-verify/artifacts/report.md",
+        )
+        in content
+    )
 
 
 def test_lookup_field_mismatch_files_under_its_own_slug_quoting_the_readme(tmp_path):
@@ -147,7 +151,9 @@ def test_a_different_field_or_source_path_is_a_fresh_filing(tmp_path):
     bugs_dir = tmp_path / "bugs"
     _file(bugs_dir)
     other_field = _file(bugs_dir, field="Systemic Risk", raw_value="hgih")
-    other_path = _file(bugs_dir, source_path="/kanban/projects/demo/tasks/TESTER-20260602-002-verify/artifacts/report.md")
+    other_path = _file(
+        bugs_dir, source_path="/kanban/projects/demo/tasks/TESTER-20260602-002-verify/artifacts/report.md"
+    )
     assert other_field.outcome == "filed"
     assert other_path.outcome == "filed"
     assert len({r.bug_id for r in (other_field, other_path)}) == 2
@@ -167,20 +173,34 @@ def test_unknown_kind_is_refused_and_nothing_is_filed(tmp_path):
 
 def test_cli_prints_outcome_lines_and_exits_zero(tmp_path, capsys):
     bugs_dir = tmp_path / "bugs"
-    rc = main([
-        str(bugs_dir), "demo", "v1.2.3", KIND_REPORT_VALUE,
-        "Systemic Risk", "hgih", "/kanban/report.md",
-    ])
+    rc = main(
+        [
+            str(bugs_dir),
+            "demo",
+            "v1.2.3",
+            KIND_REPORT_VALUE,
+            "Systemic Risk",
+            "hgih",
+            "/kanban/report.md",
+        ]
+    )
     out = capsys.readouterr().out.splitlines()
     assert rc == 0
     assert out[0] == "outcome=filed"
     assert out[1].startswith("bug_id=BUG-")
     assert out[2].startswith("bug_path=") and out[2].endswith("-unparseable-systemic-risk-value.md")
 
-    rc = main([
-        str(bugs_dir), "demo", "v1.2.3", KIND_REPORT_VALUE,
-        "Systemic Risk", "hgih", "/kanban/report.md",
-    ])
+    rc = main(
+        [
+            str(bugs_dir),
+            "demo",
+            "v1.2.3",
+            KIND_REPORT_VALUE,
+            "Systemic Risk",
+            "hgih",
+            "/kanban/report.md",
+        ]
+    )
     out = capsys.readouterr().out.splitlines()
     assert rc == 0
     assert out[0] == "outcome=duplicate"
@@ -209,11 +229,17 @@ def test_needs_operator_bug_for_the_same_input_is_cited_and_nothing_is_filed(tmp
     first = _file(bugs_dir)
     _set_status(pathlib.Path(first.bug_path), "needs-operator")
 
-    rc = main([
-        str(bugs_dir), "demo", "v1.2.4", KIND_REPORT_VALUE, "Recommendation",
-        "Recommendation: SHIPP-WITH-CONCERNZ",
-        "/kanban/projects/demo/tasks/TESTER-20260601-001-verify/artifacts/report.md",
-    ])
+    rc = main(
+        [
+            str(bugs_dir),
+            "demo",
+            "v1.2.4",
+            KIND_REPORT_VALUE,
+            "Recommendation",
+            "Recommendation: SHIPP-WITH-CONCERNZ",
+            "/kanban/projects/demo/tasks/TESTER-20260601-001-verify/artifacts/report.md",
+        ]
+    )
     out = capsys.readouterr().out.splitlines()
 
     assert rc == 0
@@ -224,9 +250,7 @@ def test_needs_operator_bug_for_the_same_input_is_cited_and_nothing_is_filed(tmp
 @pytest.mark.parametrize("status", ["open", "running"])
 def test_live_bug_with_an_ordinal_variant_slug_is_cited_and_nothing_is_filed(tmp_path, status):
     bugs_dir = tmp_path / "bugs"
-    hand_filed = write_hand_filed_bug(
-        bugs_dir, "BUG-9201", "unparseable-recommendation-value-again", status=status
-    )
+    hand_filed = write_hand_filed_bug(bugs_dir, "BUG-9201", "unparseable-recommendation-value-again", status=status)
 
     result = _file(bugs_dir)
 

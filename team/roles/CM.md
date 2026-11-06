@@ -52,9 +52,9 @@ tag: ${branch_prefix}vX.Y.Z           — the release
 
 Release state is split between two sources, on purpose.
 
-**In-flight RC state** lives in `$KANBAN_ROOT/projects/<project-name>/release-state.md`, whose four fields and accepted values are core's. The three RC-tracking fields are ephemeral: `cm/open-rc.sh` populates them, `cm/release.sh` and `cm/cancel-rc.sh` clear them to `none`. `## Last Released` is monotonic and latching, written by `cm/release.sh` Step 15 after the tag is created and never cleared by cancel-rc. It exists for exactly one consumer, `halt_after/drain.py` evaluating the `rc:vX.Y.Z` drain; absent or empty on a project that has never shipped, which drain reads as "nothing has shipped yet." The retired `Last Released At` and `Last Released By Task` fields are not part of the schema.
+**In-flight RC state** lives in `$KANBAN_ROOT/projects/<project-name>/release-state.md`, whose four fields and accepted values are core's. The three RC-tracking fields are ephemeral: `cm/open-rc.sh` populates them, `cm/release.sh` and `cm/cancel-rc.sh` clear them to `none`. `## Last Released` is monotonic and latching, written by `cm/release.sh` Step 15 after the tag is created and never cleared by cancel-rc. It feeds `halt_after/drain.py` evaluating the `rc:vX.Y.Z` drain, and `pp_last_released_version` falls back to it when no release tag matches; absent or empty on a project that has never shipped, which drain reads as "nothing has shipped yet." The retired `Last Released At` and `Last Released By Task` fields are not part of the schema.
 
-**Historical release state** is git tags on the dev tree's main branch. The tag `v0.21.6` *is* the v0.21.6 release, and the highest semver tag merged into `origin/main` is the canonical answer to "what version are we at" — which core routes through one helper, `pp_last_released_version "<project>"` in `scripts/lib/project_paths.sh`.
+**Historical release state** is git tags on the dev tree's prefixed main branch. The tag `v0.21.6` *is* the v0.21.6 release, and the highest semver tag carrying the project's branch prefix merged into `<remote>/<prefix>main` (`<remote>` is the project's `git_remote_name`) is the canonical answer to "what version are we at" whenever that ref holds one — which core routes through one helper, `pp_last_released_version "<project>"` in `scripts/lib/project_paths.sh`, whose fallbacks are in the order the reference below gives.
 
 > What the helper does internally is in `docs/cm-release-reference.md`, "Historical release state in full." `install.sh`'s migration of this file and the rationale for the split: `docs/OPERATIONS.md`, "Release State File — migration and rationale."
 
@@ -92,15 +92,15 @@ The canonical matrix. Evaluate inputs in the column order below; the first match
 | DONE | high | `no` / `none` | (any) | none large | Ship, naming the carried finding | `KNOWN-ISSUE` |
 | DONE | high | `no` / `none` | (any) | any large | Ship, recording an Auto-Ship Event (trigger 2); under `ship_posture = matrix`, HALT (trigger 2) | `NON-FUNCTIONAL`; — on HALT |
 | DONE | high | anything else | (any) | (any) | Ship, recording an Auto-Ship Event (trigger 2); under `ship_posture = matrix`, HALT (trigger 2) | `NON-FUNCTIONAL`; — on HALT |
-| DONE | unparseable | (not read) | PASS | (any) | Ship; file a bug quoting the raw value | `KNOWN-BUGS` |
+| DONE | unparseable | (not read) | PASS | (any) | Ship; write an operator-inbox entry quoting the raw value (CM files no bugs — `SOP-core.md`, "Ownership") | `KNOWN-BUGS` |
 | DONE | not high | (not read) | PASS | (any) | Ship | `FUNCTIONAL` |
 | DONE | not high | (not read) | SHIP-WITH-CONCERNS | (any) | Ship with filed bugs listed | `KNOWN-BUGS` |
 | DONE | not high | (not read) | SHIP-WITH-SERIOUS-CONCERNS | none large | Ship with NON-FUNCTIONAL warning | `NON-FUNCTIONAL` |
 | DONE | not high | (not read) | SHIP-WITH-SERIOUS-CONCERNS | any large | Ship, recording an Auto-Ship Event (trigger 3); under `ship_posture = matrix`, HALT (trigger 3) | `NON-FUNCTIONAL`; — on HALT |
-| DONE | not high | (not read) | absent or unparseable | (any) | Ship; file a bug quoting the raw value | `KNOWN-BUGS` |
+| DONE | not high | (not read) | absent or unparseable | (any) | Ship; write an operator-inbox entry quoting the raw value (CM files no bugs — `SOP-core.md`, "Ownership") | `KNOWN-BUGS` |
 | no TESTER task for this version | — | — | — | — | Ship — verification was not ordered | `FUNCTIONAL` |
-| TESTER task found, state neither DONE nor BLOCKED | — | — | — | — | Ship; file a bug quoting the state verbatim (once the RC's verification requeue is spent, ship as unverified) | `KNOWN-BUGS`; `NON-FUNCTIONAL` once the requeue is spent |
-| (no row above matched) | — | — | — | — | Ship; file a bug quoting the field values verbatim | `KNOWN-BUGS` |
+| TESTER task found, state neither DONE nor BLOCKED | — | — | — | — | Ship; write an operator-inbox entry quoting the state verbatim (once the RC's verification requeue is spent, ship as unverified) | `KNOWN-BUGS`; `NON-FUNCTIONAL` once the requeue is spent |
+| (no row above matched) | — | — | — | — | Ship; write an operator-inbox entry quoting the field values verbatim | `KNOWN-BUGS` |
 
 There is no `BLOCK` recommendation: TESTER never blocks the chain on found bugs, and its own state stays `DONE`. `FUNCTIONAL` means clean, with no significant bugs filed. `KNOWN-BUGS` ships with the filed bugs listed in the notes, entering the next bundle. `NON-FUNCTIONAL` ships work that may be unusable until the next patch and carries a `## Known Issues` warning immediately below `## Status`, naming the filed bugs, telling readers not to use it in production, and saying a fix is expected in the next patch. `KNOWN-ISSUE` is the carried-finding row above. One further value, `SHIPPED-BY-OPERATOR-OVERRIDE`, is never a matrix outcome — it records that an operator forced a stop the matrix set.
 
@@ -272,7 +272,7 @@ Naive string compare is incorrect: `v0.9.7` is *less* than `v0.17.1`, not greate
 
 Read `## Workflow Type` from the task README; absent means `release`.
 
-- **`release`** — `open-rc`, `release`, `cancel-rc`. Tag on main, track in-flight RC state in `release-state.md`, read Last Released from git tags via `pp_last_released_version`.
+- **`release`** — `open-rc`, `release`, `cancel-rc`. Tag on main, track in-flight RC state in `release-state.md`, resolve Last Released through `pp_last_released_version` (a matching release tag first, then `release-state.md`'s `## Last Released`).
 - **`document`** — `open-doc` and `finalize`. No git tags; `finalize.sh` records Last Released in `release-state.md`; operates on the project's artifacts version directories.
 - **`feature`** — lightweight, no RC bookends. CM may not be invoked at all; if it is, run the operation the task names.
 

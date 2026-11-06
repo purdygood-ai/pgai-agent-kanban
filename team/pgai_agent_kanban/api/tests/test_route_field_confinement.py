@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -120,8 +120,7 @@ def client(board: pathlib.Path) -> Generator[TestClient, None, None]:
 def _snapshot(base: pathlib.Path) -> dict[str, bytes | None]:
     """Every path under *base*, relative, with file bytes (None for a directory)."""
     return {
-        str(path.relative_to(base)): (None if path.is_dir() else path.read_bytes())
-        for path in sorted(base.rglob("*"))
+        str(path.relative_to(base)): (None if path.is_dir() else path.read_bytes()) for path in sorted(base.rglob("*"))
     }
 
 
@@ -264,9 +263,7 @@ def test_every_action_route_refuses_an_unconfined_field(
 
 
 def test_dry_run_does_not_describe_a_refused_value(client: TestClient, no_process: None) -> None:
-    response = client.post(
-        "/operations/deep-verify", json={"project": "--operator-approved", "dry_run": True}
-    )
+    response = client.post("/operations/deep-verify", json={"project": "--operator-approved", "dry_run": True})
     _assert_component_refusal(response, "deep-verify", "project")
     assert "would execute" not in response.text
 

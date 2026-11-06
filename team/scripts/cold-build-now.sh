@@ -40,10 +40,10 @@
 set -euo pipefail
 # --- Bootstrap: self-locate → source shell-env → fail loud ---
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # --- Locate the lib directory relative to this script ---
-_CBN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_CBN_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _CBN_LIB_DIR="${_CBN_SCRIPT_DIR}/lib"
 
 # --- Source the container-tier flag handling (--image, --operator-approved

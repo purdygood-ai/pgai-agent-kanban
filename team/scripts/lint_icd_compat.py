@@ -109,16 +109,14 @@ from typing import Any
 # Two parent levels: scripts/ -> team/ -> project_root/
 # ---------------------------------------------------------------------------
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_TEAM_DIR = _THIS_FILE.parent.parent           # team/
-_DEV_TREE_ROOT = _TEAM_DIR.parent              # project_root/
+_TEAM_DIR = _THIS_FILE.parent.parent  # team/
+_DEV_TREE_ROOT = _TEAM_DIR.parent  # project_root/
 _DEFAULT_ICD_PATH = _DEV_TREE_ROOT / "docs" / "api" / "icd.json"
 _DEFAULT_BASELINES_DIR = _DEV_TREE_ROOT / "docs" / "api" / "baselines"
 _DEFAULT_SUPPORT_DOC = _DEV_TREE_ROOT / "docs" / "operator-api.md"
 
 # Policy message appended to every violation.
-_POLICY_MSG = (
-    "breaking changes require a major ICD version and an operator-approved RC"
-)
+_POLICY_MSG = "breaking changes require a major ICD version and an operator-approved RC"
 
 # The finding shape and the error-contract emitter live in the team package
 # beside scripts/; this script is run directly as well as imported, so the
@@ -263,8 +261,7 @@ def _check_paths(
     for path, methods in baseline_paths.items():
         if path not in current_paths:
             violations.append(
-                f"  path '{path}' (baseline v{baseline_version}) removed from current ICD; "
-                f"{_POLICY_MSG}"
+                f"  path '{path}' (baseline v{baseline_version}) removed from current ICD; " f"{_POLICY_MSG}"
             )
             continue
         for method in methods:
@@ -311,16 +308,8 @@ def _check_response_fields(
             # Inspect 200 response schema.
             b_resp = (baseline_op.get("responses") or {}).get("200", {})
             c_resp = (current_op.get("responses") or {}).get("200", {})
-            b_schema_raw = (
-                b_resp.get("content", {})
-                .get("application/json", {})
-                .get("schema", {})
-            )
-            c_schema_raw = (
-                c_resp.get("content", {})
-                .get("application/json", {})
-                .get("schema", {})
-            )
+            b_schema_raw = b_resp.get("content", {}).get("application/json", {}).get("schema", {})
+            c_schema_raw = c_resp.get("content", {}).get("application/json", {}).get("schema", {})
 
             b_schema = _unwrap_schema(b_schema_raw, baseline_doc)
             c_schema = _unwrap_schema(c_schema_raw, current_doc)
@@ -366,9 +355,7 @@ def _compare_properties(
 
     for field_name, b_field_schema in b_props.items():
         if field_name not in c_props:
-            violations.append(
-                f"  field '{field_name}' removed from {context}; {_POLICY_MSG}"
-            )
+            violations.append(f"  field '{field_name}' removed from {context}; {_POLICY_MSG}")
             continue
 
         # Recurse into nested objects.
@@ -423,16 +410,8 @@ def _check_request_fields(
             c_rb = current_op.get("requestBody", {})
 
             # Resolve request body schemas.
-            b_rb_schema_raw = (
-                b_rb.get("content", {})
-                .get("application/json", {})
-                .get("schema", {})
-            )
-            c_rb_schema_raw = (
-                c_rb.get("content", {})
-                .get("application/json", {})
-                .get("schema", {})
-            )
+            b_rb_schema_raw = b_rb.get("content", {}).get("application/json", {}).get("schema", {})
+            c_rb_schema_raw = c_rb.get("content", {}).get("application/json", {}).get("schema", {})
 
             b_schema = _unwrap_schema(b_rb_schema_raw, baseline_doc)
             c_schema = _unwrap_schema(c_rb_schema_raw, current_doc)
@@ -459,14 +438,10 @@ def _check_request_fields(
 
             # Also check path parameters for new required ones.
             b_params = {
-                p["name"]: p
-                for p in (baseline_op.get("parameters") or [])
-                if isinstance(p, dict) and "name" in p
+                p["name"]: p for p in (baseline_op.get("parameters") or []) if isinstance(p, dict) and "name" in p
             }
             c_params = {
-                p["name"]: p
-                for p in (current_op.get("parameters") or [])
-                if isinstance(p, dict) and "name" in p
+                p["name"]: p for p in (current_op.get("parameters") or []) if isinstance(p, dict) and "name" in p
             }
             for pname, cparam in c_params.items():
                 if pname not in b_params and cparam.get("required", False):
@@ -529,9 +504,7 @@ def _check_enum_values(
 
             b_params = baseline_op.get("parameters") or []
             c_params_by_name = {
-                p["name"]: p
-                for p in (current_op.get("parameters") or [])
-                if isinstance(p, dict) and "name" in p
+                p["name"]: p for p in (current_op.get("parameters") or []) if isinstance(p, dict) and "name" in p
             }
             for b_param in b_params:
                 if not isinstance(b_param, dict):
@@ -577,9 +550,7 @@ def _compare_enums_in_schema(
         c_enum = c_schema.get("enum") or []
         for val in b_enum:
             if val not in c_enum:
-                violations.append(
-                    f"  enum value '{val}' removed from {context}; {_POLICY_MSG}"
-                )
+                violations.append(f"  enum value '{val}' removed from {context}; {_POLICY_MSG}")
 
     # Recurse into properties.
     b_props = b_schema.get("properties") or {}
@@ -938,23 +909,27 @@ def find_support_table_drift(
     if not supported_file.is_file():
         return []
     if not doc_path.is_file():
-        return [(
-            "no-table",
-            "",
-            f"  support-table document {doc_path} not found; it must carry the "
-            f"support table mirroring {supported_file}",
-        )]
+        return [
+            (
+                "no-table",
+                "",
+                f"  support-table document {doc_path} not found; it must carry the "
+                f"support table mirroring {supported_file}",
+            )
+        ]
 
     manifest = read_manifest_versions(supported_file)
     rows = parse_support_table(doc_path)
     if rows is None:
-        return [(
-            "no-table",
-            "",
-            f"  no support table found in {doc_path}: expected a 'Support table' "
-            f"heading followed by a table with a Version column mirroring "
-            f"{supported_file}",
-        )]
+        return [
+            (
+                "no-table",
+                "",
+                f"  no support table found in {doc_path}: expected a 'Support table' "
+                f"heading followed by a table with a Version column mirroring "
+                f"{supported_file}",
+            )
+        ]
 
     manifest_set = set(manifest)
     table_versions = {version for version, _status, _line in rows}
@@ -962,30 +937,36 @@ def find_support_table_drift(
 
     for version in manifest:
         if version not in table_versions:
-            findings.append((
-                "missing",
-                version,
-                f"  missing: version {version} is listed in {supported_file} but "
-                f"has no row in the support table in {doc_path}",
-            ))
+            findings.append(
+                (
+                    "missing",
+                    version,
+                    f"  missing: version {version} is listed in {supported_file} but "
+                    f"has no row in the support table in {doc_path}",
+                )
+            )
 
     for version, status, line_no in rows:
         if status == _RETIRED_STATUS:
             if version in manifest_set:
-                findings.append((
-                    "retired",
-                    version,
-                    f"  retired: version {version} is marked '{_RETIRED_STATUS}' in "
-                    f"the support table at {doc_path}:{line_no} but is still listed "
-                    f"in {supported_file}",
-                ))
+                findings.append(
+                    (
+                        "retired",
+                        version,
+                        f"  retired: version {version} is marked '{_RETIRED_STATUS}' in "
+                        f"the support table at {doc_path}:{line_no} but is still listed "
+                        f"in {supported_file}",
+                    )
+                )
         elif version not in manifest_set:
-            findings.append((
-                "extra",
-                version,
-                f"  extra: version {version} has a '{status}' row in the support "
-                f"table at {doc_path}:{line_no} but is not listed in {supported_file}",
-            ))
+            findings.append(
+                (
+                    "extra",
+                    version,
+                    f"  extra: version {version} has a '{status}' row in the support "
+                    f"table at {doc_path}:{line_no} but is not listed in {supported_file}",
+                )
+            )
     return findings
 
 
@@ -1003,10 +984,7 @@ def check_support_table(
         One cause line per finding; empty when the table mirrors SUPPORTED.
     """
     return [
-        cause
-        for _kind, _version, cause in find_support_table_drift(
-            doc_path=doc_path, supported_file=supported_file
-        )
+        cause for _kind, _version, cause in find_support_table_drift(doc_path=doc_path, supported_file=supported_file)
     ]
 
 
@@ -1030,29 +1008,21 @@ def report_support_table_drift(
         True when the table mirrors the manifest; False on any drift.
     """
     findings = find_support_table_drift(doc_path=doc_path, supported_file=supported_file)
-    relint = (
-        f"python3 {_THIS_FILE} --baselines-dir {supported_file.parent} "
-        f"--support-doc {doc_path}"
-    )
+    relint = f"python3 {_THIS_FILE} --baselines-dir {supported_file.parent} " f"--support-doc {doc_path}"
     for _kind, _version, cause in findings:
         _record(
             recorded,
             cause,
-            f"Edit the 'Support table' section of {doc_path} so it mirrors "
-            f"{supported_file}, then run: {relint}",
+            f"Edit the 'Support table' section of {doc_path} so it mirrors " f"{supported_file}, then run: {relint}",
             file=doc_path,
         )
     if not findings:
         if supported_file.is_file():
-            print(
-                f"lint_icd_compat: ok — the support table in {doc_path} mirrors "
-                f"{supported_file}"
-            )
+            print(f"lint_icd_compat: ok — the support table in {doc_path} mirrors " f"{supported_file}")
         return True
 
     print(
-        f"lint_icd_compat: FAIL — the support table in {doc_path} does not "
-        f"mirror {supported_file}",
+        f"lint_icd_compat: FAIL — the support table in {doc_path} does not " f"mirror {supported_file}",
         file=sys.stderr,
     )
     print("Cause(s):", file=sys.stderr)
@@ -1091,8 +1061,7 @@ def report_support_table_drift(
             file=sys.stderr,
         )
     print(
-        f"  2. python3 {_THIS_FILE} --baselines-dir {supported_file.parent} "
-        f"--support-doc {doc_path}",
+        f"  2. python3 {_THIS_FILE} --baselines-dir {supported_file.parent} " f"--support-doc {doc_path}",
         file=sys.stderr,
     )
     print(
@@ -1242,8 +1211,7 @@ def check_compat(
 
         if violations:
             print(
-                f"lint_icd_compat: FAIL — current ICD is not a compatible superset of "
-                f"baseline v{version}:",
+                f"lint_icd_compat: FAIL — current ICD is not a compatible superset of " f"baseline v{version}:",
                 file=sys.stderr,
             )
             for v in violations:
@@ -1254,9 +1222,7 @@ def check_compat(
     # Rule e: every baseline below the current version is byte-identical to
     # the last released tree.  Each mutated baseline is one finding.
     current_version = str((current_doc.get("info") or {}).get("version") or "")
-    published_violations = check_published_baselines(
-        current_version, baselines_dir=baselines_dir, main_ref=main_ref
-    )
+    published_violations = check_published_baselines(current_version, baselines_dir=baselines_dir, main_ref=main_ref)
     if published_violations:
         print(
             "lint_icd_compat: FAIL — a published baseline was rewritten after "
@@ -1306,10 +1272,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--icd",
         metavar="PATH",
-        help=(
-            "Path to the current ICD artifact.  Default: docs/api/icd.json "
-            "relative to the dev tree root."
-        ),
+        help=("Path to the current ICD artifact.  Default: docs/api/icd.json " "relative to the dev tree root."),
     )
     parser.add_argument(
         "--baselines-dir",
@@ -1361,15 +1324,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = _parse_args(argv)
     icd_path = pathlib.Path(args.icd) if args.icd else _DEFAULT_ICD_PATH
-    baselines_dir = (
-        pathlib.Path(args.baselines_dir)
-        if args.baselines_dir
-        else _DEFAULT_BASELINES_DIR
-    )
+    baselines_dir = pathlib.Path(args.baselines_dir) if args.baselines_dir else _DEFAULT_BASELINES_DIR
 
-    support_doc = (
-        pathlib.Path(args.support_doc) if args.support_doc else _DEFAULT_SUPPORT_DOC
-    )
+    support_doc = pathlib.Path(args.support_doc) if args.support_doc else _DEFAULT_SUPPORT_DOC
 
     findings: list = []
     check_compat(

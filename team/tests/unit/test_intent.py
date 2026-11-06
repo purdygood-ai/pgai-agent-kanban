@@ -105,8 +105,7 @@ def test_single_entry_parses_with_date_and_declaration_intact(tmp_path: pathlib.
     assert entries == [
         IntentEntry(
             date="2026-03-14",
-            declaration="ai_main rebased to v2.4.0 - hindsight experiment; "
-            "lineage on last_run_ai_main",
+            declaration="ai_main rebased to v2.4.0 - hindsight experiment; " "lineage on last_run_ai_main",
         )
     ]
 
@@ -243,9 +242,7 @@ def test_parser_performs_no_writes_against_a_read_only_fixture_directory(
     finally:
         fixture_dir.chmod(dir_mode)
 
-    assert entries == [
-        IntentEntry(date="2026-08-08", declaration="entry read from a locked-down directory")
-    ]
+    assert entries == [IntentEntry(date="2026-08-08", declaration="entry read from a locked-down directory")]
     assert sorted(os.listdir(fixture_dir)) == before_listing
     assert path.read_bytes() == before_content
     assert path.stat().st_mtime_ns == before_mtime
@@ -271,9 +268,7 @@ def test_read_project_intent_resolves_standard_path_and_parses(
         "## Entries\n\n- 2026-09-09: entry reached through the project-scoped reader\n",
     )
     entries = read_project_intent(str(tmp_path), "demo-project")
-    assert entries == [
-        IntentEntry(date="2026-09-09", declaration="entry reached through the project-scoped reader")
-    ]
+    assert entries == [IntentEntry(date="2026-09-09", declaration="entry reached through the project-scoped reader")]
 
 
 def test_read_project_intent_returns_empty_list_for_a_project_with_no_intent_file(

@@ -56,6 +56,11 @@
 # Waits this long for another firing's read-decide-write step.
 _WAKE_BATCH_GUARD_STEP_WAIT_SECONDS=5
 
+# This file's directory, as an absolute path resolved once at load: no
+# function depends on the caller's current directory or on whether this
+# file was named by a relative path.
+_WAKE_BATCH_GUARD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || _WAKE_BATCH_GUARD_LIB_DIR=""
+
 wake_batch_guard_agent() {
     # The flag set mirrors the provider wake scripts' argument loops: keep
     # the value-taking options here in step with theirs.
@@ -75,7 +80,7 @@ wake_batch_guard_agent() {
 }
 
 _wake_batch_guard_lib_dir() {
-    cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd
+    [[ -n "${_WAKE_BATCH_GUARD_LIB_DIR}" ]] && printf '%s\n' "${_WAKE_BATCH_GUARD_LIB_DIR}"
 }
 
 wake_batch_guard_take() {

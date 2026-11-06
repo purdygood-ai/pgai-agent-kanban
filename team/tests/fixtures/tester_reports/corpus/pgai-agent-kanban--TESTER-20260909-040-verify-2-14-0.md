@@ -162,7 +162,7 @@ not "fix" them.
 
 `4de7551` ("initial empty commit") is the tip of `ai_rc/v2.14.0` and changes no
 file against its parent. Reflog places it 19 seconds after the WRITER-038 merge.
-Author is the normal agent identity (`purdygood`), not the harness identity
+Author is the normal agent identity (`operator`), not the harness identity
 (`PGAI Harness <harness@pgai.local>`) -- `harness_init_scratch_repo`'s
 already-inside-a-repo refusal
 (`team/scripts/harness/lib/throwaway-root.sh:80-86`) held. The message is the

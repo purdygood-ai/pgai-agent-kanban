@@ -2,7 +2,8 @@
 # team/scripts/lib/script_common.sh
 # Single home for the small pieces of boilerplate nearly every
 # team/scripts/ entry point re-implements on its own: ANSI colour
-# rendering, the EXIT-trap cleanup body, and a generic usage-text emitter.
+# rendering, the colour table and coloured status-line logger, the
+# EXIT-trap cleanup body, and a generic usage-text emitter.
 # Source this file once per script; it only defines functions — it
 # installs no trap, sets no shell options, and parses no arguments, so
 # sourcing it is always a safe no-op until the caller invokes one of the
@@ -43,6 +44,36 @@
 #   of yellow/green). Callers capture the result via command substitution,
 #   e.g. RED="$(ansi_code red)" — the substitution strips the trailing
 #   newline `echo` adds, so callers never see it.
+#
+# script_colour_table [tty|on|off]
+#   Sets the shared colour table as globals: C_RED, C_RED_BOLD, C_GREEN,
+#   C_YELLOW, C_BLUE, C_CYAN, C_BOLD, C_DIM and C_RESET, each to the escape
+#   ansi_code gives that name (C_RED_BOLD is "\033[1;31m"), or to "" when
+#   colour is off. tty (the default) turns colour on only when stdout is a
+#   terminal; on/true and off/false force it. A caller with its own rule
+#   (NO_COLOR, TERM=dumb) decides and passes on or off. Leaves the caller's
+#   USE_COLOR untouched.
+#
+# script_log_init <tag> [--labelled]
+#   Readies the status-line logger below: sets the colour table for stdout
+#   (script_colour_table tty) and the tag every line carries. --labelled
+#   adds "WARNING: " to warn lines and "ERROR: " to err lines after the
+#   tag. An empty <tag> selects the bare form (see below).
+#
+# info / ok / warn / err <message...>
+#   Print one status line: the tag in brackets, coloured blue (info),
+#   green (ok), yellow (warn) or red (err), then a space and the message —
+#   "[install] copying files". err writes to stderr; the rest to stdout.
+#   With no tag set, the coloured head is the level word followed by a
+#   colon instead: "INFO: ", "OK: ", "WARN: ", "ERROR: ". All return 0.
+#
+# die <message...>
+#   err <message...>, then exit 1.
+#
+# log_line <colour> <head> <tail>
+#   Prints <colour><head>, the colour reset, then <tail> verbatim, on
+#   stdout. The primitive under the five above, for a script whose status
+#   line has its own head ("[verify-install-policy] PASS").
 #
 # cleanup_on_exit
 #   Standard EXIT-trap body shared by scripts that spawn background jobs:
@@ -135,6 +166,58 @@ ansi_code() {
     *)       echo "" ;;
   esac
 }
+
+script_colour_table() {
+  # Shadows the caller's USE_COLOR for the ansi_code calls below only.
+  local USE_COLOR=false
+  case "${1:-tty}" in
+    on|true) USE_COLOR=true ;;
+    tty) if [[ -t 1 ]]; then USE_COLOR=true; fi ;;
+  esac
+  C_RED="$(ansi_code red)"
+  C_GREEN="$(ansi_code green)"
+  C_YELLOW="$(ansi_code yellow)"
+  C_BLUE="$(ansi_code blue)"
+  C_CYAN="$(ansi_code cyan)"
+  C_BOLD="$(ansi_code bold)"
+  C_DIM="$(ansi_code dim)"
+  C_RESET="$(ansi_code reset)"
+  C_RED_BOLD=""
+  if [[ "$USE_COLOR" == "true" ]]; then C_RED_BOLD=$'\033[1;31m'; fi
+}
+
+script_log_init() {
+  SCRIPT_LOG_TAG="${1:-}"
+  SCRIPT_LOG_WARN_LABEL=""
+  SCRIPT_LOG_ERR_LABEL=""
+  if [[ "${2:-}" == "--labelled" ]]; then
+    SCRIPT_LOG_WARN_LABEL="WARNING: "
+    SCRIPT_LOG_ERR_LABEL="ERROR: "
+  fi
+  script_colour_table tty
+}
+
+log_line() {
+  printf '%s%s%s%s\n' "${1:-}" "${2:-}" "${C_RESET:-}" "${3:-}"
+}
+
+# _script_log <colour> <level-word> <label> <message...>: the tagged or
+# bare status line info/ok/warn/err print.
+_script_log() {
+  local colour="$1" word="$2" label="$3"
+  shift 3
+  if [[ -n "${SCRIPT_LOG_TAG:-}" ]]; then
+    log_line "$colour" "[${SCRIPT_LOG_TAG}]" " ${label}$*"
+  else
+    log_line "$colour" "$word" ": $*"
+  fi
+}
+
+info() { _script_log "${C_BLUE:-}" INFO "" "$@"; }
+ok()   { _script_log "${C_GREEN:-}" OK "" "$@"; }
+warn() { _script_log "${C_YELLOW:-}" WARN "${SCRIPT_LOG_WARN_LABEL:-}" "$@"; }
+err()  { _script_log "${C_RED:-}" ERROR "${SCRIPT_LOG_ERR_LABEL:-}" "$@" >&2; }
+die()  { err "$@"; exit 1; }
 
 cleanup_stop_process_group() {
   local pgid="${1:-}" grace="${2:-30}" deadline

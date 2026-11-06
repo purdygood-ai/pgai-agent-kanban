@@ -57,7 +57,6 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Optional
 
 import pytest
 
@@ -112,10 +111,14 @@ def _require_git() -> None:
     require_binary("git", label="git-remote-name-release-flow")
 
 
-def _git(*args: str, env: Optional[dict] = None) -> str:
+def _git(*args: str, env: dict | None = None) -> str:
     return subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True,
-        stdin=subprocess.DEVNULL, env=env,
+        ["git", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        env=env,
     ).stdout.strip()
 
 
@@ -158,9 +161,7 @@ class _Fixture:
         (self.root / "kanban.cfg").write_text(
             "[paths]\n\n[chain]\npm_mode = automatic\n\n[wake]\nmax_tasks_per_wake = 1\n", encoding="utf-8"
         )
-        (self.root / "projects.cfg").write_text(
-            f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8"
-        )
+        (self.root / "projects.cfg").write_text(f"[project:{_PROJECT}]\npriority=1\nenabled=true\n", encoding="utf-8")
         cfg = (
             "[project]\n"
             f"project_name = {_PROJECT}\n"
@@ -207,17 +208,24 @@ class _Fixture:
     def git(self, *args: str) -> str:
         return _git("-C", str(self.dev), *args, env=self.env)
 
-    def run(self, script: pathlib.Path, *args: str, extra_env: Optional[dict] = None) -> subprocess.CompletedProcess:
+    def run(self, script: pathlib.Path, *args: str, extra_env: dict | None = None) -> subprocess.CompletedProcess:
         env = dict(self.env)
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
-            ["bash", str(script), *args], capture_output=True, text=True, env=env,
-            cwd=str(self.root), timeout=180, stdin=subprocess.DEVNULL,
+            ["bash", str(script), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(self.root),
+            timeout=180,
+            stdin=subprocess.DEVNULL,
         )
 
     def remote_heads(self) -> list[str]:
-        return _git("-C", str(self.bare), "for-each-ref", "--format=%(refname:short)", "refs/heads", env=self.env).splitlines()
+        return _git(
+            "-C", str(self.bare), "for-each-ref", "--format=%(refname:short)", "refs/heads", env=self.env
+        ).splitlines()
 
     def remote_tags(self) -> list[str]:
         return _git("-C", str(self.bare), "tag", "--list", env=self.env).splitlines()
@@ -283,7 +291,10 @@ def test_open_ship_cancel_and_lag_all_use_the_configured_remote(
     assert released_version.last_released_version(box.root, _PROJECT) == "v0.1.0"
     bash = subprocess.run(
         ["bash", "-c", f'source "{_INI_PARSER}"; source "{_PROJECT_PATHS}"; pp_last_released_version "{_PROJECT}"'],
-        capture_output=True, text=True, env={**box.env, "PGAI_GIT_LOCAL_ONLY": "1"}, timeout=60,
+        capture_output=True,
+        text=True,
+        env={**box.env, "PGAI_GIT_LOCAL_ONLY": "1"},
+        timeout=60,
     )
     assert bash.stdout.strip() == "v0.1.0", _out(bash)
 
@@ -303,11 +314,17 @@ def test_local_only_project_names_the_configured_remote_and_never_writes_it(tmp_
 
     opened = _ok(box.run(_OPEN_RC, "v0.1.0"), "open-rc v0.1.0")
     assert "push_to_remote=false — skipping git fetch upstream (local-only install)." in opened
-    assert "[push_to_remote=false] skipping upstream push for remote-name-flow: git push -u upstream ai_rc/v0.1.0" in opened
+    assert (
+        "[push_to_remote=false] skipping upstream push for remote-name-flow: git push -u upstream ai_rc/v0.1.0"
+        in opened
+    )
 
     cancelled = _ok(box.run(_CANCEL_RC, "--key", "v0.1.0", "--yes"), "cancel-rc v0.1.0")
     assert "Push policy: push_to_remote=false — skipping upstream operations." in cancelled
-    assert "[push_to_remote=false] skipping upstream push for remote-name-flow: git push upstream --delete ai_rc/v0.1.0 (Step 8)" in cancelled
+    assert (
+        "[push_to_remote=false] skipping upstream push for remote-name-flow: git push upstream --delete ai_rc/v0.1.0 (Step 8)"
+        in cancelled
+    )
 
     assert "origin" not in opened + cancelled, "a project on another remote is never narrated as origin"
     assert (box.remote_heads(), box.remote_tags()) == before, "a local-only project never writes its remote"

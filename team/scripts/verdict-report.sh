@@ -92,7 +92,8 @@
 #     cause=<sentence fragment>
 #     remedy=<sentence fragment>
 #
-#   --details-only block shapes (each carries kind=<name> plus project=<name>):
+#   Block shapes printed only under --details (each carries kind=<name> plus
+#   project=<name>):
 #
 #     kind=release_lock  -- one per lock held for the project (the lock
 #       readers of team/pgai_agent_kanban/ops/locks.py -- the same ones
@@ -210,10 +211,10 @@
 
 set -euo pipefail
 # shellcheck source=lib/env_bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/env_bootstrap.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/env_bootstrap.sh"
 
 # --- Locate the lib directory relative to this script ---
-_VR_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_VR_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 _VR_LIB_DIR="${_VR_SCRIPT_DIR}/lib"
 
 # --- Source the standard argument layer ---

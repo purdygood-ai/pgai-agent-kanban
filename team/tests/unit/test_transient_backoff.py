@@ -45,7 +45,7 @@ _TEAM_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 _LIB = _TEAM_DIR / "scripts" / "lib"
 _PROJECT = "transient-proj"
 _TASK = "CODER-20260101-001-example-task"
-_T0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+_T0 = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
 
 def _section(text: str, heading: str) -> str:
@@ -59,7 +59,7 @@ def _retry_record(count: int) -> str:
     )
 
 
-def _status_file(directory: pathlib.Path, count: int, *, blocked_at: "datetime.datetime | None") -> pathlib.Path:
+def _status_file(directory: pathlib.Path, count: int, *, blocked_at: datetime.datetime | None) -> pathlib.Path:
     directory.mkdir(parents=True, exist_ok=True)
     status = directory / "status.md"
     status.write_text(
@@ -130,19 +130,33 @@ class Sandbox:
         self.queue = self.project_root / "tasks" / "queues" / "coder_backlog.md"
         self.batch_log = self.root / "logs" / "agents" / "coder-batch-20260101-000000.log"
         self.home = tmp_path / "home"
-        for d in (self.project_root / "overwatch" / "backups", self.project_root / "bugs", self.task_dir / "logs",
-                  self.queue.parent, self.batch_log.parent, self.root / "tmp", self.home):
+        for d in (
+            self.project_root / "overwatch" / "backups",
+            self.project_root / "bugs",
+            self.task_dir / "logs",
+            self.queue.parent,
+            self.batch_log.parent,
+            self.root / "tmp",
+            self.home,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         (self.project_root / "overwatch" / "actions.log").write_text("", encoding="utf-8")
         (self.project_root / "project.cfg").write_text(f"[project]\nproject_name = {_PROJECT}\n", encoding="utf-8")
         (self.root / "kanban.cfg").write_text("[wake]\ntransient_retry_cap = 3\n", encoding="utf-8")
         self.queue.write_text(f"# CODER Backlog\n\n- [B] {_TASK} — example\n", encoding="utf-8")
-        (self.task_dir / "README.md").write_text("# Task\n\n## Role\nCODER\n\n## Prerequisites\nnone\n",
-                                                 encoding="utf-8")
+        (self.task_dir / "README.md").write_text(
+            "# Task\n\n## Role\nCODER\n\n## Prerequisites\nnone\n", encoding="utf-8"
+        )
         preamble, span = "wake starting\n", "agent working\nAPI Error: 529 overloaded_error\n"
         self.batch_log.write_text(preamble + span, encoding="utf-8")
-        ledger = {"event": "returned", "batch_log": str(self.batch_log), "offset_start": len(preamble),
-                  "offset_end": len(preamble) + len(span), "exit_code": 1, "recorded_at": "2026-01-01T10:00:00Z"}
+        ledger = {
+            "event": "returned",
+            "batch_log": str(self.batch_log),
+            "offset_start": len(preamble),
+            "offset_end": len(preamble) + len(span),
+            "exit_code": 1,
+            "recorded_at": "2026-01-01T10:00:00Z",
+        }
         (self.task_dir / "logs" / "dispatch.jsonl").write_text(json.dumps(ledger) + "\n", encoding="utf-8")
 
     @property
@@ -154,17 +168,20 @@ class Sandbox:
         return (self.project_root / "overwatch" / "actions.log").read_text(encoding="utf-8")
 
     def seed(self, count: int, blocked_minutes_ago: int) -> None:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         _status_file(self.task_dir, count, blocked_at=now - datetime.timedelta(minutes=blocked_minutes_ago))
 
     def bash(self, body: str) -> subprocess.CompletedProcess:
-        env = build_scrubbed_env(home_dir=self.home, extra_env={
-            "KANBAN_ROOT": str(self.root),
-            "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
-            "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
-            "OVERWATCH_PROJECT": _PROJECT,
-            "HALT_OVERWATCH": "",
-        })
+        env = build_scrubbed_env(
+            home_dir=self.home,
+            extra_env={
+                "KANBAN_ROOT": str(self.root),
+                "PGAI_AGENT_KANBAN_ROOT_PATH": str(self.root),
+                "PGAI_AGENT_KANBAN_TEMP_DIR": str(self.root / "tmp"),
+                "OVERWATCH_PROJECT": _PROJECT,
+                "HALT_OVERWATCH": "",
+            },
+        )
         script = f"set -euo pipefail\ncd {shlex.quote(str(_TEAM_DIR))}\n" + body
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=180, env=env)
 

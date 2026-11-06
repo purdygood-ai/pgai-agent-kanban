@@ -94,8 +94,7 @@ def _temp_env(tmp_path: pathlib.Path) -> dict[str, str]:
 
 def _claim_lines(result) -> list[str]:
     assert result.returncode == 0, (
-        f"helper invocation failed (rc={result.returncode})\n"
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        f"helper invocation failed (rc={result.returncode})\n" f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     return [line for line in result.stdout.splitlines() if line.strip()]
 
@@ -111,10 +110,7 @@ def test_two_claims_in_one_process_resolve_distinct_dirs_under_pytest_subtree(
     env = _temp_env(tmp_path)
     result = run_bash(
         tmp_path,
-        _source_both(
-            "gated_runner_pytest_basetemp unit\n"
-            "gated_runner_pytest_basetemp unit\n"
-        ),
+        _source_both("gated_runner_pytest_basetemp unit\n" "gated_runner_pytest_basetemp unit\n"),
         extra_env=env,
         cwd=_TEAM_DIR,
     )
@@ -132,9 +128,9 @@ def test_two_claims_in_one_process_resolve_distinct_dirs_under_pytest_subtree(
             f"root's pytest/ subtree ({expected_parent}); the Temporary File "
             "Convention makes that root the parent of every basetemp"
         )
-        assert pathlib.Path(path).name.startswith("unit-"), (
-            f"basetemp {path} must be labelled with the suite that claimed it"
-        )
+        assert pathlib.Path(path).name.startswith(
+            "unit-"
+        ), f"basetemp {path} must be labelled with the suite that claimed it"
 
 
 def test_two_separate_runner_processes_resolve_distinct_dirs(tmp_path: pathlib.Path) -> None:
@@ -164,9 +160,7 @@ def test_two_claims_under_the_same_task_id_still_resolve_distinct_dirs(
     first = _claim_lines(run_bash(tmp_path, snippet, extra_env=env, cwd=_TEAM_DIR))[0]
     second = _claim_lines(run_bash(tmp_path, snippet, extra_env=env, cwd=_TEAM_DIR))[0]
 
-    assert first != second, (
-        f"two claims under one PGAI_TASK_ID resolved the same basetemp {first}"
-    )
+    assert first != second, f"two claims under one PGAI_TASK_ID resolved the same basetemp {first}"
 
 
 # ---------------------------------------------------------------------------
@@ -180,9 +174,9 @@ def test_label_carries_task_id_when_set(tmp_path: pathlib.Path) -> None:
     path = _claim_lines(
         run_bash(tmp_path, _source_both("gated_runner_pytest_basetemp unit\n"), extra_env=env, cwd=_TEAM_DIR)
     )[0]
-    assert re.fullmatch(r"unit-CODER-20260101-001-example\.[A-Za-z0-9]{6}", pathlib.Path(path).name), (
-        f"basetemp label must name the task that claimed it; got {pathlib.Path(path).name}"
-    )
+    assert re.fullmatch(
+        r"unit-CODER-20260101-001-example\.[A-Za-z0-9]{6}", pathlib.Path(path).name
+    ), f"basetemp label must name the task that claimed it; got {pathlib.Path(path).name}"
 
 
 def test_label_carries_caller_pid_when_no_task_id_is_set(tmp_path: pathlib.Path) -> None:
@@ -226,9 +220,9 @@ def test_cleanup_removes_only_the_named_basetemp_and_leaves_a_sibling(tmp_path: 
     rc_line, a, b = _claim_lines(result)
     assert rc_line == "rc=0"
     assert not pathlib.Path(a).exists(), f"released basetemp still present: {a}"
-    assert (pathlib.Path(b) / "live-fixture").exists(), (
-        f"releasing {a} must not touch the sibling invocation's basetemp {b}"
-    )
+    assert (
+        pathlib.Path(b) / "live-fixture"
+    ).exists(), f"releasing {a} must not touch the sibling invocation's basetemp {b}"
 
 
 def test_cleanup_is_a_no_op_for_empty_and_absent_paths_and_never_fails(tmp_path: pathlib.Path) -> None:
@@ -302,7 +296,7 @@ def test_runner_shaped_exit_releases_basetemp_and_preserves_exit_code(tmp_path: 
         tmp_path,
         _source_both(
             "_BASETEMP=''\n"
-            "_release_on_exit() { gated_runner_pytest_basetemp_cleanup \"${_BASETEMP:-}\"; }\n"
+            '_release_on_exit() { gated_runner_pytest_basetemp_cleanup "${_BASETEMP:-}"; }\n'
             "trap _release_on_exit EXIT\n"
             '_BASETEMP="$(gated_runner_pytest_basetemp unit)"\n'
             f'printf "%s" "$_BASETEMP" > "{claimed}"\n'
@@ -334,16 +328,16 @@ def test_claim_refuses_naming_temp_lib_when_resolver_is_not_sourced(tmp_path: pa
     env = _temp_env(tmp_path)
     result = run_bash(
         tmp_path,
-        f"set -uo pipefail\nsource {_LIB}\ngated_runner_pytest_basetemp unit; echo \"rc=$?\"\n",
+        f'set -uo pipefail\nsource {_LIB}\ngated_runner_pytest_basetemp unit; echo "rc=$?"\n',
         extra_env=env,
         cwd=_TEAM_DIR,
     )
-    assert _claim_lines(result) == ["rc=1"], (
-        f"the claim must refuse rather than guess a temp root; stdout:\n{result.stdout}"
-    )
-    assert "temp.sh" in result.stderr, (
-        f"the refusal must name the lib the caller forgot to source; stderr:\n{result.stderr}"
-    )
+    assert _claim_lines(result) == [
+        "rc=1"
+    ], f"the claim must refuse rather than guess a temp root; stdout:\n{result.stdout}"
+    assert (
+        "temp.sh" in result.stderr
+    ), f"the refusal must name the lib the caller forgot to source; stderr:\n{result.stderr}"
     assert not (pathlib.Path(env["PGAI_AGENT_KANBAN_TEMP_DIR"]) / "pytest").exists()
 
 
@@ -456,15 +450,14 @@ def _assert_claimed_under_pytest_subtree(basetemp: str, suite: str, env: dict[st
     path = pathlib.Path(basetemp)
     expected_parent = pathlib.Path(env["PGAI_AGENT_KANBAN_TEMP_DIR"]) / "pytest"
     assert path.parent == expected_parent, (
-        f"basetemp {basetemp} must sit directly under the framework temp root's "
-        f"pytest/ subtree ({expected_parent})"
+        f"basetemp {basetemp} must sit directly under the framework temp root's " f"pytest/ subtree ({expected_parent})"
     )
-    assert path.name.startswith(f"{suite}-"), (
-        f"basetemp {basetemp} must be labelled with the suite that claimed it ({suite})"
-    )
-    assert re.fullmatch(rf"{suite}-pid\d+\.[A-Za-z0-9]{{6}}", path.name), (
-        f"with no PGAI_TASK_ID the label must be {suite}-pid<pid>.XXXXXX; got {path.name}"
-    )
+    assert path.name.startswith(
+        f"{suite}-"
+    ), f"basetemp {basetemp} must be labelled with the suite that claimed it ({suite})"
+    assert re.fullmatch(
+        rf"{suite}-pid\d+\.[A-Za-z0-9]{{6}}", path.name
+    ), f"with no PGAI_TASK_ID the label must be {suite}-pid<pid>.XXXXXX; got {path.name}"
 
 
 @pytest.mark.parametrize("script,suite", _SIBLING_RUNNERS, ids=_SIBLING_IDS)
@@ -495,17 +488,17 @@ def test_sibling_runner_hands_pytest_a_live_per_invocation_basetemp_and_leaves_n
     )
     record = _stand_in_record(env)
     assert record[:2] and record[0][0] == "basetemp", (
-        f"{script.name} never reached its pytest launch\nstdout:\n{result.stdout}\n"
-        f"stderr:\n{result.stderr}"
+        f"{script.name} never reached its pytest launch\nstdout:\n{result.stdout}\n" f"stderr:\n{result.stderr}"
     )
     basetemp = record[0][1]
     _assert_claimed_under_pytest_subtree(basetemp, suite, env)
-    assert record[1] == ("at-launch", "present"), (
-        f"{script.name} handed pytest a basetemp that did not exist at launch: {basetemp}"
-    )
-    assert not pathlib.Path(basetemp).exists(), (
-        f"{script.name} left its basetemp behind after exiting {result.returncode}: {basetemp}"
-    )
+    assert record[1] == (
+        "at-launch",
+        "present",
+    ), f"{script.name} handed pytest a basetemp that did not exist at launch: {basetemp}"
+    assert not pathlib.Path(
+        basetemp
+    ).exists(), f"{script.name} left its basetemp behind after exiting {result.returncode}: {basetemp}"
     pytest_subtree = pathlib.Path(env["PGAI_AGENT_KANBAN_TEMP_DIR"]) / "pytest"
     assert list(pytest_subtree.iterdir()) == [], (
         f"pytest/ subtree must hold nothing after {script.name} exits; found "
@@ -529,15 +522,17 @@ def test_overlapping_sibling_runner_invocations_resolve_distinct_basetemps_and_n
     result = _run_sibling(script, tmp_path, env)
 
     assert result.returncode == 0, (
-        f"{script.name} exited {result.returncode}\nstdout:\n{result.stdout}\n"
-        f"stderr:\n{result.stderr}"
+        f"{script.name} exited {result.returncode}\nstdout:\n{result.stdout}\n" f"stderr:\n{result.stderr}"
     )
     record = _stand_in_record(env)
     keys = [k for k, _ in record]
     assert keys == [
-        "basetemp", "at-launch",          # the outer invocation's session starts
-        "basetemp", "at-launch",          # the inner invocation's session, while the outer is live
-        "overlap-rc", "after-overlap",    # the inner has exited; the outer is still live
+        "basetemp",
+        "at-launch",  # the outer invocation's session starts
+        "basetemp",
+        "at-launch",  # the inner invocation's session, while the outer is live
+        "overlap-rc",
+        "after-overlap",  # the inner has exited; the outer is still live
     ], f"unexpected stand-in record shape: {record}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     outer, inner = record[0][1], record[2][1]
     _assert_claimed_under_pytest_subtree(outer, suite, env)
@@ -547,9 +542,7 @@ def test_overlapping_sibling_runner_invocations_resolve_distinct_basetemps_and_n
         f"{outer}; the second run's pytest startup would delete the first run's live fixtures"
     )
     assert record[3] == ("at-launch", "present"), f"inner basetemp missing at launch: {inner}"
-    assert record[4] == ("overlap-rc", "0"), (
-        f"the inner invocation of {script.name} did not exit 0: {record[4]}"
-    )
+    assert record[4] == ("overlap-rc", "0"), f"the inner invocation of {script.name} did not exit 0: {record[4]}"
     assert record[5] == ("after-overlap", "present"), (
         f"the inner invocation of {script.name} removed the outer invocation's live "
         f"basetemp {outer} -- the two shared a path"
@@ -586,7 +579,7 @@ def test_runner_claims_and_releases_its_own_basetemp_through_the_shared_helpers(
         "per-invocation isolation for every runner"
     )
 
-    handoff = re.compile(rf'--basetemp=\$\{{{var}\}}')
+    handoff = re.compile(rf"--basetemp=\$\{{{var}\}}")
     assert handoff.search(text) is not None, (
         f"{script.name} must hand the claimed {var} to pytest via PYTEST_ADDOPTS "
         "so the replay line names the exact basetemp the run used"
@@ -600,25 +593,19 @@ def test_runner_claims_and_releases_its_own_basetemp_through_the_shared_helpers(
 
     fixed_path = re.compile(rf'_PYTEST_BASETEMP="\$\{{PGAI_AGENT_KANBAN_TEMP_DIR\}}/pytest/{suite}"')
     assert fixed_path.search(text) is None, (
-        f"{script.name} still derives a fixed per-suite basetemp; two concurrent "
-        "runs of this suite would share it"
+        f"{script.name} still derives a fixed per-suite basetemp; two concurrent " "runs of this suite would share it"
     )
 
 
 @pytest.mark.parametrize("script,suite,var", _RUNNERS, ids=[r[0].name for r in _RUNNERS])
-def test_runner_registers_the_release_inside_its_exit_hook_function(
-    script: pathlib.Path, suite: str, var: str
-) -> None:
+def test_runner_registers_the_release_inside_its_exit_hook_function(script: pathlib.Path, suite: str, var: str) -> None:
     """The release must sit inside the function CLEANUP_ON_EXIT_PRE_HOOK
     names, not in straight-line code a failing pytest `exit` would skip."""
     text = script.read_text(encoding="utf-8")
     hook_name = re.search(r"^CLEANUP_ON_EXIT_PRE_HOOK=(\S+)\s*$", text, re.MULTILINE)
     assert hook_name is not None, f"{script.name} must register a CLEANUP_ON_EXIT_PRE_HOOK"
-    body = re.search(
-        rf"^{re.escape(hook_name.group(1))}\(\)\s*\{{(.*?)^\}}", text, re.MULTILINE | re.DOTALL
-    )
+    body = re.search(rf"^{re.escape(hook_name.group(1))}\(\)\s*\{{(.*?)^\}}", text, re.MULTILINE | re.DOTALL)
     assert body is not None, f"{script.name}: hook function {hook_name.group(1)} not found"
-    assert f"gated_runner_pytest_basetemp_cleanup \"${{{var}:-}}\"" in body.group(1), (
-        f"{script.name}: the basetemp release must run from {hook_name.group(1)}, "
-        "which fires on every exit path"
+    assert f'gated_runner_pytest_basetemp_cleanup "${{{var}:-}}"' in body.group(1), (
+        f"{script.name}: the basetemp release must run from {hook_name.group(1)}, " "which fires on every exit path"
     )
